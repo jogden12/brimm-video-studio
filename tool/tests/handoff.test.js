@@ -174,6 +174,7 @@ const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta
 const wordsOfSrt = (srt) => captionsOf(srt).flatMap((c) => spread(c.text, c.start, c.end));
 
 describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm-operations for L7)", () => {
+  // A finished video is a .mov: a Share through BRIMM final is one (phase 0, A6). The reader takes the name as it is.
   const sent = JSON.parse(fixture("handoff-v1.json"));
   const RECORD = { version: 1, id: "e-20261014-3fa9c1", rev: 12, kind: "episode", video: { file: "Pricing talk.mp4", bytes: 1823400112, seconds: 23.423, recorded: "2026-10-14", recordedFrom: "video" }, name: { text: "Pricing: what to charge?", placeholder: false }, title: { text: "Price like you mean it", from: "person", approved: true } };
   const [mainSrt, reel1, reel3] = [sent.main.srt, sent.reels[0].srt, sent.reels[1].srt];
@@ -182,10 +183,10 @@ describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm
   it("is what brimm-video writes for the made-up episode, byte for byte", () => {
     const made = buildHandoff({
       record: RECORD, revision: 1, made: "2026-10-20T15:02:11-05:00", madeOn: "Mac Studio", commit: "c709b57",
-      main: { file: "Pricing- what to charge- main v5 3fa9c1.mp4", seconds: 11.878, srt: mainSrt },
+      main: { file: "Pricing- what to charge- main v5 3fa9c1.mov", seconds: 11.878, srt: mainSrt },
       reels: [
-        { n: 1, title: "Know your costs", file: "Pricing- what to charge- reel 1 v1 3fa9c1.mp4", seconds: 7.7, inMain: inMain(wordsOfSrt(reel1), MAIN_WORDS, 7.7, 11.878), srt: reel1 },
-        { n: 3, title: "Say it again, better", file: "Pricing- what to charge- reel 3 v2 3fa9c1.mp4", seconds: 4.78, inMain: inMain(wordsOfSrt(reel3), MAIN_WORDS, 4.78, 11.878), srt: reel3 }
+        { n: 1, title: "Know your costs", file: "Pricing- what to charge- reel 1 v1 3fa9c1.mov", seconds: 7.7, inMain: inMain(wordsOfSrt(reel1), MAIN_WORDS, 7.7, 11.878), srt: reel1 },
+        { n: 3, title: "Say it again, better", file: "Pricing- what to charge- reel 3 v2 3fa9c1.mov", seconds: 4.78, inMain: inMain(wordsOfSrt(reel3), MAIN_WORDS, 4.78, 11.878), srt: reel3 }
       ]
     });
     assert.equal(handoffText(made), fixture("handoff-v1.json"));
@@ -193,7 +194,7 @@ describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm
   it("writes the short video's hand-off byte for byte: no title, no Reels", () => {
     const short = JSON.parse(fixture("handoff-v1-short-video.json"));
     const record = { ...RECORD, id: "e-20261015-0b7d2e", kind: "short video", video: { ...RECORD.video, recorded: "2026-10-15", recordedFrom: "import" }, name: { text: "Know your costs", placeholder: false }, title: null };
-    const made = buildHandoff({ record, revision: 2, made: "2026-10-21T09:30:00-05:00", madeOn: "Sallie's laptop", commit: "c709b57", main: { file: "Know your costs main v2 0b7d2e.mp4", seconds: 7.7, srt: short.main.srt }, reels: [] });
+    const made = buildHandoff({ record, revision: 2, made: "2026-10-21T09:30:00-05:00", madeOn: "Sallie's laptop", commit: "c709b57", main: { file: "Know your costs main v2 0b7d2e.mov", seconds: 7.7, srt: short.main.srt }, reels: [] });
     assert.equal(handoffText(made), fixture("handoff-v1-short-video.json"));
   });
   it("passes its own check, both of them", () => {

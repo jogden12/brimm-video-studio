@@ -511,7 +511,7 @@ Create `tool/tests/fixtures/handoff-v1.json`:
     "title": "Price like you mean it"
   },
   "main": {
-    "file": "Pricing- what to charge- main v5 3fa9c1.mp4",
+    "file": "Pricing- what to charge- main v5 3fa9c1.mov",
     "seconds": 11.878,
     "srt": "1\n00:00:00,000 --> 00:00:03,250\n Welcome to the show. Today we are going to talk about\n\n2\n00:00:03,250 --> 00:00:03,900\n pricing.\n\n3\n00:00:04,100 --> 00:00:06,700\n So the first thing you need to do is know your\n\n4\n00:00:06,700 --> 00:00:11,800\n costs. It is very, very important. Thank you so much, Sallie.\n\n"
   },
@@ -519,7 +519,7 @@ Create `tool/tests/fixtures/handoff-v1.json`:
     {
       "n": 1,
       "title": "Know your costs",
-      "file": "Pricing- what to charge- reel 1 v1 3fa9c1.mp4",
+      "file": "Pricing- what to charge- reel 1 v1 3fa9c1.mov",
       "seconds": 7.7,
       "inMain": {
         "start": 4.1,
@@ -530,7 +530,7 @@ Create `tool/tests/fixtures/handoff-v1.json`:
     {
       "n": 3,
       "title": "Say it again, better",
-      "file": "Pricing- what to charge- reel 3 v2 3fa9c1.mp4",
+      "file": "Pricing- what to charge- reel 3 v2 3fa9c1.mov",
       "seconds": 4.78,
       "srt": "1\n00:00:00,000 --> 00:00:04,780\n Welcome to the show. Today we are... Let me do that again.\n\n"
     }
@@ -557,7 +557,7 @@ Create `tool/tests/fixtures/handoff-v1-short-video.json`:
     "title": null
   },
   "main": {
-    "file": "Know your costs main v2 0b7d2e.mp4",
+    "file": "Know your costs main v2 0b7d2e.mov",
     "seconds": 7.7,
     "srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n2\n00:00:02,600 --> 00:00:07,700\n costs. It is very, very important. Thank you so much, Sallie.\n\n"
   },
@@ -585,10 +585,10 @@ describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm
   it("is what brimm-video writes for the made-up episode, byte for byte", () => {
     const made = buildHandoff({
       record: RECORD, revision: 1, made: "2026-10-20T15:02:11-05:00", madeOn: "Mac Studio", commit: "c709b57",
-      main: { file: "Pricing- what to charge- main v5 3fa9c1.mp4", seconds: 11.878, srt: mainSrt },
+      main: { file: "Pricing- what to charge- main v5 3fa9c1.mov", seconds: 11.878, srt: mainSrt },
       reels: [
-        { n: 1, title: "Know your costs", file: "Pricing- what to charge- reel 1 v1 3fa9c1.mp4", seconds: 7.7, inMain: inMain(wordsOfSrt(reel1), MAIN_WORDS, 7.7), srt: reel1 },
-        { n: 3, title: "Say it again, better", file: "Pricing- what to charge- reel 3 v2 3fa9c1.mp4", seconds: 4.78, inMain: inMain(wordsOfSrt(reel3), MAIN_WORDS, 4.78), srt: reel3 }
+        { n: 1, title: "Know your costs", file: "Pricing- what to charge- reel 1 v1 3fa9c1.mov", seconds: 7.7, inMain: inMain(wordsOfSrt(reel1), MAIN_WORDS, 7.7), srt: reel1 },
+        { n: 3, title: "Say it again, better", file: "Pricing- what to charge- reel 3 v2 3fa9c1.mov", seconds: 4.78, inMain: inMain(wordsOfSrt(reel3), MAIN_WORDS, 4.78), srt: reel3 }
       ]
     });
     assert.equal(handoffText(made), fixture("handoff-v1.json"));
@@ -596,7 +596,7 @@ describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm
   it("writes the short video's hand-off byte for byte: no title, no Reels", () => {
     const short = JSON.parse(fixture("handoff-v1-short-video.json"));
     const record = { ...RECORD, id: "e-20261015-0b7d2e", kind: "short video", video: { ...RECORD.video, recorded: "2026-10-15", recordedFrom: "import" }, name: { text: "Know your costs", placeholder: false }, title: null };
-    const made = buildHandoff({ record, revision: 2, made: "2026-10-21T09:30:00-05:00", madeOn: "Sallie's laptop", commit: "c709b57", main: { file: "Know your costs main v2 0b7d2e.mp4", seconds: 7.7, srt: short.main.srt }, reels: [] });
+    const made = buildHandoff({ record, revision: 2, made: "2026-10-21T09:30:00-05:00", madeOn: "Sallie's laptop", commit: "c709b57", main: { file: "Know your costs main v2 0b7d2e.mov", seconds: 7.7, srt: short.main.srt }, reels: [] });
     assert.equal(handoffText(made), fixture("handoff-v1-short-video.json"));
   });
   it("passes its own check, both of them", () => {
