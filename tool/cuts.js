@@ -531,8 +531,9 @@ export function clipOutputs(file, n, parts = 1, outDir = dirname(file)) {
 
 /** Of the names in a folder, the files of the short clips of one video: the names clipOutputs gives for it, whatever the
     numbers in them. `base` is the video's name without its ending. A run that does the video again takes these away first.
-    A clip is written under its name with .writing after it, and a run that is killed part-way leaves that name behind. So
-    those are among them too: the next run may cut no clip of that number, and would never write over it. */
+    Before 2026-10-14 a clip was written beside the video under its name with .writing after it, and a run that was killed
+    part-way left that name behind. So those are among them too: the next run may cut no clip of that number, and would
+    never write over it. */
 export function clipFiles(names, base) {
   return names.filter((n) => {
     const whole = n.replace(/\.writing$/, "");
