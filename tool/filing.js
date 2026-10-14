@@ -5,15 +5,15 @@
 // path from itself and naming no library, and the episode's first record, record/0001.json, comes last: it is the sign that
 // the import finished. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
 // folder, and the run's folder stays, until the late check.
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { localDay } from "./shared/text.js";
-import { createdOf } from "./cuts.js";
-import { cloneIn, replaceIn, textWriter } from "./dropbox.js";
+import { createdOf, waitingToCut } from "./cuts.js";
+import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
-import { dropFolder, episodesFolder } from "./settings.js";
+import { dropFolder, episodesFolder, pendingFolder } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 
@@ -194,17 +194,17 @@ export function heldBy({ root, video, bytes, now = Date.now() }) {
   } catch (e) {
     // There are no episodes yet.
   }
+  // A status that failed or found a problem says most, then an episode that holds the video, then an import running.
+  const held = readStatuses(root, now).filter(({ status }) => status && status.video === video && holdsVideo(status, now)).map(({ status }) => status);
+  const failed = held.find((status) => importState(status, now) === "failed");
+  if (failed) return `its import failed on ${failed.machine}: ${String(failed.failed).replace(/\.$/, "")}. Say "try it again" to import it again.`;
+  const problem = held.find((status) => importState(status, now) === "problem");
+  if (problem) return `copied in, but the late check found a problem: ${String(problem.problem).replace(/\.$/, "")}.`;
   for (const name of names.sort()) {
     const { record } = readEpisode(join(episodes, name));
     if (record && record.video && record.video.file === video && record.video.bytes === bytes) return `already imported as ${name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
   }
-  for (const { status } of readStatuses(root, now)) {
-    if (!status || status.video !== video || !holdsVideo(status, now)) continue;
-    const state = importState(status, now);
-    if (state === "failed") return `its import failed on ${status.machine}: ${String(status.failed).replace(/\.$/, "")}. Say "try it again" to import it again.`;
-    if (state === "problem") return `copied in, but the late check found a problem: ${String(status.problem).replace(/\.$/, "")}.`;
-    return `it is being imported on ${status.machine}.`;
-  }
+  if (held.length) return `it is being imported on ${held[0].machine}.`;
   return "";
 }
 
@@ -222,4 +222,204 @@ export function clearCrashes({ root, machine, now = Date.now(), alive = isRunnin
     cleared.push(status.video);
   }
   return cleared;
+}
+
+/** The late check a Mac has still to make of an episode's import, kept on its own disk until it is made, so that a run that
+    is stopped first leaves it for the next: { version: 1, id, name, folder, video, bytes, seconds, drop, work, entries,
+    lastCopy, root, machine, planTxt, problem? }. `entries` are the late check's (dropbox.js); `work` is the run's own folder,
+    which holds their work copies; `drop` is the raw video in the drop folder; `lastCopy` is when the last file was put into
+    Dropbox, in milliseconds; `planTxt` is the cut plan's text file, by its name. `problem` is there once a late check found a
+    file still wrong. */
+const pendingFile = (home, id) => join(pendingFolder(home), `${id}.json`);
+
+/** Keep a late check still to be made, written whole on this Mac's own disk, under another name and then renamed. */
+export function writePending(home, pending) {
+  const file = pendingFile(home, pending.id);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(`${file}.writing`, JSON.stringify(pending, null, 2) + "\n");
+  renameSync(`${file}.writing`, file);
+}
+
+/** The late checks this Mac has still to make, oldest first. One that cannot be read is left out. */
+export function readPendings(home) {
+  let names = [];
+  try {
+    names = readdirSync(pendingFolder(home)).filter((n) => n.endsWith(".json"));
+  } catch (e) {
+    return [];
+  }
+  const read = [];
+  for (const name of names) {
+    try {
+      const pending = JSON.parse(readFileSync(join(pendingFolder(home), name), "utf8"));
+      if (pending && pending.version === 1 && Array.isArray(pending.entries) && Number.isFinite(pending.lastCopy)) read.push(pending);
+    } catch (e) {
+      // It is half written, and its run wrote it again or is gone.
+    }
+  }
+  return read.sort((a, b) => a.lastCopy - b.lastCopy);
+}
+
+/** When a late check is due, in milliseconds. */
+export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
+
+/** A time of day as a person reads it, "10:15". */
+const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
+
+/** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
+const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });
+
+/** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. */
+function waitingStatus(pending, deps, step) {
+  try {
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
+  } catch (e) {
+    // The status costs nothing but itself, and the next minute's is written again.
+  }
+}
+
+/** Make the late check of an episode's import (dropbox.js lateCheck): every file put into Dropbox is looked at, and one that
+    is missing or short is put in again from its work copy. When every file is whole, the run's own folder, the raw video in
+    the drop folder, this Mac's status files of the video and the pending check are taken away. When a file is still wrong,
+    the log says each problem; the first time, the cut plan's text in the episode is written again with the problem first,
+    and a new record lists its size, and a banner says so; the status says the problem; and the raw video, the work copies
+    and the pending check stay, so that the next run checks again and the video is never imported twice. Gives back
+    { ok, problems }. */
+export function finishLate(pending, deps) {
+  const { log = () => {}, notify = () => {} } = deps;
+  const opts = ruleOpts(deps);
+  const problems = lateCheck(pending.entries, opts);
+  if (!problems.length) {
+    rmSync(pending.work, { recursive: true, force: true });
+    try {
+      rmSync(pending.drop, { force: true });
+    } catch (e) {
+      log(`${pending.video}: could not be taken out of the drop folder (${e.code || e.message}). Delete it there by hand.`);
+    }
+    try {
+      removeStatus(pending.root, pending.video, pending.machine);
+      rmSync(pendingFile(deps.episode.home, pending.id), { force: true });
+    } catch (e) {
+      log(`${pending.video}: its late check passed, but it could not be put away (${e.code || e.message}). The next run checks it again.`);
+    }
+    log(`${pending.video}: the late check passed: every file of "${pending.name}" is whole in Dropbox. The video is taken out of the drop folder.`);
+    return { ok: true, problems };
+  }
+  for (const problem of problems) log(`${pending.video}: the late check found a problem: ${problem}`);
+  const said = problems.join(" ");
+  if (!pending.problem) {
+    notify(`Dropbox lost a file of ${basename(pending.video, extname(pending.video))}. The video stays in the drop folder; see the log.`);
+    try {
+      noteProblem(pending, said, deps);
+    } catch (e) {
+      log(`${pending.video}: the problem could not be written into its cut plan (${String(e.message).replace(/\.$/, "")}).`);
+    }
+  }
+  pending.problem = said;
+  try {
+    writePending(deps.episode.home, pending);
+  } catch (e) {
+    log(`${pending.video}: its late check could not be kept for the next run (${e.code || e.message}).`);
+  }
+  try {
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said }, textWriter({ work: join(pending.work, "status"), ...opts }));
+  } catch (e) {
+    log(`${pending.video}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
+  }
+  return { ok: false, problems };
+}
+
+/** Put the late check's problem first in the episode's cut plan text, by the rule, and write a new record that lists the
+    file's new size. The late check's entry for the file is changed to the new work copy. */
+function noteProblem(pending, said, deps) {
+  const opts = ruleOpts(deps);
+  const late = join(pending.work, "late");
+  mkdirSync(late, { recursive: true });
+  const entry = pending.entries.find((e) => basename(e.to) === pending.planTxt && dirname(e.to) === pending.folder);
+  if (!entry) return;
+  const from = join(late, pending.planTxt);
+  writeFileSync(from, `Dropbox lost a file of this episode after it was copied in, and it could not be put back: ${said}\n${readFileSync(entry.from, "utf8")}`);
+  replaceIn(from, entry.to, opts);
+  Object.assign(entry, { from, bytes: statSync(from).size });
+  const { record } = readEpisode(pending.folder);
+  if (!record) return;
+  const write = textWriter({ work: join(late, "record"), keep: true, ...opts });
+  writeEpisode(pending.folder, { ...record, files: { ...record.files, [pending.planTxt]: entry.bytes } }, { expectRev: record.rev, writeText: (to, text) => pending.entries.push(write(to, text)), writer: record.writer, home: deps.episode.home });
+}
+
+/** Keep this Mac awake while `pid` runs: caffeinate, which is part of macOS, holds off idle sleep until that process ends.
+    It is a courtesy: when it cannot be started, nothing else changes. */
+export function caffeinate(pid) {
+  if (!existsSync("/usr/bin/caffeinate")) return;
+  const child = spawn("/usr/bin/caffeinate", ["-i", "-w", String(pid)], { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
+  child.unref();
+}
+
+/** How often the wait for a late check looks in the drop folder for videos that have arrived meanwhile. */
+const LOOK_AGAIN_MS = 60 * 1000;
+
+/** The episode import of this Mac's drop folder `dir`, with the folder's lock held: the late checks earlier runs left that
+    are due, first; then each video waiting in the folder (`importOne(name)`, which resolves what uneditedFile does), unless
+    an episode or a status holds it (heldBy); then, while any late check of this run is not yet due, a wait of a minute at
+    most, a look for videos that arrived meanwhile, and each late check that has come due. The Mac is kept awake while there
+    is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those held, each with `held`. */
+export async function importEpisodes(dir, deps, importOne) {
+  const { episode, log = () => {}, wait, clock = Date.now, keepAwake = caffeinate } = deps;
+  const results = [];
+  const seen = new Set();
+  // Each late check is made once in a run: one that found a problem, or could not be put away, waits for the next run.
+  const checked = new Set();
+  let awake = false;
+  const wake = () => {
+    if (!awake) keepAwake(process.pid);
+    awake = true;
+  };
+  const mine = () => readPendings(episode.home).filter((p) => p.machine === episode.machine && resolve(p.root) === resolve(episode.root) && !checked.has(p.id));
+  const finishDue = (problems) => {
+    for (const pending of mine()) {
+      if ((problems || !pending.problem) && clock() >= dueAt(pending)) {
+        wake();
+        checked.add(pending.id);
+        finishLate(pending, deps);
+      }
+    }
+  };
+  const importWaiting = async (first) => {
+    let names;
+    try {
+      names = waitingToCut(readdirSync(dir)).filter((name) => !seen.has(name));
+    } catch (e) {
+      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
+      return;
+    }
+    if (first) log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");
+    for (const name of names) {
+      seen.add(name);
+      const held = heldBy({ root: episode.root, video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0 });
+      if (held) {
+        log(`${name}: ${held}`);
+        results.push({ ok: true, name, held });
+        continue;
+      }
+      wake();
+      results.push(await importOne(name));
+    }
+  };
+  for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${video}: an import of it on this Mac stopped before it was done, so it is imported again.`);
+  finishDue(true);
+  await importWaiting(true);
+  for (;;) {
+    const open = mine().filter((p) => !p.problem);
+    if (!open.length) break;
+    wake();
+    const left = Math.min(...open.map(dueAt)) - clock();
+    if (left > 0) {
+      for (const pending of open) waitingStatus(pending, deps, "Waiting for its late check");
+      await wait(Math.min(LOOK_AGAIN_MS, left));
+      await importWaiting(false);
+    }
+    finishDue(false);
+  }
+  return results;
 }

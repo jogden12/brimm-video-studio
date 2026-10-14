@@ -50,7 +50,7 @@ import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./r
 import { fcpxml, checkFcpxml, relativeUrl } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, textWriter } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, heldBy, clearCrashes } from "./filing.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt } from "./filing.js";
 import { readSettings, runsFolder } from "./settings.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -879,6 +879,14 @@ async function workOn(file, deps) {
       try {
         filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work }, deps);
         keepWork = true;
+        // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
+        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
+        try {
+          writePending(episode.home, pending);
+          log(`${name}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
+        } catch (e) {
+          log(`${name}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
+        }
       } catch (e) {
         const why = `it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`;
         missing.push(why);
@@ -1068,7 +1076,9 @@ export async function videosFromPlan(file, deps) {
 }
 
 /** Do every video in a folder that has no cut plan yet, and file each one away in a folder of its own. One run at a time works
-    on a folder, and the lock is the transcript tool's own, so the two never work on one folder at the same time. */
+    on a folder, and the lock is the transcript tool's own, so the two never work on one folder at the same time. When this
+    Mac has settings for episodes and the folder is its own drop folder, each video is made into an episode in Episodes
+    instead, and checked again in Dropbox 15 minutes after it was copied in (filing.js); the run waits for that, kept awake. */
 export async function uneditedFolder(dir, deps) {
   const { log = () => {}, alive = isRunning } = deps;
   const lock = lockFile(dir, deps.lockDir || undefined);
@@ -1077,8 +1087,15 @@ export async function uneditedFolder(dir, deps) {
     log(held);
     return [];
   }
-  const results = [];
   try {
+    // When this is this Mac's drop folder, each video is made into an episode, and checked again 15 minutes after it was
+    // copied into Dropbox (filing.js).
+    const { settings } = deps;
+    if (episodeMode(dir, settings)) {
+      const episode = { root: settings.root, machine: settings.machine, checkout: settings.checkout, home: deps.home || homedir() };
+      const withEpisode = { ...deps, episode };
+      return await importEpisodes(dir, withEpisode, (name) => uneditedFile(join(dir, name), { ...withEpisode, outDir: "", watched: dir }));
+    }
     // Only what is directly in the folder is looked at, so a video that has been filed away is never taken again.
     let names;
     try {
@@ -1088,30 +1105,14 @@ export async function uneditedFolder(dir, deps) {
       return [];
     }
     log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");
-    // When this is this Mac's drop folder, each video is made into an episode (filing.js).
-    const { settings } = deps;
-    const episode = episodeMode(dir, settings) ? { root: settings.root, machine: settings.machine, checkout: settings.checkout, home: deps.home || homedir() } : null;
-    if (episode) {
-      for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${video}: an import of it on this Mac stopped before it was done, so it is imported again.`);
-    }
-    for (const name of names) {
-      // A video an episode or an import already holds is not imported again (filing.js).
-      const held = episode ? heldBy({ root: episode.root, video: name, bytes: sizeOnDisk(join(dir, name)) }) : "";
-      if (held) {
-        log(`${name}: ${held}`);
-        results.push({ ok: true, name, held });
-        continue;
-      }
-      results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir, ...(episode ? { episode } : {}) }));
-    }
+    const results = [];
+    for (const name of names) results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir }));
+    return results;
   } finally {
     rmSync(lock, { force: true });
   }
-  return results;
 }
 
-/** Work each watched folder in the order given, as the transcript tool does. Resolves what the run ends with: 2 when a folder
-    is not there, 1 when something could not be made for a video or the work on a folder stopped, and 0 otherwise. */
 export async function uneditedFolders(folders, deps) {
   const { log = () => {} } = deps;
   let code = 0;

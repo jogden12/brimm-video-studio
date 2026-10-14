@@ -3,11 +3,11 @@
 // stand-ins for every program, is in unedited.test.js. Each test has a temp folder of its own; nothing touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes } from "../filing.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -105,6 +105,29 @@ describe("which brimm-video wrote a record", () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
     assert.equal(commitOf(dir), "unknown");
     assert.equal(commitOf(join(dir, "not there")), "unknown");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("the wait for late checks", () => {
+  it("checks each pending late check once in a run, so one that cannot be put away never holds the run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    const home = join(dir, "home");
+    const root = join(dir, "BRIMM Video");
+    const drop = join(root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    const pending = join(home, "Library", "Application Support", "BRIMM Video", "pending");
+    mkdirSync(pending, { recursive: true });
+    // A late check that is due, of a file that is whole, whose pending file cannot be taken away: its folder is read-only.
+    const to = join(dir, "whole.txt");
+    writeFileSync(to, "whole");
+    writeFileSync(join(pending, "e-20261013-000001.json"), JSON.stringify({ version: 1, id: "e-20261013-000001", name: "x", folder: dir, video: "x.mov", bytes: 5, seconds: 1, drop: join(drop, "x.mov"), work: join(dir, "work"), entries: [{ from: to, to, bytes: 5 }], lastCopy: 0, root, machine: "Mac Studio", planTxt: "x.cut-plan.txt" }));
+    chmodSync(pending, 0o555);
+    let waits = 0;
+    const deps = { episode: { root, machine: "Mac Studio", home }, clock: () => 10 ** 13, wait: async () => { waits += 1; }, keepAwake: () => {}, log: () => {} };
+    const results = await importEpisodes(drop, deps, async () => assert.fail("nothing is waiting"));
+    chmodSync(pending, 0o755);
+    assert.deepEqual([results, waits], [[], 0]);
     rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -15,7 +15,7 @@ import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
-import { progressFolder } from "../progress.js";
+import { progressFolder, noProgress } from "../progress.js";
 import { writeSettings } from "../settings.js";
 import { readEpisode } from "../episode.js";
 
@@ -2737,6 +2737,15 @@ function episodic(script = {}) {
   };
   t.deps.commit = "abc1234";
   t.deps.now = () => new Date("2026-10-13T10:00:00");
+  // A clock of the test's own, which each wait moves on, so that the wait for a late check takes no time; and a Mac kept
+  // awake by nothing.
+  let clock = Date.parse("2026-10-13T10:00:00");
+  t.deps.clock = () => clock;
+  t.deps.wait = async (ms) => {
+    t.waits.push(ms);
+    clock += ms;
+  };
+  t.deps.keepAwake = () => {};
   t.deps.move = (from) => assert.fail(`nothing is moved in an episode's import, and ${from} was`);
   const episodes = join(root, "Episodes");
   const put = (name, bytes = "video") => {
@@ -2803,11 +2812,17 @@ describe("an episode imported from this Mac's drop folder", () => {
   it("leaves the raw video in the drop folder, and the run's own folder in BRIMM Video Work/.runs, for the late check", async () => {
     const t = episodic();
     t.put("Talk.mov");
+    const seen = [];
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 60000 && !seen.length) {
+        const runs = readdirSync(join(t.home, "BRIMM Video Work", ".runs"));
+        seen.push(readdirSync(t.drop), runs.length, readdirSync(join(t.home, "BRIMM Video Work", ".runs", runs[0], "made")).includes("Talk.rough-cut.mp4"));
+      }
+      return wait(ms);
+    };
     await uneditedFolder(t.drop, t.deps);
-    assert.deepEqual(readdirSync(t.drop), ["Talk.mov"]);
-    const runs = readdirSync(join(t.home, "BRIMM Video Work", ".runs"));
-    assert.equal(runs.length, 1);
-    assert.ok(readdirSync(join(t.home, "BRIMM Video Work", ".runs", runs[0], "made")).includes("Talk.rough-cut.mp4"));
+    assert.deepEqual(seen, [["Talk.mov"], 1, true]);
     t.done();
   });
   it("takes the day the file says it was recorded when it says one", async () => {
@@ -2915,10 +2930,12 @@ describe("the status of an episode's import, and a video never imported twice", 
     await uneditedFolder(t.drop, t.deps);
     const written = statuses(t);
     assert.deepEqual(written.slice(0, 3).map((s) => s.step), ["Waiting to start", "Reading the sound", "Reading the sound"]);
-    assert.equal(written[written.length - 1].step, "Filing");
+    const filing = written.findIndex((s) => s.step === "Filing");
+    assert.ok(filing > 2 && written.slice(filing + 1).every((s) => s.step === "Waiting for its late check"), written.map((s) => s.step).join(", "));
     assert.ok(written.every((s, i) => s.name === `Talk.mov (Mac Studio) ${i + 1}.json` && s.machine === "Mac Studio" && s.pid === process.pid && s.bytes === 5));
-    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), [`Talk.mov (Mac Studio) ${written.length}.json`]);
-    assert.equal(written[written.length - 1].seconds, 120);
+    assert.equal(written[filing].seconds, 120);
+    // Once the late check has passed, the status is taken away.
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
     t.done();
   });
   it("writes why the import failed into its status, and leaves it, and the video in the drop folder", async () => {
@@ -2937,7 +2954,8 @@ describe("the status of an episode's import, and a video never imported twice", 
     await uneditedFolder(t.drop, t.deps);
     const calls = t.calls.length;
     t.logs.length = 0;
-    rmSync(join(t.episodes, ".importing"), { recursive: true, force: true });
+    // The same video dropped again, after its late check took the first one away.
+    t.put("Talk.mov");
     const results = await uneditedFolder(t.drop, t.deps);
     assert.deepEqual([results.map((r) => r.ok), t.calls.length], [[true], calls]);
     assert.ok(t.logs.includes(`Talk.mov: already imported as ${FOLDER}. It stays in the drop folder until its late check passes, or for a person to delete.`), t.logs.join("\n"));
@@ -2973,7 +2991,163 @@ describe("the status of an episode's import, and a video never imported twice", 
     const [r] = await uneditedFolder(t.drop, t.deps);
     assert.deepEqual([r.ok, r.folder], [true, "2026-10-12 Talk (Mac Studio)"]);
     assert.ok(t.logs.includes("Talk.mov: an import of it on this Mac stopped before it was done, so it is imported again."), t.logs.join("\n"));
-    assert.equal(readdirSync(join(t.episodes, ".importing")).length, 1);
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
+    t.done();
+  });
+});
+
+describe("the late check of an episode's import", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  const runs = (t) => join(t.home, "BRIMM Video Work", ".runs");
+  const pendings = (t) => {
+    const folder = join(t.home, "Library", "Application Support", "BRIMM Video", "pending");
+    return existsSync(folder) ? readdirSync(folder).map((n) => JSON.parse(readFileSync(join(folder, n), "utf8"))) : [];
+  };
+  /** An episode's import on a clock of its own, which a wait moves on. `hooks` is called at each wait with how long it is and
+      the time since the run began, before the clock moves. `awake` lists each process the Mac is kept awake for. */
+  function timed(script = {}) {
+    const t = episodic(script);
+    const start = Date.parse("2026-10-13T10:00:00");
+    let now = start;
+    t.awake = [];
+    t.hooks = [];
+    t.deps.clock = () => now;
+    t.deps.wait = async (ms) => {
+      for (const hook of t.hooks) await hook(ms, now - start);
+      t.waits.push(ms);
+      now += ms;
+    };
+    t.deps.keepAwake = (pid) => t.awake.push(pid);
+    t.later = (ms) => {
+      now += ms;
+    };
+    t.waited = () => t.waits.filter((ms) => ms > 5000).reduce((sum, ms) => sum + ms, 0);
+    return t;
+  }
+  it("waits 15 minutes after the last copy, then checks, and only then deletes the raw video and the run's own folder", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    t.hooks.push(() => assert.ok(existsSync(join(t.drop, "Talk.mov")), "the raw video stays until the late check"));
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.equal(r.ok, true);
+    assert.ok(t.waited() >= 900000 && t.waited() < 900000 + 60000, String(t.waited()));
+    assert.deepEqual([readdirSync(t.drop), readdirSync(runs(t)), pendings(t), readdirSync(join(t.episodes, ".importing"))], [[], [], [], []]);
+    assert.deepEqual(t.awake, [process.pid]);
+    assert.ok(t.logs.includes(`Talk.mov: the late check passed: every file of "${FOLDER}" is whole in Dropbox. The video is taken out of the drop folder.`), t.logs.join("\n"));
+    t.done();
+  });
+  it("copies a file in again when Dropbox has taken it away before the late check", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    const rough = join(t.episodes, FOLDER, "Talk.rough-cut.mp4");
+    t.hooks.push((ms) => {
+      if (ms === 60000 && existsSync(rough)) rmSync(rough);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([readFileSync(rough, "utf8"), readdirSync(t.drop)], ["the rough cut", []]);
+    assert.ok(t.logs.some((line) => line.startsWith("Talk.rough-cut.mp4 is not whole in ") && line.endsWith("at the late check (it is not there), so it is copied in again from its work copy.")), t.logs.join("\n"));
+    t.done();
+  });
+  it("keeps the raw video, says so in the status file, the cut plan's first lines and a banner, and never imports it twice, when a file is still wrong", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    const rough = join(t.episodes, FOLDER, "Talk.rough-cut.mp4");
+    let filed = false;
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      if (filed && to === rough) return writeFileSync(to, "the rou");
+      return clone(from, to);
+    };
+    t.hooks.push((ms) => {
+      if (ms === 60000 && !filed) {
+        filed = true;
+        writeFileSync(rough, "the rou");
+      }
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(readdirSync(t.drop), ["Talk.mov"]);
+    const [status] = readdirSync(join(t.episodes, ".importing")).map((n) => JSON.parse(readFileSync(join(t.episodes, ".importing", n), "utf8")));
+    assert.match(status.problem, /^Talk\.rough-cut\.mp4 could not be put into .*: it is 7 bytes there, not 13\. Nothing was copied\.$/);
+    const plan = readFileSync(join(t.episodes, FOLDER, "Talk.cut-plan.txt"), "utf8");
+    assert.ok(plan.startsWith(`Dropbox lost a file of this episode after it was copied in, and it could not be put back: ${status.problem}\n`), plan.slice(0, 200));
+    const { record } = readEpisode(join(t.episodes, FOLDER));
+    assert.deepEqual([record.rev, record.files["Talk.cut-plan.txt"]], [2, Buffer.byteLength(plan)]);
+    assert.deepEqual(t.notes, ['Ready: Talk. In Claude, say "open Talk".', "Dropbox lost a file of Talk. The video stays in the drop folder; see the log."]);
+    const calls = t.calls.length;
+    t.logs.length = 0;
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(t.calls.length, calls);
+    assert.ok(t.logs.some((line) => line.startsWith("Talk.mov: copied in, but the late check found a problem: ")), t.logs.join("\n"));
+    t.done();
+  });
+  it("imports a video that arrives while it waits for a late check, and checks both", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    let waits = 0;
+    t.hooks.push((ms) => {
+      if (ms === 60000 && ++waits === 3) t.put("Other.mov", "other");
+    });
+    const results = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(results.map((r) => [r.ok, r.folder]), [[true, FOLDER], [true, "2026-10-13 Other (Mac Studio)"]]);
+    assert.deepEqual([t.folders(), readdirSync(t.drop), pendings(t)], [["2026-10-13 Other (Mac Studio)", FOLDER], [], []]);
+    t.done();
+  });
+  it("leaves a stopped run's late check, with its work copies in BRIMM Video Work/.runs, for this Mac's next run, which does it first", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    t.hooks.push((ms) => {
+      if (ms === 60000) throw new Error("the run was stopped");
+    });
+    await uneditedFolders([t.drop], t.deps);
+    const [pending] = pendings(t);
+    assert.ok(pending.work.startsWith(runs(t) + "/") && existsSync(join(pending.work, "made", "Talk.rough-cut.mp4")), pending.work);
+    assert.deepEqual(readdirSync(t.drop), ["Talk.mov"]);
+    t.hooks.length = 0;
+    t.later(20 * 60000);
+    t.waits.length = 0;
+    t.logs.length = 0;
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(t.waited(), 0);
+    assert.ok(t.logs[0].endsWith("The video is taken out of the drop folder."), t.logs.join("\n"));
+    assert.deepEqual([readdirSync(t.drop), pendings(t), readdirSync(runs(t))], [[], [], []]);
+    t.done();
+  });
+  it("waits for a stopped run's late check that is not yet due, and then makes it", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    t.hooks.push((ms) => {
+      if (ms === 60000) throw new Error("the run was stopped");
+    });
+    await uneditedFolders([t.drop], t.deps);
+    t.hooks.length = 0;
+    t.later(5 * 60000);
+    t.waits.length = 0;
+    await uneditedFolder(t.drop, t.deps);
+    assert.ok(t.waited() >= 600000 - 60000 && t.waited() <= 600000, String(t.waited()));
+    assert.deepEqual([readdirSync(t.drop), pendings(t)], [[], []]);
+    t.done();
+  });
+  it("shows the Ready banner and ends the panel's bar at filing, waits quietly, and says in the log when the check is due", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    const told = [];
+    t.deps.progress = { ...noProgress, end: () => told.push("end"), begin: () => told.push("begin") };
+    t.hooks.push((ms) => {
+      if (ms === 60000) told.push(`wait, with ${t.notes.length} banner`);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(told.slice(0, 3), ["begin", "end", "wait, with 1 banner"]);
+    assert.ok(told.slice(2).every((x) => x === "wait, with 1 banner"));
+    assert.deepEqual(t.notes, ['Ready: Talk. In Claude, say "open Talk".']);
+    assert.ok(t.logs.includes("Talk.mov: copied into Dropbox. Its late check is due at 10:15."), t.logs.join("\n"));
+    t.done();
+  });
+  it("tells the other Mac it is waiting for the late check, in the status file, once a minute", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const steps = t.clones.filter(([, to]) => to.includes("/.importing/")).map(([, , text]) => JSON.parse(text).step);
+    assert.ok(steps.filter((s) => s === "Waiting for its late check").length >= 14, steps.join(", "));
     t.done();
   });
 });
