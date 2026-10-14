@@ -49,8 +49,8 @@ import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole, textWriter } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt, fileId } from "./filing.js";
+import { isWhole, readThrough, textWriter } from "./dropbox.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt, fileId, importIdOf } from "./filing.js";
 import { readSettings, runsFolder } from "./settings.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -602,8 +602,17 @@ async function workOn(file, deps) {
   // A file has arrived when its size has settled and it is whole on this Mac: Dropbox can show a file at its full size before
   // it has brought any of it over, and ffprobe could then hang on it or fail.
   const whole = deps.isWhole || isWhole;
+  // A file Dropbox shows only as a placeholder, as one dropped from another device, is not brought down until something reads
+  // it: once its size has settled, it is asked for, read through once, and then looked at again.
+  const bringDown = deps.bringDown || readThrough;
+  let broughtDown = false;
   const sizes = [sizeOf(file)];
   while (!settled(sizes) || !whole(file)) {
+    if (settled(sizes) && !broughtDown) {
+      broughtDown = true;
+      log(`${name}: Dropbox has not brought it down to this Mac yet, so it is asked for.`);
+      await bringDown(file).catch((e) => log(`${name}: it could not be read through (${e.code || e.message}).`));
+    }
     if (sizes.length > MAX_LOOKS) {
       log(`${name}: still arriving. It is taken the next time the folder changes.`);
       return { ok: false, name, arriving: true, message: "still arriving" };
@@ -614,6 +623,8 @@ async function workOn(file, deps) {
   // An episode's import keeps its own folder in BRIMM Video Work, on the same disk as Dropbox, until the late check: macOS
   // may clear the temp folder before a late check that a restart left is made.
   const { episode } = deps;
+  // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
+  const arrived = episode ? fileId(file) : null;
   const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   // Whether the run's folder stays when the run ends: it does once an episode's files are in Dropbox, for the late check.
@@ -624,7 +635,7 @@ async function workOn(file, deps) {
   // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see.
   if (episode) {
     const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
-    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
+    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, files, progress };
   const fail = (why) => {
@@ -691,10 +702,12 @@ async function workOn(file, deps) {
     if (!captions) return fail("the transcriber found no speech in it");
     // What an earlier run made of this video goes first, so that nothing stays beside a plan it does not belong to, and
     // nothing of it stays in a watched folder when the video is filed away.
-    for (const old of [out.srt, out.txt, out.words, out.plan, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...oldClips(out)]) rmSync(old, { force: true });
+    // An episode's import writes nothing beside the video in the drop folder, and a file there of the video's name is a
+    // person's own.
+    if (!episode) for (const old of [out.srt, out.txt, out.words, out.plan, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...oldClips(out)]) rmSync(old, { force: true });
     files.text(out.txt, stampedText(srt));
     files.text(out.srt, srt);
-    rmSync(out.failed, { force: true });
+    if (!episode) rmSync(out.failed, { force: true });
     log(`${name}: the transcript is written, ${captions} captions.`);
 
     // From here on a step that fails costs the plan or a file made from it, and never the transcript: what was made is kept
@@ -877,10 +890,10 @@ async function workOn(file, deps) {
       const stem = basename(name, extname(name));
       let filed = null;
       try {
-        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work }, deps);
+        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work, dropFile: arrived }, deps);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
-        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: fileId(file), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
+        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
         try {
           writePending(episode.home, pending);
           log(`${name}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
@@ -888,6 +901,12 @@ async function workOn(file, deps) {
           log(`${name}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
         }
       } catch (e) {
+        if (e.code === "DROP_CHANGED") {
+          // Nothing of it was put into Dropbox. The new file is imported on its own, as another recording.
+          log(`${name}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
+          progress.drop();
+          return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
+        }
         const why = `it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`;
         missing.push(why);
         progress.fail(why);

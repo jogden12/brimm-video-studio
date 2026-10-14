@@ -3,11 +3,11 @@
 // stand-ins for every program, is in unedited.test.js. Each test has a temp folder of its own; nothing touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns } from "../filing.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -128,6 +128,22 @@ describe("the wait for late checks", () => {
     const results = await importEpisodes(drop, deps, async () => assert.fail("nothing is waiting"));
     chmodSync(pending, 0o755);
     assert.deepEqual([results, waits], [[], 0]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("what the lead's review of PR 11 found in the runs' own folders", () => {
+  it("4. takes away the folders of runs that stopped, and keeps those of a live run and those a late check still needs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    const home = join(dir, "home");
+    const runs = join(home, "BRIMM Video Work", ".runs");
+    for (const name of ["99999999-1", "99999998-2", `${process.pid}-3`, "push-99999997-4", "notes"]) mkdirSync(join(runs, name), { recursive: true });
+    const pending = { version: 1, id: "e-20261013-000001", work: join(runs, "99999998-2"), entries: [], lastCopy: 0 };
+    const pendings = join(home, "Library", "Application Support", "BRIMM Video", "pending");
+    mkdirSync(pendings, { recursive: true });
+    writeFileSync(join(pendings, "e-20261013-000001.json"), JSON.stringify(pending));
+    clearRuns(home, (pid) => pid === process.pid);
+    assert.deepEqual(readdirSync(runs).sort(), [`${process.pid}-3`, "99999998-2", "notes"].sort());
     rmSync(dir, { recursive: true, force: true });
   });
 });

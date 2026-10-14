@@ -191,3 +191,19 @@ describe("taking a status file away", () => {
     t.done();
   });
 });
+
+describe("what the lead's review of PR 11 found in the status files", () => {
+  it("18. keeps two imports of one name apart by each import's own id, and takes away one's own alone", () => {
+    const t = setup();
+    writeStatus(t.root, { ...STATUS, import: "aaa" }, t.writeText);
+    writeStatus(t.root, { ...STATUS, import: "aaa", step: "Filing" }, t.writeText);
+    writeStatus(t.root, { ...STATUS, import: "bbb", failed: "the transcriber stopped" }, t.writeText);
+    assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) aaa 2.json", "Pricing talk.mp4 (Mac Studio) bbb 1.json"]);
+    assert.deepEqual(readStatuses(t.root, NOW).map((r) => [r.status.import, r.status.step, r.status.failed]), [["aaa", "Filing", undefined], ["bbb", "Making the rough cut", "the transcriber stopped"]]);
+    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio", "aaa");
+    assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) bbb 1.json"]);
+    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio");
+    assert.deepEqual(t.names(), []);
+    t.done();
+  });
+});

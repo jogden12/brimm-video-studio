@@ -17,7 +17,7 @@
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
-import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder } from "./settings.js";
 import { progressFolder } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
-import { isWhole, textWriter } from "./dropbox.js";
+import { isWhole, readThrough, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions } from "./portable.js";
 import { projectName, timelineFile } from "./names.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
@@ -490,14 +490,6 @@ export async function push(ctx, rest) {
   return pushPart(ctx, { ...found, record }, { part: "main", xml: readFileSync(source, "utf8"), noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits") });
 }
 
-/** Read a file to its end and let what is read go: Dropbox then brings all of it over to this Mac. */
-const readAll = (path) => new Promise((done, fail) => {
-  const stream = createReadStream(path);
-  stream.on("data", () => {});
-  stream.on("end", done);
-  stream.on("error", fail);
-});
-
 /** `bring --now "<episode folder>"`, the detached run `open` starts: each file of the episode that is not whole on this Mac
     is read to its end, so that Dropbox brings it over, and the result says which are whole now. */
 export async function bring(ctx, rest) {
@@ -515,7 +507,7 @@ export async function bring(ctx, rest) {
   const name = record.name.text;
   const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const coming = notHere(ctx, found, record);
-    const read = ctx.deps.readAll || readAll;
+    const read = ctx.deps.readAll || readThrough;
     const failed = [];
     for (const rel of coming) {
       try {

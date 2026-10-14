@@ -13,7 +13,7 @@ import { createdOf, waitingToCut } from "./cuts.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
-import { dropFolder, episodesFolder, pendingFolder } from "./settings.js";
+import { dropFolder, episodesFolder, pendingFolder, runsFolder } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 
@@ -86,8 +86,11 @@ export function commitOf(checkout) {
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
     uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, cut, work }, deps) {
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, cut, work, dropFile }, deps) {
   const { episode, log = () => {} } = deps;
+  // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
+  // export, is another recording, and is never filed with this one's transcript and cuts.
+  if (!sameFile(file, dropFile)) throw Object.assign(new Error(`${basename(file)} changed in the drop folder while it was imported`), { code: "DROP_CHANGED" });
   const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
   const video = basename(file);
   const bytes = statSync(file).size;
@@ -138,8 +141,8 @@ const STATUS_EVERY_MS = 60 * 1000;
     while a step runs, by the timer `every`. `fail(why)` writes the status with why the import failed, and the status is left.
     `end` stops the timer and leaves the status: the late check takes it away. A status that cannot be written costs nothing
     but itself: the log says so once, and the work goes on. */
-export function statusReporter(inner, { root, machine, video, bytes, writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
-  const status = { version: 1, machine, pid, video, bytes, seconds: null, step: "Waiting to start" };
+export function statusReporter(inner, { root, machine, video, bytes, importId = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
+  const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start" };
   let told = false;
   const write = (more = {}) => {
     try {
@@ -171,6 +174,10 @@ export function statusReporter(inner, { root, machine, video, bytes, writeText, 
     encoding: (seconds) => inner.encoding(seconds),
     fail(why) {
       write({ failed: why });
+    },
+    /** Take this import's status away, as when it stopped because its video changed. */
+    drop() {
+      removeStatus(root, video, machine, importId);
     },
     end(finished) {
       if (timer !== null) cancel(timer);
@@ -228,7 +235,7 @@ export function clearCrashes({ root, machine, now = Date.now(), alive = isRunnin
     if (!status || status.machine !== machine || status.failed || status.problem) continue;
     const gone = status.pid !== pid && !alive(status.pid);
     if (!gone && !leftByCrash(status, now, machine)) continue;
-    removeStatus(root, status.video, machine);
+    removeStatus(root, status.video, machine, status.import || "");
     cleared.push(status.video);
   }
   return cleared;
@@ -270,19 +277,23 @@ export function readPendings(home) {
   return read.sort((a, b) => a.lastCopy - b.lastCopy);
 }
 
-/** What tells one file from another of the same name: its inode and its size. */
+/** What tells one file from another of the same name: its inode, its size and when it was last written. */
 export const fileId = (path) => {
   const found = statSync(path, { throwIfNoEntry: false });
-  return found ? { ino: found.ino, size: found.size } : null;
+  return found ? { ino: found.ino, size: found.size, mtimeMs: found.mtimeMs } : null;
 };
 
-/** Whether the file at `path` is still the one `id` was taken of. A late check written before ids were kept counts as the
-    same. */
-const sameFile = (path, id) => {
+/** Whether the file at `path` is still the one `id` was taken of: by each of its inode, size and time that `id` holds. With no
+    id, as of a late check written before ids were kept, it counts as the same. */
+export const sameFile = (path, id) => {
   if (!id) return true;
   const now = fileId(path);
-  return Boolean(now) && now.ino === id.ino && now.size === id.size;
+  return Boolean(now) && ["ino", "size", "mtimeMs"].every((k) => id[k] === undefined || now[k] === id[k]);
 };
+
+/** The short id of an import, which keeps two imports of one name apart in their status files: the inode of the video it
+    took, in base 36. */
+export const importIdOf = (id) => (id ? Number(id.ino).toString(36) : "");
 
 /** When a late check is due, in milliseconds. */
 export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
@@ -296,7 +307,7 @@ const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(
 /** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. */
 function waitingStatus(pending, deps, step) {
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
   } catch (e) {
     // The status costs nothing but itself, and the next minute's is written again.
   }
@@ -325,7 +336,7 @@ export function finishLate(pending, deps) {
       log(`${pending.video}: could not be taken out of the drop folder (${e.code || e.message}). Delete it there by hand.`);
     }
     try {
-      removeStatus(pending.root, pending.video, pending.machine);
+      removeStatus(pending.root, pending.video, pending.machine, pending.importId || "");
       rmSync(pendingFile(deps.episode.home, pending.id), { force: true });
     } catch (e) {
       log(`${pending.video}: its late check passed, but it could not be put away (${e.code || e.message}). The next run checks it again.`);
@@ -350,7 +361,7 @@ export function finishLate(pending, deps) {
     log(`${pending.video}: its late check could not be kept for the next run (${e.code || e.message}).`);
   }
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said }, textWriter({ work: join(pending.work, "status"), ...opts }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said }, textWriter({ work: join(pending.work, "status"), ...opts }));
   } catch (e) {
     log(`${pending.video}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
   }
@@ -416,6 +427,8 @@ export async function importEpisodes(dir, deps, importOne) {
       }
     }
   };
+  // Whether an import was stopped because its video was replaced meanwhile: the new file is then looked for at once.
+  let changed = false;
   const importWaiting = async (first) => {
     const key = (name) => {
       const id = fileId(join(dir, name));
@@ -442,15 +455,32 @@ export async function importEpisodes(dir, deps, importOne) {
       }
       seen.add(id);
       wake();
-      const result = await importOne(name);
+      // While a video is imported, which can take many minutes, the videos waiting for their late checks go on saying so.
+      const { every = setInterval, cancel = clearInterval } = deps;
+      const keep = every(() => {
+        for (const pending of mine().filter((p) => !p.problem)) waitingStatus(pending, deps, "Waiting for its late check");
+      }, LOOK_AGAIN_MS);
+      if (keep && typeof keep.unref === "function") keep.unref();
+      let result;
+      try {
+        result = await importOne(name);
+      } finally {
+        cancel(keep);
+      }
+      if (result.changed) changed = true;
       // A video still arriving is looked at again.
       if (result.arriving) seen.delete(id);
       results.push(result);
     }
   };
+  clearRuns(episode.home, deps.alive || isRunning);
   for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${video}: an import of it on this Mac stopped before it was done, so it is imported again.`);
   finishDue(true);
   await importWaiting(true);
+  while (changed) {
+    changed = false;
+    await importWaiting(false);
+  }
   for (;;) {
     const open = mine().filter((p) => !p.problem);
     if (!open.length) break;
@@ -460,8 +490,34 @@ export async function importEpisodes(dir, deps, importOne) {
       for (const pending of open) waitingStatus(pending, deps, "Waiting for its late check");
       await wait(Math.min(LOOK_AGAIN_MS, left));
       await importWaiting(false);
+      while (changed) {
+        changed = false;
+        await importWaiting(false);
+      }
     }
     finishDue(false);
   }
   return results;
+}
+
+/** Take away the folders in BRIMM Video Work/.runs that runs left when they stopped: a folder named for a run, "<pid>-<time>"
+    or "push-<pid>-<time>", whose run is not running and that no late check still to make names. Gives back what was taken
+    away. */
+export function clearRuns(home, alive = isRunning) {
+  const runs = runsFolder(home);
+  let names = [];
+  try {
+    names = readdirSync(runs);
+  } catch (e) {
+    return [];
+  }
+  const needed = new Set(readPendings(home).map((p) => resolve(p.work)));
+  const gone = [];
+  for (const name of names) {
+    const m = /^(?:push-)?(\d+)-\d+$/.exec(name);
+    if (!m || alive(Number(m[1])) || needed.has(resolve(join(runs, name)))) continue;
+    rmSync(join(runs, name), { recursive: true, force: true });
+    gone.push(name);
+  }
+  return gone;
 }

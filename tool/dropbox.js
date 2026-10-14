@@ -10,7 +10,7 @@
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { lastLine } from "./run.js";
 
@@ -134,6 +134,15 @@ export function isWhole(path, { stat = statSync, flags = fileFlags } = {}) {
     return false;
   }
 }
+
+/** Read a file to its end and let what is read go: Dropbox then brings all of it down to this Mac, as it does for a file that
+    is there only as a placeholder. Resolves when it is read, and rejects when it cannot be. */
+export const readThrough = (path) => new Promise((done, fail) => {
+  const stream = createReadStream(path);
+  stream.on("data", () => {});
+  stream.on("end", done);
+  stream.on("error", fail);
+});
 
 /** Wait for files that Dropbox may still be bringing over: each is looked at, and while any is not whole, the wait is a few
     seconds and they are looked at again, `tries` looks in all. Gives back which are whole and which are not yet, each in the

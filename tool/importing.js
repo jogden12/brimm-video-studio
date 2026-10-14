@@ -1,7 +1,8 @@
 // The import status files: small files for each import, in Episodes/.importing/ in Dropbox, so that both Macs can see them.
 // Each says which Mac is importing which video, the video's size and length, the step the import is at, and when it was
-// written. A status file is never written into: each write is a new file, named for the video, the Mac and the next number,
-// as "Pricing talk.mp4 (Mac Studio) 3.json", and the one before is then deleted. The import writes one at the start, at each
+// written. A status file is never written into: each write is a new file, named for the video, the Mac, the import's own short
+// id and the next number, as "Pricing talk.mp4 (Mac Studio) k3j9x 3.json", and the one before is then deleted. The id keeps
+// two imports of one name apart, as of a video dropped again under the same name. The import writes one at the start, at each
 // step and at least once a minute, so a status not written for 10 minutes is an import that stopped, as when the Mac slept
 // or the run was killed. They are taken away once the import's files have passed the late check. One that says why the
 // import failed, or what the late check found wrong, is left for a person: only `edit.js retry` takes it away. While a
@@ -15,9 +16,9 @@ import { importingFolder } from "./settings.js";
     minute. */
 export const STALE_MS = 10 * 60 * 1000;
 
-/** The name of a status file: the video's file name, the Mac that imports it in brackets, and the file's number. A path is
-    cut to its file's name. */
-export const statusName = (video, machine, n) => `${basename(video)} (${machine}) ${n}.json`;
+/** The name of a status file: the video's file name, the Mac that imports it in brackets, the import's own id when it has
+    one, and the file's number. A path is cut to its file's name. */
+export const statusName = (video, machine, n, id = "") => `${basename(video)} (${machine}) ${id ? `${id} ` : ""}${n}.json`;
 
 /** The number at the end of a status file's name, or 0 when it has none. */
 const numberOf = (name) => {
@@ -25,11 +26,13 @@ const numberOf = (name) => {
   return m ? Number(m[1]) : 0;
 };
 
-/** The names in Episodes/.importing/ that are one video's status files from one Mac, each with its number. The video's
-    name and the Mac's may both hold brackets, so a name is matched against the one it would have, and not taken apart. */
-function filesOf(names, video, machine) {
+/** The names in Episodes/.importing/ that are one video's status files from one Mac, each with its number: of the import
+    `id`, or of every import of the video when no id is given. The video's name and the Mac's may both hold brackets, so a
+    name is matched against the one it would have, and not taken apart. */
+function filesOf(names, video, machine, id) {
   const start = `${basename(video)} (${machine}) `;
-  return names.filter((n) => n.startsWith(start) && /^\d+\.json$/.test(n.slice(start.length))).map((n) => ({ name: n, n: numberOf(n) }));
+  const rest = id === undefined ? /^(?:[0-9a-z]+ )?\d+\.json$/ : id ? new RegExp(`^${id} \\d+\\.json$`) : /^\d+\.json$/;
+  return names.filter((n) => n.startsWith(start) && rest.test(n.slice(start.length))).map((n) => ({ name: n, n: numberOf(n) }));
 }
 
 /** The names in Episodes/.importing/ under `root`, or [] when there is no such folder. */
@@ -51,6 +54,7 @@ export function statusFault(s) {
   const faults = [
     [typeof s.machine === "string" && s.machine !== "", "it names no Mac"],
     [Number.isInteger(s.pid) && s.pid > 0, "the run that wrote it cannot be read"],
+    [s.import === undefined || (typeof s.import === "string" && /^[0-9a-z]+$/.test(s.import)), "the import it is of cannot be read"],
     [typeof s.video === "string" && s.video !== "" && s.video === basename(s.video), "it names no video"],
     [Number.isInteger(s.bytes) && s.bytes >= 0, "the video's size cannot be read"],
     [s.seconds === null || (typeof s.seconds === "number" && Number.isFinite(s.seconds) && s.seconds >= 0), "the video's length cannot be read"],
@@ -72,9 +76,9 @@ export function writeStatus(root, status, writeText) {
   if (fault) throw new Error(`the import's status was not written, because ${fault}`);
   const folder = importingFolder(root);
   mkdirSync(folder, { recursive: true });
-  const before = filesOf(namesIn(root), status.video, status.machine);
+  const before = filesOf(namesIn(root), status.video, status.machine, status.import || "");
   const n = before.reduce((most, f) => Math.max(most, f.n), 0) + 1;
-  const file = join(folder, statusName(status.video, status.machine, n));
+  const file = join(folder, statusName(status.video, status.machine, n, status.import || ""));
   writeText(file, JSON.stringify(status, null, 2) + "\n");
   for (const f of before) rmSync(join(folder, f.name), { force: true });
   return file;
@@ -105,17 +109,18 @@ export function readStatuses(root, now = Date.now()) {
       const fault = statusFault(status);
       return fault ? { file, status: null, stale: false, n, why: `it could not be read (${fault})` } : { file, status, stale: isStale(status, now), n };
     });
-  // Of one video's files from one Mac, the highest number is the status.
-  const key = (r) => JSON.stringify([r.status.video, r.status.machine]);
+  // Of one import's files, the highest number is the status.
+  const key = (r) => JSON.stringify([r.status.video, r.status.machine, r.status.import || ""]);
   const highest = new Map();
   for (const r of read.filter((r) => r.status)) if (!highest.has(key(r)) || highest.get(key(r)).n < r.n) highest.set(key(r), r);
   return read.filter((r) => !r.status || highest.get(key(r)) === r);
 }
 
-/** Take away every status file of one video from one Mac, `machine`, under `root`: once the import's files have passed the
-    late check, at this Mac's next run after a crash, or by `edit.js retry`. Nothing happens when there is none. */
-export function removeStatus(root, video, machine) {
-  for (const f of filesOf(namesIn(root), video, machine)) rmSync(join(importingFolder(root), f.name), { force: true });
+/** Take away the status files of one video from one Mac, `machine`, under `root`: of the import `id` alone, once its files
+    have passed the late check; or of every import of the video, with no id, at this Mac's next run after a crash, or by
+    `edit.js retry`. Nothing happens when there is none. */
+export function removeStatus(root, video, machine, id) {
+  for (const f of filesOf(namesIn(root), video, machine, id)) rmSync(join(importingFolder(root), f.name), { force: true });
 }
 
 /** Where an import has got to, by its whole status at `now`, in milliseconds: "failed" when it says why it failed; "problem"
