@@ -454,6 +454,23 @@ describe("one unedited video", () => {
     assert.deepEqual(u.logs, ["huge.mov: still arriving. It is taken the next time the folder changes."]);
     u.done();
   });
+  it("waits for a video Dropbox shows at its full size with no data yet, and takes it once it is whole", async () => {
+    // The size is looked at four times: it has settled at the second look, and the file is whole at the fourth.
+    const t = setup({ sizes: [7, 7, 7, 7] });
+    const looks = [false, false, true];
+    const r = await uneditedFile(t.video("talk.mov"), { ...t.deps, isWhole: () => looks.shift() });
+    assert.equal(r.ok, true);
+    assert.deepEqual([t.waits.slice(0, 3), looks], [[5000, 5000, 5000], []]);
+    t.done();
+  });
+  it("leaves a placeholder for the next time after as many looks as a growing file, and makes nothing", async () => {
+    const t = setup({ sizes: Array.from({ length: 500 }, () => 7) });
+    const r = await uneditedFile(t.video("huge.mov"), { ...t.deps, isWhole: () => false });
+    assert.deepEqual([r.ok, r.arriving], [false, true]);
+    assert.deepEqual([t.names(), t.calls], [["huge.mov"], []]);
+    assert.deepEqual(t.logs, ["huge.mov: still arriving. It is taken the next time the folder changes."]);
+    t.done();
+  });
   it("is done again when it is asked for by name, though it has a plan already", async () => {
     const t = setup();
     const file = t.video("talk.mov");

@@ -49,6 +49,7 @@ import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
+import { isWhole } from "./dropbox.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -595,8 +596,11 @@ async function workOn(file, deps) {
   const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk, progress = noProgress } = deps;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
+  // A file has arrived when its size has settled and it is whole on this Mac: Dropbox can show a file at its full size before
+  // it has brought any of it over, and ffprobe could then hang on it or fail.
+  const whole = deps.isWhole || isWhole;
   const sizes = [sizeOf(file)];
-  while (!settled(sizes)) {
+  while (!settled(sizes) || !whole(file)) {
     if (sizes.length > MAX_LOOKS) {
       log(`${name}: still arriving. It is taken the next time the folder changes.`);
       return { ok: false, name, arriving: true, message: "still arriving" };
