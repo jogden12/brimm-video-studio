@@ -4,7 +4,7 @@
 // of a detached run are stand-ins. Nothing here touches Dropbox, opens Final Cut or starts a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { editMain, findEpisode, contextFor, openApp } from "../edit.js";
@@ -131,9 +131,9 @@ describe("node edit.js episodes", () => {
     assert.equal(r.code, 0);
     assert.ok(r.text.startsWith([
       "Episodes, newest first:",
-      "  Pricing with confidence: a short video of 2:00, in 2026-10-14 Pricing talk (Mac Studio)",
+      "  Pricing with confidence: a short video of 2:00, in 2026-10-14 Pricing talk (Mac Studio), id 000002",
       "    Shown in Final Cut: v2, on Mac Studio",
-      "  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio)"
+      "  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio), id 000001"
     ].join("\n")), r.text);
     assert.ok(!r.text.includes("Old"), r.text);
     t.done();
@@ -145,7 +145,7 @@ describe("node edit.js episodes", () => {
     const other = t.episode("2026-10-14 Pricing talk (Mac Studio)");
     writeFileSync(join(other.path, "Talk (Jason Ogden's conflicted copy 2026-10-14).mov"), "x");
     const r = await t.run("episodes");
-    assert.ok(r.text.includes("  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio)\n    Not right: Talk.cut-plan.txt is missing"), r.text);
+    assert.ok(r.text.includes("  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio), id 000001\n    Not right: Talk.cut-plan.txt is missing"), r.text);
     assert.ok(r.text.includes("  2026-10-14 Pricing talk (Mac Studio)\n    Not right: Dropbox has kept a conflicted copy in this episode: Talk (Jason Ogden's conflicted copy 2026-10-14).mov."), r.text);
     t.done();
   });
@@ -156,13 +156,14 @@ describe("node edit.js episodes", () => {
     mkdirSync(laptop, { recursive: true });
     writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "x".repeat(5));
     writeFileSync(join(laptop, "Budget.mov"), "budget");
-    utimesSync(join(laptop, "Budget.mov"), new Date(NOW - 25 * 60000), new Date(NOW - 25 * 60000));
-    utimesSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), new Date(NOW - 2 * 3600000), new Date(NOW - 2 * 3600000));
+    // How long is from when each came into its folder (its ctime), which a test cannot set: so the clock is set from it.
+    const came = Math.max(statSync(join(laptop, "Budget.mov")).ctimeMs, statSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov")).ctimeMs);
+    t.deps.now = () => came + 2 * 3600000;
     const r = await t.run("episodes");
     assert.ok(r.text.includes([
       "Waiting in the drop folders:",
       "  Talk.mov, in Mac Studio's, for 2 hours: already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete.",
-      "  Budget.mov, in Sallie's laptop's, for 25 minutes"
+      "  Budget.mov, in Sallie's laptop's, for 2 hours"
     ].join("\n")), r.text);
     t.done();
   });
@@ -621,6 +622,116 @@ describe("what the final review found in edit.js", () => {
     t.deps.kickstart = () => assert.fail("nothing is asked");
     const r = await t.run("retry", "talk");
     assert.deepEqual([r.code, r.said], [1, ["Talk.mov is already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]]);
+    t.done();
+  });
+});
+
+describe("what the lead's review of PR 11 found in edit.js", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  const imported = (t) => {
+    const v0 = fcpxml({ video: join(t.episodes, FOLDER, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
+    const made = t.episode(FOLDER, {}, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
+    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
+    return made;
+  };
+  const OFFLINE = (t, path) => `So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${path}`;
+  it("1. lists a library Final Cut has made, with its .fcpcache link to itself, counting its own files once and no linked media", async () => {
+    const t = setup();
+    const library = libraryFor(t.home, FOLDER);
+    mkdirSync(join(library, "Event", "Original Media"), { recursive: true });
+    writeFileSync(join(library, "Event", "render"), "x".repeat(2 * 2 ** 20));
+    symlinkSync(".", join(library, ".fcpcache"));
+    writeFileSync(join(t.dir, "outside.mov"), "x".repeat(5 * 2 ** 20));
+    symlinkSync(join(t.dir, "outside.mov"), join(library, "Event", "Original Media", "Talk.mov"));
+    const r = await t.run("episodes");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.text.includes(`  ${FOLDER}.fcpbundle: 2.0 MB`), r.text);
+    t.done();
+  });
+  it("5. lists an episode written by a newer brimm-video by its folder, without reading its fields", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    const r = await t.run("episodes");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.text.includes(`  ${FOLDER}\n    Written by a newer brimm-video: Jason updates this Mac before it is changed here.`), r.text);
+    t.done();
+  });
+  it("6. says the offline step at the first open that completes, even when a bring came first, and only once", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    t.deps.isWhole = () => false;
+    const bringing = await t.run("open", "talk");
+    assert.ok(!bringing.said.includes(OFFLINE(t, path)), bringing.text);
+    // The detached run that brings the files over makes this Mac's folder for the episode, as runDetached does.
+    mkdirSync(join(t.home, "BRIMM Video Work", FOLDER), { recursive: true });
+    delete t.deps.isWhole;
+    const first = await t.run("open", "talk");
+    assert.ok(first.said.includes(OFFLINE(t, path)), first.text);
+    const again = await t.run("open", "talk");
+    assert.ok(!again.said.includes(OFFLINE(t, path)), again.text);
+    t.done();
+  });
+  it("6. says the offline step at a push that comes before any open on this Mac", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    const pushed = await t.run("push", "talk");
+    assert.ok(pushed.said.includes(OFFLINE(t, path)), pushed.text);
+    const opened = await t.run("open", "talk");
+    assert.ok(!opened.said.includes(OFFLINE(t, path)), opened.text);
+    t.done();
+  });
+  it("11. writes a push's record into Dropbox by the rule, as a clone", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    await t.run("push", "talk");
+    assert.ok(t.clones.includes(recordFile(path, 2)), t.clones.join("\n"));
+    t.done();
+  });
+  it("12. still asks about v1 after saying Dropbox undid a push, when the push says nothing of hand edits", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    await t.run("push", "talk");
+    rmSync(recordFile(path, 2));
+    await t.run("push", "talk");
+    const r = await t.run("push", "talk");
+    assert.deepEqual([r.code, r.said], [1, ['Did you change v1 of Talk in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.']]);
+    assert.equal(t.opened.length, 1);
+    t.done();
+  });
+  it("19. finds a folder by its exact name however its accents are written, and episodes shows each one's short id", async () => {
+    const t = setup();
+    t.episode("2026-10-13 Café talk (Mac Studio)", { name: { text: "Café talk", placeholder: true } });
+    const ctx = contextFor({ ...t.deps, say: () => {} });
+    assert.equal(findEpisode(ctx, "2026-10-13 Café talk (Mac Studio)").name, "2026-10-13 Café talk (Mac Studio)");
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes("Café talk (a placeholder name): an episode of 2:00, in 2026-10-13 Café talk (Mac Studio), id 000001"), r.text);
+    t.done();
+  });
+  it("20. leaves an import that has not finished out of what a person's words find", async () => {
+    const t = setup();
+    imported(t);
+    mkdirSync(join(t.episodes, "2026-10-14 Talk (Mac Studio)"), { recursive: true });
+    const ctx = contextFor({ ...t.deps, say: () => {} });
+    assert.equal(findEpisode(ctx, "talk").name, FOLDER);
+    t.done();
+  });
+  it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    assert.equal((await t.run("push", "talk")).code, 1);
+    t.done();
+  });
+  it("22. says how long a video has waited from when it came into the drop folder, not from its own date", async () => {
+    const t = setup();
+    const video = join(t.root, "Unedited Video", "Mac Studio", "Old.mov");
+    writeFileSync(video, "video");
+    utimesSync(video, new Date(NOW - 30 * 86400000), new Date(NOW - 30 * 86400000));
+    const came = statSync(video).ctimeMs;
+    t.deps.now = () => came + 5 * 60000;
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes("  Old.mov, in Mac Studio's, for 5 minutes"), r.text);
     t.done();
   });
 });

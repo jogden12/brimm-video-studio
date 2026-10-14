@@ -17,7 +17,7 @@
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,9 +91,10 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
     fits or more than one does. An episode with a conflicted copy, whose record cannot be read, is found by its folder. */
 export function findEpisode(ctx, said) {
-  const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) }));
+  // An import that has not finished has no whole record, and is not an episode yet.
+  const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
   const words = plainly(said).split(/\s+/).filter(Boolean);
-  const exact = all.filter((e) => e.name === said);
+  const exact = all.filter((e) => plainly(e.name) === plainly(said));
   const byId = all.filter((e) => e.read.record && (e.read.record.id === said || e.read.record.id.slice(-6) === said));
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || (e.read.record && plainly(e.read.record.name && e.read.record.name.text).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
@@ -123,13 +124,29 @@ export function ageText(ms) {
   return `${Math.round(hours / 24)} days`;
 }
 
-/** The size of everything in a folder, at any depth. */
+/** The size of the files in a folder, at any depth, without following a link: a Final Cut library holds .fcpcache, a link
+    to itself, and links to media kept elsewhere, and neither is counted. */
 function folderSize(folder) {
   let sum = 0;
-  for (const name of readdirSync(folder, { recursive: true })) {
-    const found = statSync(join(folder, name), { throwIfNoEntry: false });
-    if (found && found.isFile()) sum += found.size;
-  }
+  const walk = (dir) => {
+    let names = [];
+    try {
+      names = readdirSync(dir);
+    } catch (e) {
+      return;
+    }
+    for (const name of names) {
+      let found;
+      try {
+        found = lstatSync(join(dir, name));
+      } catch (e) {
+        continue;
+      }
+      if (found.isDirectory()) walk(join(dir, name));
+      else if (found.isFile()) sum += found.size;
+    }
+  };
+  walk(folder);
   return sum;
 }
 
@@ -162,14 +179,18 @@ export async function episodes(ctx) {
         say(`    Not right: ${read.why}.`);
         continue;
       }
+      if (read.newer) {
+        say(`  ${name}`);
+        say("    Written by a newer brimm-video: Jason updates this Mac before it is changed here.");
+        continue;
+      }
       const kind = r.kind === "short video" ? "a short video" : "an episode";
-      say(`  ${r.name.text}${r.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(r.video.seconds)}, in ${name}`);
+      say(`  ${r.name.text}${r.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(r.video.seconds)}, in ${name}, id ${r.id.slice(-6)}`);
       if (r.title) say(`    Title: ${r.title.text}${r.title.approved ? "" : " (recommended)"}`);
       const pushed = r.main && Array.isArray(r.main.pushed) ? r.main.pushed : [];
       if (pushed.length) say(`    Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}`);
       if (r.finished) say(`    Finished: revision ${r.finished.revision}, on ${r.finished.on}`);
-      if (read.newer) say("    Written by a newer brimm-video: Jason updates this Mac before it is changed here.");
-      else for (const problem of filesProblems(folder, r)) say(`    Not right: ${problem}`);
+      for (const problem of filesProblems(folder, r)) say(`    Not right: ${problem}`);
     }
   }
   // The videos in each Mac's drop folder.
@@ -192,7 +213,8 @@ export async function episodes(ctx) {
       const found = statSync(join(drops, mac, video), { throwIfNoEntry: false });
       if (!found) continue;
       const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
-      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - found.mtimeMs)}${held ? `: ${held}` : ""}`);
+      // How long it has waited is from when it came into the folder: copying a file keeps its own date.
+      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - found.ctimeMs)}${held ? `: ${held}` : ""}`);
     }
   }
   if (waiting.length) {
@@ -233,7 +255,7 @@ function startProgram(cmd, args) {
 
 /** The episode a command is asked about, by what the person said, with its record: { found, record }, or { code } when the
     command is to end, having said why. A record of a newer layout is shown as such and goes no further. */
-function episodeFor(ctx, rest) {
+function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
   const said = rest.join(" ").trim();
   if (!said) {
     ctx.say(HELP);
@@ -251,9 +273,23 @@ function episodeFor(ctx, rest) {
   }
   if (read.newer) {
     ctx.say(`${found.name} was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac.`);
-    return { code: 0 };
+    return { code: newerEnds };
   }
   return { found, record: read.record };
+}
+
+/** Say once on this Mac, at the first open or push of an episode that completes, how to keep the episode on this Mac: Dropbox
+    offers no command for it. A marker in this Mac's folder for the episode says it was said. */
+function offlineStep(ctx, found) {
+  const said = join(episodeWork(ctx.home, found.name), "offline-step-said");
+  if (existsSync(said)) return;
+  ctx.say(`So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${found.folder}`);
+  try {
+    mkdirSync(episodeWork(ctx.home, found.name), { recursive: true });
+    writeFileSync(said, "");
+  } catch (e) {
+    // It is said again the next time.
+  }
 }
 
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
@@ -301,12 +337,7 @@ export async function open(ctx, rest) {
   }
   const pushed = record.main.pushed;
   say(pushed.length ? `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}.` : "Not shown in Final Cut yet.");
-  // The first open on this Mac makes its folder for the episode, in BRIMM Video Work, and says how to keep the episode here.
-  const work = episodeWork(ctx.home, found.name);
-  if (!existsSync(work)) {
-    mkdirSync(work, { recursive: true });
-    say(`So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${found.folder}`);
-  }
+  offlineStep(ctx, found);
   say('Say "show it in Final Cut" to see the main video there.');
   return 0;
 }
@@ -427,6 +458,7 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     writeFileSync(copy, withImportOptions(local.xml, { library: libraryFor(ctx.home, found.name) }));
     ctx.openApp("Final Cut Pro", copy);
     say(`Shown in Final Cut as "${project}", in the library ${found.name}.fcpbundle in BRIMM Video Work.`);
+    offlineStep(ctx, found);
     if (first) say("Once, for this library: in Final Cut, choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups.");
     return 0;
   } catch (e) {
@@ -447,7 +479,7 @@ export async function push(ctx, rest) {
     return 1;
   }
   if (words[words.length - 1] === "main") words.pop();
-  const got = episodeFor(ctx, words);
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = got;
   const source = join(found.folder, timelineFile({ part: "main", v: 0 }));
