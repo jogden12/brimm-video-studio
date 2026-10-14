@@ -68,6 +68,7 @@ export function contextFor(deps = {}) {
     start: deps.start || startProgram,
     openApp: deps.openApp || openApp,
     kickstart: deps.kickstart || kickstart,
+    agentRunning: deps.agentRunning || agentRunning,
     deps
   };
 }
@@ -353,6 +354,12 @@ export function openApp(app, file, run = spawnSync) {
 /** The launch agent that imports this Mac's drop folder. */
 const AGENT = "com.thebrimm.unedited";
 
+/** Whether the launch agent's run is at work now: launchctl names its process while it runs. */
+function agentRunning() {
+  const ran = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  return ran.status === 0 && /^\s*pid = \d+/m.test(ran.stdout);
+}
+
 /** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
     arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
     looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
@@ -613,6 +620,12 @@ export async function retry(ctx, rest) {
     return 1;
   }
   removeStatus(ctx.root, video, ctx.machine);
+  // A run of the launch agent at work now takes the video when it next looks: it looks again each minute while it waits for
+  // a late check, and once more before it ends. Asking the agent to start would do nothing while it runs.
+  if (ctx.agentRunning()) {
+    say(`${video} is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
+    return 0;
+  }
   // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
   // --rules-only, its environment and its lock.
   try {

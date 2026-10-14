@@ -3354,3 +3354,59 @@ describe("what the lead's review of PR 11 found in the import", () => {
     t.done();
   });
 });
+
+describe("a failed import taken again by a run that is still at work (retry with a busy agent)", () => {
+  /** Have the transcriber fail for `video` until `ok()` is called. The transcriber is not told the video's name, so the video
+      the run is on is the one ffprobe was last asked about. */
+  const failing = (t, video) => {
+    let fails = true;
+    let on = "";
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, asked) => {
+      if (cmd === "FFPROBE") on = basename(args[args.length - 1]);
+      if (cmd === "WHISPER" && fails && on === video) return { code: 3, stderr: "error: failed to initialize whisper context\n" };
+      return run(cmd, args, asked);
+    };
+    return () => {
+      fails = false;
+    };
+  };
+  const lift = (t, video) => {
+    const folder = join(t.episodes, ".importing");
+    for (const n of readdirSync(folder)) if (n.startsWith(`${video} (`)) rmSync(join(folder, n));
+  };
+  it("imports again, while it waits for a late check, a video whose failed status was taken away", async () => {
+    const t = episodic();
+    t.put("Other.mov", "other");
+    t.put("Talk.mov");
+    const ok = failing(t, "Other.mov");
+    let n = 0;
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 60000 && ++n === 2) {
+        ok();
+        lift(t, "Other.mov");
+      }
+      return wait(ms);
+    };
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.folders(), ["2026-10-13 Other (Mac Studio)", "2026-10-13 Talk (Mac Studio)"]);
+    t.done();
+  });
+  it("looks once more before it ends, so a failed status taken away while it worked is acted on", async () => {
+    const t = episodic();
+    t.put("Other.mov", "other");
+    const ok = failing(t, "Other.mov");
+    t.deps.notify = (text) => {
+      t.notes.push(text);
+      if (text.startsWith("No transcript could be made from Other.mov")) {
+        // As retry would: the failed status, written just before this banner, is taken away.
+        ok();
+        lift(t, "Other.mov");
+      }
+    };
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.folders(), ["2026-10-13 Other (Mac Studio)"]);
+    t.done();
+  });
+});

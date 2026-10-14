@@ -735,3 +735,34 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     t.done();
   });
 });
+
+describe("retry, with the launch agent idle or at work", () => {
+  const drop = (t) => join(t.root, "Unedited Video", "Mac Studio");
+  const failedStatus = (t) => {
+    const folder = join(t.episodes, ".importing");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "Talk.mov (Mac Studio) k3 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, import: "k3", video: "Talk.mov", bytes: 5, seconds: 120, step: "Writing the transcript", at: new Date(NOW - 30 * 60000).toISOString(), failed: "the transcriber stopped" }));
+  };
+  it("asks an idle launch agent to start", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    failedStatus(t);
+    const kicked = [];
+    t.deps.agentRunning = () => false;
+    t.deps.kickstart = () => kicked.push(1);
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, kicked.length], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], 1]);
+    t.done();
+  });
+  it("says truthfully when the launch agent's run is at work: that run takes it when it next looks", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    failedStatus(t);
+    t.deps.agentRunning = () => true;
+    t.deps.kickstart = () => assert.fail("a run is at work, and none is started");
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is."]]);
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
+    t.done();
+  });
+});
