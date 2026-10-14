@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22 or later, ES modules, `node:test`, no npm packages. zsh for the installer. `/bin/cp -c` (clonefile) for every copy into Dropbox. Tests run with `cd tool && node --test` on macOS and on GitHub's Ubuntu runner.
 
-**Spec:** `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md`, on `main` at e5b5017 (approved and merged). This plan is the spec's phase 1a: its row in section 7, sections 1 and 2, and the parts of section 4 that 1a builds (`episodes`, `open`, `push` with the guard, `status`, `retry`, detached runs). Builder A's brief from the lead adds `release`: see "Questions for the lead", item 1.
+**Spec:** `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md`, on `main` at e5b5017 (approved and merged). This plan is the spec's phase 1a: its row in section 7, sections 1 and 2, and the parts of section 4 that 1a builds (`episodes`, `open`, `push` with the guard, `status`, `retry`, detached runs). Builder A's brief from the lead adds `release`: see "The lead's answers", item 1.
 
 **Built from:** the architect's drafts on branch `drafts/plans-1a-2-1b` at commit 03bd414, folder `docs/superpowers/plans/drafts/`. Taken in, each changed to the merged design as its task says: `plan-1a-tasks-1-6/task-01-names.md` (Task 1), `task-02-settings.md` (Task 2), `task-03-dropbox.md` (Task 3), `task-04-episode-record.md` (Task 4), `task-05-import-status-files.md` (Task 5), `task-06-portable.md` (Task 6, as it stands but for one line). `contract.md` gives the module, function and file names, and `decisions-1a.md` the order of the import, both followed except where a task says otherwise and why. Each drafted task's full code is in its draft file at 03bd414: a task below says "the draft's code" for the parts it keeps, and gives in full the code it changes. The branch is not merged: the pieces are copied into this branch, task by task.
 
@@ -87,7 +87,7 @@ Builder C (phase 2) builds on these names. Phase 1b (the architect) adds the cla
 
 ## What 1a leaves to other phases, and stubs
 
-- **The claim, take-over, `release`, `resolve`** are phase 1b's (spec section 7). In 1a `open` claims nothing, and nothing writes `editing` or `released`. The helpers for them stay in `episode.js` from the draft, untested by any command. See "Questions for the lead", item 1.
+- **The claim, take-over, `release`, `resolve`** are phase 1b's (spec section 7). In 1a `open` claims nothing, and nothing writes `editing` or `released`. The helpers for them stay in `episode.js` from the draft, untested by any command. See "The lead's answers", item 1.
 - **The title, `reel pick`, `push reel <n>`, `finish`, `From Final Cut/`** are phase 2's. 1a writes `title` and `reels` into the first record as above, makes the `From Final Cut` folder at install, and exposes `pushPart`.
 - **`pull` does not exist** until phase 5. A "yes, I trimmed it" at the guard stops the command, as the spec's section 4 says.
 - **The skill, `~/BRIMM Video Studio`, its settings** are phase 1b's. In 1a `edit.js` prints its own next-step lines, which a Claude session on the Mac Studio reads.
@@ -105,11 +105,18 @@ Builder C (phase 2) builds on these names. Phase 1b (the architect) adds the cla
 | Library backups set other than by hand | `push` names the step at an episode's first push on this Mac: File > Library Properties, Modify Settings, Backups, `~/BRIMM Video Work/Backups`. |
 | Whether a clone into Dropbox's File Provider folder is safe | Checked by hand after the deploy (deployment note). Until then the import's late check and list stand guard. |
 
-## Questions for the lead
+## The lead's answers and changes (2026-10-14, approving df60480)
 
-1. **`release` in 1a.** The brief lists it; the spec's phase table and the architect's contract put the claim and `release` in 1b, and on the Mac Studio alone there is nothing to release to. This plan leaves `release` out. Say if you want a minimal one in 1a (lets the claim go, records the files and the guard's answers).
-2. **The Claude model.** The spec says the call names its model "so the two Macs pick Reels with the same one". A setting on each Mac could differ, so this plan makes it a constant in `unedited.js`, the same on any Mac at one commit: `CLAUDE_MODEL = "claude-opus-5-5"`, the most capable model today. Its cost is the account's Claude Code usage per import (phase 1a measures one). The contract had it as a setting (`claudeModel`); this plan drops that field. Say if you want another model, or the setting.
-3. **The status file's step and percent** (the spec's proposal, "Showing the other Mac how an import is going"). This plan writes the step, which the spec requires, and not the percent, which is Jason's to accept.
+1. **`release`**: left out of 1a, with the claim. The spec is right.
+2. **The model**: a constant, `CLAUDE_MODEL = "claude-opus-5-5"`.
+3. **The status file**: the step only, no percent.
+
+Changes, folded into their tasks below:
+
+- **A.** In episode mode the run's own folder is `~/BRIMM Video Work/.runs/<pid>-<time>/`, not the temp folder, so a pending late check after a restart still has its work copies (macOS may clear `$TMPDIR`). Same disk, so the clone rule is unchanged. Old mode keeps the temp folder. (Tasks 9 and 11.)
+- **B.** At filing, the "Ready: … open …" banner shows and the panel closes. The wait for the late check runs quietly; the log says when the check is due. A banner shows only when the late check finds a problem: `Dropbox lost a file of Talk. The video stays in the drop folder; see the log.` (Task 11.)
+- **C.** The duplicate guard matches by name and size, before ffprobe, with a comment saying the spec says size and length and why size is enough here. (Task 10.)
+- **D, E, F.** The deployment note checks that this Mac's Claude Code accepts the model; puts the clone test's file in `BRIMM Video/Clone test (delete after)/` and says to delete it after the hour; and checks that `Unedited Video Transfer` is empty before the installer runs. The README names the new drop folder in its first lines. (Task 17 and the note.)
 
 ---
 
@@ -210,8 +217,8 @@ export function timelineFile({ part, v, machine }) {
 **From the draft** `task-02-settings.md` at 03bd414: the module and its tests, with these changes to the merged design:
 
 - No `sharedFolder` and `exportsFolder`: one local folder, `fromFinalCutFolder(home)` = `~/BRIMM Video Work/From Final Cut` (spec rule 6).
-- New folder helpers: `backupsFolder(home)` (`~/BRIMM Video Work/Backups`), `pushedFolder(home, folder)` (`~/BRIMM Video Work/<folder>/pushed`), `writtenFile(home)` (`~/Library/Application Support/BRIMM Video/written.json`), `pendingFolder(home)` (`~/Library/Application Support/BRIMM Video/pending`).
-- No `claudeModel` (Questions for the lead, item 2): the settings are `{ version: 1, machine, root, checkout }`; `--claude-model` is not an option of `write`; `show` has no model line. A field a later version adds is still kept as it is.
+- New folder helpers: `backupsFolder(home)` (`~/BRIMM Video Work/Backups`), `pushedFolder(home, folder)` (`~/BRIMM Video Work/<folder>/pushed`), `writtenFile(home)` (`~/Library/Application Support/BRIMM Video/written.json`), `pendingFolder(home)` (`~/Library/Application Support/BRIMM Video/pending`), `runsFolder(home)` (`~/BRIMM Video Work/.runs`, the lead's change A).
+- No `claudeModel` (the lead's answers, item 2): the settings are `{ version: 1, machine, root, checkout }`; `--claude-model` is not an option of `write`; `show` has no model line. A field a later version adds is still kept as it is.
 - `show` lists `From Final Cut` beside `Work in Final Cut`.
 - The `marker` command is added in Task 12, where `dropbox.js` is at hand.
 
@@ -535,7 +542,7 @@ When this Mac has settings and `--watch` names its drop folder (`dropFolder(root
   - `findFolder(episodes, video, machine, day) → { name, reused }`: a folder of this Mac's whose record is not whole and that holds this video under its name at its size, or none of it yet, is reused (spec item 2); otherwise a new name by `episodeFolderName`.
   - `fileEpisode({ dropped, held, facts, plan, read, cut, made }, deps) → { folder, record, entries }`: makes the folder (`mkdirSync`, as the spec allows), clones in the raw video and each held file (`cloneIn`, or `replaceIn` when reused), the Final Cut file to `edit/main.v0.fcpxml`, builds the record with `newEpisode` (kind; `video` with `bytes`, `seconds`, `created`; `files` of every file cloned in; `reels` from `cut` for an episode; `title` from `read.title` when it is text), writes it with `writeEpisode(… { expectRev: 0, writeText: textWriter({ work, keep: true }) })` and gives back the late-check entries: `{ from, to, bytes }` for each file, the raw video's `from` being its copy in the drop folder.
   - `commitOf(checkout, run) → Promise<string>`: `git -C <checkout> rev-parse --short HEAD`, or `"unknown"`.
-- `unedited.js`: `uneditedFolder(dir, deps)` checks `episodeMode(dir, deps.settings)`; `depsFor` reads the settings once (`readSettings(home)`) into `deps.settings` (null when there are none). In episode mode `workOn` gives `finalCut` a `src` of `relativeUrl("../" + name)` and no library, does not delete the run's folder in `finally` when filing gave late-check entries, and calls `fileEpisode` where today it calls `fileAway`.
+- `unedited.js`: `uneditedFolder(dir, deps)` checks `episodeMode(dir, deps.settings)`; `depsFor` reads the settings once (`readSettings(home)`) into `deps.settings` (null when there are none). In episode mode `workOn` gives `finalCut` a `src` of `relativeUrl("../" + name)` and no library, does not delete the run's folder in `finally` when filing gave late-check entries, and calls `fileEpisode` where today it calls `fileAway`. In episode mode the run's own folder is `~/BRIMM Video Work/.runs/<pid>-<time>/` (`runsFolder(home)` in `settings.js`), not the temp folder (the lead's change A); old mode keeps `deps.tmpDir || tmpdir()`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `cuts.test.js`: "reads the creation time ffprobe gives the file, and null when it gives none".
@@ -545,7 +552,7 @@ When this Mac has settings and `--watch` names its drop folder (`dropFolder(root
     2. "puts every file into Dropbox by a clone from the run's own folder, the raw video from the drop folder, and the record last": the clone calls in order; none renames (a stand-in `move` that throws if called in episode mode).
     3. "writes a first record that lists every file with its size": `id` matches `/^e-20261014-[0-9a-f]{6}$/`, `rev` 1, `kind` "episode", `video` `{ file, bytes, seconds: 23.423, recorded: "2026-10-14", recordedFrom: "import" }`, `name` `{ text: "Talk", placeholder: true }`, `files` equal to the sizes on disk, `writer.on` "Mac Studio".
     4. "names the video in edit/main.v0.fcpxml by a path from the file, and names no library": `src="../Talk.mp4"`, no `import-options`.
-    5. "leaves the raw video in the drop folder, and the run's own folder, for the late check" (Task 11 deletes them).
+    5. "leaves the raw video in the drop folder, and the run's own folder in BRIMM Video Work/.runs, for the late check" (Task 11 deletes them).
     6. "takes the day the file says it was recorded when it says one" (`creation_time` 2026-10-01 → `recorded: "2026-10-01"`, `recordedFrom: "video"`).
     7. "makes a short or upright recording a short video: no upright version and no clips" (1080x1920 and a wide one of 60 s: no `.rough-cut.vertical.mp4`, no `.reel-` file, `kind: "short video"`, `reels: []`; Claude is still asked and its notes kept).
     8. "puts the clips Claude picked into the record as Reel candidates" (`{ n: 1, status: "candidate", from, to, title: <hook>, why, files: ["Talk.reel-1.mp4", "Talk.reel-1.srt"], pushed: [] }`).
@@ -565,6 +572,7 @@ When this Mac has settings and `--watch` names its drop folder (`dropFolder(root
 
 **Interfaces:**
 - `filing.js`: `statusReporter(inner, { root, machine, video, bytes, writeText, now, every }) → reporter`: wraps the progress reporter (phase P) so that `begin`, each `step`, and a timer every 60 seconds (`every`, default `setInterval`, unref'd) write the status (`writeStatus`); `length(seconds)` fills `seconds`; `fail(why)` writes it with `failed`; `end()` stops the timer and leaves the file (Task 11 removes it after the late check).
+- The guard matches an episode by the video's name and size, before ffprobe, with this comment (the lead's change C): the spec says size and length; size is enough here because the guard runs before ffprobe has read the length, the name must match too, and two different recordings with one name and one size to the byte are not met in practice; a length check would cost an ffprobe of every video in the drop folder at every run.
 - `filing.js`: `heldBy({ episodes, root, video, bytes, now, machine }) → "" | why`: an episode whose whole record names this video at this size ("already imported as <folder>"), or a status that `holdsVideo` ("being imported on <Mac>", "its import failed on <Mac>: <why>. Say "try it again" to import it again.", "copied in, but the late check found a problem: <problem>").
 - `filing.js`: `clearCrashes({ root, machine, now, alive })`: removes this Mac's stale status files with no `failed` and no `problem` whose `pid` is not running (spec: "The Mac that wrote that file removes it at its next run").
 
@@ -588,6 +596,7 @@ After its videos, the run waits, kept awake, until the late check of each is due
 **Interfaces:**
 - `filing.js`: `pendingFile(home, id)`; `writePending(home, pending)`; `readPendings(home) → pending[]`; a pending is `{ version: 1, id, folder, video, drop, work, entries, lastCopy, root, machine }`.
 - `filing.js`: `finishLate(pending, deps) → { ok, problems }`: `lateCheck(entries)`; when it gives none, deletes the run's folder (`work`), the raw video in the drop folder, this Mac's status files for the video, and the pending file; when it gives some, logs each, writes the cut plan's text again with the problems as its first lines (`replaceIn`, by the rule), writes the status with `problem`, keeps the raw video, the work copies and the pending file (so a later run checks again), and the banner says so.
+- The panel and the banner (the lead's change B): at filing, the banner `Ready: <name>. In Claude, say "open <name>".` shows and the video's panel bar ends (`progress.end`), so no panel stays up through the wait. The wait runs quietly; the log says `<name>: copied into Dropbox. Its late check is due at <time>.` A banner shows only when the late check finds a problem: `Dropbox lost a file of <name>. The video stays in the drop folder; see the log.`
 - `unedited.js`: in episode mode `uneditedFolder` does: take the lock; `keepAwake(process.pid)` (real: `/usr/bin/caffeinate -i -w <pid>`, detached, unref'd, errors ignored; `deps.keepAwake` in tests); `clearCrashes`; this Mac's pendings that are due, then each waiting video; then, while any pending is not yet due, `wait(min(60000, until due))`, import anything new, and finish each that is due. `deps.now` (default `Date.now`) is the clock; a test's `wait` moves it on.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -597,6 +606,8 @@ After its videos, the run waits, kept awake, until the late check of each is due
   - "imports a video that arrives while it waits for a late check" (a second video appears in the drop folder at the third wait).
   - "does a late check a stopped run left, before anything else" (a pending file whose `lastCopy` is 20 minutes ago: checked at once, at the start of the next run).
   - "leaves a pending check that is not yet due for this run to wait for" (one written 5 minutes ago: waited 10 minutes more).
+  - "keeps the run's own folder in BRIMM Video Work/.runs, so a pending check after a restart still has its work copies" (the pending's `work` is under `~/BRIMM Video Work/.runs/`; after the run ends early, the work copies are still there).
+  - "shows the Ready banner and ends the panel's bar at filing, waits quietly, and shows a banner after the wait only when the late check finds a problem".
 - [ ] **Step 2–5:** run and fail; write; run and pass with the whole suite; commit "Check every file again 15 minutes after the import's last copy, and only then let the raw video go".
 
 ---
@@ -724,7 +735,7 @@ After its videos, the run waits, kept awake, until the late check of each is due
 
 **Files:** Modify `README.md`, `docs/requirements.md`; the memory note `mac-studio-video-setup` (outside the repo).
 
-- [ ] **Step 1:** README: a section "Episodes", after "Unedited video": the folders in Dropbox, what the import writes and in what order, the rule (clones, never over a file, the late check 15 minutes on, the raw video kept until then), the record, `edit.js` and what each command does, what 1a does not do yet (the claim, release, Reels, finish), the phase 0 fallbacks, and how to set a Mac up (`install.sh --print --machine …`). The line of the Claude call (line 124) gains `--model claude-opus-5-5`. The "What is where" table gains the new modules.
+- [ ] **Step 1:** README: its first lines name the new drop folder, `The BRIMM DB/BRIMM Video/Unedited Video/<Mac>/` (the lead's change F). A section "Episodes", after "Unedited video": the folders in Dropbox, what the import writes and in what order, the rule (clones, never over a file, the late check 15 minutes on, the raw video kept until then), the record, `edit.js` and what each command does, what 1a does not do yet (the claim, release, Reels, finish), the phase 0 fallbacks, and how to set a Mac up (`install.sh --print --machine …`). The line of the Claude call (line 124) gains `--model claude-opus-5-5`. The "What is where" table gains the new modules.
 - [ ] **Step 2:** `docs/requirements.md`, Changes: `2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone.`
 - [ ] **Step 3:** run the whole suite; run `./install.sh --print --machine "Mac Studio" "<root>"` by hand (it changes nothing) and keep its output for the PR's deployment note.
 - [ ] **Step 4: Commit**: "Say in the README what episodes are, and how a Mac is set up for them".
@@ -735,10 +746,11 @@ After its videos, the run waits, kept awake, until the late check of each is due
 
 The PR to `main` carries, for the lead:
 
+0. **Before anything: the model.** Pulling `main` changes the live old mode's Claude call too. One real call from an empty temp folder, exit 0 (the lead's change D): `echo 'Say ok' | claude -p --model claude-opus-5-5 --tools "" --strict-mcp-config --setting-sources "" --output-format json`.
 1. **What `install.sh --print` shows** for `./install.sh --print --machine "Mac Studio" "/Users/jasonogden/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video"`, run by hand from the worktree before the PR (it changes nothing), pasted whole.
 2. **What it makes in Dropbox**: `BRIMM Video/`, `BRIMM Video/Unedited Video/Mac Studio/` with `.brimm-watched-by`, `BRIMM Video/Episodes/` and `BRIMM Video/Episodes/.importing/`. On the Mac: `settings.json`, `~/BRIMM Video Work/Backups/` and `From Final Cut/`. The launch agent stops watching `Unedited Video Transfer` and watches `Unedited Video/Mac Studio/`.
-3. **Order**: merge; pull `main` in `~/Claude Code/BRIMM video` (the agent then still watches `Unedited Video Transfer` in today's mode); `--print`; Jason's yes; the installer without `--print`.
-4. **The by-hand checks the spec asks for** (Jason or the lead, after the install): (a) the clone into Dropbox: a made-up file of over 1 GB (`mkfile 1100m` in a temp folder) cloned into `BRIMM Video/` with `cp -c` while Dropbox is uploading it, and one replaced as `replaceIn` does it, both checked on the Mac an hour later (and on the laptop in phase 1b); if a clone is undone, stop and take the design back to Jason. (b) A made-up clip end to end: in a temp folder, `say -o talk.aiff "…"` and `ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30000/1001 -i talk.aiff -shortest -c:v libx264 -c:a aac talk.mp4`; copy `talk.mp4` into `Unedited Video/Mac Studio/`; watch the panel; 15 minutes after the last copy, `Episodes/<day> talk (Mac Studio)/` holds every file and `record/0001.json`, the drop folder is empty, and `~/Library/Logs/brimm-video.log` says the late check passed. Then `node tool/edit.js episodes`, `open talk`, `push talk main` (Final Cut opens the project in its own library), and a second `push talk main` refused until `--no-hand-edits`. (c) One real recording, dropped, opened and pushed; its folder, its library and the peak space in the temp folder measured, and the Claude usage of one import noted.
+3. **Order**: check that `Unedited Video Transfer` is empty, so no video is stranded when the agent stops watching it (the lead's change F); merge; pull `main` in `~/Claude Code/BRIMM video` (the agent then still watches `Unedited Video Transfer` in today's mode); `--print`; Jason's yes; the installer without `--print`.
+4. **The by-hand checks the spec asks for** (Jason or the lead, after the install): (a) the clone into Dropbox: a made-up file of over 1 GB (`mkfile 1100m` in a temp folder) cloned into `BRIMM Video/Clone test (delete after)/`, never into `Episodes` or a drop folder (the lead's change E), with `cp -c` while Dropbox is uploading it, and one replaced as `replaceIn` does it, both checked on the Mac an hour later (and on the laptop in phase 1b); if a clone is undone, stop and take the design back to Jason. Delete `Clone test (delete after)` after the hour's check. (b) A made-up clip end to end: in a temp folder, `say -o talk.aiff "…"` and `ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30000/1001 -i talk.aiff -shortest -c:v libx264 -c:a aac talk.mp4`; copy `talk.mp4` into `Unedited Video/Mac Studio/`; watch the panel; 15 minutes after the last copy, `Episodes/<day> talk (Mac Studio)/` holds every file and `record/0001.json`, the drop folder is empty, and `~/Library/Logs/brimm-video.log` says the late check passed. Then `node tool/edit.js episodes`, `open talk`, `push talk main` (Final Cut opens the project in its own library), and a second `push talk main` refused until `--no-hand-edits`. (c) One real recording, dropped, opened and pushed; its folder, its library and the peak space in the temp folder measured, and the Claude usage of one import noted.
 
 ## Self-review
 
