@@ -29,14 +29,27 @@ func alive(_ pid: Int32) -> Bool {
   return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
 }
 
-/** The runs in the folder whose processes are still going, oldest first. A file that cannot be read is not a run. */
+/** When this Mac last started, in milliseconds since 1970. A process's number in a file written before then may now belong to
+    another program. 0 when it cannot be told, and then every file counts as written since. */
+func bootedAt() -> Double {
+  var boot = timeval()
+  var size = MemoryLayout<timeval>.stride
+  var mib: [Int32] = [CTL_KERN, KERN_BOOTTIME]
+  guard sysctl(&mib, 2, &boot, &size, nil, 0) == 0 else { return 0 }
+  return Double(boot.tv_sec) * 1000 + Double(boot.tv_usec) / 1000
+}
+
+/** The runs in the folder whose processes are still going, oldest first. A file that cannot be read is not a run, and nor is
+    one last written before this Mac last started. */
 func rows(in folder: URL) -> [Row] {
   let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+  let booted = bootedAt()
   var found: [Row] = []
   for name in names where name.hasSuffix(".json") {
     guard let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
       let run = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
       (run["version"] as? Int) == 1,
+      ((run["updated"] as? NSNumber)?.doubleValue ?? 0) >= booted,
       let pid = (run["pid"] as? NSNumber)?.int32Value, alive(pid),
       let video = run["video"] as? String,
       let detail = run["detail"] as? String
@@ -61,7 +74,8 @@ let folder = URL(fileURLWithPath: args[0], isDirectory: true)
 
 // One panel at a time: the number of its process is kept in panel.pid, and a second panel ends at once.
 let pidFile = folder.appendingPathComponent("panel.pid")
-if let text = try? String(contentsOf: pidFile, encoding: .utf8), let other = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)), other != getpid(), alive(other) {
+let pidFileWritten = ((try? FileManager.default.attributesOfItem(atPath: pidFile.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+if let text = try? String(contentsOf: pidFile, encoding: .utf8), let other = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)), other != getpid(), alive(other), pidFileWritten * 1000 >= bootedAt() {
   exit(0)
 }
 try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

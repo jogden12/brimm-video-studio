@@ -5,14 +5,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { progressFolder, PANEL, PANEL_PID, RATES, ffmpegProgress, aboutLeft, detailOf, readRates, blended, reporter, noProgress } from "../progress.js";
 
 /** One test's progress folder, a clock that moves only when told, a timer whose ticks a test runs by hand, a stand-in for
     starting a program, and what the log said. */
-function setup({ swift = "", alive = () => false } = {}) {
+function setup({ swift = "", alive = () => false, bootedAt } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "brimm-progress-"));
   const folder = join(dir, "progress");
   const clock = { t: 1_000_000 };
@@ -26,7 +26,7 @@ function setup({ swift = "", alive = () => false } = {}) {
     child.unref = () => {};
     return child;
   };
-  const r = reporter({ folder, swift, log: (line) => logs.push(line), pid: 4242, now: () => clock.t, start, alive, timer: { every: (fn) => (ticks.push(fn), ticks.length), cancel: (h) => cancelled.push(h) } });
+  const r = reporter({ folder, swift, log: (line) => logs.push(line), pid: 4242, now: () => clock.t, start, alive, ...(bootedAt === undefined ? {} : { bootedAt }), timer: { every: (fn) => (ticks.push(fn), ticks.length), cancel: (h) => cancelled.push(h) } });
   const file = () => JSON.parse(readFileSync(join(folder, "4242.json"), "utf8"));
   return { dir, folder, clock, ticks, cancelled, started, logs, r, file, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -158,6 +158,22 @@ describe("a run's progress file", () => {
     assert.match(t.logs[0], /^The progress panel's file could not be written \((EEXIST|ENOTDIR)\)\. The work goes on without it\.$/);
     t.done();
   });
+  it("gives ffmpeg nothing more to do when the folder is there but cannot be written, which would stop every encode", () => {
+    const t = setup({ swift: "/usr/bin/swift" });
+    mkdirSync(t.folder, { recursive: true });
+    chmodSync(t.folder, 0o500);
+    try {
+      t.r.begin("a.mov");
+      t.r.step("Making the rough cut");
+      assert.deepEqual(t.r.encoding(10).args, []);
+      assert.equal(t.ticks.length, 0);
+      assert.equal(t.logs.length, 1);
+      assert.match(t.logs[0], /^The progress panel's file could not be written \(EACCES\)\. The work goes on without it\.$/);
+    } finally {
+      chmodSync(t.folder, 0o700);
+      t.done();
+    }
+  });
   it("says nothing, and does nothing, when the run is given the reporter that says nothing", () => {
     for (const call of ["begin", "length", "steps", "step", "fraction", "end"]) assert.equal(noProgress[call]("x"), undefined);
     assert.deepEqual(noProgress.encoding(100).args, []);
@@ -257,6 +273,29 @@ describe("the time left in all", () => {
   });
 });
 
+describe("files left by runs that have gone", () => {
+  const anHourAgo = () => (Date.now() - 3_600_000) / 1000;
+  it("are taken away when a video begins: a run's file whose process has gone, or that was written before this Mac last started", () => {
+    const t = setup({ alive: (pid) => pid === 555 || pid === 4243, bootedAt: Date.now() - 60_000 });
+    mkdirSync(t.folder, { recursive: true });
+    for (const name of ["999.json", "999.ffmpeg.txt", "555.json", "4243.json", RATES]) writeFileSync(join(t.folder, name), "{}");
+    // 555 is a running process now, but its file was written before the restart: the number belongs to another program.
+    utimesSync(join(t.folder, "555.json"), anHourAgo(), anHourAgo());
+    t.r.begin("a.mov");
+    assert.deepEqual(readdirSync(t.folder).sort(), ["4242.json", "4243.json", RATES]);
+    t.done();
+  });
+  it("include a panel's number written before this Mac last started: the panel is started though that number now runs", () => {
+    const t = setup({ swift: "/usr/bin/swift", alive: () => true, bootedAt: Date.now() - 60_000 });
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, PANEL_PID), "77");
+    utimesSync(join(t.folder, PANEL_PID), anHourAgo(), anHourAgo());
+    t.r.begin("a.mov");
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+});
+
 describe("the panel", () => {
   it("is started when a video is begun, on its own and never waited for, with the folder of progress files", () => {
     const t = setup({ swift: "/usr/bin/swift" });
@@ -270,6 +309,7 @@ describe("the panel", () => {
     writeFileSync(join(t.folder, PANEL_PID), "77");
     t.r.begin("a.mov");
     assert.deepEqual(t.started, []);
+    assert.deepEqual(t.logs, ["A progress panel is showing already (process 77), and this run's bar goes into it."]);
     writeFileSync(join(t.folder, PANEL_PID), "78");
     t.r.begin("b.mov");
     assert.equal(t.started.length, 1);
@@ -297,10 +337,13 @@ describe("progress.swift, the panel itself", () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-panel-"));
     const gone = spawnSync("/usr/bin/true").pid;
     const run = (pid, video, started, more = {}) => writeFileSync(join(dir, `${pid}-${video}.json`), JSON.stringify({ version: 1, pid, video, step: "x", n: 1, of: 2, percent: null, left: null, total: null, detail: `${video} detail`, started, updated: started, ...more }));
-    run(process.pid, "second.mov", 2000, { percent: 42 });
-    run(process.pid, 'Sallie\'s "third" \u{1F600}.mov', 3000, { percent: 7 });
-    run(process.pid, "first.mov", 1000);
-    run(gone, "gone.mov", 500);
+    const now = Date.now();
+    run(process.pid, "second.mov", now - 2000, { percent: 42 });
+    run(process.pid, 'Sallie\'s "third" \u{1F600}.mov', now - 1000, { percent: 7 });
+    run(process.pid, "first.mov", now - 3000);
+    run(gone, "gone.mov", now - 4000);
+    // A running process, but its run's file was written before this Mac last started (1970, here): another program's number.
+    run(process.pid, "before the restart.mov", 1000);
     writeFileSync(join(dir, "broken.json"), "{");
     writeFileSync(join(dir, RATES), JSON.stringify({ "Reading the sound": 0.2 }));
     writeFileSync(join(dir, PANEL_PID), "1");

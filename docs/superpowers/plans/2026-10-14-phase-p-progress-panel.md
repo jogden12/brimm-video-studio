@@ -1490,3 +1490,8 @@ Seen by hand on the Mac Studio with a made-up 34-second recording, in a scratch 
 - the panel closed itself after the last run
 
 The panel holds about 264 MB while it is open.
+
+After the final review, three more fixes:
+- A folder that is there but cannot be written made ffmpeg stop at once on every encode, because it was still handed `-progress`. `encoding()` now makes ffmpeg's file first, and gives ffmpeg nothing more when it cannot.
+- After a restart, a process number left in `panel.pid` or in a run's file could belong to another program, so the panel silently never started, or showed a bar that had gone. Files written before this Mac last started no longer count. `begin()` takes away leftovers whose process has gone. The log says once when a panel is showing already.
+- The README paragraph now comes after the install commands, not between them and the sentence that introduces them.

@@ -5,7 +5,8 @@
 // Nothing here may hold the work up. A file that cannot be written, or a panel that cannot be started or is closed, changes
 // nothing about the run: the log says so once, and the work goes on.
 import { spawn } from "node:child_process";
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRunning } from "./run.js";
@@ -87,7 +88,8 @@ export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, frac
 
 /** The reporter for the runs of one process. `folder` is where its file goes. `swift` is the program that runs the panel, ""
     when there is none. `log` is the run's log. The rest are for a test to give: the process's number, the clock in
-    milliseconds, how a program is started, how a process is known to be running, and the timer that reads ffmpeg's progress.
+    milliseconds, how a program is started, how a process is known to be running, when this Mac last started (a process's
+    number from before then may now belong to another program), and the timer that reads ffmpeg's progress.
     Gives back:
     - begin(video): a video is begun. Its file is written, and the panel is started when none is showing;
     - length(seconds): the video's length, once it is known, for the time left in all;
@@ -102,7 +104,7 @@ export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, frac
       what each of its steps took is kept in RATES. A run that stopped part-way, as when ffmpeg stopped at once, is not
       measured: its steps would make the time left look shorter than it is.
     No call ever throws. */
-export function reporter({ folder, swift = "", log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, timer = { every: setInterval, cancel: clearInterval } }) {
+export function reporter({ folder, swift = "", log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, bootedAt = Date.now() - uptime() * 1000, timer = { every: setInterval, cancel: clearInterval } }) {
   const file = join(folder, `${pid}.json`);
   const ffmpegFile = join(folder, `${pid}.ffmpeg.txt`);
   const said = new Set();
@@ -147,12 +149,36 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
     }
   };
 
+  /** Was the file at `path` written since this Mac last started? A process's number in an older one may now belong to another
+      program. */
+  const sinceBoot = (path) => statSync(path).mtimeMs >= bootedAt;
+
+  /** Take away what runs that have gone left in the folder: a run's file, or ffmpeg's, whose process is not running, or that
+      was written before this Mac last started. Such a run's bar would otherwise show for as long as its number is in use. */
+  const sweep = () => {
+    let names = [];
+    try {
+      names = readdirSync(folder);
+    } catch (e) {
+      return;
+    }
+    for (const name of names) {
+      const m = /^(\d+)\.(?:json|ffmpeg\.txt)$/.exec(name);
+      if (!m || Number(m[1]) === pid) continue;
+      try {
+        if (!alive(Number(m[1])) || !sinceBoot(join(folder, name))) rmSync(join(folder, name), { force: true });
+      } catch (e) {
+        // Left where it is: the panel ignores a run whose process has gone.
+      }
+    }
+  };
+
   /** Start the panel, unless one is showing. It is started on its own, and never waited for. */
   const showPanel = () => {
     if (!swift) return once("swift", "No progress panel is shown: swift, which draws it, is not installed.");
     try {
       const held = Number(readFileSync(join(folder, PANEL_PID), "utf8")) || 0;
-      if (held && alive(held)) return;
+      if (held && alive(held) && sinceBoot(join(folder, PANEL_PID))) return once("showing", `A progress panel is showing already (process ${held}), and this run's bar goes into it.`);
     } catch (e) {
       // No panel has shown yet.
     }
@@ -184,6 +210,7 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
     begin(video) {
       const at = now();
       v = { video, length: 0, steps: [], step: "", shown: "", percent: null, left: null, started: at, stepStarted: at, written: -Infinity, spent: {}, rates: readRates(folder) };
+      sweep();
       write(true);
       showPanel();
     },
@@ -212,9 +239,11 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
     },
     encoding(seconds) {
       if (!v || !(seconds > 0)) return { args: [], stop() {} };
+      // ffmpeg stops before it writes a picture when it cannot open its progress file, so the file is made here first: a folder
+      // that is there but cannot be written gives ffmpeg nothing more to do, and the work goes on without a percent.
       try {
         mkdirSync(folder, { recursive: true });
-        rmSync(ffmpegFile, { force: true });
+        writeFileSync(ffmpegFile, "");
       } catch (e) {
         once("file", `The progress panel's file could not be written (${e.code || e.message}). The work goes on without it.`);
         return { args: [], stop() {} };
