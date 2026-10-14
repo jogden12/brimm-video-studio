@@ -78,6 +78,16 @@ The files appear beside the video and nothing is moved. `--out "/another/folder"
 
 Having the Mac watch a folder for unedited video: the installer sets that up. `<main>` is the main folder the transcript tool watches on the Mac Studio, in Dropbox:
 
+**Progress.** While a video is worked on, a small window floats in the top right corner of the screen with a bar for each
+video: the step it is at ("Making the upright version (step 7 of 8)"), how far that step has got when ffmpeg says so, and how
+long is left. Once a video has been done on a Mac, it also says roughly how long is left in all, from what each step took
+there, kept in `~/Library/Application Support/BRIMM Video/progress/rates.json`. It comes up for a run started by the launch
+agent, by hand, or from a Claude session, and goes a few seconds after the last run ends. It is drawn by `tool/progress.swift`,
+which swift runs, so nothing is installed. Without swift there is no window, and the log says so once. Each run writes a
+small file in `~/Library/Application Support/BRIMM Video/progress/`, on the Mac's own disk and never in Dropbox. Closing the
+window, or its failing to open, changes nothing about the work. A video dropped for the other Mac shows its window on that
+Mac only.
+
 ```
 cd tool
 ./install.sh --print "<main>/Unedited Video Transfer"    # shows what it would do and changes nothing

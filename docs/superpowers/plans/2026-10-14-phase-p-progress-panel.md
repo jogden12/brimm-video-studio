@@ -1475,3 +1475,18 @@ Open a pull request into `main` titled "Phase P: a progress panel while a video 
 
 - The status file in `Episodes/.importing/`, which would show the other Mac how an import is going. It needs phase 1's Episodes folder, whose place the design review is reconsidering.
 - The transcriber's own percent (whisper's `--print-progress`, not tried). Until then, "Writing the transcript" shows a moving bar with no number.
+
+## Changed while building (2026-10-14)
+
+The first run by hand (Task 4, Step 2) showed two faults in the code above, both fixed test first:
+
+- Steps under a second (reading the sound, the cut plan, the faces) were never measured, because of a one-second floor, so the time left in all could not be said before the last step. The floor is gone. `end(finished)` measures every step of a run whose work finished, and nothing of one that stopped part-way, which is what the floor was guarding against. `workOn` and `videosFromPlan` say whether the work finished.
+- On the last step the line said the same time twice ("less than a minute left, less than a minute left in all"). The time left in all is now said only while steps remain after this one.
+
+Seen by hand on the Mac Studio with a made-up 34-second recording, in a scratch folder with a scratch home folder:
+- a window titled "BRIMM video" came up about 6 seconds after the start, at the top right, on the floating layer
+- each step showed with its number; the encodes showed a percent; the time left in all showed from the second run
+- the panel was stopped during the rough cut, and the run finished with every file made
+- the panel closed itself after the last run
+
+The panel holds about 264 MB while it is open.
