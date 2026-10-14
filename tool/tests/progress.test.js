@@ -258,3 +258,28 @@ describe("the panel", () => {
     t.done();
   });
 });
+
+describe("progress.swift, the panel itself", () => {
+  const cannot = process.platform !== "darwin" ? "the panel is drawn with AppKit, which is only on a Mac"
+    : spawnSync("swift", ["--version"]).status !== 0 ? "swift is not installed, so the panel cannot be run" : false;
+  it("shows each run whose process is still going, oldest first, and nothing of a run that has gone or a file it cannot read", { skip: cannot }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-panel-"));
+    const gone = spawnSync("/usr/bin/true").pid;
+    const run = (pid, video, started, more = {}) => writeFileSync(join(dir, `${pid}-${video}.json`), JSON.stringify({ version: 1, pid, video, step: "x", n: 1, of: 2, percent: null, left: null, total: null, detail: `${video} detail`, started, updated: started, ...more }));
+    run(process.pid, "second.mov", 2000, { percent: 42 });
+    run(process.pid, 'Sallie\'s "third" \u{1F600}.mov', 3000, { percent: 7 });
+    run(process.pid, "first.mov", 1000);
+    run(gone, "gone.mov", 500);
+    writeFileSync(join(dir, "broken.json"), "{");
+    writeFileSync(join(dir, RATES), JSON.stringify({ "Reading the sound": 0.2 }));
+    writeFileSync(join(dir, PANEL_PID), "1");
+    const r = spawnSync("swift", [PANEL, "--print", dir], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), [
+      { video: "first.mov", detail: "first.mov detail" },
+      { video: "second.mov", detail: "second.mov detail", percent: 42 },
+      { video: 'Sallie\'s "third" \u{1F600}.mov', detail: 'Sallie\'s "third" \u{1F600}.mov detail', percent: 7 }
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

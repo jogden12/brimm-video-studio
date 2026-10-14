@@ -879,10 +879,10 @@ Expected: PASS, 21 tests.
 Then check that the panel compiles cleanly and stays up with nothing to show. It shows no window when the folder holds no run:
 
 ```bash
-mkdir -p /tmp/brimm-panel-check && (swift tool/progress.swift /tmp/brimm-panel-check 2> /tmp/brimm-panel-check.err &) && sleep 8 && pgrep -f "progress.swift /tmp/brimm-panel-check" && pkill -f "progress.swift /tmp/brimm-panel-check"; cat /tmp/brimm-panel-check.err
+mkdir -p /tmp/brimm-panel-check && (swift tool/progress.swift /tmp/brimm-panel-check 2> /tmp/brimm-panel-check.err &) && sleep 8 && P=$(cat /tmp/brimm-panel-check/panel.pid) && kill -0 "$P" && echo "running as $P" && kill "$P"; cat /tmp/brimm-panel-check.err
 ```
 
-Expected: a process number, then nothing from swift: no warning and no error. With Swift 6.4, code that touches AppKit outside the main actor warns here, and the file above keeps all of it in a `@MainActor` class.
+Expected: "running as" and a process number, then nothing from swift: no warning and no error. The panel is found by the number it writes in `panel.pid`, not by its command line: swift runs a script as `swift-frontend -frontend -interpret`, with flags between the script and the folder, so `pgrep -f "progress.swift <folder>"` never finds it. (Checked on 2026-10-14: running, no warning, and about 264 MB of memory with nothing on screen, which is the review's point that a `swift` script keeps the compiler in memory.) With Swift 6.4, code that touches AppKit outside the main actor warns here, and the file above keeps all of it in a `@MainActor` class.
 
 - [ ] **Step 5: Commit**
 
