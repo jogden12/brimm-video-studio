@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fcpxml, checkFcpxml } from "../fcpxml.js";
+import { fcpxml, checkFcpxml, fileUrl, relativeUrl, attribute } from "../fcpxml.js";
 
 const VIDEO = "/Users/sallie/Movies/Episode 12.mp4";
 /** What ffprobe says of a video: one of 60 seconds at 30 frames a second, and one of 3,600 frames at 29.97. */
@@ -157,6 +157,36 @@ describe("the library the project goes into", () => {
     for (const library of ["BRIMM rough cuts.fcpbundle", "~/BRIMM Video Work/BRIMM rough cuts.fcpbundle", "/Users/sallie/BRIMM Video Work", "/Users/sallie/BRIMM rough cuts.fcpbundle.zip", "/Users/sallie/.fcpbundle"]) {
       assert.throws(() => make({ library }), { message: `The library must be given by its whole path, with a name ending .fcpbundle: ${library}` });
     }
+  });
+});
+
+describe("where the file says the video is", () => {
+  it("is the address it is given, as it is given, and nothing else in the file changes", () => {
+    const xml = make({ src: "../Episode%2012.mp4" });
+    assert.equal(tags(xml, "media-rep")[0].src, "../Episode%2012.mp4");
+    assert.equal(xml, make().replace(`src="file:///Users/sallie/Movies/Episode%2012.mp4"`, `src="../Episode%2012.mp4"`));
+    assert.deepEqual(checkFcpxml(xml, AT_30), []);
+  });
+  it("is the video's whole path, as before, when it is given none", () => {
+    for (const none of [undefined, null, ""]) assert.equal(tags(make({ src: none }), "media-rep")[0].src, "file:///Users/sallie/Movies/Episode%2012.mp4", String(none));
+  });
+  it("comes with no library when none is given, as a file kept beside its video in Dropbox has, and with one when it is", () => {
+    assert.doesNotMatch(make({ src: "../Episode%2012.mp4" }), /import-options|<option/);
+    const both = make({ src: "../Episode%2012.mp4", library: LIBRARY });
+    assert.deepEqual([tags(both, "media-rep")[0].src, tags(both, "option").length], ["../Episode%2012.mp4", 1]);
+  });
+  it("is written so that the file still reads, whatever it is given", () => {
+    assert.equal(tags(make({ src: `../Q&A "1" <2>.mp4` }), "media-rep")[0].src, "../Q&amp;A &quot;1&quot; &lt;2&gt;.mp4");
+  });
+  it("is made from a path from the file with each folder's name and the file's with every awkward character as %xx", () => {
+    assert.equal(relativeUrl("../Episode 12.mp4"), "../Episode%2012.mp4");
+    assert.equal(relativeUrl("../media/Épisode #12 – 100%?.mp4"), "../media/%C3%89pisode%20%2312%20%E2%80%93%20100%25%3F.mp4");
+    assert.equal(relativeUrl(`Q&A "final" <2>.mov`), "Q%26A%20%22final%22%20%3C2%3E.mov");
+    // Read back folder by folder, it is the path it was.
+    const path = "../media/Sallie's talk #1 & 100% <done>?.mov";
+    assert.equal(relativeUrl(path).split("/").map(decodeURIComponent).join("/"), path);
+    // A whole path is written as Final Cut writes one, as before.
+    assert.equal(fileUrl("/Users/sallie/Movies/Episode 12.mp4"), "file:///Users/sallie/Movies/Episode%2012.mp4");
   });
 });
 
@@ -371,6 +401,10 @@ describe("what came from outside", () => {
   it("is put on one line where it is a name", () => {
     const xml = make({ ranges: [{ start: 0, end: 5, name: " The first\npoint " }], markers: [{ at: 2, text: "Cut 0:05 to 0:10:\r\n\ta false start" }], project: "Episode 12\nrough cut" });
     assert.deepEqual([tags(xml, "asset-clip")[0].name, tags(xml, "marker")[0].value, tags(xml, "project")[0].name], ["The first point", "Cut 0:05 to 0:10: a false start", "Episode 12 rough cut"]);
+  });
+  it("is written as the value of an attribute in one way, which other code can use too", () => {
+    assert.equal(attribute(` Tom & "Jerry"\n<1>\u0000 `), "Tom &amp; &quot;Jerry&quot; &lt;1&gt;");
+    assert.equal(attribute(null), "");
   });
 });
 
