@@ -5,9 +5,9 @@
 //   node docs/phase-0/make-files.mjs                 makes ~/BRIMM Video Work/Phase 0
 //   node docs/phase-0/make-files.mjs "<folder>"      makes it there instead
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fcpxml } from "../../tool/fcpxml.js";
 
 const HOME = homedir();
@@ -165,25 +165,27 @@ const titles = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 write(join(EPISODE, "edit", "B1 titles and a still.fcpxml"), titles);
 
-// B2: an upright project of the wide clip: filled and moved, then filled only, with a built-in title on it.
+// B2: an upright project of the wide clip: filled and moved, then filled only, with a built-in title on it. Each clip names
+// its own wide format: without it, a clip takes the upright format of the project (phase 0, B2).
 const half = Math.floor(all / 2);
 const uprightProject = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE fcpxml>
 
 <fcpxml version="1.10">
   <resources>
-    <format id="r1" name="FFVideoFormat1080p30" frameDuration="1/30s" width="1920" height="1080"/>
+    <format id="r1" name="FFVideoFormat1080p30" frameDuration="1/30s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
     <asset id="r2" name="${NAME}" start="0s" duration="${t(all)}" hasVideo="1" format="r1" videoSources="1" hasAudio="1" audioSources="1" audioChannels="1" audioRate="48000">
       <media-rep kind="original-media" src="../${relUrl(`${NAME}.mov`)}"/>
     </asset>
-    <format id="r3" frameDuration="1/30s" width="1080" height="1920"/>
+    <!-- An upright format has no name, as Final Cut writes its own (phase 0, B2). -->
+    <format id="r3" frameDuration="100/3000s" width="1080" height="1920" colorSpace="1-1-1 (Rec. 709)"/>
     <effect id="r4" name="Basic Title" uid="${TITLE}"/>
   </resources>
   <event name="${NAME}">
     <project name="B2 upright, filled">
       <sequence format="r3" duration="${t(all)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
         <spine>
-          <asset-clip ref="r2" offset="0s" name="B2 filled and moved" start="0s" duration="${t(half)}">
+          <asset-clip ref="r2" offset="0s" name="B2 filled and moved" format="r1" start="0s" duration="${t(half)}">
             <adjust-conform type="fill"/>
             <adjust-transform position="20 0"/>
             <title ref="r4" lane="1" offset="1s" name="B2 title in an upright project" duration="4s">
@@ -192,7 +194,7 @@ const uprightProject = `<?xml version="1.0" encoding="UTF-8"?>
               </text>
             </title>
           </asset-clip>
-          <asset-clip ref="r2" offset="${t(half)}" name="B2 filled only" start="${t(half)}" duration="${t(all - half)}">
+          <asset-clip ref="r2" offset="${t(half)}" name="B2 filled only" format="r1" start="${t(half)}" duration="${t(all - half)}">
             <adjust-conform type="fill"/>
           </asset-clip>
         </spine>
@@ -216,8 +218,13 @@ write(join(EPISODE, "edit", "B3 timecode.fcpxml"), timedXml);
 // The episode folder copied to another parent folder, as a clone, for the relative path to be read from there.
 mkdirSync(join(INTO, "Moved"), { recursive: true });
 run("/bin/cp", ["-c", "-R", EPISODE, join(INTO, "Moved")]);
+// In the copy the video is colour bars with a higher tone, so the picture shows which folder Final Cut read it from (A1).
+const moved = join(INTO, "Moved", basename(EPISODE), `${NAME}.mov`);
+rmSync(moved);
+run(FFMPEG, ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "smptehdbars=size=1920x1080:rate=30:duration=20", "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=20", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "1", "-shortest", moved]);
 mkdirSync(join(INTO, "Screenshots"), { recursive: true });
-mkdirSync(join(WORK, "From Final Cut"), { recursive: true });
+// The folder the checklist saves Shares and exports into, made only for the run the checklist names.
+if (!process.argv[2]) mkdirSync(join(WORK, "From Final Cut"), { recursive: true });
 writeFileSync(join(INTO, "results.md"), readFileSync(new URL("./results-template.md", import.meta.url), "utf8"));
 
 // Each file checked against Final Cut's own definition of the format, when Final Cut is on this Mac.

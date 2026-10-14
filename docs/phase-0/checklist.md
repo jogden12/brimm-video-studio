@@ -10,6 +10,10 @@ For Jason, on the Mac Studio, with Final Cut Pro 12.4. Made-up clips only: nothi
 
 **What each step changes** is under each step, so you can see why it is asked.
 
+**Hand every file to Final Cut from Terminal**, with `open -a "Final Cut Pro" "<file>"`, as brimm-video will. When Final Cut asks which library to import into, choose the one the step names, or New… to make it in `~/BRIMM Video Work/Phase 0/`. Do not use File > Import > XML…: its dialog opens on the last folder used, where a file of the same name may sit, and on 2026-10-14 that picked the wrong file (A1). To open a project, double-click it in the browser; selecting it only shows its thumbnail.
+
+**Done on the Mac Studio on 2026-10-14.** The results are in `docs/phase-0/results/`, and the spec's section 7 says what they settled. Part C is what is left, on Sallie's laptop.
+
 ---
 
 ## Step 0. Make the files (2 minutes)
@@ -35,20 +39,37 @@ For Jason, on the Mac Studio, with Final Cut Pro 12.4. Made-up clips only: nothi
 
 The design stores timelines in `edit/` with the video named by a path from the file's own folder (`../Phase%20test.mov`) and no library.
 
-1. In Final Cut: File > Import > XML…, and pick `Phase 0/2026-10-14 Phase test (Mac Studio)/edit/A1 relative.fcpxml`.
-2. If it asks for a library, make a new one: `~/BRIMM Video Work/Phase 0/Phase 0 relative.fcpbundle`.
-3. Open the project "A1 relative". Does the clip play, or is it red (missing)? Select the clip in the browser, then File > Reveal in Finder: which file does it point at?
-4. Now File > Import > XML… again, and pick the copy: `Phase 0/Moved/2026-10-14 Phase test (Mac Studio)/edit/A1 relative.fcpxml`, into a new library `~/BRIMM Video Work/Phase 0/Phase 0 moved.fcpbundle`. Reveal its clip in Finder: is it the file under `Moved/`?
+1. In Terminal:
 
-**Record:** any dialog, word for word; plays or missing; the two paths Reveal in Finder showed.
+   ```
+   open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/2026-10-14 Phase test (Mac Studio)/edit/A1 relative.fcpxml"
+   ```
+
+   When it asks for a library, choose New… and make `Phase 0 relative` in `~/BRIMM Video Work/Phase 0/`.
+2. Open the project "A1 relative". Does it play the moving test pattern (with a counter and a rainbow bar), or is it red (missing)?
+3. Now the copy of the episode folder, in which the video is colour bars with a higher tone:
+
+   ```
+   open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/Moved/2026-10-14 Phase test (Mac Studio)/edit/A1 relative.fcpxml"
+   ```
+
+   Make a new library `Phase 0 moved`. Does its "A1 relative" play the colour bars?
+
+**Record:** any dialog, word for word; what each one plays. (With Final Cut's Import setting at "Copy", an import with no copy-assets option copies the video into the library, so Reveal in Finder shows the library's copy, not the source; the picture tells them apart.)
 **What it changes:** if both play and point at their own folder's video, a relative path is read from the file's own folder, and Sallie's Mac can open a stored timeline as it is. If not, nothing changes in phase 1a (a push always hands Final Cut a copy with this Mac's whole paths), but the README must say never to double-click a stored timeline.
 
 ### A2. Apple's "base url" option (3 minutes)
 
-1. File > Import > XML…, pick `Phase 0/Elsewhere/A2 base url.fcpxml`, into the library "Phase 0 relative". This file names the video only as `Phase%20test.mov`, and gives the episode folder as the base url.
-2. Does the clip play? Reveal in Finder: which file?
+1. In Terminal:
 
-**Record:** plays or missing; the path; any dialog.
+   ```
+   open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/Elsewhere/A2 base url.fcpxml"
+   ```
+
+   Make a new library `Phase 0 base url`. This file names the video only as `Phase%20test.mov`, and gives the episode folder as the base url.
+2. Does "A2 base url" play the test pattern, or is it missing?
+
+**Record:** plays or missing; any dialog.
 **What it changes:** the design keeps whichever of A1 and A2 works. If both work, the pushed copy keeps whole paths, the simplest.
 
 ### A3. The first push: the local copy and its import options (8 minutes)
@@ -93,7 +114,20 @@ The pushed copy names this Mac's library (`library location`), says `copy assets
    Any dialog this time?
 
 **Record:** each dialog word for word, and which button you pressed; what the browser shows.
-**What it changes:** no dialog means each push is a new project in one event. A dialog for A4 but not for A4b means each push gets its own event. A dialog for both means the skill must tell Sallie which button to press.
+**What it changes:** no dialog means each push is a new project in one event. A dialog for A4 but not for A4b means each push gets its own event. A dialog for both means the skill must tell Sallie which button to press. (On the Mac Studio A4 asked nothing, so A4b was not needed.)
+
+### A4c. A push whose project name is already taken (1 minute)
+
+1. Hand Final Cut the A3 file again: the same project name, "Phase test main v1 0a0a0a", with `suppress warnings`:
+
+   ```
+   open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/Pushed/A3 first push.fcpxml"
+   ```
+
+2. Does Final Cut ask whether to replace or keep both? Press **Keep Both**. What is the new project called, and is the old v1 unchanged?
+
+**Record:** the dialog, word for word; the new project's name.
+**What it changes:** on the Mac Studio it asked, even with `suppress warnings`, and Keep Both named the new project `<name> 1`. So a push must never reuse a project name.
 
 ### A5. File > Export XML…: its form and its default name (5 minutes)
 
@@ -113,7 +147,7 @@ The pushed copy names this Mac's library (`library location`), says `copy assets
 
 ### A6. Share, the BRIMM final destination, and where the dialogs open (10 minutes)
 
-1. Final Cut Pro > Settings > Destinations: add an **Export File** destination, rename it "BRIMM final", set Format **Video and Audio** and Video Codec **H.264**, leave resolution as it is. Control-click it, Make Default.
+1. Final Cut Pro > Settings > Destinations: add an **Export File** destination, rename it "BRIMM final" (double-click its name), set Format **Video and Audio**, Video Codec **H.264**, Resolution **Same as Source**, and Action **Save Only**. Control-click it, Make Default.
 2. Open "Phase test main v1 0a0a0a", press Command-E. Note the name it offers and the file type it will write. Click Next. **Which folder does the save dialog open on** (you saved an export into From Final Cut just before)? Save into `~/BRIMM Video Work/From Final Cut/` with the offered name.
 3. While it renders, run this two or three times:
 
@@ -152,24 +186,28 @@ On the Mac Studio `~/Movies` is a link into your Dropbox (`Jason Ogden/Mac/Movie
 
 ### B1. Built-in titles with words only, a custom role, a moved picture (8 minutes)
 
-1. File > Import > XML…, `…/edit/B1 titles and a still.fcpxml`, into "Phase 0 relative". Open "B1 titles and a still".
+1. `open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/2026-10-14 Phase test (Mac Studio)/edit/B1 titles and a still.fcpxml"`, into a new library `Phase 0 part B` (B2 and B3 go there too). Open "B1 titles and a still".
 2. At 1 s: a Basic Title written with words only (no font, no size). Does it look like a Basic Title added by hand (font, size, place)?
 3. At 6 s: the same title with Helvetica 90 white given. Is that what shows?
 4. At 11 s: a Basic Lower Third with two lines, words only. Are both lines there, in the template's places?
 5. Timeline Index > Roles: is there a role "BRIMM titles"? Where (under Titles, or on its own)? Which clips have it?
 6. At 15 s: the picture, given scale 0.5 and position "40 -20". Is it half size? Which way did it move, and how far? Select it and read the Inspector's Transform values.
 
+7. Click in the timeline, File > Export XML…, name `B1 export`, into From Final Cut.
+
 **Record:** each answer; the Inspector's Position and Scale for the picture.
 **What it changes:** words only keeping the template's look means brimm-video writes words only and the templates carry the brand. A custom role that holds tells phase 5 how to find brimm-video's own titles in an export. The picture's numbers settle the units of a graphic's place.
 
 ### B2. An upright project of the wide clip, filled and moved (6 minutes)
 
-1. File > Import > XML…, `…/edit/B2 upright, filled.fcpxml`, into "Phase 0 relative". Open "B2 upright, filled".
+1. `open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/2026-10-14 Phase test (Mac Studio)/edit/B2 upright, filled.fcpxml"`, into "Phase 0 part B". Open "B2 upright, filled". (Each clip in it names its own wide format: on 2026-10-14 a first version without that made Final Cut treat the wide video as upright.)
 2. Is the project 1080x1920? First half: the wide clip given `fill` and position "20 0". Does it fill the frame? Which way did it move, and by how much of the frame? Select it, read the Inspector's Transform Position and Scale, and the Spatial Conform setting.
 3. Second half: `fill` only. Does it fill the frame, centred?
 4. The title at 1 s: does it sit sensibly in the upright frame?
 
-**Record:** the Inspector's numbers for both clips; a screenshot of each half (`B2 moved.png`, `B2 centred.png`).
+5. Click in the timeline, File > Export XML…, name `B2 export`, into From Final Cut.
+
+**Record:** the Inspector's numbers for both clips; a screenshot of each half at the same zoom (`B2 moved.png`, `B2 centred.png`): comparing where one colour edge sits in each gives the move.
 **What it changes:** phase 3 builds the upright Reel projects this way. The numbers settle the unit of `position` (the builder's guess is percent of the frame's height). If `fill` is not kept, phase 3 sets the scale itself.
 
 ### B3. A start timecode, and an iPhone clip (8 minutes)
@@ -214,16 +252,17 @@ On the Mac Studio `~/Movies` is a link into your Dropbox (`Jason Ogden/Mac/Movie
 
 ### B6. An export carried to a second library (5 minutes; needs A5)
 
-1. In Terminal, make the copy phase 5 would carry to the other Mac (bookmarks dropped, uids taken off, the library replaced, a new project name). Put your A5 export's name in place of `<A5 export>`:
+1. In Terminal, in the brimm-video checkout, make the copy phase 5 would carry to the other Mac from the A7 export, which holds the template too (bookmarks dropped; the uids on the asset, the event and the project taken off; the template's `src` dropped; the library replaced; a new project name):
 
    ```
-   node docs/phase-0/strip-export.mjs "$HOME/BRIMM Video Work/From Final Cut/<A5 export>" "$HOME/BRIMM Video Work/Phase 0/A5 stripped.fcpxml" "$HOME/BRIMM Video Work/Phase 0/Phase 0 second.fcpbundle"
+   node docs/phase-0/strip-export.mjs "$HOME/BRIMM Video Work/From Final Cut/A7 template.fcpxmld" "$HOME/BRIMM Video Work/Phase 0/A7 stripped.fcpxml" "$HOME/BRIMM Video Work/Phase 0/Phase 0 second.fcpbundle"
    ```
 
-2. File > Import > XML…, `Phase 0/A5 stripped.fcpxml`. Does Final Cut make the library "Phase 0 second" or ask? Any dialog? Does the clip play?
+   On Sallie's laptop, use the Mac Studio's export instead: `docs/phase-0/exports/A7 template.fcpxmld` (its video will show as missing there; the title is what counts).
+2. `open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/A7 stripped.fcpxml"`. Does Final Cut make the library "Phase 0 second" or ask (choose New…)? Does the project play, and does the "Phase 0" title show?
 
-**Record:** what the script said; each dialog; plays or not.
-**What it changes:** if the stripped copy imports cleanly, phase 5's way of carrying an edit between the Macs holds.
+**Record:** what the script said; each dialog; whether the title shows.
+**What it changes:** if the stripped copy imports cleanly and the title shows, phase 5's way of carrying an edit between the Macs holds, and Final Cut finds a template by its uid alone.
 
 ### B7. A clip linked from inside Dropbox (5 minutes)
 
@@ -235,7 +274,14 @@ On the Mac Studio `~/Movies` is a link into your Dropbox (`Jason Ogden/Mac/Movie
    cp -c "$HOME/BRIMM Video Work/Phase 0/2026-10-14 Phase test (Mac Studio)/Phase test.mov" "$DB/Phase 0 test (delete after)/"
    ```
 
-2. In Final Cut: File > Import > Media, pick that file, **Leave files in place**, into "Phase 0 relative". Put it in a new project "B7 Dropbox" and play it.
+2. Make a push file for it, as phase 1a would, and hand it to Final Cut (Final Cut's own Import window may not show the Dropbox folders):
+
+   ```
+   node docs/phase-0/push-file.mjs "$DB/Phase 0 test (delete after)/Phase test.mov" "$HOME/BRIMM Video Work/Phase 0/Phase 0 dropbox.fcpbundle" "B7 Dropbox main v1 0a0a0a" "$HOME/BRIMM Video Work/Phase 0/Pushed/B7 Dropbox push.fcpxml"
+   open -a "Final Cut Pro" "$HOME/BRIMM Video Work/Phase 0/Pushed/B7 Dropbox push.fcpxml"
+   ```
+
+   Play "B7 Dropbox main v1 0a0a0a".
 3. An hour later, play it again.
 
 **Record:** whether it imported and played, then and an hour later; any warning.
@@ -245,12 +291,12 @@ On the Mac Studio `~/Movies` is a link into your Dropbox (`Jason Ogden/Mac/Movie
 
 ## Part C: on Sallie's laptop, later
 
-Once macOS and Final Cut are on her laptop (setup items 1 and 2, with your yes), repeat there: step 0, A1, A3, A4, A5, A6, A7 (the template copied there by the rule, not made in Motion), and B7 with the same Dropbox test folder. Record the same things in her `results.md`.
+Once macOS and Final Cut are on her laptop (setup items 1 and 2, with your yes), repeat there: step 0, A1, A3, A4, A4c, A5, A6, A7 (the Mac Studio's "Phase 0 Title" folder copied into her `~/Movies/Motion Templates.localized/Titles.localized/Phase 0 test/` with `cp -c -R`, not made in Motion; then compare the uid her export writes with the Mac Studio's), B6 with the Mac Studio's A7 export, and B7 with the same Dropbox test folder (her Dropbox path in place of `$DB`). Record the same things in her `results.md`.
 
 ---
 
 ## When you are done
 
-1. Put Final Cut's import setting back as step 0 noted it.
+1. Set Final Cut's Import setting to "Leave files in place" (setup item 2 of the spec), whatever step 0 noted.
 2. Tell Claude in the design session "phase 0 is done", or how far you got. Leave `~/BRIMM Video Work/Phase 0/` and `From Final Cut/` as they are until Claude has read them.
-3. After that: delete `The BRIMM DB/Phase 0 test (delete after)/`, the Phase 0 libraries, and, if you like, the Phase 0 Title template in `~/Movies/Motion Templates.localized/Titles.localized/Phase 0 test/`.
+3. After that, in Final Cut close the Phase 0 libraries, then delete: `~/BRIMM Video Work/Phase 0/` (the libraries are in it); the test files in `~/BRIMM Video Work/From Final Cut/` (names starting "Phase test", "A7", "B1", "B2", "B3"); the Phase 0 backups in `~/Movies/Final Cut Backups.localized/` (folders named "Phase 0 …"); `The BRIMM DB/Phase 0 test (delete after)/`; and the Phase 0 Title template in `~/Movies/Motion Templates.localized/Titles.localized/Phase 0 test/`. Keep the "BRIMM final" destination.

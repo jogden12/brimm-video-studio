@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+
+<fcpxml version="1.14">
+    <resources>
+        <format id="r1" frameDuration="100/3000s" width="720" height="1280" colorSpace="1-1-1 (Rec. 709)"/>
+        <asset id="r2" name="IMG_3642" uid="321FE236C898854EC19AB30C17127CC1" start="0s" duration="3499/600s" hasVideo="1" format="r3" hasAudio="1" videoSources="1" audioSources="1" audioChannels="2" audioRate="48000">
+            <media-rep kind="original-media" sig="321FE236C898854EC19AB30C17127CC1" src="file:///Users/jasonogden/BRIMM%20Video%20Work/Phase%200/Phase%200%20part%20B.fcpbundle/Phase%20test/Original%20Media/IMG_3642.mov">
+                <bookmark>Ym9va0QEAAAAAAUQQAAAAC2fJxicYj0Wi0z1a9MZOjlGB7hzL953ofPUGnfKEVFsAAAAAAAAAAAAAAAAAgAAAPQCAAAgAAAAAQIAAHiP8afz8K5fYN9EWIYXAzFf/QrZeB/KEAq1M0MSn0Z8BAAAAAMDAAAAGAAoBQAAAAEBAABVc2VycwAAAAoAAAABAQAAamFzb25vZ2RlbgAAEAAAAAEBAABCUklNTSBWaWRlbyBXb3JrBwAAAAEBAABQaGFzZSAwABgAAAABAQAAUGhhc2UgMCBwYXJ0IEIuZmNwYnVuZGxlCgAAAAEBAABQaGFzZSB0ZXN0AAAOAAAAAQEAAE9yaWdpbmFsIE1lZGlhAAAMAAAAAQEAAElNR18zNjQyLm1vdiAAAAABBgAAOAAAAEgAAABcAAAAdAAAAIQAAACkAAAAuAAAANAAAAAIAAAABAMAAMU4AAAAAAAACAAAAAQDAAAo6QQAAAAAAAgAAAAEAwAAcmj5IQAAAAAIAAAABAMAADFNSiIAAAAACAAAAAQDAABh/G8iAAAAAAgAAAAEAwAAAPFwIgAAAAAIAAAABAMAAHjxcCIAAAAACAAAAAQDAADE9ZwiAAAAACAAAAABBgAADAEAABwBAAAsAQAAPAEAAEwBAABcAQAAbAEAAHwBAAAIAAAAAAQAAEHIQAWFAAAAGAAAAAECAAABAAAAAAAAAA8AAAAAAAAAAAAAAAAAAAAAAAAAAQUAAAQAAAADAwAACAAAAAQAAAADAwAABgAAAAgAAAAEAwAABgAAAAAAAAAEAAAAAwMAAPUBAAAIAAAAAQkAAGZpbGU6Ly8vDAAAAAEBAABNYWNpbnRvc2ggSEQIAAAABAMAAACQgpbnAAAACAAAAAAEAABByDKCNoAAACQAAAABAQAAOTk3MzYxM0ItMUNCMi00OTk4LUE0MTMtRTBCM0EwRUI5ODhCGAAAAAECAACBAAAAAQAAAO8TAAABAAAAAAAAAAAAAAABAAAAAQEAAC8AAAAvAAAAAQEAAE5TVVJMQm9va21hcmtRdWFyYW50aW5lTW91bnRlZE5ldHdvcmtWb2x1bWVzS2V5AAgBAAD+////AQAAAAAAAAAVAAAABBAAAOQAAAAAAAAABRAAAIwBAAAAAAAAEBAAAMQBAAAAAAAAQBAAALQBAAAAAAAAVBAAAOwBAAAAAAAAVRAAAPgBAAAAAAAAVhAAAOQBAAAAAAAAAiAAALACAAAAAAAABSAAACACAAAAAAAAECAAADACAAAAAAAAESAAAGQCAAAAAAAAEiAAAEQCAAAAAAAAEyAAAFQCAAAAAAAAICAAAJACAAAAAAAAMCAAAOQBAAAAAAAAAcAAAAQCAAAAAAAAEcAAAEgAAAAAAAAAEsAAABQCAAAAAAAAENAAACwAAAAAAAAAhPAAAAQAAAAAAAAAvAIAgOQBAAAAAAAA</bookmark>
+            </media-rep>
+            <metadata>
+                <md key="com.apple.proapps.studio.rawToLogConversion" value="0"/>
+                <md key="com.apple.proapps.spotlight.kMDItemProfileName" value="HLG Dolby Vision 8.4"/>
+                <md key="com.apple.proapps.studio.cameraISO" value="0"/>
+                <md key="com.apple.proapps.studio.cameraColorTemperature" value="0"/>
+                <md key="com.apple.proapps.spotlight.kMDItemCodecs">
+                    <array>
+                        <string>APAC</string>
+                        <string>HEVC</string>
+                        <string>MPEG-4 AAC</string>
+                    </array>
+                </md>
+                <md key="com.apple.proapps.mio.ingestDate" value="2026-10-14 15:12:10 -0400"/>
+            </metadata>
+        </asset>
+        <format id="r3" frameDuration="20/600s" width="1080" height="1920" colorSpace="9-18-9 (Rec. 2020 HLG)"/>
+    </resources>
+    <library location="file:///Users/jasonogden/BRIMM%20Video%20Work/Phase%200/Phase%200%20part%20B.fcpbundle/">
+        <event name="Phase test" uid="23B620A9-C8C1-4B97-80A6-732F9EF2D25C">
+            <project name="iphone video" uid="489744D8-FFCC-4321-93E3-80E53C3DF1FA" modDate="2026-10-14 15:15:38 -0400">
+                <sequence format="r1" duration="3480/600s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+                    <spine>
+                        <asset-clip ref="r2" offset="0s" name="IMG_3642" duration="3480/600s" format="r3" tcFormat="NDF" audioRole="dialogue"/>
+                    </spine>
+                </sequence>
+            </project>
+        </event>
+        <smart-collection name="Projects" match="all">
+            <match-clip rule="is" type="project"/>
+        </smart-collection>
+        <smart-collection name="All Video" match="any">
+            <match-media rule="is" type="videoOnly"/>
+            <match-media rule="is" type="videoWithAudio"/>
+        </smart-collection>
+        <smart-collection name="Audio Only" match="all">
+            <match-media rule="is" type="audioOnly"/>
+        </smart-collection>
+        <smart-collection name="Stills" match="all">
+            <match-media rule="is" type="stills"/>
+        </smart-collection>
+        <smart-collection name="Favorites" match="all">
+            <match-ratings value="favorites"/>
+        </smart-collection>
+        <smart-collection name="Missing Analysis" match="all">
+            <match-analysis-type rule="isMissing" value="any"/>
+        </smart-collection>
+    </library>
+</fcpxml>
