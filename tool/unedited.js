@@ -15,6 +15,9 @@
 //   options:  --watch <folder>   again, to work more than one folder
 //             --out <folder>     where to write, for one file
 //             --rules-only       never ask Claude: the plan is the rules' alone, and there are no notes and no clips
+//             --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the
+//                                rough cut, its upright version and the clips Claude picked, as the tool writes videos now.
+//                                No transcript is made, Claude is not asked, and no other file is touched
 //
 // The files, each named after the video: <name>.srt and <name>.transcript.txt as the transcript tool writes them,
 // <name>.words.json, <name>.cut-plan.json and <name>.cut-plan.txt, <name>.rough-cut.mp4, <name>.rough-cut.srt and
@@ -695,9 +698,10 @@ async function workOn(file, deps) {
         write(out.planTxt, planText(plan, [...lacks.map((lack) => `The ${lack.what} could not be made: ${lack.why}.${lack.note || ""}`), ...said].join("\n")));
         // The plan is written after everything made from it. It is what says this video is done, so a run cut short while the
         // rough cut, the upright version or a clip is being made does the video again. It says who made the plan. When
-        // Claude read it, it keeps what Claude decided, what was left out of its reply and why, and each clip with the
-        // names of the files that were made of it, so that a person can see what changed.
-        const claude = read ? { decisions: read.decisions, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
+        // Claude read it, it keeps what Claude decided, its ideas for graphics as they were read, what was left out of its
+        // reply and why, and each clip with the names of the files that were made of it, so that a person can see what
+        // changed. Nothing reads the ideas back yet: they are there for what is made of the plan later.
+        const claude = read ? { decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
         write(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
       } catch (e) {
         // The run stops here, and the video is never moved. Its Final Cut file names it in the folder for the day, which is
@@ -742,6 +746,138 @@ export async function uneditedFile(file, deps) {
     const why = String(e.code || e.message);
     (deps.log || (() => {}))(`${basename(file)}: the work stopped (${why}).`);
     return { ok: false, name: basename(file), message: why };
+  }
+}
+
+/** How far apart, in seconds, the length of a video now and the length its plan was made with may be, for the plan to be of
+    that video. ffprobe gives the same length for the same file, but another version of ffprobe may read it a little
+    differently. */
+const SAME_LENGTH = 0.1;
+
+/** What is wrong with a cut plan, as it was read from its JSON, for its videos to be made again: "" when nothing is. Only what
+    the videos are made of is looked at: the facts of the video, the ranges, and each clip's ranges, the ranges of each part
+    of its Story and the names of the files that were made of it. */
+function planFault(plan) {
+  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end);
+  const ranges = (v) => Array.isArray(v) && v.length > 0 && v.every(isRange);
+  if (!plan || typeof plan !== "object" || Array.isArray(plan) || plan.version !== 1 || typeof plan.video !== "string") return "it is not a cut plan this tool wrote";
+  const facts = plan.facts || {};
+  if (![facts.duration, facts.width, facts.height].every(Number.isFinite) || typeof facts.fps !== "string") return "the facts of its video cannot be read";
+  if (!ranges(plan.ranges) || !plan.ranges.every((r) => typeof r.keep === "boolean")) return "its ranges cannot be read";
+  if (!plan.claude) return "";
+  if (!Array.isArray(plan.claude.clips)) return "its clips cannot be read";
+  const bad = plan.claude.clips.findIndex((clip) => !clip || !Number.isInteger(clip.n) || clip.n < 1 || !ranges(clip.ranges) || !Array.isArray(clip.story)
+    || !clip.story.every((part) => part && ranges(part.ranges)) || !Array.isArray(clip.files) || !clip.files.every((f) => typeof f === "string"));
+  return bad === -1 ? "" : `clip ${bad + 1} in it cannot be read`;
+}
+
+/** A video's facts as they tell one video from another, in plain words, and whether two such are of one video. */
+const described = (facts) => `${facts.duration} seconds, ${facts.width} by ${facts.height}${facts.fps ? ` at ${facts.fps}` : ""}`;
+const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
+
+/** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
+    version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
+    as made. They are made as a run makes them today, from the plan's facts, its ranges and each clip's ranges as they are,
+    and the faces are looked for again. So the cuts and the clips are the ones that run made, and only how the videos are
+    written can differ. No transcript is made, Claude is not asked, and no other file is touched: the transcripts, the words,
+    the plan's two files, the notes, the captions and the Final Cut file stay as that run wrote them. The Final Cut file names
+    the video and none of the videos made here, so it needs nothing new. The plan is read where that run wrote it: beside
+    the video, or in `deps.outDir`. The video is never moved.
+    Each video is written whole under another name and then given its own, so until then the one made before is there as it
+    was. One that cannot be made leaves the one made before as it is, the log says so, and the others are made all the same.
+    Resolves {ok, name, made, message}: `made` names the videos made again, and `message` says what could not be. When there
+    is no video, no plan, a plan that cannot be read or one of another video, or the plan's video has no picture or the plan
+    keeps nothing, it stops before anything is made, the log says why, and it resolves {ok: false, stopped: true} with
+    `message` saying why. */
+export async function videosFromPlan(file, deps) {
+  const { run, tools, log = () => {} } = deps;
+  const name = basename(file);
+  const out = cutOutputs(file, deps.outDir || undefined);
+  const stop = (why) => {
+    log(`${name}: ${why}. Nothing was made.`);
+    return { ok: false, name, made: [], stopped: true, message: why };
+  };
+  if (!existsSync(file)) return stop(`there is no video at ${file}`);
+  if (!existsSync(out.plan)) return stop(`there is no cut plan at ${out.plan}`);
+  let plan;
+  try {
+    plan = JSON.parse(readFileSync(out.plan, "utf8"));
+  } catch (e) {
+    return stop(`the cut plan at ${out.plan} could not be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message})`);
+  }
+  const fault = planFault(plan);
+  if (fault) return stop(`the cut plan at ${out.plan} could not be read (${fault})`);
+  if (plan.video !== name) return stop(`the cut plan at ${out.plan} is the plan of ${plan.video}, and not of ${name}`);
+  const work = join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
+  mkdirSync(work, { recursive: true });
+  try {
+    // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
+    const probed = join(work, "facts.json");
+    const probe = await run(tools.ffprobe, probeArgs(file, probed));
+    const now = probe.code === 0 && existsSync(probed) ? factsOf(readFileSync(probed, "utf8")) : null;
+    if (!now) return stop(`the video could not be read (${lastLine(probe.stderr)})`);
+    const { facts } = plan;
+    if (!sameVideo(facts, now)) return stop(`the cut plan at ${out.plan} was made of another video: one of ${described(facts)}, and ${name} is ${described(now)}`);
+    if (!facts.height) return stop("its cut plan says it has no picture, so it has no videos to make");
+    const spans = keptSpans(plan.ranges, roughRate(facts));
+    if (!spans.length) return stop("its cut plan keeps nothing, so it has no videos to make");
+    log(`${name}: making its videos again from ${basename(out.plan)}.`);
+
+    const made = [];
+    const failed = [];
+    /** What became of the video at `to`: `why` it could not be made, which is "" when it was. `what` says it could not. */
+    const madeOr = (to, what, why) => {
+      if (!why) made.push(basename(to));
+      else {
+        failed.push(`${what}: ${why}`);
+        log(`${name}: ${what}: ${why}.${existsSync(to) ? " The one made before is kept." : ""}`);
+      }
+    };
+    let why = "";
+    try {
+      why = await roughCut(file, out.rough, { plan, facts, spans }, deps);
+    } catch (e) {
+      rmSync(out.rough + ".writing", { force: true });
+      why = `the work stopped (${e.code || e.message})`;
+    }
+    madeOr(out.rough, "the rough cut could not be made again", why);
+    // The faces are looked for once, for the upright version, and the clips are cropped by the same stills.
+    let stills = [];
+    if (needsReframe(facts)) {
+      const up = await upright(file, out.vertical, { facts, spans }, work, deps);
+      stills = up.stills;
+      madeOr(out.vertical, "the upright version could not be made again", up.why);
+    }
+    // Each clip, and each part of its Story, that the run which wrote the plan made. One it could not cut is not cut now:
+    // it has no captions, and the notes say it could not be cut.
+    const pieces = [];
+    let clips = 0;
+    for (const clip of plan.claude ? plan.claude.clips : []) {
+      const named = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
+      const has = (to) => clip.files.includes(basename(to));
+      const notCut = (what) => log(`${name}: ${what} was not cut by the run that wrote the plan, so it is not cut now.`);
+      if (!has(named.video)) {
+        notCut(`clip ${clip.n}`);
+        continue;
+      }
+      clips += 1;
+      pieces.push({ to: named.video, ranges: clip.ranges, most: 0, what: `clip ${clip.n}` });
+      named.story.forEach((to, k) => {
+        const what = `part ${k + 1} of the Story of clip ${clip.n}`;
+        if (has(to)) pieces.push({ to, ranges: clip.story[k].ranges, most: STORY_MAX, what });
+        else notCut(what);
+      });
+    }
+    if (clips) log(`${name}: cutting ${clips} short clip${clips === 1 ? "" : "s"}.`);
+    for (const piece of pieces) {
+      const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most }, deps);
+      madeOr(piece.to, `${piece.what} could not be cut again`, cut.why || "");
+    }
+    if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);
+    else log(made.length ? `${name}: made again: ${listed(made)}.` : `${name}: nothing was made again.`);
+    return { ok: !failed.length, name, made, message: failed.join("; ") };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 }
 
@@ -798,13 +934,14 @@ export async function uneditedFolders(folders, deps) {
 }
 
 export function parseArgs(argv) {
-  const a = { file: "", folders: [], out: "", rulesOnly: false, help: false };
+  const a = { file: "", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--help" || v === "-h") a.help = true;
     else if (v === "--watch") a.folders.push(argv[++i] || "");
     else if (v === "--out") a.out = argv[++i] || "";
     else if (v === "--rules-only") a.rulesOnly = true;
+    else if (v === "--from-plan") a.fromPlan = true;
     else if (!a.file) a.file = v;
   }
   a.folders = a.folders.filter(Boolean);
@@ -824,6 +961,9 @@ clips it picked.
   --out <folder>     where to write, for one file
   --rules-only       never ask Claude: the plan is the rules' alone, there are no notes and no clips, and nothing leaves
                      this Mac
+  --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
+                     cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
+                     is made, Claude is not asked, and no other file is touched. Never with --watch
 
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
@@ -847,16 +987,27 @@ export function depsFor(found, log, env = process.env, args = {}) {
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends
     with: for folders what uneditedFolders gives, and for one video 0 when everything was made, 1 when something was not, and
     2 when there is no such file. When Claude is not going to be asked, the log says so here, once for the whole run, and
-    says why: the run was told to go by the rules alone, or Claude Code is not on this Mac. */
+    says why: the run was told to go by the rules alone, or Claude Code is not on this Mac, or it makes videos again from a
+    plan (--from-plan). That is only ever done for one video, and never for a watched folder, whose videos are moved: asked
+    for one, the run says so and ends with 2. It also ends with 2 when it stopped before it made anything. */
 export async function doAsked(args, deps) {
   const { log = () => {} } = deps;
-  if (deps.rulesOnly) log("Claude is not asked in this run (--rules-only): each cut plan is the rules' alone.");
+  if (args.fromPlan && args.folders.length) {
+    log("--from-plan is for one video, named by its file, and never for a watched folder. Nothing was made.");
+    return 2;
+  }
+  if (args.fromPlan) log("Claude is not asked in this run (--from-plan), and no transcript is made: the videos are made again from the cut plan an earlier run wrote, as it is.");
+  else if (deps.rulesOnly) log("Claude is not asked in this run (--rules-only): each cut plan is the rules' alone.");
   else if (!deps.tools.claude) log("Claude Code is not installed, so Claude is not asked in this run: each cut plan is the rules' alone.");
   if (args.folders.length) return uneditedFolders(args.folders, deps);
   const file = resolve(args.file);
   if (!existsSync(file)) {
     log(`There is no file at ${file}.`);
     return 2;
+  }
+  if (args.fromPlan) {
+    const r = await videosFromPlan(file, { ...deps, outDir: args.out ? resolve(args.out) : "" });
+    return r.ok ? 0 : r.stopped ? 2 : 1;
   }
   if (args.out) mkdirSync(resolve(args.out), { recursive: true });
   const r = await uneditedFile(file, { ...deps, outDir: args.out ? resolve(args.out) : "" });
