@@ -4,9 +4,9 @@
 // anything from here: what it would say is written down in each test.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
@@ -71,7 +71,42 @@ const stretches = (ranges, fps = FACTS.fps) => keptSpans(ranges.map((r) => ({ ..
 /** What the face finder's stand-in prints: the eleven stills of the made-up recording, each with the faces `faces` gives it. */
 const stillsOf = (faces = () => [face(0.25)]) => Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: faces(i + 1) }));
 /** The calls that asked ffmpeg for a short clip or a part of its Story, each known by the name it is written under. */
-const reelCalls = (t) => t.calls.filter((c) => /\.reel-\d+(\.story-\d+)?\.mp4\.writing$/.test(c.args[c.args.length - 1]));
+const reelCalls = (t) => t.calls.filter((c) => /\.reel-\d+(\.story-\d+)?\.mp4$/.test(c.args[c.args.length - 1]));
+/** Where a run writes the file `name` before it puts it where it belongs: in the folder "made" in the run's own folder. That
+    folder is named for the moment it was made, and ffprobe, the first program a run asks, writes a file in it. */
+const inRun = (t, name) => join(dirname(after(t.calls.find((c) => c.cmd === "FFPROBE").args, "-o")), "made", name);
+/** Have something else be where a run writes the file `name` in its own folder: a folder of that name, made there when the run
+    asks its first program. The file then cannot be written. */
+const taken = (t, name) => {
+  const run = t.deps.run;
+  t.deps.run = async (cmd, args, asked) => {
+    if (cmd === "FFPROBE") mkdirSync(join(dirname(after(args, "-o")), "made", name), { recursive: true });
+    return run(cmd, args, asked);
+  };
+};
+/** Have every file a run moves be moved as it would be, and written down as [from, to]. */
+const movesOf = (t) => {
+  const moves = [];
+  t.deps.move = (from, to) => {
+    moves.push([from, to]);
+    renameSync(from, to);
+  };
+  return moves;
+};
+/** What is in the test's folder before and after each program a run asks. */
+const namesWhileWorking = (t) => {
+  const seen = [];
+  const run = t.deps.run;
+  t.deps.run = async (cmd, args, asked) => {
+    seen.push(t.names());
+    const r = await run(cmd, args, asked);
+    seen.push(t.names());
+    return r;
+  };
+  return seen;
+};
+/** A move that cannot be made because the two folders are on different disks, as rename says it. */
+const otherDisk = () => Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
 /** The files a video has when Claude was asked: the rules' own, and the notes. The clips come on top of these. */
 const WITH_NOTES = [...ALL, "edit-notes.txt"].sort();
 
@@ -122,7 +157,7 @@ function setup(script = {}) {
       }
       // A short clip, or a part of its Story, is known by the name it is written under. `script.reels` says which of them
       // ffmpeg cannot make, by the clip's number, or by that and the part's: { 2: "fail", "1.2": "throw" }.
-      const reel = /\.reel-(\d+)(?:\.story-(\d+))?\.mp4\.writing$/.exec(args[args.length - 1]);
+      const reel = /\.reel-(\d+)(?:\.story-(\d+))?\.mp4$/.exec(args[args.length - 1]);
       if (reel) {
         const how = (script.reels || {})[reel[2] ? `${reel[1]}.${reel[2]}` : reel[1]];
         if (how === "fail" || how === "throw") {
@@ -304,7 +339,7 @@ describe("one unedited video", () => {
     assert.equal(after(upright.args, "-i"), file);
     t.done();
   });
-  it("has the rough cut written whole under another name before it is given its own", async () => {
+  it("has the rough cut written whole in the run's own folder before it is put beside the video under its own name", async () => {
     const t = setup();
     const file = t.video("talk.mov");
     let during = null;
@@ -315,8 +350,9 @@ describe("one unedited video", () => {
       return r;
     };
     await uneditedFile(file, t.deps);
-    assert.equal(t.calls[5].args[t.calls[5].args.length - 1], join(t.dir, "talk.rough-cut.mp4.writing"));
-    assert.ok(during.includes("talk.rough-cut.mp4.writing") && !during.includes("talk.rough-cut.mp4") && !during.includes("talk.cut-plan.json"), during.join(" "));
+    assert.equal(t.calls[5].args[t.calls[5].args.length - 1], inRun(t, "talk.rough-cut.mp4"));
+    assert.ok(inRun(t, "talk.rough-cut.mp4").startsWith(t.work + "/"));
+    assert.ok(!during.includes("talk.rough-cut.mp4") && !during.includes("talk.cut-plan.json"), during.join(" "));
     assert.equal(t.read("talk.rough-cut.mp4"), "the rough cut");
     t.done();
   });
@@ -603,7 +639,7 @@ describe("the Final Cut file of an unedited video", () => {
     const u = setup();
     const file = u.video("talk.mov");
     // Something else is where the file is written to.
-    mkdirSync(join(u.dir, "talk.fcpxml.writing"));
+    taken(u, "talk.fcpxml");
     assert.equal((await uneditedFile(file, u.deps)).message, "the Final Cut file could not be made: the work stopped (EISDIR)");
     assert.ok(!existsSync(join(u.dir, "talk.fcpxml")) && existsSync(join(u.dir, "talk.cut-plan.json")) && existsSync(join(u.dir, "talk.rough-cut.vertical.mp4")));
     u.done();
@@ -612,9 +648,9 @@ describe("the Final Cut file of an unedited video", () => {
     const t = setup();
     const file = t.video("talk.mov");
     // The plan cannot be written: something else is where it is written to.
-    mkdirSync(join(t.dir, "talk.cut-plan.json.writing"));
+    taken(t, "talk.cut-plan.json");
     assert.deepEqual(await uneditedFile(file, t.deps), { ok: false, name: "talk.mov", message: "EISDIR" });
-    assert.deepEqual(t.names(), ALL.map((ending) => "talk." + (ending === "cut-plan.json" ? "cut-plan.json.writing" : ending)));
+    assert.deepEqual(t.names(), ALL.filter((ending) => ending !== "cut-plan.json").map((ending) => "talk." + ending));
     t.done();
   });
 });
@@ -632,7 +668,7 @@ describe("the upright version of an unedited video", () => {
     // The face finder is the one in the tool's own folder. What it prints is its answer, so that is asked for.
     assert.deepEqual([finder.cmd, basename(finder.args[0]), finder.args[1], finder.args.length], ["SWIFT", "faces.swift", folder, 2]);
     assert.ok(existsSync(finder.args[0]) && finder.out >= 1000000, String(finder.out));
-    assert.deepEqual(upright.args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(118), crop(758)], out: join(t.dir, "talk.rough-cut.vertical.mp4.writing") }));
+    assert.deepEqual(upright.args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(118), crop(758)], out: inRun(t, "talk.rough-cut.vertical.mp4") }));
     // The stills at 6 and 8 seconds are in the first stretch, and those at 14, 16, 18 and 20 in the second. The video is split
     // on the thousandth of a second below each edge, which keeps the pictures the rough cut keeps: 21.288 would take one more.
     const graph = after(upright.args, "-filter_complex").split(";");
@@ -644,7 +680,7 @@ describe("the upright version of an unedited video", () => {
     assert.deepEqual(readdirSync(t.work), []);
     t.done();
   });
-  it("is written whole under another name before it is given its own, and before the plan that says the video is done", async () => {
+  it("is written whole in the run's own folder before it is put beside the video, and before the plan that says the video is done", async () => {
     const t = setup();
     let during = null;
     const run = t.deps.run;
@@ -654,15 +690,16 @@ describe("the upright version of an unedited video", () => {
       return r;
     };
     await uneditedFile(t.video("talk.mov"), t.deps);
-    assert.ok(during.includes("talk.rough-cut.vertical.mp4.writing") && !during.includes("talk.rough-cut.vertical.mp4") && !during.includes("talk.cut-plan.json"), during.join(" "));
-    assert.ok(!t.names().includes("talk.rough-cut.vertical.mp4.writing"));
+    assert.equal(uprightCall(t).args[uprightCall(t).args.length - 1], inRun(t, "talk.rough-cut.vertical.mp4"));
+    assert.ok(!during.includes("talk.rough-cut.vertical.mp4") && !during.includes("talk.cut-plan.json"), during.join(" "));
+    assert.equal(t.read("talk.rough-cut.vertical.mp4"), "the upright version");
     t.done();
   });
   it("takes the crop of the whole video for a stretch no face was found in, and the log says how many such stretches there are", async () => {
     const t = setup({ faces: (still) => (still >= 7 && still <= 10 ? [face(0.75)] : []) });
     const file = t.video("talk.mov");
     assert.equal((await uneditedFile(file, t.deps)).ok, true);
-    assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(758), crop(758)], out: join(t.dir, "talk.rough-cut.vertical.mp4.writing") }));
+    assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(758), crop(758)], out: inRun(t, "talk.rough-cut.vertical.mp4") }));
     assert.deepEqual(t.logs.slice(-2), ["talk.mov: no face was found in 1 of the 2 kept stretches, so the crop of the whole video is used there.", "talk.mov: done."]);
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN));
     t.done();
@@ -670,7 +707,7 @@ describe("the upright version of an unedited video", () => {
     const none = setup({ faces: () => [] });
     const blank = none.video("talk.mov");
     await uneditedFile(blank, none.deps);
-    assert.deepEqual(uprightCall(none).args, verticalArgs({ video: blank, ranges: STRETCHES, crops: [crop(438), crop(438)], out: join(none.dir, "talk.rough-cut.vertical.mp4.writing") }));
+    assert.deepEqual(uprightCall(none).args, verticalArgs({ video: blank, ranges: STRETCHES, crops: [crop(438), crop(438)], out: inRun(none, "talk.rough-cut.vertical.mp4") }));
     assert.equal(none.logs[none.logs.length - 2], "talk.mov: no face was found in the video, so the upright version is cropped at the centre of the picture.");
     none.done();
   });
@@ -681,7 +718,7 @@ describe("the upright version of an unedited video", () => {
       const file = t.video("talk.mov");
       const r = await uneditedFile(file, t.deps);
       assert.deepEqual([r.ok, r.message], [true, ""], why);
-      assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(438), crop(438)], out: join(t.dir, "talk.rough-cut.vertical.mp4.writing") }), why);
+      assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: STRETCHES, crops: [crop(438), crop(438)], out: inRun(t, "talk.rough-cut.vertical.mp4") }), why);
       assert.deepEqual(t.names(), ALL.map((ending) => "talk." + ending), why);
       assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN, `The upright version is cropped at the centre of the picture, and not on the speaker: ${why}.`));
       assert.deepEqual(t.logs.slice(-2), [`talk.mov: the faces could not be looked for (${why}), so the upright version is cropped at the centre of the picture.`, "talk.mov: done."]);
@@ -916,11 +953,11 @@ describe("a video whose transcript is made but not all of the rest", () => {
     const t = setup();
     const file = t.video("talk.mov");
     // The rough cut's captions cannot be written: something else is where they are written to.
-    mkdirSync(join(t.dir, "talk.rough-cut.srt.writing"));
+    taken(t, "talk.rough-cut.srt");
     const r = await uneditedFile(file, t.deps);
     assert.equal(r.message, "the rough cut could not be made: the work stopped (EISDIR)");
     assert.equal(t.read("talk.cut-plan.txt").split("\n")[0], "The rough cut could not be made: the work stopped (EISDIR). Not made either: talk.rough-cut.srt.");
-    assert.deepEqual(t.names(), ["talk.cut-plan.json", "talk.cut-plan.txt", "talk.fcpxml", "talk.mov", "talk.rough-cut.srt.writing", "talk.rough-cut.transcript.txt", "talk.rough-cut.vertical.mp4", "talk.srt", "talk.transcript.txt", "talk.words.json"]);
+    assert.deepEqual(t.names(), ["talk.cut-plan.json", "talk.cut-plan.txt", "talk.fcpxml", "talk.mov", "talk.rough-cut.transcript.txt", "talk.rough-cut.vertical.mp4", "talk.srt", "talk.transcript.txt", "talk.words.json"]);
     assert.deepEqual(roughCalls(t), []);
     t.done();
   });
@@ -1004,14 +1041,14 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const plan = USED.plan;
     assert.deepEqual(plan.ranges.map((x) => [x.start, x.end, x.kind]).slice(4), [[13.383, 16.53, "keep"], [16.53, 19.214, "claude"], [19.214, 21.297, "keep"], [21.297, 23.423, "pause"]]);
     // The rough cut is three stretches now, and its captions are without the line Claude cut.
-    assert.deepEqual(roughCalls(t).map((c) => c.args), [roughCutArgs(file, join(t.dir, "talk.rough-cut.mp4.writing"), { ranges: plan.ranges, fps: FACTS.fps })]);
+    assert.deepEqual(roughCalls(t).map((c) => c.args), [roughCutArgs(file, inRun(t, "talk.rough-cut.mp4"), { ranges: plan.ranges, fps: FACTS.fps })]);
     assert.equal(after(roughCalls(t)[0].args, "-vf").split("gte(t,").length - 1, 3);
     assert.equal(t.read("talk.rough-cut.srt"), roughCaptions(plan.phrases, keptSpans(plan.ranges, FACTS.fps)));
     assert.equal(t.read("talk.rough-cut.transcript.txt"), "[0:00] Welcome to the show.\n[0:01] Today we are going to talk about pricing.\n[0:04] So the first thing you need to do is know your costs.\n[0:07] Thank you so much, Sallie.\n");
     // The upright version is the same three stretches.
     const kept = stretches(plan.ranges.filter((x) => x.keep));
     assert.deepEqual(kept, [{ start: 5.872, end: 9.843 }, { start: 13.38, end: 16.516 }, { start: 19.219, end: 21.287 }]);
-    assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: kept, crops: [crop(118), crop(118), crop(118)], out: join(t.dir, "talk.rough-cut.vertical.mp4.writing") }));
+    assert.deepEqual(uprightCall(t).args, verticalArgs({ video: file, ranges: kept, crops: [crop(118), crop(118), crop(118)], out: inRun(t, "talk.rough-cut.vertical.mp4") }));
     // So are the pieces of the Final Cut file, each end on a whole picture.
     assert.deepEqual(tags(t.read("talk.fcpxml"), "asset-clip").map((c) => `${c.start} ${c.duration}`), ["176176/30000s 119119/30000s", "401401/30000s 94094/30000s", "576576/30000s 62062/30000s"]);
     assert.deepEqual(checkFcpxml(t.read("talk.fcpxml"), { duration: 23.423, frameRate: "30000/1001" }), []);
@@ -1141,7 +1178,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const t = setup({ claude: [answers(REPLY)] });
     const file = t.video("talk.mov");
     // Something else is where the notes are written to.
-    mkdirSync(join(t.dir, "talk.edit-notes.txt.writing"));
+    taken(t, "talk.edit-notes.txt");
     const r = await uneditedFile(file, t.deps);
     assert.deepEqual([r.ok, r.kept, r.message], [false, 9.198, "the notes for the editor could not be made: the work stopped (EISDIR)"]);
     assert.deepEqual(t.read("talk.cut-plan.txt").split("\n").slice(0, 3), ["The notes for the editor could not be made: the work stopped (EISDIR).", "Claude read this plan and changed it in 1 place.", "Kept 0:09 of 0:23. Cut 0:14."]);
@@ -1286,7 +1323,7 @@ describe("the short clips Claude picked", () => {
     const [clip] = USED.clips;
     assert.deepEqual(clip.ranges, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]);
     assert.deepEqual(stretches(clip.ranges), [{ start: 13.38, end: 16.516 }, { start: 19.219, end: 21.287 }]);
-    assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(clip.ranges), crops: [crop(118), crop(118)], out: join(t.dir, "talk.reel-1.mp4.writing") })]);
+    assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(clip.ranges), crops: [crop(118), crop(118)], out: inRun(t, "talk.reel-1.mp4") })]);
     assert.equal(t.read("talk.reel-1.mp4"), "clip 1");
     t.done();
   });
@@ -1326,7 +1363,7 @@ describe("the short clips Claude picked", () => {
     assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE", "FFMPEG", "WHISPER", "FFMPEG", "FFMPEG", "CLAUDE", "FFMPEG", "FFMPEG", "SWIFT", "FFMPEG", "FFMPEG", "FFMPEG"]);
     assert.equal(t.calls.filter((c) => c.args[c.args.length - 1].endsWith("%04d.jpg")).length, 1);
     const crops = (clip) => cropsFor(FACTS, stretches(clip.ranges), stillsOf(faces));
-    assert.deepEqual(reelCalls(t).map((c) => c.args), made.clips.map((clip) => verticalArgs({ video: file, ranges: stretches(clip.ranges), crops: crops(clip), out: join(t.dir, `talk.reel-${clip.n}.mp4.writing`) })));
+    assert.deepEqual(reelCalls(t).map((c) => c.args), made.clips.map((clip) => verticalArgs({ video: file, ranges: stretches(clip.ranges), crops: crops(clip), out: inRun(t, `talk.reel-${clip.n}.mp4`) })));
     assert.deepEqual(made.clips.map((clip) => crops(clip).map((c) => c.x)), [[118], [118, 758]]);
     const graph = after(reelCalls(t)[1].args, "-filter_complex").split(";");
     assert.deepEqual(graph.filter((part) => part.includes("crop=")), ["[pv1]setpts=PTS-STARTPTS,crop=404:720:118:0[v0]", "[pv3]setpts=PTS-STARTPTS,crop=404:720:758:0[v1]"]);
@@ -1340,7 +1377,7 @@ describe("the short clips Claude picked", () => {
     const file = t.video("talk.mov");
     const r = await uneditedFile(file, t.deps);
     assert.deepEqual([r.ok, r.message], [true, ""]);
-    assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(USED.clips[0].ranges), crops: [crop(438), crop(438)], out: join(t.dir, "talk.reel-1.mp4.writing") })]);
+    assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(USED.clips[0].ranges), crops: [crop(438), crop(438)], out: inRun(t, "talk.reel-1.mp4") })]);
     assert.deepEqual(t.read("talk.cut-plan.txt").split("\n").slice(0, 2), [
       "Claude read this plan and changed it in 1 place. Its notes are in talk.edit-notes.txt.",
       "The upright version and the short clips are cropped at the centre of the picture, and not on the speaker: swift, which finds the faces, is not installed."
@@ -1355,7 +1392,7 @@ describe("the short clips Claude picked", () => {
       const r = await uneditedFile(file, t.deps);
       assert.deepEqual([r.ok, r.message], [true, ""]);
       assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE", "FFMPEG", "WHISPER", "FFMPEG", "FFMPEG", "CLAUDE", "FFMPEG", "FFMPEG"]);
-      assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(USED.clips[0].ranges), crops: null, out: join(t.dir, "talk.reel-1.mp4.writing") })]);
+      assert.deepEqual(reelCalls(t).map((c) => c.args), [verticalArgs({ video: file, ranges: stretches(USED.clips[0].ranges), crops: null, out: inRun(t, "talk.reel-1.mp4") })]);
       const graph = after(reelCalls(t)[0].args, "-filter_complex").split(";");
       assert.ok(!graph.some((part) => part.includes("crop=")));
       assert.equal(graph[graph.length - 1], "[j]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[v]");
@@ -1363,17 +1400,18 @@ describe("the short clips Claude picked", () => {
       t.done();
     }
   });
-  it("are each written whole under another name before they are given their own, and before the plan that says the video is done", async () => {
+  it("are each written whole in the run's own folder before they are put beside the video, and before the plan that says the video is done", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     let during = null;
     const run = t.deps.run;
     t.deps.run = async (cmd, args, asked) => {
       const r = await run(cmd, args, asked);
-      if (args[args.length - 1].endsWith(".reel-1.mp4.writing")) during = t.names();
+      if (args[args.length - 1].endsWith(".reel-1.mp4")) during = t.names();
       return r;
     };
     await uneditedFile(t.video("talk.mov"), t.deps);
-    assert.ok(during.includes("talk.reel-1.mp4.writing") && !during.includes("talk.reel-1.mp4") && !during.includes("talk.reel-1.srt") && !during.includes("talk.cut-plan.json") && !during.includes("talk.edit-notes.txt"), during.join(" "));
+    assert.equal(reelCalls(t)[0].args[reelCalls(t)[0].args.length - 1], inRun(t, "talk.reel-1.mp4"));
+    assert.ok(!during.includes("talk.reel-1.mp4") && !during.includes("talk.reel-1.srt") && !during.includes("talk.cut-plan.json") && !during.includes("talk.edit-notes.txt"), during.join(" "));
     assert.ok(!t.names().some((n) => n.endsWith(".writing")));
     t.done();
   });
@@ -1389,7 +1427,7 @@ describe("the short clips Claude picked", () => {
     const r = await uneditedFile(file, t.deps);
     assert.deepEqual([r.ok, r.message, r.kept], [true, "", 87.5]);
     const facts = { ...FACTS, duration: 87.5 };
-    const cut = (ranges, ending) => verticalArgs({ video: file, ranges: stretches(ranges), crops: cropsFor(facts, stretches(ranges), stillsOf()), out: join(t.dir, `talk.reel-1${ending}.mp4.writing`) });
+    const cut = (ranges, ending) => verticalArgs({ video: file, ranges: stretches(ranges), crops: cropsFor(facts, stretches(ranges), stillsOf()), out: inRun(t, `talk.reel-1${ending}.mp4`) });
     const [clip] = made.clips;
     assert.deepEqual(reelCalls(t).map((c) => c.args), [cut(clip.ranges, ""), cut(clip.story[0].ranges, ".story-1"), cut(clip.story[1].ranges, ".story-2")]);
     assert.deepEqual(t.names().filter((n) => n.includes(".reel-")), ["talk.reel-1.mp4", "talk.reel-1.srt", "talk.reel-1.story-1.mp4", "talk.reel-1.story-2.mp4"]);
@@ -1413,7 +1451,7 @@ describe("the short clips Claude picked", () => {
     const file = t.video("talk.mov");
     const r = await uneditedFile(file, t.deps);
     assert.deepEqual([r.ok, r.message], [true, ""]);
-    const cut = (ranges, ending) => verticalArgs({ video: file, ranges, crops: cropsFor(FACTS, ranges, stillsOf()), out: join(t.dir, `talk.reel-1${ending}.mp4.writing`) });
+    const cut = (ranges, ending) => verticalArgs({ video: file, ranges, crops: cropsFor(FACTS, ranges, stillsOf()), out: inRun(t, `talk.reel-1${ending}.mp4`) });
     // A minute holds 1798 pictures of this video, so the first part ends a picture sooner, on picture 1957. The clip itself
     // and the last part are as they were.
     const first = [{ start: 5.305, end: 65.298 }];
@@ -1470,11 +1508,11 @@ describe("the short clips Claude picked", () => {
   it("keep the clip itself when its captions cannot be written, and the log and the notes say so", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     const file = t.video("talk.mov");
-    // Something else comes to be where the captions are written to, while the clip itself is being cut. It is not there
-    // when the run starts: what is under that name then is what an earlier run left half written, and is taken away.
+    // Something else comes to be where the captions are written to, in the run's own folder, while the clip itself is being
+    // cut.
     const run = t.deps.run;
     t.deps.run = async (cmd, args, asked) => {
-      if (args[args.length - 1].endsWith("talk.reel-1.mp4.writing")) mkdirSync(join(t.dir, "talk.reel-1.srt.writing"));
+      if (args[args.length - 1].endsWith("talk.reel-1.mp4")) mkdirSync(join(dirname(args[args.length - 1]), "talk.reel-1.srt"));
       return run(cmd, args, asked);
     };
     const r = await uneditedFile(file, t.deps);
@@ -1532,9 +1570,9 @@ describe("the short clips Claude picked", () => {
   it("are taken away half written too, when a run that was killed left one under the name it was being written under", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     t.video("talk.mov");
-    // What a run left that was killed while ffmpeg wrote its third clip, before any plan was written: the video still waits.
-    // This run cuts one clip, so it writes nothing under those names itself. The last is of another video, and is no
-    // business of this run.
+    // What a run of an earlier version of the tool left, which wrote each clip beside the video under its name with .writing
+    // after it, when it was killed while ffmpeg wrote its third clip, before any plan was written: the video still waits.
+    // This run cuts one clip. The last is of another video, and is no business of this run.
     for (const name of ["talk.reel-3.mp4.writing", "talk.reel-3.srt.writing", "talk.reel-3.story-1.mp4.writing", "other.reel-1.mp4.writing"]) writeFileSync(join(t.dir, name), "half a clip");
     const [r] = await uneditedFolder(t.dir, t.deps);
     assert.deepEqual([r.ok, r.folder], [true, "2026-10-13"]);
@@ -1576,9 +1614,10 @@ describe("Claude's ideas for graphics in the Final Cut file", () => {
   });
   it("are still there when the file is written again to name the video where it stayed", async () => {
     const t = setup({ claude: [answers(REPLY)] });
-    t.video("a.mov");
-    t.deps.move = () => {
-      throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+    const video = t.video("a.mov");
+    t.deps.move = (from, to) => {
+      if (from === video) throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+      renameSync(from, to);
     };
     await uneditedFolder(t.dir, t.deps);
     assert.equal(tags(t.read("a.fcpxml"), "media-rep")[0].src, address(join(t.dir, "a.mov")));
@@ -1664,11 +1703,11 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
     const reels = ["talk.reel-1.mp4", "talk.reel-1.story-1.mp4", "talk.reel-1.story-2.mp4"];
     assert.deepEqual([r.ok, r.made], [true, ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", ...reels]]);
     assert.equal(reelCalls(t).length, 3);
-    assert.deepEqual(reelCalls(t).map((c) => c.args), reelCalls({ calls: first }).map((c) => c.args));
+    assert.deepEqual(reelCalls(t).map(same), reelCalls({ calls: first }).map(same));
     assert.deepEqual(reels.map((n) => t.read(n)), ["clip 1", "part 1 of the Story of clip 1", "part 2 of the Story of clip 1"]);
     t.done();
   });
-  it("writes each video whole under another name, and only then gives it its own: until then the one made before is there as it was", async () => {
+  it("writes each video whole in the run's own folder, and only then puts it beside the video over the one made before, with one move: until then that one is there as it was", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     const { file } = await doneOnce(t);
     const seen = [];
@@ -1676,11 +1715,13 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
     t.deps.run = async (cmd, args, asked) => {
       const r = await run(cmd, args, asked);
       const to = args[args.length - 1];
-      if (to.endsWith(".mp4.writing")) seen.push([basename(to), readFileSync(to, "utf8"), readFileSync(to.slice(0, -".writing".length), "utf8")]);
+      if (to.endsWith(".mp4")) seen.push([to.startsWith(t.work + "/"), basename(to), readFileSync(to, "utf8"), t.read(basename(to))]);
       return r;
     };
+    const moves = movesOf(t);
     await videosFromPlan(file, t.deps);
-    assert.deepEqual(seen, [["talk.rough-cut.mp4.writing", "the rough cut", "made before"], ["talk.rough-cut.vertical.mp4.writing", "the upright version", "made before"], ["talk.reel-1.mp4.writing", "clip 1", "made before"]]);
+    assert.deepEqual(seen, [[true, "talk.rough-cut.mp4", "the rough cut", "made before"], [true, "talk.rough-cut.vertical.mp4", "the upright version", "made before"], [true, "talk.reel-1.mp4", "clip 1", "made before"]]);
+    assert.deepEqual(moves.map(([from, to]) => [from.startsWith(t.work + "/"), basename(from), to]), seen.map(([, n]) => [true, n, join(t.dir, n)]));
     assert.ok(!t.names().some((n) => n.endsWith(".writing")));
     t.done();
   });
@@ -1855,6 +1896,24 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
 
 describe("a folder of unedited videos", () => {
   const notAllowed = () => Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+  /** Have the video `name` be one that cannot be moved, and every other file be moved as it would be. */
+  const stuck = (t, name) => {
+    t.deps.move = (from, to) => {
+      if (resolve(from) === join(t.dir, name)) throw notAllowed();
+      renameSync(from, to);
+    };
+  };
+  /** Have the files moved as they would be, until three have gone into the folder for the day: then no more can go there. */
+  const fullAfterThree = (t) => {
+    let moved = 0;
+    t.deps.move = (from, to) => {
+      if (dirname(to) === join(t.dir, "2026-10-13")) {
+        if (moved === 3) throw notAllowed();
+        moved += 1;
+      }
+      renameSync(from, to);
+    };
+  };
   it("has the notes and the clips of each video filed with the rest of its files, and the video is not taken again", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     t.video("a.mov");
@@ -1868,7 +1927,7 @@ describe("a folder of unedited videos", () => {
     assert.equal(t.asks.length, 1);
     t.done();
   });
-  it("has the video moved first and its plan with the files the rules make, and the notes and the clips after those", async () => {
+  it("has the video moved first, then the files the rules make, then the notes and the clips, and the plan last", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     t.video("a.mov");
     const order = [];
@@ -1878,7 +1937,7 @@ describe("a folder of unedited videos", () => {
     };
     await uneditedFolder(t.dir, t.deps);
     assert.equal(order[0], "a.mov");
-    assert.deepEqual(order.slice(-4), ["a.fcpxml", "a.edit-notes.txt", "a.reel-1.mp4", "a.reel-1.srt"]);
+    assert.deepEqual(order.slice(-5), ["a.fcpxml", "a.edit-notes.txt", "a.reel-1.mp4", "a.reel-1.srt", "a.cut-plan.json"]);
     t.done();
   });
   it("never takes a short clip, or a part of its Story, as a video that is waiting, though it was left in the folder", async () => {
@@ -1961,34 +2020,29 @@ describe("a folder of unedited videos", () => {
     assert.ok(existsSync(lockFile(t.dir, t.locks)));
     t.done();
   });
-  it("leaves a video where it is, with its files, when it cannot be moved. It still counts as done, and no empty folder is left", async () => {
+  it("leaves a video where it is, and puts its files beside it, when it cannot be moved. It still counts as done, and no empty folder is left", async () => {
     const t = setup();
     t.video("a.mov");
-    t.deps.move = () => {
-      throw notAllowed();
-    };
+    stuck(t, "a.mov");
     const [r] = await uneditedFolder(t.dir, t.deps);
     assert.deepEqual([r.ok, r.folder], [true, ""]);
     assert.deepEqual(t.names(), ALL.map((ending) => "a." + ending));
-    assert.equal(t.logs[t.logs.length - 1], "a.mov: could not be moved into a folder for the day (EPERM). Nothing was moved: its files are still in the watched folder.");
+    assert.equal(t.logs[t.logs.length - 1], "a.mov: could not be moved into a folder for the day (EPERM), so it stays in the watched folder, and its files are put beside it there.");
     assert.deepEqual(t.notes, ["The cut plan for a.mov is ready."]);
     assert.deepEqual(await uneditedFolder(t.dir, t.deps), []);
     assert.equal(t.calls.length, 9);
     t.done();
   });
-  it("says which files stayed behind when only some could be moved", async () => {
+  it("puts in the watched folder the files that could not be put in the folder for the day, and says which they are", async () => {
     const t = setup();
     t.video("a.mov");
-    let moved = 0;
-    t.deps.move = (from, to) => {
-      if (moved === 3) throw notAllowed();
-      moved += 1;
-      renameSync(from, to);
-    };
+    fullAfterThree(t);
     const [r] = await uneditedFolder(t.dir, t.deps);
     assert.deepEqual([r.ok, r.folder], [true, ""]);
     assert.deepEqual(t.inside("2026-10-13"), ["a.mov", "a.srt", "a.transcript.txt"]);
-    assert.equal(t.logs[t.logs.length - 1], 'a.mov: moved into "2026-10-13", but not all of its files could be (EPERM). Still in the watched folder: a.words.json, a.cut-plan.json, a.cut-plan.txt, a.rough-cut.mp4, a.rough-cut.srt, a.rough-cut.transcript.txt, a.rough-cut.vertical.mp4, a.fcpxml.');
+    const rest = ["a.words.json", "a.cut-plan.txt", "a.rough-cut.mp4", "a.rough-cut.srt", "a.rough-cut.transcript.txt", "a.rough-cut.vertical.mp4", "a.fcpxml", "a.cut-plan.json"];
+    assert.deepEqual(t.names(), ["2026-10-13", ...rest].sort());
+    assert.equal(t.logs[t.logs.length - 1], `a.mov: moved into "2026-10-13", but not all of its files could be put there (EPERM). Put in the watched folder instead: ${rest.join(", ")}.`);
     assert.deepEqual(await uneditedFolder(t.dir, t.deps), []);
     t.done();
   });
@@ -2001,12 +2055,12 @@ describe("a folder of unedited videos", () => {
     assert.equal(tags(t.read("2026-10-13-2", "b.fcpxml"), "media-rep")[0].src, address(join(t.dir, "2026-10-13-2", "b.mp4")));
     t.done();
   });
-  it("has the Final Cut file name that folder before anything is moved, so a run cut short at the move leaves a file that is right", async () => {
+  it("has the Final Cut file name that folder before anything is moved, so the file put there after the video is right", async () => {
     const t = setup();
     t.video("a.mov");
     let named = "";
     t.deps.move = (from, to) => {
-      named = named || tags(t.read("a.fcpxml"), "media-rep")[0].src;
+      named = named || tags(readFileSync(inRun(t, "a.fcpxml"), "utf8"), "media-rep")[0].src;
       renameSync(from, to);
     };
     await uneditedFolder(t.dir, t.deps);
@@ -2028,26 +2082,26 @@ describe("a folder of unedited videos", () => {
   it("has the Final Cut file name the video where it stayed, when the video could not be moved", async () => {
     const t = setup();
     t.video("a.mov");
-    t.deps.move = () => {
-      throw notAllowed();
-    };
+    stuck(t, "a.mov");
     await uneditedFolder(t.dir, t.deps);
     assert.equal(tags(t.read("a.fcpxml"), "media-rep")[0].src, address(join(t.dir, "a.mov")));
     assert.deepEqual(checkFcpxml(t.read("a.fcpxml"), { duration: 23.423, frameRate: "30000/1001" }), []);
     assert.ok(!t.names().includes("a.fcpxml.writing"));
     t.done();
   });
-  it("has the Final Cut file name the video where it stayed, when the run stops before the video is moved", async () => {
+  it("leaves nothing but the video in the watched folder when the run stops before the video is moved, and does the video again the next time", async () => {
     // The plan cannot be written, as text or as the JSON that says the video is done: something else is where it is written to.
-    for (const taken of ["a.cut-plan.txt.writing", "a.cut-plan.json.writing"]) {
+    for (const name of ["a.cut-plan.txt", "a.cut-plan.json"]) {
       const t = setup();
       t.video("a.mov");
-      mkdirSync(join(t.dir, taken));
-      assert.deepEqual(await uneditedFolder(t.dir, t.deps), [{ ok: false, name: "a.mov", message: "EISDIR" }]);
-      assert.ok(t.names().includes("a.mov") && !t.names().includes("2026-10-13"), t.names().join(" "));
-      assert.equal(tags(t.read("a.fcpxml"), "media-rep")[0].src, address(join(t.dir, "a.mov")), taken);
-      assert.deepEqual(checkFcpxml(t.read("a.fcpxml"), { duration: 23.423, frameRate: "30000/1001" }), []);
-      assert.ok(!t.names().includes("a.fcpxml.writing"));
+      const run = t.deps.run;
+      taken(t, name);
+      assert.deepEqual(await uneditedFolder(t.dir, t.deps), [{ ok: false, name: "a.mov", message: "EISDIR" }], name);
+      assert.deepEqual(t.names(), ["a.mov"], name);
+      assert.deepEqual(readdirSync(t.work), []);
+      t.deps.run = run;
+      const [again] = await uneditedFolder(t.dir, t.deps);
+      assert.deepEqual([again.ok, again.folder], [true, "2026-10-13"], name);
       t.done();
     }
   });
@@ -2059,24 +2113,17 @@ describe("a folder of unedited videos", () => {
     assert.equal(tags(t.read("2026-10-13", "a.fcpxml"), "media-rep")[0].src, address(join(t.dir, "2026-10-13", "a.mov")));
     t.done();
     // The same when the video could not be moved, and its file is written again to name it where it stayed.
-    const stuck = setup();
-    stuck.video("a.mov");
-    stuck.deps.move = () => {
-      throw notAllowed();
-    };
-    await uneditedFolder(relative(process.cwd(), stuck.dir), stuck.deps);
-    assert.equal(tags(stuck.read("a.fcpxml"), "media-rep")[0].src, address(join(stuck.dir, "a.mov")));
-    stuck.done();
+    const left = setup();
+    left.video("a.mov");
+    stuck(left, "a.mov");
+    await uneditedFolder(relative(process.cwd(), left.dir), left.deps);
+    assert.equal(tags(left.read("a.fcpxml"), "media-rep")[0].src, address(join(left.dir, "a.mov")));
+    left.done();
   });
   it("has the Final Cut file name the video in the folder for the day when the video went there and the file itself did not", async () => {
     const t = setup();
     t.video("a.mov");
-    let moved = 0;
-    t.deps.move = (from, to) => {
-      if (moved === 3) throw notAllowed();
-      moved += 1;
-      renameSync(from, to);
-    };
+    fullAfterThree(t);
     await uneditedFolder(t.dir, t.deps);
     assert.ok(t.inside("2026-10-13").includes("a.mov") && t.names().includes("a.fcpxml"));
     assert.equal(tags(t.read("a.fcpxml"), "media-rep")[0].src, address(join(t.dir, "2026-10-13", "a.mov")));
@@ -2123,16 +2170,14 @@ describe("a folder of unedited videos", () => {
     assert.deepEqual(t.inside("2026-10-13"), ["a.cut-plan.txt", "a.mov", "a.srt", "a.transcript.txt"]);
     assert.deepEqual(t.notes, ["The transcript of a.mov is ready, in the folder 2026-10-13, but no cut plan could be made. See a.cut-plan.txt."]);
     t.done();
-    const stuck = setup({ told: null });
-    stuck.video("b.mov");
-    stuck.deps.move = () => {
-      throw notAllowed();
-    };
-    await uneditedFolder(stuck.dir, stuck.deps);
-    assert.deepEqual(stuck.names(), ["b.cut-plan.txt", "b.mov", "b.srt", "b.transcript.txt"]);
-    assert.deepEqual(await uneditedFolder(stuck.dir, stuck.deps), []);
-    assert.equal(stuck.calls.length, 4);
-    stuck.done();
+    const left = setup({ told: null });
+    left.video("b.mov");
+    stuck(left, "b.mov");
+    await uneditedFolder(left.dir, left.deps);
+    assert.deepEqual(left.names(), ["b.cut-plan.txt", "b.mov", "b.srt", "b.transcript.txt"]);
+    assert.deepEqual(await uneditedFolder(left.dir, left.deps), []);
+    assert.equal(left.calls.length, 4);
+    left.done();
   });
   it("says so in plain words when the folder cannot be read, and frees the folder for the next try", async () => {
     const t = setup();
@@ -2376,6 +2421,146 @@ describe("a run, once it knows what it was asked and what is on this Mac", () =>
     assert.equal(await doAsked(asked({ file: gone, rulesOnly: true }), t.deps), 2);
     assert.equal(t.logs[t.logs.length - 1], `There is no file at ${gone}.`);
     t.done();
+  });
+});
+
+// On 2026-10-14 the tool wrote each file beside the video under its name with .writing after it, and renamed it when it was
+// whole. In a folder in Dropbox, Dropbox undid two of those renames, of large videos it was still uploading: they stayed under
+// their .writing names. So a file is now written in the run's own folder, which is on the same disk, and is moved into the
+// folder it belongs in, under its own name, only once it is whole.
+describe("where a run writes its files", () => {
+  it("writes each file of one video in the run's own folder, and puts it beside the video only when it is whole, with one move under its own name, the plan last: nothing is renamed beside the video", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const file = t.video("talk.mov");
+    const moves = movesOf(t);
+    const seen = namesWhileWorking(t);
+    const r = await uneditedFile(file, t.deps);
+    assert.deepEqual([r.ok, r.message], [true, ""]);
+    const placed = t.names().filter((n) => n !== "talk.mov");
+    assert.deepEqual(placed, [...WITH_NOTES, "reel-1.mp4", "reel-1.srt"].filter((ending) => ending !== "mov").sort().map((ending) => "talk." + ending));
+    assert.deepEqual(moves.map(([, to]) => basename(to)).sort(), placed);
+    for (const [from, to] of moves) {
+      assert.ok(from.startsWith(t.work + "/"), from);
+      assert.deepEqual([dirname(to), basename(to)], [t.dir, basename(from)]);
+    }
+    assert.equal(moves[moves.length - 1][1], join(t.dir, "talk.cut-plan.json"));
+    // While the programs work, nothing is beside the video under a name it does not keep.
+    assert.deepEqual(seen.flat().filter((n) => !placed.includes(n) && n !== "talk.mov"), []);
+    // ffmpeg writes every video in the run's own folder.
+    const videos = t.calls.filter((c) => c.cmd === "FFMPEG" && c.args[c.args.length - 1].endsWith(".mp4")).map((c) => c.args[c.args.length - 1]);
+    assert.deepEqual(videos.map((to) => [to.startsWith(t.work + "/"), basename(to)]), [[true, "talk.rough-cut.mp4"], [true, "talk.rough-cut.vertical.mp4"], [true, "talk.reel-1.mp4"]]);
+    assert.deepEqual(readdirSync(t.work), []);
+    t.done();
+  });
+  it("writes its note that no transcript could be made in the run's own folder too, and puts it beside the video whole", async () => {
+    const t = setup({ ffmpeg: "fail" });
+    const moves = movesOf(t);
+    await uneditedFile(t.video("bad.mov"), t.deps);
+    assert.deepEqual(moves.map(([from, to]) => [from.startsWith(t.work + "/"), to]), [[true, join(t.dir, "bad.failed.txt")]]);
+    assert.match(t.read("bad.failed.txt"), /^No transcript could be made from bad\.mov\./);
+    assert.deepEqual(readdirSync(t.work), []);
+    t.done();
+  });
+  it("for a watched folder, keeps every file in the run's own folder until the video is filed, then moves the video and puts each file straight into the folder for the day: the video is the one file renamed in the watched folder", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    t.video("a.mov");
+    const moves = movesOf(t);
+    const seen = namesWhileWorking(t);
+    const [r] = await uneditedFolder(t.dir, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, "2026-10-13"]);
+    // While the run works, nothing but the video is in the watched folder. A run cut short leaves nothing there.
+    assert.deepEqual([...new Set(seen.map((names) => names.join(" ")))], ["a.mov"]);
+    const day = join(t.dir, "2026-10-13");
+    assert.deepEqual(moves[0], [join(t.dir, "a.mov"), join(day, "a.mov")]);
+    for (const [from, to] of moves.slice(1)) {
+      assert.ok(from.startsWith(t.work + "/"), from);
+      assert.deepEqual([dirname(to), basename(to)], [day, basename(from)]);
+    }
+    assert.deepEqual(moves.map(([, to]) => basename(to)).sort(), t.inside("2026-10-13"));
+    assert.deepEqual(t.names(), ["2026-10-13"]);
+    t.done();
+  });
+  it("copies a file into place, under its own name, and deletes it from the run's own folder, when the two folders are on different disks, and the log says so", async () => {
+    const t = setup();
+    const file = t.video("talk.mov");
+    const copies = [];
+    t.deps.move = (from, to) => {
+      if (from.startsWith(t.work + "/")) throw otherDisk();
+      renameSync(from, to);
+    };
+    t.deps.copy = (from, to) => {
+      copies.push([from, to]);
+      copyFileSync(from, to);
+    };
+    const r = await uneditedFile(file, t.deps);
+    assert.deepEqual([r.ok, r.message], [true, ""]);
+    assert.deepEqual(t.names(), ALL.map((ending) => "talk." + ending));
+    assert.equal(t.read("talk.rough-cut.mp4"), "the rough cut");
+    assert.deepEqual(copies.map(([, to]) => to).sort(), t.names().filter((n) => n !== "talk.mov").map((n) => join(t.dir, n)));
+    assert.ok(copies.every(([from]) => from.startsWith(t.work + "/")));
+    const said = t.logs.filter((line) => line.includes("another disk"));
+    assert.equal(said.length, ALL.length - 1);
+    assert.ok(said.includes(`talk.mov: talk.rough-cut.mp4 could not be moved from the run's own folder into ${t.dir}, which is on another disk, so it was copied there, and deleted from the run's folder.`), said.join("\n"));
+    assert.deepEqual(readdirSync(t.work), []);
+    t.done();
+    // The same for a watched folder: the video is moved into the folder for the day, and its files are copied in after it.
+    const w = setup();
+    w.video("a.mov");
+    w.deps.move = (from, to) => {
+      if (from.startsWith(w.work + "/")) throw otherDisk();
+      renameSync(from, to);
+    };
+    const [filed] = await uneditedFolder(w.dir, w.deps);
+    assert.deepEqual([filed.ok, filed.folder], [true, "2026-10-13"]);
+    assert.deepEqual(w.inside("2026-10-13"), ALL.map((ending) => "a." + ending));
+    assert.ok(w.logs.includes(`a.mov: a.cut-plan.json could not be moved from the run's own folder into ${join(w.dir, "2026-10-13")}, which is on another disk, so it was copied there, and deleted from the run's folder.`));
+    w.done();
+  });
+  it("leaves nothing half copied under its name when a copy into place fails, and that file is not made", async () => {
+    const t = setup();
+    const file = t.video("talk.mov");
+    t.deps.move = (from, to) => {
+      if (from.startsWith(t.work + "/")) throw otherDisk();
+      renameSync(from, to);
+    };
+    t.deps.copy = (from, to) => {
+      if (basename(to) !== "talk.rough-cut.mp4") return copyFileSync(from, to);
+      writeFileSync(to, "half a copy");
+      throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+    };
+    const r = await uneditedFile(file, t.deps);
+    assert.deepEqual([r.ok, r.message], [false, "the rough cut could not be made: the work stopped (ENOSPC)"]);
+    assert.deepEqual(t.names(), ALL.filter((ending) => ending !== "rough-cut.mp4").map((ending) => "talk." + ending));
+    assert.deepEqual(readdirSync(t.work), []);
+    t.done();
+  });
+  it("says plainly in the log when a file is not under its own name after it was moved into place, and that file is not made", async () => {
+    const t = setup();
+    const file = t.video("talk.mov");
+    // Something takes the rough cut away as soon as it is moved in.
+    t.deps.move = (from, to) => {
+      renameSync(from, to);
+      if (basename(to) === "talk.rough-cut.mp4") rmSync(to);
+    };
+    const r = await uneditedFile(file, t.deps);
+    const gone = "no file is there under its name after the move";
+    assert.deepEqual([r.ok, r.message], [false, `the rough cut could not be made: the work stopped (${gone})`]);
+    assert.ok(t.logs.includes(`talk.mov: talk.rough-cut.mp4 was moved into ${t.dir}, but there is no file of that name there now.`), t.logs.join("\n"));
+    assert.equal(t.read("talk.cut-plan.txt").split("\n")[0], `The rough cut could not be made: the work stopped (${gone}).`);
+    t.done();
+    // The same for a video made again from its plan: the log says so, and that the one made before is gone.
+    const p = setup();
+    const video = p.video("talk.mov");
+    await uneditedFile(video, p.deps);
+    p.deps.move = (from, to) => {
+      renameSync(from, to);
+      if (basename(to) === "talk.rough-cut.mp4") rmSync(to);
+    };
+    const again = await videosFromPlan(video, p.deps);
+    assert.deepEqual([again.ok, again.made, again.message], [false, ["talk.rough-cut.vertical.mp4"], `the rough cut could not be made again: the work stopped (${gone})`]);
+    assert.ok(p.logs.includes(`talk.mov: talk.rough-cut.mp4 was moved into ${p.dir}, but there is no file of that name there now.`));
+    assert.ok(p.logs.includes(`talk.mov: the rough cut could not be made again: the work stopped (${gone}).`));
+    p.done();
   });
 });
 

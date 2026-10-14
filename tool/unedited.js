@@ -25,6 +25,8 @@
 // <name>.edit-notes.txt, and for each clip it picked <name>.reel-<n>.mp4 with its captions, <name>.reel-<n>.srt, and
 // <name>.reel-<n>.story-<k>.mp4 for each part of a Story of more than a minute. The cuts are suggested by rules (cuts.js)
 // and by Claude (notes.js), which reads the words and never sees the picture. All of them are for a person to check.
+// Each file is written whole in the run's own folder, among the Mac's temporary files, and only then moved where it belongs,
+// under its own name. So a folder that syncs to a cloud drive never sees a file half written, and never sees one renamed.
 //
 // ffprobe reads the file's facts. ffmpeg takes the sound out, finds the pauses, and makes the rough cut, the upright version
 // and the clips. whisper.cpp writes the captions and the time of every word. They are the transcript tool's programs, and
@@ -33,7 +35,7 @@
 // without it, or when Claude cannot be reached, the plan is the rules' alone. Final Cut Pro is never opened from here.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,40 +118,109 @@ function dayFor(dir, { today = () => localDay() }) {
   }
 }
 
-/** Move a finished video and its files into a new folder in the watched folder, named for the day, as the transcript tool
-    files a video. `files` starts with the video: a run cut short part-way then never leaves it in the watched folder to be
-    done a second time. `day` is the folder's name when it was worked out already, as it is for a video whose Final Cut file
-    names it there. Returns `folder`, the new folder's name when every file is in it and "" otherwise, and `at`, where each
-    of the files is now. When a file cannot be moved the log says so, and it and the ones after it stay where they are. */
-function fileAway(dir, files, { log = () => {}, today = () => localDay(), move = renameSync }, day = "") {
-  const name = basename(files[0]);
+/** Put a file that is whole, at `from` in the run's own folder, where it belongs, at `to`: one move, so that it appears there
+    whole, under its own name, and is never renamed there. A file of that name there already is replaced by it. A folder that
+    syncs to a cloud drive may still be sending a file when it is renamed there, and on 2026-10-14 Dropbox undid two such
+    renames, of large videos: they stayed under the names they had been written under. When the two folders are on different
+    disks the file cannot be moved, and it is copied there under its own name, and deleted from the run's folder: `say`, the
+    log, says so. A copy that fails leaves nothing under that name. Then the file is looked for under its name, and `say`
+    says so plainly when it is not there. Throws when the file is not where it belongs. `move` and `copy` are how a file is
+    moved and copied, for a test to give others. */
+function put(from, to, { say, move = renameSync, copy = copyFileSync }) {
+  try {
+    move(from, to);
+  } catch (e) {
+    if (e.code !== "EXDEV") throw e;
+    try {
+      copy(from, to);
+    } catch (failed) {
+      try {
+        rmSync(to, { force: true });
+      } catch (stays) {
+        // What is there is not a file, and nothing was copied into it.
+      }
+      throw failed;
+    }
+    rmSync(from, { force: true });
+    say(`${basename(to)} could not be moved from the run's own folder into ${dirname(to)}, which is on another disk, so it was copied there, and deleted from the run's folder.`);
+  }
+  if (!existsSync(to)) {
+    say(`${basename(to)} was moved into ${dirname(to)}, but there is no file of that name there now.`);
+    throw new Error("no file is there under its name after the move");
+  }
+}
+
+/** The files one run makes of the video `name`. Each is written whole in the folder "made" in the run's own folder, `work`,
+    under its own name, and only then put where it belongs (see put). `at` says where the file that belongs at `to` is
+    written. `done` is said of it when it is whole: it is put in place then, or, with `hold`, it is held in the run's folder,
+    for the run to file it away with the video (see fileAway). `text` writes a text file whole there, and has it done. `put`
+    puts a file in place now: where it belongs, or at `where`. `has` says whether a file was made, where it belongs or held. */
+function filesOf(work, { name, hold = false, log = () => {}, move, copy }) {
+  const folder = join(work, "made");
+  mkdirSync(folder, { recursive: true });
+  const at = (to) => join(folder, basename(to));
+  const now = (to, where = to) => put(at(to), where, { say: (line) => log(`${name}: ${line}`), move, copy });
+  const done = (to) => {
+    if (!hold) now(to);
+  };
+  const text = (to, written) => {
+    writeFileSync(at(to), written);
+    done(to);
+  };
+  return { at, done, text, put: now, has: (to) => existsSync(hold ? at(to) : to) };
+}
+
+/** File a finished video away, with the files made of it, in a new folder in the watched folder named for the day, as the
+    transcript tool files a video. The video is moved first: a run cut short part-way then never leaves it in the watched
+    folder to be done a second time. It is the one file renamed in the watched folder, and it has been whole there since
+    before the run began. The files `made` of it were held in the run's own folder (see filesOf), and each is put straight
+    into the new folder after it, so that it appears there whole. `day` is the folder's name when it was worked out already,
+    as it is for a video whose Final Cut file names it there. When the video cannot be moved it stays where it is, `stayed`
+    is called, and its files are put beside it. When a file cannot be put in the new folder, it and the ones after it are
+    put in the watched folder instead. The log says which, and says so of a file that could not be put there either.
+    Returns the new folder's name when every file is in it, and "" otherwise. */
+function fileAway(dir, file, made, deps, day, stayed) {
+  const { log = () => {}, today = () => localDay(), move = renameSync, files } = deps;
+  const name = basename(file);
+  /** Put files in the watched folder, beside where the video was. */
+  const beside = (list) => {
+    for (const to of list) {
+      try {
+        files.put(to, join(dir, basename(to)));
+      } catch (e) {
+        log(`${name}: ${basename(to)} could not be put in the watched folder (${e.code || e.message}), and was not kept.`);
+      }
+    }
+  };
   let into = "";
-  let moved = 0;
-  const at = () => files.map((file, i) => (i < moved ? join(into, basename(file)) : file));
   try {
     const folder = day || dayFolder(readdirSync(dir), today());
     mkdirSync(join(dir, folder));
     into = join(dir, folder);
-    for (const from of files) {
-      move(from, join(into, basename(from)));
-      moved += 1;
-    }
-    log(`${name}: moved with its files into "${folder}".`);
-    return { folder, at: at() };
+    move(file, join(into, name));
   } catch (e) {
-    const why = e.code || e.message;
-    if (moved) log(`${name}: moved into "${basename(into)}", but not all of its files could be (${why}). Still in the watched folder: ${files.slice(moved).map((f) => basename(f)).join(", ")}.`);
-    else {
-      // The folder made for it is empty, and is not left behind in a folder that may sync to other people.
-      try {
-        if (into) rmdirSync(into);
-      } catch (stays) {
-        // Something is in it by now, so it is left.
-      }
-      log(`${name}: could not be moved into a folder for the day (${why}). Nothing was moved: its files are still in the watched folder.`);
+    // The folder made for it is empty, and is not left behind in a folder that may sync to other people.
+    try {
+      if (into) rmdirSync(into);
+    } catch (stays) {
+      // Something is in it by now, so it is left.
     }
-    return { folder: "", at: at() };
+    log(`${name}: could not be moved into a folder for the day (${e.code || e.message}), so it stays in the watched folder, and its files are put beside it there.`);
+    stayed();
+    beside(made);
+    return "";
   }
+  for (const [k, to] of made.entries()) {
+    try {
+      files.put(to, join(into, basename(to)));
+    } catch (e) {
+      log(`${name}: moved into "${basename(into)}", but not all of its files could be put there (${e.code || e.message}). Put in the watched folder instead: ${made.slice(k).map((f) => basename(f)).join(", ")}.`);
+      beside(made.slice(k));
+      return "";
+    }
+  }
+  log(`${name}: moved with its files into "${basename(into)}".`);
+  return basename(into);
 }
 
 /** The files of the short clips that an earlier run cut of a video, where this run writes its own, and the ones a run that
@@ -255,17 +326,18 @@ async function askClaude(name, plan, facts, work, deps) {
 }
 
 /** Make the rough cut of a video from the kept ranges of its plan. Resolves "" when it is made, or why it is not. It is
-    written whole under another name and then given its own, as every other file is. */
-async function roughCut(file, to, { plan, facts, spans }, { run, tools, log = () => {} }) {
+    written whole in the run's own folder and then put where it belongs, as every other file is. */
+async function roughCut(file, to, { plan, facts, spans }, { run, tools, files, log = () => {} }) {
   if (!facts.height) return "there is no picture in the file";
   if (!spans.length) return "the plan keeps nothing";
   log(`${basename(file)}: making the rough cut.`);
-  const made = await run(tools.ffmpeg, roughCutArgs(file, to + ".writing", { ranges: plan.ranges, fps: roughRate(facts) }));
-  if (made.code !== 0 || !existsSync(to + ".writing")) {
-    rmSync(to + ".writing", { force: true });
+  const writing = files.at(to);
+  const made = await run(tools.ffmpeg, roughCutArgs(file, writing, { ranges: plan.ranges, fps: roughRate(facts) }));
+  if (made.code !== 0 || !existsSync(writing)) {
+    rmSync(writing, { force: true });
     return `ffmpeg stopped (${lastLine(made.stderr)})`;
   }
-  renameSync(to + ".writing", to);
+  files.done(to);
   return "";
 }
 
@@ -310,14 +382,15 @@ const stretches = (spans) => spans.map((span) => ({ start: below(span.start), en
 
 /** Have ffmpeg write stretches of a video, joined, as one file at `to`: each with its crop, and the whole made 1080 by 1920,
     or with no crops for a video that keeps its shape. Resolves "" when the file is made, or why it is not. It is written
-    whole under another name and then given its own, as every other file is. */
-async function joined(file, to, { ranges, crops }, { run, tools }) {
-  const made = await run(tools.ffmpeg, verticalArgs({ video: file, ranges, crops, out: to + ".writing" }));
-  if (made.code !== 0 || !existsSync(to + ".writing")) {
-    rmSync(to + ".writing", { force: true });
+    whole in the run's own folder and then put where it belongs, as every other file is. */
+async function joined(file, to, { ranges, crops }, { run, tools, files }) {
+  const writing = files.at(to);
+  const made = await run(tools.ffmpeg, verticalArgs({ video: file, ranges, crops, out: writing }));
+  if (made.code !== 0 || !existsSync(writing)) {
+    rmSync(writing, { force: true });
     return `ffmpeg stopped (${lastLine(made.stderr)})`;
   }
-  renameSync(to + ".writing", to);
+  files.done(to);
   return "";
 }
 
@@ -343,17 +416,10 @@ async function upright(file, to, { facts, spans }, work, deps) {
     }
     return { why: await joined(file, to, { ranges, crops }, deps), centred: seen.why || "", stills: seen.stills || [] };
   } catch (e) {
-    rmSync(to + ".writing", { force: true });
+    rmSync(deps.files.at(to), { force: true });
     return { why: `the work stopped (${e.code || e.message})`, centred: seen.why || "", stills: seen.stills || [] };
   }
 }
-
-/** Write a text file. Each file is written whole under another name and then given its own, so a half-written one is never
-    picked up. */
-const write = (path, text) => {
-  writeFileSync(path + ".writing", text);
-  renameSync(path + ".writing", path);
-};
 
 /** Stretches as keptSpans gives them, cut down to hold `most` seconds at most. Each end of a stretch was moved to the nearest
     whole picture, and that can leave the stretches a picture or two longer than they were given: 60 seconds of a video
@@ -391,7 +457,7 @@ async function cutPiece(file, to, given, { facts, stills, most = 0 }, deps) {
     const why = await joined(file, to, { ranges, crops: needsReframe(facts) ? cropsFor(facts, ranges, stills) : null }, deps);
     return why ? { why } : { spans };
   } catch (e) {
-    rmSync(to + ".writing", { force: true });
+    rmSync(deps.files.at(to), { force: true });
     return { why: `the work stopped (${e.code || e.message})` };
   }
 }
@@ -416,7 +482,7 @@ async function cutClips(file, clips, { plan, facts, stills }, deps) {
         // The captions are the kept phrases of the clip, placed as the rough cut's captions are placed in the rough cut. A
         // phrase is the clip's when some of it lies in the clip. The transcriber may time the last words past the end of the
         // file, which is where the clip ends: such a time is placed at the clip's end.
-        write(out.srt, roughCaptions(plan.phrases.filter((p) => p.keep && p.start < clip.end && p.end > clip.start), whole.spans));
+        deps.files.text(out.srt, roughCaptions(plan.phrases.filter((p) => p.keep && p.start < clip.end && p.end > clip.start), whole.spans));
         files.push(out.srt);
       } catch (e) {
         failed.push(`the captions of clip ${clip.n} could not be written: the work stopped (${e.code || e.message})`);
@@ -505,8 +571,13 @@ async function workOn(file, deps) {
   }
   const work = join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
+  // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
+  // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
+  const files = filesOf(work, { name, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
+  deps = { ...deps, files };
   const fail = (why) => {
-    writeFileSync(out.failed, `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
+    writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
+    files.put(out.failed);
     log(`${name}: failed. ${why}.`);
     notify(`No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
@@ -544,16 +615,17 @@ async function workOn(file, deps) {
     const srt = spellNames(quiet.srt);
     const captions = captionCount(srt);
     if (!captions) return fail("the transcriber found no speech in it");
-    write(out.txt, stampedText(srt));
-    write(out.srt, srt);
+    // What an earlier run made of this video goes first, so that nothing stays beside a plan it does not belong to, and
+    // nothing of it stays in a watched folder when the video is filed away.
+    for (const old of [out.srt, out.txt, out.words, out.plan, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...oldClips(out)]) rmSync(old, { force: true });
+    files.text(out.txt, stampedText(srt));
+    files.text(out.srt, srt);
     rmSync(out.failed, { force: true });
     log(`${name}: the transcript is written, ${captions} captions.`);
 
     // From here on a step that fails costs the plan or a file made from it, and never the transcript: what was made is kept
     // and filed, and the plan's own text says what is missing. A short clip that could not be cut is the one thing it does
-    // not name: the log and the notes for the editor do. What an earlier run made of this video goes first, so that
-    // nothing stays beside a plan it does not belong to.
-    for (const old of [out.words, out.plan, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...oldClips(out)]) rmSync(old, { force: true });
+    // not name: the log and the notes for the editor do.
     const planned = await planFor({ facts, probe, told: outBase + ".json", untimed, silent, wav }, deps).catch((e) => ({ why: `the work on the plan stopped (${e.message})` }));
     // The plan the rules made. Claude's decisions may change it below, and the plan they give is the plan for all that follows.
     let { plan } = planned;
@@ -567,19 +639,19 @@ async function workOn(file, deps) {
     // The folder for the day the video is to be filed in, and the Final Cut file that names it there.
     let day = "";
     let project = null;
-    // Have the Final Cut file at `to` name the video at `video`, where the video is, when it names it anywhere else. A video
-    // is named by its whole path, whatever path the tool was given.
-    const nameAgain = (to, video) => {
+    // Have the Final Cut file name the video at `video`, where the video is, when it names it anywhere else. A video is named
+    // by its whole path, whatever path the tool was given.
+    const nameAgain = (video) => {
       if (!project || resolve(video) === project.named) return;
       try {
-        write(to, project.textFor(resolve(video)).text);
+        files.text(out.fcpxml, project.textFor(resolve(video)).text);
       } catch (e) {
         log(`${name}: its Final Cut file names it in a folder it is not in, and could not be written again (${e.code || e.message}).`);
       }
     };
     if (!plan) {
       missing.push(`no cut plan could be made: ${planned.why}`);
-      write(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
+      files.text(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
     } else {
       /** What a plan comes to, as the log says it. */
       const sums = (made) => {
@@ -612,16 +684,16 @@ async function workOn(file, deps) {
       let why = "";
       let note = "";
       try {
-        write(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
+        files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
         const roughSrt = roughCaptions(plan.phrases, spans);
-        write(out.roughTxt, stampedText(roughSrt));
-        write(out.roughSrt, roughSrt);
+        files.text(out.roughTxt, stampedText(roughSrt));
+        files.text(out.roughSrt, roughSrt);
         why = await roughCut(file, out.rough, { plan, facts, spans }, deps);
       } catch (e) {
         // Something nobody foresaw, such as a file that cannot be written. What was made is kept, and the plan names the rest.
         why = `the work stopped (${e.code || e.message})`;
-        rmSync(out.rough + ".writing", { force: true });
-        const gone = [out.words, out.roughTxt, out.roughSrt].filter((f) => !existsSync(f)).map((f) => basename(f));
+        rmSync(files.at(out.rough), { force: true });
+        const gone = [out.words, out.roughTxt, out.roughSrt].filter((f) => !files.has(f)).map((f) => basename(f));
         if (gone.length) note = ` Not made either: ${gone.join(", ")}.`;
       }
       if (why) lacks.push({ what: "rough cut", why, note });
@@ -666,7 +738,7 @@ async function workOn(file, deps) {
         wrong = `the folder for its library could not be made (${e.code || e.message})`;
       }
       try {
-        if (!wrong) write(out.fcpxml, first.text);
+        if (!wrong) files.text(out.fcpxml, first.text);
       } catch (e) {
         wrong = `the work stopped (${e.code || e.message})`;
       }
@@ -679,7 +751,7 @@ async function workOn(file, deps) {
       // what could not be read, each decision and each clip that was left out, and each clip that could not be cut.
       if (read) {
         try {
-          write(out.notes, notesText({ ...read, problems: [...ignored, ...uncut.map(sentence)] }, plan, clips));
+          files.text(out.notes, notesText({ ...read, problems: [...ignored, ...uncut.map(sentence)] }, plan, clips));
         } catch (e) {
           lacks.push({ what: "notes for the editor", why: `the work stopped (${e.code || e.message})` });
         }
@@ -688,41 +760,35 @@ async function workOn(file, deps) {
       // What the plan's text says first, after the files that are missing: who made the plan, and what was cropped at the
       // centre of the picture and not on the speaker.
       const said = [];
-      if (read) said.push(`Claude read this plan and ${changes ? `changed it in ${changes} place${changes === 1 ? "" : "s"}` : "changed nothing in it"}.${existsSync(out.notes) ? ` Its notes are in ${basename(out.notes)}.` : ""}`);
+      if (read) said.push(`Claude read this plan and ${changes ? `changed it in ${changes} place${changes === 1 ? "" : "s"}` : "changed nothing in it"}.${files.has(out.notes) ? ` Its notes are in ${basename(out.notes)}.` : ""}`);
       else if (asked) said.push(`Claude could not be asked (${asked.why}), so this plan is the rules' alone.`);
       else if (!deps.rulesOnly) said.push("Claude Code is not installed, so this plan is the rules' alone.");
       if (centred && atCentre.length) said.push(`${capital(listed(atCentre))} ${atCentre.includes("the short clips") ? "are" : "is"} cropped at the centre of the picture, and not on the speaker: ${centred}.`);
 
       missing.push(...lacks.map((lack) => `the ${lack.what} could not be made: ${lack.why}`), ...uncut);
-      try {
-        write(out.planTxt, planText(plan, [...lacks.map((lack) => `The ${lack.what} could not be made: ${lack.why}.${lack.note || ""}`), ...said].join("\n")));
-        // The plan is written after everything made from it. It is what says this video is done, so a run cut short while the
-        // rough cut, the upright version or a clip is being made does the video again. It says who made the plan. When
-        // Claude read it, it keeps what Claude decided, its ideas for graphics as they were read, what was left out of its
-        // reply and why, and each clip with the names of the files that were made of it, so that a person can see what
-        // changed. Nothing reads the ideas back yet: they are there for what is made of the plan later.
-        const claude = read ? { decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
-        write(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
-      } catch (e) {
-        // The run stops here, and the video is never moved. Its Final Cut file names it in the folder for the day, which is
-        // never made, so the file is first written again to name the video where it stays.
-        nameAgain(out.fcpxml, file);
-        throw e;
-      }
+      files.text(out.planTxt, planText(plan, [...lacks.map((lack) => `The ${lack.what} could not be made: ${lack.why}.${lack.note || ""}`), ...said].join("\n")));
+      // The plan is written after everything made from it. It is what says this video is done, so a run cut short while the
+      // rough cut, the upright version or a clip is being made does the video again. When it cannot be written the run
+      // stops here, and the video is done again the next time: for a watched folder nothing has been put anywhere, and what
+      // was held in the run's own folder goes with it. It says who made the plan. When Claude read it, it keeps what Claude
+      // decided, its ideas for graphics as they were read, what was left out of its reply and why, and each clip with the
+      // names of the files that were made of it, so that a person can see what changed. Nothing reads the ideas back yet:
+      // they are there for what is made of the plan later.
+      const claude = read ? { decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
+      files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
     }
     for (const what of missing) log(`${name}: ${what}.`);
     if (!missing.length) log(`${name}: done.`);
-    const files = [file, ...[out.srt, out.txt, out.words, out.plan, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...cut.flatMap((made) => made.files)].filter((f) => existsSync(f))];
-    const filed = deps.watched ? fileAway(deps.watched, files, deps, day) : { folder: "", at: files };
-    // The Final Cut file names the video in the folder it was to be filed in. When the video did not get there, the file is
-    // written again where it is now, to name the video where that is.
-    const now = (f) => filed.at[files.indexOf(f)];
-    nameAgain(now(out.fcpxml), now(file));
-    const where = filed.folder ? `, in the folder ${filed.folder}` : "";
+    // For a watched folder, the video is filed away with the files the run held for it, the plan last. Its Final Cut file
+    // names it in the folder it is filed in: when it cannot be moved there, the file is first written again to name the
+    // video where it stays.
+    const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...cut.flatMap((made) => made.files), out.plan];
+    const folder = deps.watched ? fileAway(deps.watched, file, held.filter((f) => files.has(f)), deps, day, () => nameAgain(file)) : "";
+    const where = folder ? `, in the folder ${folder}` : "";
     const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (plan) notify(`The cut plan for ${name} is ready${where}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}.${unasked}`);
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
-    return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder: filed.folder, message: missing.join("; ") };
+    return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -783,8 +849,9 @@ const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fp
     the plan's two files, the notes, the captions and the Final Cut file stay as that run wrote them. The Final Cut file names
     the video and none of the videos made here, so it needs nothing new. The plan is read where that run wrote it: beside
     the video, or in `deps.outDir`. The video is never moved.
-    Each video is written whole under another name and then given its own, so until then the one made before is there as it
-    was. One that cannot be made leaves the one made before as it is, the log says so, and the others are made all the same.
+    Each video is written whole in the run's own folder and then put in place over the one made before, so until then that
+    one is there as it was. One that cannot be made leaves the one made before as it is, the log says so, and the others are
+    made all the same.
     Resolves {ok, name, made, message}: `made` names the videos made again, and `message` says what could not be. When there
     is no video, no plan, a plan that cannot be read or one of another video, or the plan's video has no picture or the plan
     keeps nothing, it stops before anything is made, the log says why, and it resolves {ok: false, stopped: true} with
@@ -810,6 +877,9 @@ export async function videosFromPlan(file, deps) {
   if (plan.video !== name) return stop(`the cut plan at ${out.plan} is the plan of ${plan.video}, and not of ${name}`);
   const work = join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
+  // Each video goes through `files`, and is put in place as soon as it is whole.
+  const files = filesOf(work, { name, log, move: deps.move, copy: deps.copy });
+  deps = { ...deps, files };
   try {
     // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
     const probed = join(work, "facts.json");
@@ -837,7 +907,7 @@ export async function videosFromPlan(file, deps) {
     try {
       why = await roughCut(file, out.rough, { plan, facts, spans }, deps);
     } catch (e) {
-      rmSync(out.rough + ".writing", { force: true });
+      rmSync(files.at(out.rough), { force: true });
       why = `the work stopped (${e.code || e.message})`;
     }
     madeOr(out.rough, "the rough cut could not be made again", why);
