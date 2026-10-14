@@ -3,7 +3,9 @@
 // stand-ins. Nothing here starts a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDetached, runDetached, resultFile, readResult, runningCommand, lockOf } from "../detached.js";
@@ -105,5 +107,33 @@ describe("what the lead's review of PR 11 found in detached runs", () => {
     assert.equal(existsSync(lockOf(t.home, FOLDER)), false);
     assert.deepEqual(readdirSync(join(t.home, "BRIMM Video Work", FOLDER)), ["bring.result.json"]);
     t.done();
+  });
+});
+
+describe("a dead run's lock, raced for by several runs", () => {
+  it("3. is never held by two runs at once, nor taken from a run that holds it: 4 processes, 50 times", { timeout: 120000 }, async () => {
+    const racer = fileURLToPath(new URL("./lock-racer.js", import.meta.url));
+    const run = (args) => new Promise((done) => {
+      const child = spawn(process.execPath, [racer, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      let err = "";
+      child.stdout.on("data", (d) => (out += d));
+      child.stderr.on("data", (d) => (err += d));
+      child.on("close", (code) => done({ code, out, err }));
+    });
+    for (let trial = 1; trial <= 50; trial++) {
+      const t = setup();
+      const seen = join(t.home, "seen");
+      mkdirSync(seen);
+      mkdirSync(join(t.home, "BRIMM Video Work", FOLDER), { recursive: true });
+      writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242424, command: "dead" }));
+      const ended = await Promise.all([1, 2, 3, 4].map(() => run([t.home, FOLDER, seen])));
+      for (const e of ended) assert.equal(e.code, 0, e.err);
+      const ran = ended.filter((e) => JSON.parse(e.out).ran).length;
+      const wrong = readdirSync(seen).filter((n) => n.startsWith("overlap-") || n.startsWith("lost-"));
+      assert.deepEqual(wrong, [], `trial ${trial}: ${wrong.join(", ")}`);
+      assert.ok(ran >= 1, `trial ${trial}: no run took the lock`);
+      t.done();
+    }
   });
 });

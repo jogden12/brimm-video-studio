@@ -4,7 +4,8 @@
 // awake while it runs. When it ends it leaves a result file, which `status` reads: what it made, what failed, and what to ask
 // next. Everything here is on this Mac's own disk, in BRIMM Video Work, and never in Dropbox.
 import { spawn } from "node:child_process";
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { episodeWork } from "./settings.js";
@@ -50,57 +51,93 @@ function writeWhole(file, text) {
   renameSync(writing, file);
 }
 
-/** Read a lock file: its holder, or null. */
-function heldIn(file) {
+/** A lock file's text, or null when there is none. */
+function textOf(file) {
   try {
-    const held = JSON.parse(readFileSync(file, "utf8"));
+    return readFileSync(file, "utf8");
+  } catch (e) {
+    return null;
+  }
+}
+
+/** A lock's holder, read from its text: { pid, command }, or null. */
+function heldBy(text) {
+  try {
+    const held = JSON.parse(text);
     return held && Number.isInteger(held.pid) ? held : null;
   } catch (e) {
     return null;
   }
 }
 
-/** Take the episode's lock for this run: { taken: true }, or { running } naming the command of the live run that holds it.
-    The lock is taken by a hard link of a file of this run's own to the lock's name, which fails when the lock is there:
-    one run alone can take it. A lock whose run is not running is moved aside by a rename, which one run alone can make,
-    and only then taken; when what was moved aside turns out to be the lock of a live run, which took it meanwhile, it is put
-    back. */
+/** Wait a few milliseconds, holding up nothing but this run. */
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** How old a takeover guard may be before it counts as left by a run that died inside it: it is held for a moment only. */
+const GUARD_STALE_MS = 10000;
+
+/** Take the episode's lock for this run: { taken: true, text } with the lock's text, or { running } naming the command of the
+    live run that holds it. Safe for any number of runs at once:
+    - the lock is taken by a hard link of a file of this run's own to the lock's name, which fails when the lock is there,
+      so one run alone takes a free lock;
+    - a lock whose run is not running is taken away only by the run that holds the takeover guard (taken by a hard link too),
+      and only when its text is still, word for word, the dead run's: no live run's lock is ever taken away. */
 function takeEpisodeLock(lock, command, alive) {
-  const mine = `${lock}.${process.pid}`;
-  writeFileSync(mine, JSON.stringify({ pid: process.pid, command }));
+  const text = JSON.stringify({ pid: process.pid, command, nonce: randomUUID() });
+  const mine = `${lock}.${process.pid}.${randomUUID().slice(0, 8)}`;
+  const guard = `${lock}.takeover`;
+  writeFileSync(mine, text);
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 400; attempt++) {
       try {
         linkSync(mine, lock);
-        return { taken: true };
+        return { taken: true, text };
       } catch (e) {
         if (e.code !== "EEXIST") throw e;
       }
-      const held = heldIn(lock);
+      const seen = textOf(lock);
+      if (seen === null) continue;
+      const held = heldBy(seen);
       if (held && alive(held.pid)) return { running: held.command };
-      const aside = `${lock}.stale.${process.pid}`;
+      // The lock is a dead run's. Only the run that holds the guard may take it away, and only if it is still that one.
       try {
-        renameSync(lock, aside);
+        linkSync(mine, guard);
       } catch (e) {
+        if (e.code !== "EEXIST") throw e;
+        const keeper = heldBy(textOf(guard));
+        let age = 0;
+        try {
+          age = Date.now() - statSync(guard).mtimeMs;
+        } catch (gone) {
+          continue;
+        }
+        if (age > GUARD_STALE_MS && !(keeper && alive(keeper.pid))) rmSync(guard, { force: true });
+        else pause(5);
         continue;
       }
-      const was = heldIn(aside);
-      if (was && alive(was.pid)) {
+      try {
+        if (textOf(lock) === seen) rmSync(lock, { force: true });
         try {
-          linkSync(aside, lock);
+          linkSync(mine, lock);
+          return { taken: true, text };
         } catch (e) {
-          // Yet another run holds it now: it is the one at work.
+          if (e.code !== "EEXIST") throw e;
         }
-        rmSync(aside, { force: true });
-        return { running: was.command };
+      } finally {
+        if (textOf(guard) === text) rmSync(guard, { force: true });
       }
-      rmSync(aside, { force: true });
     }
-    const held = heldIn(lock);
+    const held = heldBy(textOf(lock));
     return { running: held ? held.command : "another run" };
   } finally {
     rmSync(mine, { force: true });
   }
+}
+
+/** Let the episode's lock go, when it is still this run's own (its text is the one taken): a lock some other run holds is
+    never taken away. */
+function releaseEpisodeLock(lock, text) {
+  if (textOf(lock) === text) rmSync(lock, { force: true });
 }
 
 /** Run `work` as the detached run of `command` for the episode `folder`: it takes the episode's lock (one left by a run that
@@ -125,7 +162,7 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");
   } finally {
-    rmSync(lock, { force: true });
+    releaseEpisodeLock(lock, took.text);
   }
   return result;
 }
