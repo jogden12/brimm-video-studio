@@ -51,6 +51,19 @@ export function factsOf(printed) {
   return { duration: ms(duration), width, height, fps, sound: Boolean(sound), soundStart: picture && sound ? ms(num(sound.start_time) - num(picture.start_time)) : 0 };
 }
 
+/** When the file says it was recorded: the creation time ffprobe read from its format, as ffprobe gave it, or null when it
+    gave none or wrote nothing that can be read. An episode's record takes its day from it. It is not one of the facts above,
+    which a cut plan keeps, so that a plan is written as it was. */
+export function createdOf(printed) {
+  try {
+    const told = JSON.parse(printed);
+    const at = told && told.format && told.format.tags && told.format.tags.creation_time;
+    return typeof at === "string" && at ? at : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** Have the transcriber write the captions as the transcript tool does and, in the same pass, everything it knows as JSON, with
     a time for every token. Without -nfa it silently drops -dtw, which is what gives those times. */
 export const wordArgs = (given) => [...whisperArgs(given), "-ojf", "-nfa", "-dtw", "large.v3.turbo"];
