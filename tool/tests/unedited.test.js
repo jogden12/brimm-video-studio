@@ -3611,3 +3611,66 @@ describe("a video with a sound this Mac's ffmpeg cannot read beside one it can, 
     t.done();
   });
 });
+
+describe("the streams a run takes, by their numbers, when they are not their places in ffprobe's list", () => {
+  /** What ffprobe writes of a recording, as `printed` says, when it has a timecode track first, its picture as stream 2, Apple's
+      APAC as stream 3 with four channels, starting 0.479 seconds after the picture, and then two sounds this Mac's ffmpeg can
+      read: AAC in stereo at 44.1 kHz as stream 5, and a mono AAC as stream 6. No stream's number is its place in the list,
+      and ffmpeg on its own would take the APAC, which has the most channels. */
+  const numbered = (printed) => {
+    const told = JSON.parse(printed);
+    const [picture, sound] = told.streams;
+    told.streams = [
+      { index: 0, codec_type: "data", codec_tag_string: "tmcd" },
+      { ...picture, index: 2 },
+      { ...sound, index: 3, codec_name: "apple_apac", channels: 4, sample_rate: "48000", start_time: "0.479000" },
+      { ...sound, index: 5, codec_name: "aac", channels: 2, sample_rate: "44100" },
+      { ...sound, index: 6, codec_name: "aac", channels: 1, sample_rate: "22050" }
+    ];
+    return JSON.stringify(told);
+  };
+  const talk = longTalk(16);
+  const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+  /** The streams of the video an ffmpeg call names: by -map, and in its graph of filters. A graph's own outputs, mapped as [v]
+      and [a], are not streams of the video. */
+  const named = (args) => [...args.filter((a, i) => args[i - 1] === "-map" && a.startsWith("0:")), ...(args.includes("-filter_complex") ? [...after(args, "-filter_complex").matchAll(/\[(0:[^\]]+)\]/g)].map((m) => m[1]) : [])];
+  /** Each ffmpeg call that reads the video `file`, but for the stills the faces are looked for in, which take its picture
+      alone: the name of the file it writes, and the streams it names, each once. */
+  const reads = (calls, file) => calls.filter((c) => c.cmd === "FFMPEG" && after(c.args, "-i") === file && !c.args.includes("-an"))
+    .map((c) => [basename(c.args[c.args.length - 1]), [...new Set(named(c.args))].sort()]);
+  const BOTH = ["0:2", "0:5"];
+  it("takes the picture and the first sound it can read by their numbers in every ffmpeg of the import: the sound, the rough cut, the upright version, the clip and each part of its Story", async () => {
+    const t = setup({ ...talk, probed: numbered(talk.probed), claude: [answers(reply)] });
+    const file = t.video("talk.mov");
+    const r = await uneditedFile(file, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.deepEqual(reads(t.calls, file), [["sound.wav", ["0:5"]], ["talk.rough-cut.mp4", BOTH], ["talk.rough-cut.vertical.mp4", BOTH], ["talk.reel-1.mp4", BOTH], ["talk.reel-1.story-1.mp4", BOTH], ["talk.reel-1.story-2.mp4", BOTH]]);
+    t.done();
+  });
+  it("takes them by their numbers in every ffmpeg of --from-plan, as ffprobe reads the video again: the rough cut, the upright version, the clip and each part of its Story", async () => {
+    const script = { ...talk, claude: [answers(reply)] };
+    const t = setup(script);
+    const file = t.video("talk.mov");
+    await uneditedFile(file, t.deps);
+    for (const said of [t.calls, t.logs]) said.length = 0;
+    // The plan was made of the video as the stand-in first described it. Read again, its streams are numbered otherwise.
+    script.probed = numbered(talk.probed);
+    const r = await videosFromPlan(file, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.deepEqual(reads(t.calls, file), [["talk.rough-cut.mp4", BOTH], ["talk.rough-cut.vertical.mp4", BOTH], ["talk.reel-1.mp4", BOTH], ["talk.reel-1.story-1.mp4", BOTH], ["talk.reel-1.story-2.mp4", BOTH]]);
+    t.done();
+  });
+  it("times the words, the pauses and the captions by the sound it takes, and gives the Final Cut file that sound's channels and rate, as Final Cut's own export of an iPhone clip has them (B3)", async () => {
+    const plain = setup({ ...talk, claude: [answers(reply)] });
+    await uneditedFile(plain.video("talk.mov"), plain.deps);
+    const t = setup({ ...talk, probed: numbered(talk.probed), claude: [answers(reply)] });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(JSON.parse(t.read("talk.words.json")).words, JSON.parse(plain.read("talk.words.json")).words);
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")).ranges, JSON.parse(plain.read("talk.cut-plan.json")).ranges);
+    assert.deepEqual(tags(t.read("talk.fcpxml"), "caption"), tags(plain.read("talk.fcpxml"), "caption"));
+    const asset = tags(t.read("talk.fcpxml"), "asset")[0];
+    assert.deepEqual([asset.audioChannels, asset.audioRate], ["2", "44100"]);
+    plain.done();
+    t.done();
+  });
+});

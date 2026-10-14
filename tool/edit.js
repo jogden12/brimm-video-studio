@@ -979,7 +979,7 @@ export async function freeLibrary(ctx, found, { yes = false } = {}) {
     return 0;
   }
   rmSync(library, { recursive: true, force: true });
-  // The record stops naming a library on this Mac, so the next push names the Backups step for the new one.
+  // The record stops naming a library on this Mac, so the next push makes a new one and names it there.
   const { [ctx.machine]: gone, ...libraries } = record.libraries || {};
   return save(ctx, found, { ...record, libraries }, `Deleted its Final Cut library on this Mac, ${size}.`);
 }

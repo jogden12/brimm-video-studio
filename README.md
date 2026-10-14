@@ -264,7 +264,7 @@ Still open, and checked by hand on the Mac Studio when Final Cut can be quit: a 
 
 **The guard.** A timeline shown before is shown again only when the person says it was not changed in Final Cut since (`--no-hand-edits`). Changes made by hand in Final Cut cannot be built on yet (phase 5 reads Final Cut's exports), so a "yes" stops the push: ask for brimm-video's changes first and trim by hand last, or finish that timeline by hand.
 
-**Setting a Mac up.** `./install.sh --print --machine "Mac Studio" "<path to The BRIMM DB/BRIMM Video>"` shows what it would do and changes nothing: the drop folder, `Episodes/` and `.importing/` to make in Dropbox, the marker, this Mac's settings, `BRIMM Video Work/Backups` and `From Final Cut`, and the launch agent watching the drop folder alone. It refuses a drop folder another Mac's marker names, and BRIMM Video inside a folder the transcript tool watches. Without `--print`, and with Jason's yes, it does it.
+**Setting a Mac up.** `./install.sh --print --machine "Mac Studio" "<path to The BRIMM DB/BRIMM Video>"` shows what it would do and changes nothing: the drop folder, `Episodes/` and `.importing/` to make in Dropbox, the marker, this Mac's settings, `BRIMM Video Work/From Final Cut`, and the launch agent watching the drop folder alone. It refuses a drop folder another Mac's marker names, and BRIMM Video inside a folder the transcript tool watches. Without `--print`, and with Jason's yes, it does it.
 
 None of this has met a real recording yet: the tests run every step with stand-ins for the programs and for `cp -c`.
 

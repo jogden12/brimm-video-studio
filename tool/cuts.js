@@ -26,6 +26,7 @@ export function framesASecond(fps) {
 
 /** The facts the cut plan needs, from what ffprobe wrote: the file's length in seconds, the size of the picture as it is shown,
     its frame rate as a fraction, whether there is sound, and how many seconds after the first picture the sound starts.
+    The sound is the one the tool takes (soundStream), so that its start is that of the sound the words are heard in.
     A file with no picture has no size and no frame rate. Null when ffprobe wrote nothing that can be read, or no length. */
 export function factsOf(printed) {
   let told;
@@ -38,7 +39,7 @@ export function factsOf(printed) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   // The cover of a sound file is stored as a video of one picture. It is not a picture to cut.
   const picture = streams.find((s) => s.codec_type === "video" && !(s.disposition && s.disposition.attached_pic));
-  const sound = streams.find((s) => s.codec_type === "audio");
+  const sound = soundStream(streams);
   const duration = num(told.format && told.format.duration) || num(picture && picture.duration) || num(sound && sound.duration);
   if (!duration) return null;
   // A phone stores an upright video on its side, with a note to turn it.
@@ -54,6 +55,17 @@ export function factsOf(printed) {
 /** Sound codecs this Mac's ffmpeg has no decoder for: Apple's APAC, which an iPhone writes beside its AAC (phase 0, B3). */
 const UNREADABLE_SOUND = new Set(["apple_apac"]);
 
+/** Whether this Mac's ffmpeg can read a sound stream: ffprobe named its codec, and it is not one ffmpeg has no decoder for. */
+const readable = (s) => Boolean(s.codec_name) && !UNREADABLE_SOUND.has(s.codec_name);
+
+/** The sound stream the tool takes, of the streams ffprobe wrote: the first this Mac's ffmpeg can read, which streamsOf maps,
+    or the first sound there is when ffprobe names none it can read. Its start, its length, its channels and its rate are the
+    facts of the sound, for the words, the captions and the Final Cut file. undefined when there is no sound. */
+export function soundStream(streams) {
+  const sounds = list(streams).filter((s) => s.codec_type === "audio");
+  return sounds.find(readable) || sounds[0];
+}
+
 /** The streams of a video the tool takes, by their numbers in the file: { video, audio, unreadable }. `video` is the picture
     (a cover picture passed over), and `audio` the first sound stream this Mac's ffmpeg can read, each null when there is
     none; `unreadable` names the sounds passed over. They are given to ffmpeg as explicit maps, since ffmpeg on its own takes
@@ -67,9 +79,8 @@ export function streamsOf(printed) {
   }
   const picture = streams.find((s) => s.codec_type === "video" && !(s.disposition && s.disposition.attached_pic));
   const sounds = streams.filter((s) => s.codec_type === "audio");
-  const readable = sounds.find((s) => s.codec_name && !UNREADABLE_SOUND.has(s.codec_name));
   const number = (s) => (s && Number.isInteger(s.index) ? s.index : null);
-  return { video: number(picture), audio: number(readable), unreadable: sounds.filter((s) => UNREADABLE_SOUND.has(s.codec_name)).map((s) => s.codec_name) };
+  return { video: number(picture), audio: number(sounds.find(readable)), unreadable: sounds.filter((s) => UNREADABLE_SOUND.has(s.codec_name)).map((s) => s.codec_name) };
 }
 
 /** The colour of a video's picture as ffprobe read it: { primaries, transfer }, as "bt2020" and "arib-std-b67" for an

@@ -305,7 +305,9 @@ describe("the installer's own text", () => {
   });
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
-    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$WORK/Backups" "$WORK/From Final Cut"'), made);
+    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"'), made);
+    // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them.
+    assert.ok(!/backup/i.test(text), "the installer names no backups");
     assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
     assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"'), made);
     const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
@@ -351,7 +353,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       `  Its marker there, ${d.root}/Unedited Video/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
       `  Episodes, to make in Dropbox:  ${d.root}/Episodes`,
       `  The import status files, to make in Dropbox:  ${d.root}/Episodes/.importing`,
-      "  On this Mac:  <home>/BRIMM Video Work/Backups and <home>/BRIMM Video Work/From Final Cut"
+      "  On this Mac:  <home>/BRIMM Video Work/From Final Cut"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
     assert.ok(out.includes(`  This Mac's settings, in <home>/Library/Application Support/BRIMM Video/settings.json:\n{\n  "version": 1,\n  "machine": "Mac Studio",\n  "root": "${d.root}",\n  "checkout": "${dirname(HERE)}"\n}\n`), out);
     changedNothing(r);

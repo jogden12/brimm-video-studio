@@ -892,3 +892,24 @@ describe("the streams of a video the tool takes", () => {
     assert.deepEqual(roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges, fps: "30/1", streams: { video: 0, audio: null } }), plain);
   });
 });
+
+describe("the facts of a video's sound, when it has more than one", () => {
+  /** What ffprobe writes of a clip with its picture, and then the sounds given, in that order: each { codec, start, duration }. */
+  const sounds = (...given) => JSON.stringify({
+    streams: [{ index: 0, codec_type: "video", codec_name: "hevc", width: 1920, height: 1080, r_frame_rate: "30/1", start_time: "0.000000" },
+      ...given.map(({ codec, start = "0.000000", duration }, i) => ({ index: i + 1, codec_type: "audio", codec_name: codec, start_time: start, ...(duration ? { duration } : {}) }))],
+    format: { duration: "12.000000" }
+  });
+  it("are those of the sound the tool takes: when APAC is listed first and starts later, the words start with the AAC", () => {
+    assert.equal(factsOf(sounds({ codec: "apple_apac", start: "0.479000" }, { codec: "aac" })).soundStart, 0);
+    assert.equal(factsOf(sounds({ codec: "apple_apac" }, { codec: "aac", start: "0.250000" })).soundStart, 0.25);
+  });
+  it("take the length from the sound the tool takes when nothing else gives one", () => {
+    const told = JSON.parse(sounds({ codec: "apple_apac", duration: "9.000000" }, { codec: "aac", duration: "11.500000" }));
+    delete told.format.duration;
+    assert.equal(factsOf(JSON.stringify(told)).duration, 11.5);
+  });
+  it("still say there is sound when its only sound is APAC, so that the run says it cannot be read", () => {
+    assert.equal(factsOf(sounds({ codec: "apple_apac" })).sound, true);
+  });
+});

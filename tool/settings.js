@@ -27,9 +27,6 @@ export const importingFolder = (root) => join(episodesFolder(root), ".importing"
 export const workFolder = (home) => join(home, "BRIMM Video Work");
 /** The one folder Final Cut's Share and File > Export XML… both save into, on this Mac's own disk. */
 export const fromFinalCutFolder = (home) => join(workFolder(home), "From Final Cut");
-/** Where each episode's library keeps its backups: Final Cut's own default on the Mac Studio is ~/Movies, which is in
-    Dropbox there. */
-export const backupsFolder = (home) => join(workFolder(home), "Backups");
 /** Where an import keeps its own folder while it works and until its late check: on the same disk as Dropbox, so its files
     can be cloned in, and not in the temp folder, which macOS may clear before a late check left by a restart is made. */
 export const runsFolder = (home) => join(workFolder(home), ".runs");

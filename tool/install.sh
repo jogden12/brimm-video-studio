@@ -245,7 +245,7 @@ if [[ -n "$machine" ]]; then
   say "  Its marker there, $marker, saying:  $machine"
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
-  say "  On this Mac:  $WORK/Backups and $WORK/From Final Cut"
+  say "  On this Mac:  $WORK/From Final Cut"
   say "  Once, in Finder:  Control-click $drop and choose Make available offline, so that a video dropped there from another device is brought down at once"
   say "  This Mac's settings, in $SETTINGS_FILE:"
   settings_json
@@ -316,7 +316,7 @@ mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 # For one of the two Macs: Episodes and its status files in Dropbox, the marker by the rule for writing into Dropbox, this
 # Mac's settings, and its folders for Final Cut's work.
 if [[ -n "$machine" ]]; then
-  mkdir -p "$root/Episodes/.importing" "$WORK/Backups" "$WORK/From Final Cut"
+  mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
   "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"
 fi

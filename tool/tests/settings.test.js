@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, backupsFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain } from "../settings.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -31,10 +31,9 @@ describe("where this Mac keeps its settings, and the folders found from them", (
     assert.equal(episodesFolder(ROOT), `${ROOT}/Episodes`);
     assert.equal(importingFolder(ROOT), `${ROOT}/Episodes/.importing`);
   });
-  it("keeps its work in Final Cut in BRIMM Video Work, outside Dropbox: what Final Cut saves, the backups, the runs' own folders, and a folder, a library and the pushed copies for each episode", () => {
+  it("keeps its work in Final Cut in BRIMM Video Work, outside Dropbox: what Final Cut saves, the runs' own folders, and a folder, a library and the pushed copies for each episode", () => {
     assert.equal(workFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work");
     assert.equal(fromFinalCutFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work/From Final Cut");
-    assert.equal(backupsFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work/Backups");
     assert.equal(runsFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work/.runs");
     assert.equal(pushedFolder("/Users/sallie", "2026-10-14 Pricing talk"), "/Users/sallie/BRIMM Video Work/2026-10-14 Pricing talk/pushed");
     assert.equal(episodeWork("/Users/sallie", "2026-10-14 Pricing talk"), "/Users/sallie/BRIMM Video Work/2026-10-14 Pricing talk");

@@ -44,7 +44,7 @@ import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
-import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, soundStream, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
@@ -522,10 +522,11 @@ async function cutClips(file, clips, { plan, facts, stills, streams = null }, de
 }
 
 /** What ffprobe wrote of the file's sound, as the Final Cut file says it: how many channels it has, and its samples a second.
-    Either is left out when ffprobe does not say. */
+    The sound is the one the tool takes (soundStream): of an iPhone's clip, its AAC, and not the APAC listed beside it. Either
+    is left out when ffprobe does not say. */
 export function soundOf(printed) {
   try {
-    const sound = JSON.parse(printed).streams.find((stream) => stream.codec_type === "audio") || {};
+    const sound = soundStream(JSON.parse(printed).streams) || {};
     return { audioChannels: Number(sound.channels) || undefined, audioRate: Number(sound.sample_rate) || undefined };
   } catch (e) {
     return {};

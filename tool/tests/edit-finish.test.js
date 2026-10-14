@@ -226,7 +226,7 @@ describe("free library", () => {
     // Only the library goes: what else this Mac keeps for the episode stays.
     assert.ok(existsSync(join(episodeWork(t.home, FOLDER), "pushed", "main.v5.mac-studio.fcpxml")));
     assert.ok(existsSync(join(episodeWork(t.home, FOLDER), "finish.asked.json")));
-    // The record no longer names a library on this Mac, so the next push names the Backups step for the new one.
+    // The record no longer names a library on this Mac, so the next push makes a new one and names it there.
     assert.equal(reread(found).libraries["Mac Studio"], undefined);
     t.done();
   });
