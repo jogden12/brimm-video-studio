@@ -2,7 +2,7 @@
 // to suggest cutting. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { probeArgs, factsOf, createdOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
+import { probeArgs, factsOf, createdOf, colourOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
 import { whisperArgs, stampedText, captionCount } from "../lib.js";
 import { probed, told, TOLD, PAUSES } from "./fixtures.js";
 
@@ -849,5 +849,18 @@ describe("the notes at each join", () => {
   it("say how much was taken out at each join and why, one note for what is cut with nothing kept between", () => {
     const ranges = [{ start: 0, end: 2, keep: false, kind: "pause", why: "a long pause" }, { start: 2, end: 5, keep: true }, { start: 5, end: 6.5, keep: false, kind: "retake", why: "said again at 0:07" }, { start: 6.5, end: 7, keep: false, kind: "claude", why: "Claude: it trails off" }, { start: 7, end: 9, keep: true }];
     assert.deepEqual(joinNotes(ranges), [{ at: 0, text: "Taken out, 2.0 seconds. Pause: a long pause" }, { at: 5, text: "Taken out, 2.0 seconds. Retake: said again at 0:07. Claude: it trails off" }]);
+  });
+});
+
+describe("the colour of a video's picture", () => {
+  const printed = (stream) => JSON.stringify({ streams: [{ codec_type: "video", width: 1080, height: 1920, ...stream }, { codec_type: "audio" }], format: { duration: "12.0" } });
+  it("is the picture's colour primaries and transfer as ffprobe read them", () => {
+    assert.deepEqual(colourOf(printed({ color_primaries: "bt2020", color_transfer: "arib-std-b67" })), { primaries: "bt2020", transfer: "arib-std-b67" });
+    assert.deepEqual(colourOf(printed({ color_primaries: "bt709", color_transfer: "bt709" })), { primaries: "bt709", transfer: "bt709" });
+  });
+  it("is null when ffprobe gave none, or wrote nothing that can be read, or the file has no picture", () => {
+    assert.equal(colourOf(printed({})), null);
+    assert.equal(colourOf(JSON.stringify({ streams: [{ codec_type: "audio" }] })), null);
+    assert.equal(colourOf("{"), null);
   });
 });

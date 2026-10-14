@@ -7,10 +7,10 @@
 // asked to copy it into media/. Only where the media are, the import options and the names of the event and the project are
 // changed: nothing else in a file is touched. Carrying over a file Final Cut exported on the other Mac (its paths, bookmarks,
 // library and uids) is a later phase.
-// Phase 0 on Final Cut Pro 12.4, 2026-10-14: a relative address is read from the file's own folder, so a kept file opens as
-// it is. Still to be settled by hand: whether `copy assets` 0 is honoured whatever Final Cut's Import setting says, and
-// whether `library location` may end in a slash. The copy's library is written with no slash at its end, as the files Final
-// Cut Pro 12.4 has opened were.
+// Phase 0 on Final Cut Pro 12.4, 2026-10-14, settled: a relative address is read from the file's own folder, so a kept file
+// opens as it is (A1), and `base url` works too (A2); `copy assets` 0 is honoured even when Final Cut's Import setting says to
+// copy, and the library then holds a link to the video (A3); `library location` with no slash at its end makes the library
+// and opens the project, and is what is written here. Still open: library backups, which a push cannot set (B4).
 // Nothing here touches a disk or runs a program. It takes text and gives back text.
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";

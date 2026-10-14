@@ -94,16 +94,20 @@ Builder C (phase 2) builds on these names. Phase 1b (the architect) adds the cla
 - **The "keep the lid open" line in the panel** is for her laptop: phase 1b.
 - **The start timecode of phone files** (spec section 2) is not built: Zoom files carry none, and phase 0 settles how Final Cut reads it. The asset's `start` stays `0s`, as today.
 
-### Phase 0 facts still pending, and the fallback used for each
+### Phase 0 facts: settled on 2026-10-14, and still open
 
-| Unknown | What 1a does until phase 0 settles it |
+Phase 0 ran on the Mac Studio with Final Cut Pro 12.4 on 2026-10-14 (the spec has every finding). The follow-up to this plan, after PR #11, applies them.
+
+| Question | What phase 0 found, and what the tool does |
 |---|---|
-| A relative `src`, or `base url` | Stored timelines use a relative `src`. The copy handed to Final Cut names whole paths, so it works either way. Marked in `portable.js`. |
-| `copy assets` 0 honoured when the Import preference says to copy | The local copy sets it. If phase 0 finds it ignored, the README says to set the preference to "Leave files in place". |
-| "Replace or keep both" on a second push | The spec's fallback: each push gets its own event, named as its project. Marked in `edit.js`. |
-| `library location` with or without a slash at its end | Without, the one form opened in Final Cut Pro 12.4 so far (README, "The Final Cut file"). The draft's `withImportOptions` added a slash; Task 6 takes it off. |
-| Library backups set other than by hand | `push` names the step at an episode's first push on this Mac: File > Library Properties, Modify Settings, Backups, `~/BRIMM Video Work/Backups`. |
-| Whether a clone into Dropbox's File Provider folder is safe | Checked by hand after the deploy (deployment note). Until then the import's late check and list stand guard. |
+| A relative `src`, or `base url` | Settled (A1, A2): both work. Stored timelines keep a relative `src`; the copy handed to Final Cut names whole paths. |
+| `copy assets` 0 when the Import setting says to copy | Settled (A3): honoured; the library holds a link to the video. A stored file opened by a double-click follows the Import setting and copies, so episodes are opened through Claude. |
+| "Replace or keep both" on a second push | Settled (A4, A4c): a new project in the same event asks nothing, so every push of an episode goes into one event named for the episode folder; a name the library holds asks even with `suppress warnings`, so a push's version is above any this Mac has handed over. |
+| `library location` with or without a slash at its end | Settled: without works, and is what is written. |
+| Library backups set other than by hand | Open (B4): a push-made library backs up into `~/Movies`, which is Dropbox on the Mac Studio. Each push and open reads the library's `Settings.plist` and says to set Backups while it names no `backupLocation`. |
+| An iPhone video's colour (B3) | Settled: HDR, "9-18-9 (Rec. 2020 HLG)", with no start timecode. The video's format names the colour space ffprobe finds. |
+| Whether a clone into Dropbox's File Provider folder is safe | Open: checked by hand after the deploy (deployment note). |
+| Pushes while Final Cut is closed | Open. |
 
 ## The lead's answers and changes (2026-10-14, approving df60480)
 

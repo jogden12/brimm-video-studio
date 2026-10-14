@@ -3537,3 +3537,46 @@ describe("the end of a run from the command line", () => {
     assert.match(text, /main\(process\.argv\.slice\(2\)\)\.then\(\(code\) => finish\(code\)\);/);
   });
 });
+
+describe("the colour space of an episode's timeline", () => {
+  it("is written on the video's format for an iPhone's HDR video, as Final Cut takes it in (B3)", async () => {
+    const t = episodic({ probed: probed({ picture: { width: 1080, height: 1920, color_primaries: "bt2020", color_transfer: "arib-std-b67" }, duration: "120.000000" }) });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const xml = readFileSync(join(t.episodes, "2026-10-13 Talk (Mac Studio)", "edit", "main.v0.fcpxml"), "utf8");
+    assert.equal(tags(xml, "format")[0].colorSpace, "9-18-9 (Rec. 2020 HLG)");
+    t.done();
+  });
+  it("is left off a video that says nothing of its colour, as before", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const xml = readFileSync(join(t.episodes, "2026-10-13 Talk (Mac Studio)", "edit", "main.v0.fcpxml"), "utf8");
+    assert.equal(tags(xml, "format")[0].colorSpace, undefined);
+    t.done();
+  });
+});
+
+describe("the timeline of an HDR video, in both modes", () => {
+  const HLG = { color_primaries: "bt2020", color_transfer: "arib-std-b67" };
+  const timeline = (xml) => {
+    const id = tags(xml, "sequence")[0].format;
+    return tags(xml, "format").find((f) => f.id === id);
+  };
+  it("is Rec. 709 in an episode's main.v0, while the video's format is HLG", async () => {
+    const t = episodic({ probed: probed({ picture: { width: 1080, height: 1920, ...HLG }, duration: "120.000000" }) });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const xml = readFileSync(join(t.episodes, "2026-10-13 Talk (Mac Studio)", "edit", "main.v0.fcpxml"), "utf8");
+    assert.deepEqual([tags(xml, "format")[0].colorSpace, timeline(xml).colorSpace], ["9-18-9 (Rec. 2020 HLG)", "1-1-1 (Rec. 709)"]);
+    t.done();
+  });
+  it("is Rec. 709 in today's rough cut's Final Cut file, while the video's format is HLG", async () => {
+    const t = setup({ probed: probed({ picture: HLG }) });
+    t.video("a.mov");
+    await uneditedFolder(t.dir, t.deps);
+    const xml = t.read("2026-10-13", "a.fcpxml");
+    assert.deepEqual([tags(xml, "format")[0].colorSpace, timeline(xml).colorSpace], ["9-18-9 (Rec. 2020 HLG)", "1-1-1 (Rec. 709)"]);
+    t.done();
+  });
+});

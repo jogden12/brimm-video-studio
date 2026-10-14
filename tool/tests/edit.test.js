@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { editMain, findEpisode, contextFor, openApp } from "../edit.js";
+import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
@@ -311,7 +311,7 @@ describe("node edit.js push", () => {
     assert.ok(t.clones.includes(join(path, "edit", "main.v1.mac-studio.fcpxml")));
     assert.deepEqual(tags(kept, "media-rep").map((m) => m.src), ["../Talk.mov"]);
     assert.doesNotMatch(kept, /import-options/);
-    assert.deepEqual([tags(kept, "project")[0].name, tags(kept, "event")[0].name], ["Talk main v1 000001", "Talk main v1 000001"]);
+    assert.deepEqual([tags(kept, "project")[0].name, tags(kept, "event")[0].name], ["Talk main v1 000001", "2026-10-13 Talk (Mac Studio)"]);
     const local = join(t.home, "BRIMM Video Work", "2026-10-13 Talk (Mac Studio)", "pushed", "main.v1.mac-studio.fcpxml");
     const copy = readFileSync(local, "utf8");
     assert.deepEqual(tags(copy, "media-rep").map((m) => m.src), [fileUrl(join(path, "Talk.mov"))]);
@@ -418,16 +418,6 @@ describe("node edit.js push", () => {
     writeFileSync(recordFile(path, 2), recordText({ ...r, rev: 2, files: { ...r.files, "edit/main.v0.fcpxml": Buffer.byteLength(v0) } }));
     const out = await t.run("push", "talk");
     assert.deepEqual([out.code, out.said, t.opened], [1, ["/Users/sallie/Movies/b-roll.mov is outside the episode's folder. Copy it into its media folder first."], []]);
-    t.done();
-  });
-  it("names the backup step at the first push on this Mac, and not after", async () => {
-    const t = setup();
-    imported(t);
-    const first = await t.run("push", "talk");
-    const step = "Once, for this library: in Final Cut, choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups.";
-    assert.ok(first.said.includes(step), first.text);
-    const again = await t.run("push", "talk", "--no-hand-edits");
-    assert.ok(!again.said.includes(step), again.text);
     t.done();
   });
   it("names a video with an apostrophe, #, & and % rightly in the kept timeline, the local copy and the project", async () => {
@@ -832,5 +822,84 @@ describe("the lead's last check of PR 11, in edit.js", () => {
     const r = await t.run("bring", "--now", "2026-10-13 Talk (Mac Studio)");
     assert.deepEqual([r.code, r.said], [1, ["Another run is taking over the lock of 2026-10-13 Talk (Mac Studio); try again in a few seconds."]]);
     t.done();
+  });
+});
+
+describe("what phase 0 settled about pushing to Final Cut", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  const imported = (t, more = {}) => {
+    const v0 = fcpxml({ video: join(t.episodes, FOLDER, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
+    const made = t.episode(FOLDER, more, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
+    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
+    return made;
+  };
+  const events = (t) => t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "event")[0].name);
+  /** A library as Final Cut makes it when it opens a push, with its Settings.plist as `settings` says, read by a stand-in. */
+  const library = (t, settings) => {
+    mkdirSync(libraryFor(t.home, FOLDER), { recursive: true });
+    t.deps.readPlist = (file) => (file === join(libraryFor(t.home, FOLDER), "Settings.plist") ? settings : null);
+  };
+  const SET = `In Final Cut, select the library ${FOLDER}.fcpbundle in the sidebar, then choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups: this episode's library keeps its backups in ~/Movies, which is in Dropbox on the Mac Studio.`;
+  it("puts every push of an episode in one event, named for the episode folder (A4)", async () => {
+    const t = setup();
+    imported(t);
+    await t.run("push", "talk");
+    await t.run("push", "talk", "--no-hand-edits");
+    assert.deepEqual(events(t), [FOLDER, FOLDER]);
+    t.done();
+  });
+  it("takes a version above any this Mac has handed Final Cut: a record at v2 and a copy of v3 give v4 (A4c)", async () => {
+    const t = setup();
+    const pushes = [1, 2].map((v) => ({ v, at: "2026-10-13T10:00:00-05:00", on: "Mac Studio", file: `edit/main.v${v}.mac-studio.fcpxml`, project: `Talk main v${v} 000001` }));
+    imported(t, { main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: pushes, base: null } });
+    mkdirSync(join(t.home, "BRIMM Video Work", FOLDER, "pushed"), { recursive: true });
+    writeFileSync(join(t.home, "BRIMM Video Work", FOLDER, "pushed", "main.v3.mac-studio.fcpxml"), "<fcpxml/>");
+    const r = await t.run("push", "talk", "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name), ["Talk main v4 000001"]);
+    t.done();
+  });
+  it("says at a first push, before Final Cut has made the library, that its backups are to be set once it has (B4)", async () => {
+    const t = setup();
+    imported(t);
+    t.deps.readPlist = () => null;
+    const r = await t.run("push", "talk");
+    assert.ok(r.said.includes(`Final Cut makes this episode's library, ${FOLDER}.fcpbundle, as it opens the project. Once it has, select it in Final Cut's sidebar and set its backups: File > Library Properties, Modify Settings beside Storage Locations, Backups to BRIMM Video Work/Backups. The next push or open looks again.`), r.text);
+    t.done();
+  });
+  it("says plainly at a push and at an open, while the library keeps its backups in ~/Movies, to set them (B4)", async () => {
+    const t = setup();
+    imported(t);
+    library(t, { backupsEnabled: true });
+    const pushed = await t.run("push", "talk");
+    assert.ok(pushed.said.includes(SET), pushed.text);
+    const opened = await t.run("open", "talk");
+    assert.ok(opened.said.includes(SET), opened.text);
+    t.done();
+  });
+  it("says nothing of backups once the library names where they go, and nothing at an open before there is a library", async () => {
+    const t = setup();
+    imported(t);
+    const before = await t.run("open", "talk");
+    assert.ok(!before.text.includes("Backups"), before.text);
+    library(t, { backupLocation: "Ym9va21hcms=", backupsEnabled: true });
+    const pushed = await t.run("push", "talk");
+    const opened = await t.run("open", "talk");
+    assert.ok(!pushed.text.includes("Backups") && !opened.text.includes("Backups"), pushed.text + opened.text);
+    t.done();
+  });
+});
+
+describe("reading a library's Settings.plist", () => {
+  it("lists its keys, bookmark data and all, which plutil cannot turn into JSON, and is null with no file", { skip: process.platform !== "darwin" ? "plutil is on a Mac only" : false }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-plist-"));
+    const file = join(dir, "Settings.plist");
+    writeFileSync(file, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>backupLocation</key><data>Ym9va21hcms=</data><key>backupsEnabled</key><true/><key>libraryID</key><string>X</string></dict></plist>
+`);
+    assert.deepEqual(readPlist(file), { backupLocation: true, backupsEnabled: true, libraryID: true });
+    assert.equal(readPlist(join(dir, "none.plist")), null);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -51,6 +51,19 @@ export function factsOf(printed) {
   return { duration: ms(duration), width, height, fps, sound: Boolean(sound), soundStart: picture && sound ? ms(num(sound.start_time) - num(picture.start_time)) : 0 };
 }
 
+/** The colour of a video's picture as ffprobe read it: { primaries, transfer }, as "bt2020" and "arib-std-b67" for an
+    iPhone's HDR video, or null when ffprobe gave neither, wrote nothing that can be read, or the file has no picture. It is
+    not one of the facts a cut plan keeps, so that a plan is written as it was. */
+export function colourOf(printed) {
+  try {
+    const picture = list(JSON.parse(printed).streams).find((s) => s.codec_type === "video" && !(s.disposition && s.disposition.attached_pic));
+    if (!picture || (!picture.color_primaries && !picture.color_transfer)) return null;
+    return { primaries: picture.color_primaries || "", transfer: picture.color_transfer || "" };
+  } catch (e) {
+    return null;
+  }
+}
+
 /** When the file says it was recorded: the creation time ffprobe read from its format, as ffprobe gave it, or null when it
     gave none or wrote nothing that can be read. An episode's record takes its day from it. It is not one of the facts above,
     which a cut plan keeps, so that a plan is written as it was. */

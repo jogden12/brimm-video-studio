@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fcpxml, checkFcpxml, fileUrl, relativeUrl, attribute, reelPosition } from "../fcpxml.js";
+import { fcpxml, checkFcpxml, fileUrl, relativeUrl, attribute, reelPosition, colorSpaceOf } from "../fcpxml.js";
 
 const VIDEO = "/Users/sallie/Movies/Episode 12.mp4";
 /** What ffprobe says of a video: one of 60 seconds at 30 frames a second, and one of 3,600 frames at 29.97. */
@@ -587,6 +587,19 @@ describe("Final Cut Pro's own definition of the format", () => {
   const cannot = !existsSync(fileURLToPath(DTD)) ? "Final Cut Pro is not on this machine, so its definition of the format is not here to check a file against"
     : spawnSync("xmllint", ["--version"]).error ? "xmllint is not on this machine, so a file cannot be checked against Final Cut Pro's definition of the format"
       : false;
+  it("passes a file whose video's format names its colour space, Rec. 709 or Rec. 2020 HLG", { skip: cannot }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-fcpxml-"));
+    try {
+      for (const colorSpace of ["1-1-1 (Rec. 709)", "9-18-9 (Rec. 2020 HLG)"]) {
+        const file = join(dir, "colour.fcpxml");
+        writeFileSync(file, fcpxml({ ...RICH, facts: { ...RICH.facts, colorSpace } }));
+        const checked = spawnSync("xmllint", ["--noout", "--dtdvalid", DTD, file], { encoding: "utf8" });
+        assert.equal(checked.status, 0, checked.stderr);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("passes a file with several pieces, captions, notes, awkward characters and a path with spaces in it", { skip: cannot }, () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-fcpxml-"));
     try {
@@ -640,6 +653,45 @@ describe("Final Cut Pro's own definition of the format", () => {
       assert.match(wrong.stderr, /fcpxml content does not follow the DTD/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the colour space of the video's format", () => {
+  it("is Rec. 709 for bt709, Rec. 2020 HLG for bt2020 with arib-std-b67, and none for anything else (B3)", () => {
+    assert.equal(colorSpaceOf({ primaries: "bt709", transfer: "bt709" }), "1-1-1 (Rec. 709)");
+    assert.equal(colorSpaceOf({ primaries: "bt2020", transfer: "arib-std-b67" }), "9-18-9 (Rec. 2020 HLG)");
+    for (const other of [{ primaries: "bt2020", transfer: "smpte2084" }, { primaries: "smpte170m", transfer: "bt709" }, null]) assert.equal(colorSpaceOf(other), "", JSON.stringify(other));
+  });
+  it("is written on the video's format when it is given, and the format is as before when it is not", () => {
+    const hdr = make({ facts: { ...AT_30, colorSpace: "9-18-9 (Rec. 2020 HLG)" } });
+    assert.equal(tags(hdr, "format")[0].colorSpace, "9-18-9 (Rec. 2020 HLG)");
+    assert.equal(make(), make({ facts: { ...AT_30, colorSpace: "" } }));
+    assert.equal(tags(make(), "format")[0].colorSpace, undefined);
+  });
+});
+
+describe("the timeline's format of an HDR video", () => {
+  /** The format the project's timeline uses. */
+  const timeline = (xml) => {
+    const id = tags(xml, "sequence")[0].format;
+    return tags(xml, "format").find((f) => f.id === id);
+  };
+  it("is a Rec. 709 format of its own, the video's size and rate, while the video's format keeps its HLG colour space, as Final Cut writes it", () => {
+    const xml = make({ facts: { ...AT_30, colorSpace: "9-18-9 (Rec. 2020 HLG)" } });
+    const asset = tags(xml, "asset")[0];
+    const own = tags(xml, "format").find((f) => f.id === asset.format);
+    assert.equal(own.colorSpace, "9-18-9 (Rec. 2020 HLG)");
+    const seq = timeline(xml);
+    assert.notEqual(seq.id, own.id);
+    assert.deepEqual([seq.colorSpace, seq.width, seq.height, seq.frameDuration], ["1-1-1 (Rec. 709)", own.width, own.height, own.frameDuration]);
+    assert.deepEqual(checkFcpxml(xml, AT_30), []);
+  });
+  it("is the video's own one format for a Rec. 709 video, and for one that names no colour space, as before", () => {
+    for (const colorSpace of ["1-1-1 (Rec. 709)", ""]) {
+      const xml = make({ facts: { ...AT_30, colorSpace } });
+      assert.equal(tags(xml, "format").length, 1, colorSpace);
+      assert.equal(timeline(xml).id, tags(xml, "asset")[0].format);
     }
   });
 });

@@ -49,3 +49,8 @@ export function timelineFile({ part, v, machine }) {
   const kind = part === "main" ? "main" : `reel-${part.reel}`;
   return v === 0 ? `edit/${kind}.v0.fcpxml` : `edit/${kind}.v${v}.${machineSlug(machine)}.fcpxml`;
 }
+
+/** The Final Cut event every push of an episode puts its project in: the episode folder's name, for the main video and the
+    Reels alike, never changed. Phase 0 on Final Cut Pro 12.4 (A4): a new project pushed into the same library and event
+    asks nothing, and the video stays linked once. */
+export const eventName = (folder) => String(folder);

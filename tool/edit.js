@@ -28,7 +28,7 @@ import { progressFolder } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { isWhole, readThrough, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions } from "./portable.js";
-import { projectName, timelineFile } from "./names.js";
+import { eventName, projectName, timelineFile } from "./names.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey } from "./filing.js";
 import { isMedia } from "./lib.js";
@@ -70,6 +70,7 @@ export function contextFor(deps = {}) {
     openApp: deps.openApp || openApp,
     kickstart: deps.kickstart || kickstart,
     agentRunning: deps.agentRunning || agentRunning,
+    readPlist: deps.readPlist || readPlist,
     deps
   };
 }
@@ -344,6 +345,7 @@ export async function open(ctx, rest) {
   const pushed = record.main.pushed;
   say(pushed.length ? `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}.` : "Not shown in Final Cut yet.");
   offlineStep(ctx, found);
+  backupsCheck(ctx, found);
   say('Say "show it in Final Cut" to see the main video there.');
   return 0;
 }
@@ -358,6 +360,32 @@ export function openApp(app, file, run = spawnSync) {
 
 /** The launch agent that imports this Mac's drop folder. */
 const AGENT = "com.thebrimm.unedited";
+
+/** The keys a property list holds, as { key: true }, or null when it is not there or cannot be read. It is read as XML, since
+    a library's Settings.plist holds bookmark data that JSON cannot carry. Nothing here writes it. */
+export function readPlist(file) {
+  if (!existsSync(file)) return null;
+  const ran = spawnSync("/usr/bin/plutil", ["-convert", "xml1", "-o", "-", file], { encoding: "utf8" });
+  if (ran.status !== 0) return null;
+  return Object.fromEntries([...ran.stdout.matchAll(/<key>([^<]*)<\/key>/g)].map((m) => [m[1], true]));
+}
+
+/** Say how to set an episode's library's backups while they go to Final Cut's own place, ~/Movies, which is in Dropbox on the
+    Mac Studio: Final Cut sets that for a library a push makes (phase 0, B4), and no import option sets another. The library's
+    Settings.plist names `backupLocation` once a person has set it, and is only read here, never written. Final Cut makes
+    the library as it opens a push, after the push has returned, so at a push it may not be there yet: then it says to set
+    them once it is. At an open before any push, there is nothing to say. */
+function backupsCheck(ctx, found, { pushed = false } = {}) {
+  const library = libraryFor(ctx.home, found.name);
+  const settings = existsSync(library) ? ctx.readPlist(join(library, "Settings.plist")) : null;
+  if (settings && settings.backupLocation) return;
+  if (!existsSync(library) || !settings) {
+    if (pushed) ctx.say(`Final Cut makes this episode's library, ${found.name}.fcpbundle, as it opens the project. Once it has, select it in Final Cut's sidebar and set its backups: File > Library Properties, Modify Settings beside Storage Locations, Backups to BRIMM Video Work/Backups. The next push or open looks again.`);
+    return;
+  }
+  // Library Properties shows the library selected in Final Cut's sidebar, so the library is named.
+  ctx.say(`In Final Cut, select the library ${found.name}.fcpbundle in the sidebar, then choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups: this episode's library keeps its backups in ~/Movies, which is in Dropbox on the Mac Studio.`);
+}
 
 /** Whether the launch agent's run is at work now: launchctl names its process while it runs. */
 function agentRunning() {
@@ -383,8 +411,9 @@ const ruleOpts = (ctx) => ({ ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}
     - the guard: a part shown before is shown again only when the person says it was not changed in Final Cut since
       (`noHandEdits`). A yes (`handEdits`) stops it: until brimm-video can read Final Cut's exports (phase 5), it cannot build
       on hand edits, and a new version would leave them behind;
-    - the new version's project is named by projectName, and is in an event of its own of that name, since phase 0 has not
-      yet settled whether Final Cut asks "replace or keep both" of a second push;
+    - the new version's project is named by projectName, in the episode's one event (eventName). Phase 0 (A4): a new project
+      in that event asks nothing; a project of a name the library holds asks to replace it even with suppress warnings, and
+      Keep Both renames it, so a name is never handed over twice (the version, below);
     - the timeline is kept in the episode's edit/ by the rule, the record lists the push and the file, and only then is a copy
       written on this Mac's own disk, with this Mac's paths, its library for the episode, copy assets 0 and suppress warnings
       1, and handed to Final Cut.
@@ -433,7 +462,7 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
   const project = projectName({ name: record.name.text, part, v, id: record.id });
   const file = timelineFile({ part, v, machine: ctx.machine });
   const kept = join(found.folder, file);
-  const stored = retitle(xml, { event: project, project });
+  const stored = retitle(xml, { event: eventName(found.name), project });
   // The copy handed to Final Cut names this Mac's paths: each medium must be in the episode's folder, and here, whole.
   const local = localMedia(stored, { from: kept, episode: found.folder });
   if (local.outside.length) {
@@ -453,7 +482,6 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     // A timeline of this Mac's of this version that the record does not list was left by a push whose record was never
     // written: it is no one's, and a new one is put in its place. One the record lists is never written over.
     const entry = textWriter({ work, ...opts })(kept, stored, { replace: !(file in record.files) && existsSync(kept) });
-    const first = !(record.libraries && record.libraries[ctx.machine]);
     const push = { v, at: localStamp(new Date(ctx.now())), on: ctx.machine, file, project, ...(last ? { answer: `no hand edits since v${last}` } : {}) };
     const next = part === "main"
       ? { ...record, main: { ...record.main, pushed: [...pushed, push] } }
@@ -471,7 +499,7 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     ctx.openApp("Final Cut Pro", copy);
     say(`Shown in Final Cut as "${project}", in the library ${found.name}.fcpbundle in BRIMM Video Work.`);
     offlineStep(ctx, found);
-    if (first) say("Once, for this library: in Final Cut, choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups.");
+    backupsCheck(ctx, found, { pushed: true });
     return 0;
   } catch (e) {
     say(`It could not be shown in Final Cut: ${String(e.message).replace(/\.$/, "")}.`);

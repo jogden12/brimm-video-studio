@@ -2,7 +2,7 @@
 // short form of a Mac's name, and the names a push gives its project and its timeline. Nothing here touches a disk.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fileSafe, episodeFolderName, machineSlug, shortId, projectName, timelineFile } from "../names.js";
+import { fileSafe, episodeFolderName, machineSlug, shortId, projectName, timelineFile, eventName } from "../names.js";
 
 describe("the file-safe form of a name", () => {
   it("has a dash for each character Dropbox calls incompatible", () => {
@@ -65,5 +65,11 @@ describe("the short form of a Mac's name", () => {
   });
   it("has no dash at either end", () => {
     assert.equal(machineSlug(" -Studio 2- "), "studio-2");
+  });
+});
+
+describe("the event a push puts its project in", () => {
+  it("is the episode folder's name, for every push of the episode, main or Reel", () => {
+    assert.equal(eventName("2026-10-13 Talk (Mac Studio)"), "2026-10-13 Talk (Mac Studio)");
   });
 });

@@ -110,9 +110,22 @@ export function reelPosition(facts, crop, frame) {
   return `${Math.round(held * 10000) / 10000 || 0} 0`;
 }
 
+/** Final Cut's name for the colour space of an ordinary video, and of every timeline brimm-video writes. */
+const REC_709 = "1-1-1 (Rec. 709)";
+
+/** The colour space Final Cut writes for a video's colour as ffprobe reads it ({ primaries, transfer }, cuts.js colourOf):
+    "1-1-1 (Rec. 709)" for bt709, and "9-18-9 (Rec. 2020 HLG)" for bt2020 with the HLG transfer, arib-std-b67, as an iPhone's
+    HDR video came into Final Cut Pro 12.4 in phase 0 (B3). "" for anything else, and the format then names none, as before. */
+export function colorSpaceOf(colour) {
+  if (!colour) return "";
+  if (colour.primaries === "bt709") return REC_709;
+  if (colour.primaries === "bt2020" && colour.transfer === "arib-std-b67") return "9-18-9 (Rec. 2020 HLG)";
+  return "";
+}
+
 /** The whole project file, as text.
     `video` is the path of the video file, and `facts` is what ffprobe says of it: { duration, frameRate, width, height, hasAudio,
-    audioRate, audioChannels }. `ranges` are the pieces to keep, in order, as [{ start, end, name }] in seconds of the video.
+    audioRate, audioChannels, colorSpace }, where `colorSpace`, when it is given, goes on the video's format (colorSpaceOf). `ranges` are the pieces to keep, in order, as [{ start, end, name }] in seconds of the video.
     `captions` are [{ start, end, text }] and `markers`, the notes for the editor, are [{ at, text }]. Both are in seconds of the
     video too, and not of the cut. It throws when the video's frame rate or its length cannot be read, when a time of a piece, a
     caption or a note cannot be read, and when a piece starts before the one before it ends.
@@ -131,6 +144,8 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
   if (frame && !(Number.isInteger(frame.width) && frame.width > 0 && Number.isInteger(frame.height) && frame.height > 0)) throw new Error(`The frame of the project must be given in whole pixels: ${frame.width} by ${frame.height}.`);
   const rate = rateOf(facts.frameRate);
   const time = (count) => timeOf(count, rate);
+  // A video whose colour space is not Rec. 709, as an iPhone's HLG video, gets a timeline format of its own.
+  const hdr = Boolean(facts.colorSpace) && facts.colorSpace !== REC_709;
   /** A time from outside as a count of frames. One that is not a number, or is not there, is refused. Let through, it would take
       a piece of the video or a caption out of the file without a word, or put a note on a frame nobody meant. */
   const frames = (seconds, what) => {
@@ -207,17 +222,20 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
   const file = tag("fcpxml", { version: "1.10" }, [
     ...(library ? [tag("import-options", {}, [tag("option", { key: "library location", value: libraryUrl(library) })])] : []),
     tag("resources", {}, [
-      tag("format", { id: "r1", name: size && speed ? `FFVideoFormat${size}${speed}` : undefined, frameDuration: time(1), width: facts.width, height: facts.height }),
+      tag("format", { id: "r1", name: size && speed ? `FFVideoFormat${size}${speed}` : undefined, frameDuration: time(1), width: facts.width, height: facts.height, colorSpace: facts.colorSpace || undefined }),
       tag("asset", { id: "r2", name, start: "0s", duration: time(total), hasVideo: 1, format: "r1", videoSources: 1, ...sound }, [
         tag("media-rep", { kind: "original-media", src: src || fileUrl(video) })
       ]),
       // An upright project's timeline has a format of its own, written as Final Cut 12.4 writes the 1080x1920 format of a
       // project made by hand (phase 0): no name, and its colour space.
-      ...(frame ? [tag("format", { id: "r3", frameDuration: time(1), width: frame.width, height: frame.height, colorSpace: "1-1-1 (Rec. 709)" })] : [])
+      ...(frame ? [tag("format", { id: "r3", frameDuration: time(1), width: frame.width, height: frame.height, colorSpace: "1-1-1 (Rec. 709)" })] : []),
+      // An HDR video's format keeps its own colour space, and the timeline gets a Rec. 709 format of its own, the video's size
+      // and rate, as Final Cut writes the project of an iPhone's HLG clip (phase 0, B3): never an HDR timeline.
+      ...(!frame && hdr ? [tag("format", { id: "r3", frameDuration: time(1), width: facts.width, height: facts.height, colorSpace: REC_709 })] : [])
     ]),
     tag("event", { name: event || "Rough cuts" }, [
       tag("project", { name: project || `${name} rough cut` }, [
-        tag("sequence", { format: frame ? "r3" : "r1", duration: time(length), tcStart: "0s", tcFormat: "NDF", ...(facts.hasAudio ? { audioLayout: "stereo", audioRate: "48k" } : {}) }, [
+        tag("sequence", { format: frame || hdr ? "r3" : "r1", duration: time(length), tcStart: "0s", tcFormat: "NDF", ...(facts.hasAudio ? { audioLayout: "stereo", audioRate: "48k" } : {}) }, [
           tag("spine", {}, clips)
         ])
       ])
