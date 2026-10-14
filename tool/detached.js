@@ -4,7 +4,7 @@
 // awake while it runs. When it ends it leaves a result file, which `status` reads: what it made, what failed, and what to ask
 // next. Everything here is on this Mac's own disk, in BRIMM Video Work, and never in Dropbox.
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { episodeWork } from "./settings.js";
@@ -43,10 +43,64 @@ export function runningCommand(home, folder, alive = isRunning) {
   return held && alive(held.pid) ? held.command : "";
 }
 
-/** Write a file whole on this Mac's own disk: under another name, then renamed, which is safe there. */
+/** Write a file whole on this Mac's own disk: under a name of this run's own, then renamed, which is safe there. */
 function writeWhole(file, text) {
-  writeFileSync(`${file}.writing`, text);
-  renameSync(`${file}.writing`, file);
+  const writing = `${file}.${process.pid}.writing`;
+  writeFileSync(writing, text);
+  renameSync(writing, file);
+}
+
+/** Read a lock file: its holder, or null. */
+function heldIn(file) {
+  try {
+    const held = JSON.parse(readFileSync(file, "utf8"));
+    return held && Number.isInteger(held.pid) ? held : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Take the episode's lock for this run: { taken: true }, or { running } naming the command of the live run that holds it.
+    The lock is taken by a hard link of a file of this run's own to the lock's name, which fails when the lock is there:
+    one run alone can take it. A lock whose run is not running is moved aside by a rename, which one run alone can make,
+    and only then taken; when what was moved aside turns out to be the lock of a live run, which took it meanwhile, it is put
+    back. */
+function takeEpisodeLock(lock, command, alive) {
+  const mine = `${lock}.${process.pid}`;
+  writeFileSync(mine, JSON.stringify({ pid: process.pid, command }));
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        linkSync(mine, lock);
+        return { taken: true };
+      } catch (e) {
+        if (e.code !== "EEXIST") throw e;
+      }
+      const held = heldIn(lock);
+      if (held && alive(held.pid)) return { running: held.command };
+      const aside = `${lock}.stale.${process.pid}`;
+      try {
+        renameSync(lock, aside);
+      } catch (e) {
+        continue;
+      }
+      const was = heldIn(aside);
+      if (was && alive(was.pid)) {
+        try {
+          linkSync(aside, lock);
+        } catch (e) {
+          // Yet another run holds it now: it is the one at work.
+        }
+        rmSync(aside, { force: true });
+        return { running: was.command };
+      }
+      rmSync(aside, { force: true });
+    }
+    const held = heldIn(lock);
+    return { running: held ? held.command : "another run" };
+  } finally {
+    rmSync(mine, { force: true });
+  }
 }
 
 /** Run `work` as the detached run of `command` for the episode `folder`: it takes the episode's lock (one left by a run that
@@ -57,17 +111,8 @@ function writeWhole(file, text) {
 export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now }, work) {
   const lock = lockOf(home, folder);
   mkdirSync(episodeWork(home, folder), { recursive: true });
-  for (let attempt = 0; ; attempt++) {
-    try {
-      writeFileSync(lock, JSON.stringify({ pid: process.pid, command }), { flag: "wx" });
-      break;
-    } catch (e) {
-      const held = holder(home, folder);
-      if (held && alive(held.pid)) return { running: held.command };
-      if (attempt > 0) return { running: held ? held.command : "another run" };
-      rmSync(lock, { force: true });
-    }
-  }
+  const took = takeEpisodeLock(lock, command, alive);
+  if (!took.taken) return { running: took.running };
   const started = now();
   let done;
   try {

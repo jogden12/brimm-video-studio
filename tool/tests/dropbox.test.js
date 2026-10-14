@@ -5,7 +5,7 @@
 // own /bin/cp -c, in a folder made for it. Nothing here touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { LATE_CHECK_MS, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk } from "../dropbox.js";
@@ -267,6 +267,48 @@ describe("the clone this Mac makes", () => {
     assert.deepEqual([readFileSync(to, "utf8"), statSync(to).ino === was, t.logs], ["a longer video", false, []]);
     assert.throws(() => cloneFile(join(t.work, "gone.mp4"), join(t.dest, "gone.mp4")), { message: /No such file or directory/ });
     assert.equal(existsSync(join(t.dest, "gone.mp4")), false);
+    t.done();
+  });
+});
+
+describe("what the lead's review of PR 11 found in the rule", () => {
+  /** The free space on the disk a folder is on, in bytes. */
+  const free = (folder) => {
+    const disk = statfsSync(folder);
+    return Number(disk.bavail) * Number(disk.bsize);
+  };
+  it("9. makes a clone, which takes no space, where a byte copy would take the file's size again", { skip: notAMac }, () => {
+    const t = setup();
+    const size = 128 * 2 ** 20;
+    const from = join(t.work, "big.bin");
+    writeFileSync(from, Buffer.alloc(size, 7));
+    const before = free(t.dest);
+    cloneIn(from, join(t.dest, "cloned.bin"));
+    const cloned = before - free(t.dest);
+    const again = free(t.dest);
+    copyFileSync(from, join(t.dest, "copied.bin"));
+    const copied = again - free(t.dest);
+    assert.ok(cloned < size / 2, `the clone took ${cloned} bytes`);
+    assert.ok(copied > size / 2, `the byte copy took only ${copied} bytes, so this test cannot tell the two apart`);
+    t.done();
+  });
+  it("10. tells two disks apart, by the device each is on", () => {
+    const t = setup();
+    const from = t.made("talk.mp4", "a video");
+    assert.equal(onSameDisk(from, t.dest, (path) => ({ dev: path === from ? 1 : 2 })), false);
+    if (process.platform === "darwin") assert.equal(onSameDisk(from, "/dev"), false);
+    t.done();
+  });
+  it("16. puts a file back when Dropbox took its folder away too, and says in plain words when a folder is not there", () => {
+    const t = setup();
+    const from = t.made("0001.json", "{}\n");
+    const to = join(t.dest, "record", "0001.json");
+    mkdirSync(dirname(to));
+    cloneIn(from, to, t.opts);
+    rmSync(dirname(to), { recursive: true });
+    assert.deepEqual(lateCheck([{ from, to, bytes: 3 }], t.opts), []);
+    assert.equal(readFileSync(to, "utf8"), "{}\n");
+    assert.throws(() => cloneIn(from, join(t.dest, "gone", "0001.json"), t.opts), { message: `0001.json could not be put into ${join(t.dest, "gone")}: the folder is not there. Nothing was copied.` });
     t.done();
   });
 });

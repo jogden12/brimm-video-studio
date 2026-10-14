@@ -36,7 +36,7 @@ export function cloneFile(from, to) {
 }
 
 /** Whether a file and a folder are on one disk, where a clone can be made. */
-export const onSameDisk = (from, folder) => statSync(from).dev === statSync(folder).dev;
+export const onSameDisk = (from, folder, stat = statSync) => stat(from).dev === stat(folder).dev;
 
 /** What is wrong with the file at `to`, which should hold `bytes` bytes: "" when nothing is. */
 function wrong(to, bytes) {
@@ -54,6 +54,7 @@ export function cloneIn(from, to, { clone = cloneFile, sameDisk = onSameDisk, lo
   const folder = dirname(to);
   const name = basename(to);
   if (existsSync(to)) throw new Error(`${name} is in ${folder} already, and a file there is never written over.`);
+  if (!existsSync(folder)) throw new Error(`${name} could not be put into ${folder}: the folder is not there. Nothing was copied.`);
   if (!sameDisk(from, folder)) throw new Error(`${name} could not be put into ${folder}: it is on another disk than the run's own folder, and a clone can only be made on one disk. Nothing was copied.`);
   const bytes = statSync(from).size;
   let why = "";
@@ -97,6 +98,9 @@ export function lateCheck(entries, opts = {}) {
     }
     log(`${basename(to)} is not whole in ${dirname(to)} at the late check (${why}), so it is copied in again from its work copy.`);
     try {
+      // Dropbox may have taken the file's folder away with it, as edit/ or record/: it is made again. Making a folder is not
+      // writing into a file.
+      mkdirSync(dirname(to), { recursive: true });
       replaceIn(from, to, opts);
     } catch (e) {
       problems.push(e.message);

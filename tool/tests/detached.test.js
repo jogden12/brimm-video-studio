@@ -77,3 +77,33 @@ describe("a command run detached", () => {
     t.done();
   });
 });
+
+describe("what the lead's review of PR 11 found in detached runs", () => {
+  it("23. lets one run alone take over a dead run's lock, when two find it at once", async () => {
+    const t = setup();
+    mkdirSync(join(t.home, "BRIMM Video Work", FOLDER), { recursive: true });
+    writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "finish" }));
+    let other = null;
+    let release;
+    const holding = new Promise((done) => (release = done));
+    // While this run looks at the dead run's lock, another run takes it over.
+    const alive = (pid) => {
+      if (pid === 4242) {
+        if (!other) other = runDetached({ ...t.opts, command: "bring", alive: (p) => p !== 4242 }, async () => { await holding; return { ok: true, made: [], failed: [], next: "" }; });
+        return false;
+      }
+      return pid === process.pid;
+    };
+    let ran = false;
+    const mine = await runDetached({ ...t.opts, command: "finish", alive }, async () => {
+      ran = true;
+      return { ok: true, made: [], failed: [], next: "" };
+    });
+    assert.deepEqual([mine, ran, runningCommand(t.home, FOLDER, (p) => p === process.pid)], [{ running: "bring" }, false, "bring"]);
+    release();
+    assert.equal((await other).ok, true);
+    assert.equal(existsSync(lockOf(t.home, FOLDER)), false);
+    assert.deepEqual(readdirSync(join(t.home, "BRIMM Video Work", FOLDER)), ["bring.result.json"]);
+    t.done();
+  });
+});
