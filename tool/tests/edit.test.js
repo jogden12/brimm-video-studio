@@ -442,6 +442,28 @@ describe("node edit.js push", () => {
     assert.equal(tags(copy, "project")[0].name, "Sallie's talk #1 &amp; 100% main v1 000001");
     t.done();
   });
+  it("never hands Final Cut a project name twice, even after Final Cut could not be asked to open one", async () => {
+    // Phase 0, 2026-10-14: Final Cut 12.4 asks before it replaces a project of the same name, and Keep Both renames the new
+    // one "<name> 1", whose Share then no longer has the name the push recorded. So each push's version is used up when its
+    // record is written, before Final Cut is asked.
+    const t = setup();
+    imported(t);
+    t.deps.openApp = () => {
+      throw new Error("Final Cut Pro could not be opened");
+    };
+    const failed = await t.run("push", "talk");
+    assert.equal(failed.code, 1);
+    t.deps.openApp = (app, file) => t.opened.push([app, file]);
+    const second = await t.run("push", "talk", "--no-hand-edits");
+    assert.equal(second.code, 0, second.text);
+    const third = await t.run("push", "talk", "--no-hand-edits");
+    assert.equal(third.code, 0, third.text);
+    const projects = record(t).main.pushed.map((p) => p.project);
+    assert.deepEqual(projects, ["Talk main v1 000001", "Talk main v2 000001", "Talk main v3 000001"]);
+    const handed = t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name);
+    assert.deepEqual(handed, ["Talk main v2 000001", "Talk main v3 000001"]);
+    t.done();
+  });
   it("says Reels are pushed from a later version", async () => {
     const t = setup();
     imported(t);
