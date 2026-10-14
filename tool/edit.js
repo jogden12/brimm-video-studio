@@ -30,7 +30,7 @@ import { isWhole, readThrough, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions } from "./portable.js";
 import { projectName, timelineFile } from "./names.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding } from "./filing.js";
+import { heldBy, commitOf, episodeHolding, readSeen, seenKey } from "./filing.js";
 import { isMedia } from "./lib.js";
 import { isRunning, lastLine } from "./run.js";
 
@@ -215,10 +215,11 @@ export async function episodes(ctx) {
       const found = ctx.stat(join(drops, mac, video));
       if (!found) continue;
       const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
-      // How long it has waited is from when the file was made on this disk, as Dropbox's download or a copy makes it: its ctime
-      // changes with a tag or a preview. When the disk keeps no such time, its own date. A known limit: macOS moves a file's
-      // birth time back when its date is set earlier, so a copy that keeps the file's own date shows that date's age.
-      const came = found.birthtimeMs > 0 ? found.birthtimeMs : found.mtimeMs;
+      // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
+      // and macOS moves its birth time back with them. When this Mac has not seen it, as in the other Mac's drop folder, from
+      // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
+      const noted = readSeen(ctx.home)[seenKey(video, found)];
+      const came = noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs;
       waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
     }
   }
@@ -532,6 +533,10 @@ export async function bring(ctx, rest) {
     for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
     return { ok: !failed.length, made, failed, next: failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".` };
   });
+  if (result.taking) {
+    ctx.say(`Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+    return 1;
+  }
   if (result.running) {
     ctx.say(`${result.running} is running for ${found.name} already.`);
     return 1;

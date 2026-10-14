@@ -10,10 +10,11 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
+import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
-import { dropFolder, episodesFolder, pendingFolder, runsFolder } from "./settings.js";
+import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 
@@ -435,6 +436,7 @@ export async function importEpisodes(dir, deps, importOne) {
   // Whether the last look imported anything, which then has its late check to wait for.
   let progressed = false;
   const importWaiting = async (first) => {
+    noteSeen(episode.home, dir, clock());
     for (const [id, name] of failed) {
       const still = readStatuses(episode.root).some(({ status }) => status && status.video === name && status.machine === episode.machine && status.failed);
       if (!still) {
@@ -480,10 +482,15 @@ export async function importEpisodes(dir, deps, importOne) {
         cancel(keep);
       }
       if (result.changed) changed = true;
-      // An import that filed nothing failed. One that filed its episode with a piece missing is filed, and is not looked at
-      // again.
-      if (!result.ok && !result.arriving && !result.filed) failed.set(id, name);
-      if (!result.arriving) progressed = true;
+      // An import that filed nothing failed. It is looked at again in this run only once its failed status has been seen and
+      // then taken away, as retry does: when that status could not be written, never. One that filed its episode, even with a
+      // piece missing, is filed: it has a late check to wait for, and is not looked at again.
+      if (!result.ok && !result.arriving && !result.filed) {
+        const said = readStatuses(episode.root).some(({ status }) => status && status.video === name && status.machine === episode.machine && status.failed);
+        if (said) failed.set(id, name);
+        else log(`${name}: its import failed, and its status, which would say so, could not be written, so it is not tried again in this run.`);
+      }
+      if (result.filed) progressed = true;
       // A video still arriving is looked at again.
       if (result.arriving) seen.delete(id);
       results.push(result);
@@ -546,4 +553,54 @@ export function clearRuns(home, alive = isRunning) {
     gone.push(name);
   }
   return gone;
+}
+
+/** The key a video is known by in seen.json: its name, inode and size. */
+export const seenKey = (name, id) => `${name}:${id.ino}:${id.size}`;
+
+/** When this Mac first saw each video in its drop folder, by seenKey: { path, at }. {} when nothing is noted, or the file
+    cannot be read. */
+export function readSeen(home) {
+  try {
+    const seen = JSON.parse(readFileSync(seenFile(home), "utf8"));
+    return seen && typeof seen === "object" && !Array.isArray(seen) ? seen : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/** Note when this Mac first saw each video in the drop folder `dir`, at `now`, and forget each video noted that is no longer
+    there as it was. Written whole on this Mac's own disk, under another name and then renamed. A note that cannot be written
+    costs only how long a video is said to have waited. */
+export function noteSeen(home, dir, now) {
+  const seen = readSeen(home);
+  let changed = false;
+  for (const [key, entry] of Object.entries(seen)) {
+    const [name, ino, size] = key.split(/:(?=\d+:\d+$)|:(?=\d+$)/);
+    if (!entry || !sameFile(entry.path, { ino: Number(ino), size: Number(size) }) || basename(entry.path) !== name) {
+      delete seen[key];
+      changed = true;
+    }
+  }
+  let names = [];
+  try {
+    names = readdirSync(dir).filter(isMedia);
+  } catch (e) {
+    // The folder cannot be read now, and nothing new is noted.
+  }
+  for (const name of names) {
+    const id = fileId(join(dir, name));
+    if (!id || seen[seenKey(name, id)]) continue;
+    seen[seenKey(name, id)] = { path: join(dir, name), at: now };
+    changed = true;
+  }
+  if (!changed) return;
+  const file = seenFile(home);
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(`${file}.writing`, JSON.stringify(seen, null, 2) + "\n");
+    renameSync(`${file}.writing`, file);
+  } catch (e) {
+    rmSync(`${file}.writing`, { force: true });
+  }
 }

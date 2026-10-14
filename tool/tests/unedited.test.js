@@ -3,10 +3,12 @@
 // recording in fixtures.js. None of the real programs is run here, and neither is Final Cut Pro. Claude is never asked
 // anything from here: what it would say is written down in each test.
 import { describe, it } from "node:test";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
@@ -3397,13 +3399,21 @@ describe("a failed import taken again by a run that is still at work (retry with
     const t = episodic();
     t.put("Other.mov", "other");
     const ok = failing(t, "Other.mov");
+    // As retry would, once the run has seen the failed status: it is taken away at the run's next look at its clock, which is
+    // its last look in the drop folder.
+    let failedNow = false;
     t.deps.notify = (text) => {
       t.notes.push(text);
-      if (text.startsWith("No transcript could be made from Other.mov")) {
-        // As retry would: the failed status, written just before this banner, is taken away.
+      if (text.startsWith("No transcript could be made from Other.mov")) failedNow = true;
+    };
+    const clock = t.deps.clock;
+    t.deps.clock = () => {
+      if (failedNow) {
+        failedNow = false;
         ok();
         lift(t, "Other.mov");
       }
+      return clock();
     };
     await uneditedFolder(t.drop, t.deps);
     assert.deepEqual(t.folders(), ["2026-10-13 Other (Mac Studio)"]);
@@ -3446,5 +3456,69 @@ describe("the lead's re-check of PR 11", () => {
     const results = await uneditedFolder(t.drop, t.deps);
     assert.deepEqual(results.map((r) => [r.name, r.ok, Boolean(r.held)]), [["Talk.mov", false, false]]);
     t.done();
+  });
+});
+
+describe("the lead's last check of PR 11", () => {
+  /** How many times the run asked ffprobe about `video`: once for each try at importing it. */
+  const tries = (t, video) => t.calls.filter((c) => c.cmd === "FFPROBE" && c.args[c.args.length - 1].endsWith(video)).length;
+  it("1. tries a failed import once in a run when its failed status cannot be written, and says why", async () => {
+    const t = episodic({ whisper: "fail" });
+    t.put("Talk.mov");
+    const importing = join(t.episodes, ".importing");
+    mkdirSync(importing, { recursive: true });
+    chmodSync(importing, 0o555);
+    try {
+      await uneditedFolder(t.drop, t.deps);
+    } finally {
+      chmodSync(importing, 0o755);
+    }
+    assert.equal(tries(t, "Talk.mov"), 1);
+    assert.ok(t.logs.includes("Talk.mov: its import failed, and its status, which would say so, could not be written, so it is not tried again in this run."), t.logs.join("\n"));
+    t.done();
+  });
+  it("1. tries a video with a name of 240 bytes once, with a status file name cut to fit, and says why it failed", async () => {
+    const t = episodic();
+    const name = `${"a".repeat(236)}.mov`;
+    t.put(name);
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(tries(t, name), 1);
+    const statuses = readdirSync(join(t.episodes, ".importing"));
+    assert.equal(statuses.length, 1);
+    assert.ok(Buffer.byteLength(statuses[0]) <= 255, statuses[0]);
+    assert.ok(JSON.parse(readFileSync(join(t.episodes, ".importing", statuses[0]), "utf8")).failed, t.logs.join("\n"));
+    assert.ok(t.logs.some((line) => line.startsWith(`${name}: it could not be filed into Episodes`) || line.includes("ENAMETOOLONG")), t.logs.join("\n"));
+    t.done();
+  });
+  it("3. records when this Mac first saw each video in its drop folder, and forgets it once the video is gone", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    const seenFile = join(t.home, "Library", "Application Support", "BRIMM Video", "seen.json");
+    let during = null;
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 60000 && !during) during = JSON.parse(readFileSync(seenFile, "utf8"));
+      return wait(ms);
+    };
+    await uneditedFolder(t.drop, t.deps);
+    const id = statSync(join(t.episodes, "2026-10-13 Talk (Mac Studio)", "Talk.mov")) && Object.keys(during)[0];
+    assert.match(id, /^Talk\.mov:\d+:5$/);
+    assert.equal(during[id].path, join(t.drop, "Talk.mov"));
+    assert.ok(Number.isFinite(during[id].at));
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(JSON.parse(readFileSync(seenFile, "utf8")), {});
+    t.done();
+  });
+});
+
+describe("the end of a run from the command line", () => {
+  it("2. ends the process with its code once what it printed is out, whatever is still open", () => {
+    const code = `import("${fileURLToPath(new URL("../unedited.js", import.meta.url))}").then(({ finish }) => { setInterval(() => {}, 1000); process.stdout.write("done\\n"); finish(3); });`;
+    const ran = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10000 });
+    assert.deepEqual([ran.status, ran.stdout], [3, "done\n"]);
+  });
+  it("2. is how the command line ends", () => {
+    const text = readFileSync(fileURLToPath(new URL("../unedited.js", import.meta.url)), "utf8");
+    assert.match(text, /main\(process\.argv\.slice\(2\)\)\.then\(\(code\) => finish\(code\)\);/);
   });
 });

@@ -217,7 +217,7 @@ The BRIMM DB/BRIMM Video/
       edit/main.v1.mac-studio.fcpxml …   each version shown in Final Cut
 ```
 
-On the Mac's own disk: `~/BRIMM Video Work/<episode folder>/` holds the copies of timelines handed to Final Cut (`pushed/`), the episode's Final Cut library (`<episode folder>.fcpbundle`), and what detached runs left; `~/BRIMM Video Work/.runs/` holds an import's own folder until its late check; `~/Library/Application Support/BRIMM Video/` holds this Mac's `settings.json`, `written.json` (the last record this Mac wrote of each episode) and `pending/` (the late checks still to make).
+On the Mac's own disk: `~/BRIMM Video Work/<episode folder>/` holds the copies of timelines handed to Final Cut (`pushed/`), the episode's Final Cut library (`<episode folder>.fcpbundle`), and what detached runs left; `~/BRIMM Video Work/.runs/` holds an import's own folder until its late check; `~/Library/Application Support/BRIMM Video/` holds this Mac's `settings.json`, `written.json` (the last record this Mac wrote of each episode), `pending/` (the late checks still to make) and `seen.json` (when this Mac's import first saw each video in its drop folder).
 
 **Writing into Dropbox: the rule.** Dropbox undid two renames on 2026-10-14, minutes after they had returned. So nothing in Dropbox is written into, renamed or moved. Every file is written whole on this Mac's own disk, then put into Dropbox under its final name as an APFS clone, by `/bin/cp -c`. `cp -c` makes a plain byte copy, without a word, when the two folders are on different disks (its manual says so), so the tool checks they are on one disk first, and where a clone cannot be made it stops and says why: nothing is copied byte by byte. A file already there is deleted first and the new one cloned in. Each file is looked at right after, and again at least 15 minutes after the import's last copy, the late check. A file missing or short then is put in again from its work copy. Only after the late check passes are the run's folder and the raw video in the drop folder deleted. Whether a clone into Dropbox's folder is safe where a rename was not has still to be seen by hand (the deployment note of the pull request that built this).
 
@@ -237,7 +237,7 @@ On the Mac's own disk: `~/BRIMM Video Work/<episode folder>/` holds the copies o
 
 | Command | What it does |
 |---|---|
-| `episodes` | Each episode, newest first: its name, length, kind, what was shown in Final Cut, and any file not right. The videos waiting in each drop folder, and for how long. The imports. This Mac's libraries and the free space |
+| `episodes` | Each episode, newest first: its name, length, kind, short id, what was shown in Final Cut, and any file not right. The videos waiting in each drop folder, and for how long: from when this Mac's import first saw it, or, in the other Mac's drop folder, from when it came into the folder (a tag set on it since makes that later). The imports. This Mac's libraries and the free space |
 | `open "<episode>"` | Checks the episode's files, starts a detached run to bring over those Dropbox has not brought yet, and shows the name, the title, Claude's notes, the Reel candidates and the next step. The first time on this Mac it says how to keep the episode on the Mac (Finder, Make available offline) |
 | `push "<episode>" [main] [--no-hand-edits \| --hand-edits]` | Shows the main timeline in Final Cut Pro as a new version (below) |
 | `status ["<words>"]` | What is running on this Mac, the imports, and what detached runs left |

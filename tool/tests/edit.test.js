@@ -55,7 +55,9 @@ function setup({ settings = true } = {}) {
     },
     wait: async () => {},
     alive: () => false,
-    statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 })
+    statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }),
+    // No test asks launchctl about this Mac's own launch agent: it is idle unless a test says otherwise.
+    agentRunning: () => false
   };
   const run = async (...argv) => {
     const said = [];
@@ -787,15 +789,48 @@ describe("the lead's re-check of PR 11, in edit.js", () => {
     assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
     t.done();
   });
-  it("6. says how long a video has waited from when the file was made on this disk, which a tag or a preview does not change, and from its own date when the disk keeps none", async () => {
+});
+
+describe("the lead's last check of PR 11, in edit.js", () => {
+  const drop = (t) => join(t.root, "Unedited Video", "Mac Studio");
+  const seen = (t, entries) => {
+    const file = join(t.home, "Library", "Application Support", "BRIMM Video", "seen.json");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(entries));
+  };
+  it("3. says how long a video has waited from when this Mac first saw it, which a tag set after it came does not change", async () => {
     const t = setup();
-    writeFileSync(join(drop(t), "Old.mov"), "video");
-    writeFileSync(join(drop(t), "Bare.mov"), "video");
-    // The file was made on this disk 5 minutes ago; a tag set on it a minute ago changed its ctime; its own date is a month old.
-    t.deps.stat = (path) => ({ size: 5, birthtimeMs: path.endsWith("Old.mov") ? NOW - 5 * 60000 : 0, ctimeMs: NOW - 60000, mtimeMs: NOW - 2 * 3600000 });
+    const video = join(drop(t), "Talk.mov");
+    writeFileSync(video, "video");
+    const { ino } = statSync(video);
+    seen(t, { [`Talk.mov:${ino}:5`]: { path: video, at: NOW - 20 * 60000 } });
+    // A tag set a minute ago changed its ctime; its own date is a month old.
+    t.deps.stat = () => ({ ino, size: 5, birthtimeMs: NOW - 30 * 86400000, ctimeMs: NOW - 60000, mtimeMs: NOW - 30 * 86400000 });
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes("  Talk.mov, in Mac Studio's, for 20 minutes"), r.text);
+    t.done();
+  });
+  it("22. says how long a video has waited from when it came into the drop folder, not from its own date, when this Mac has not seen it yet", async () => {
+    const t = setup();
+    const video = join(drop(t), "Old.mov");
+    writeFileSync(video, "video");
+    utimesSync(video, new Date(NOW - 30 * 86400000), new Date(NOW - 30 * 86400000));
+    const came = statSync(video).ctimeMs;
+    t.deps.now = () => came + 5 * 60000;
     const r = await t.run("episodes");
     assert.ok(r.text.includes("  Old.mov, in Mac Studio's, for 5 minutes"), r.text);
-    assert.ok(r.text.includes("  Bare.mov, in Mac Studio's, for 2 hours"), r.text);
+    t.done();
+  });
+  it("4. says another run is taking over the lock when a guard a crashed run left stands in the way", { timeout: 20000 }, async () => {
+    const t = setup();
+    t.episode("2026-10-13 Talk (Mac Studio)");
+    const work = join(t.home, "BRIMM Video Work", "2026-10-13 Talk (Mac Studio)");
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, "episode.lock"), JSON.stringify({ pid: 4242, command: "finish" }));
+    writeFileSync(join(work, "episode.lock.takeover"), JSON.stringify({ pid: 4343, command: "bring" }));
+    t.deps.keepAwake = () => {};
+    const r = await t.run("bring", "--now", "2026-10-13 Talk (Mac Studio)");
+    assert.deepEqual([r.code, r.said], [1, ["Another run is taking over the lock of 2026-10-13 Talk (Mac Studio); try again in a few seconds."]]);
     t.done();
   });
 });

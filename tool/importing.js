@@ -16,9 +16,25 @@ import { importingFolder } from "./settings.js";
     minute. */
 export const STALE_MS = 10 * 60 * 1000;
 
-/** The name of a status file: the video's file name, the Mac that imports it in brackets, the import's own id when it has
-    one, and the file's number. A path is cut to its file's name. */
-export const statusName = (video, machine, n, id = "") => `${basename(video)} (${machine}) ${id ? `${id} ` : ""}${n}.json`;
+/** The longest name a file can have on the Mac's disk, in bytes. */
+const NAME_BYTES = 255;
+/** What a status file's name keeps free after the video's and the Mac's names: an import's id (base 36 of an inode, 13
+    characters at most) and a space, and a number of up to 8 digits with ".json". */
+const ID_AND_NUMBER_BYTES = 14 + 13;
+
+/** The start of every status file's name of a video from a Mac: the video's file name, cut on a whole character so that the
+    whole name fits the disk, and the Mac's name in brackets. It does not depend on the import's id or the number. */
+function startOf(video, machine) {
+  const tail = ` (${machine}) `;
+  const room = NAME_BYTES - ID_AND_NUMBER_BYTES - Buffer.byteLength(tail);
+  let name = basename(video);
+  while (Buffer.byteLength(name) > room) name = [...name].slice(0, -1).join("");
+  return `${name}${tail}`;
+}
+
+/** The name of a status file: the video's file name (cut to fit), the Mac that imports it in brackets, the import's own id
+    when it has one, and the file's number. A path is cut to its file's name. */
+export const statusName = (video, machine, n, id = "") => `${startOf(video, machine)}${id ? `${id} ` : ""}${n}.json`;
 
 /** The number at the end of a status file's name, or 0 when it has none. */
 const numberOf = (name) => {
@@ -30,7 +46,7 @@ const numberOf = (name) => {
     `id`, or of every import of the video when no id is given. The video's name and the Mac's may both hold brackets, so a
     name is matched against the one it would have, and not taken apart. */
 function filesOf(names, video, machine, id) {
-  const start = `${basename(video)} (${machine}) `;
+  const start = startOf(video, machine);
   const rest = id === undefined ? /^(?:[0-9a-z]+ )?\d+\.json$/ : id ? new RegExp(`^${id} \\d+\\.json$`) : /^\d+\.json$/;
   return names.filter((n) => n.startsWith(start) && rest.test(n.slice(start.length))).map((n) => ({ name: n, n: numberOf(n) }));
 }

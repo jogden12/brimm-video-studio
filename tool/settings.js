@@ -41,6 +41,9 @@ export const pushedFolder = (home, folder) => join(episodeWork(home, folder), "p
 export const libraryFor = (home, folder) => join(episodeWork(home, folder), `${folder}.fcpbundle`);
 /** Where this Mac notes the last rev it wrote of each episode's record, so it can tell when Dropbox undid one. */
 export const writtenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "written.json");
+/** Where this Mac notes when it first saw each video in its drop folder, so that how long one has waited is known whatever
+    dates the file itself carries. */
+export const seenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "seen.json");
 /** Where this Mac keeps the late checks it has still to make, so a run that is stopped leaves them for the next. */
 export const pendingFolder = (home) => join(home, "Library", "Application Support", "BRIMM Video", "pending");
 

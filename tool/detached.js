@@ -87,8 +87,11 @@ function takeEpisodeLock(lock, command, alive) {
   const mine = `${lock}.${process.pid}.${randomUUID().slice(0, 8)}`;
   const guard = `${lock}.takeover`;
   writeFileSync(mine, text);
+  // Whether a takeover guard stood in the way: when the attempts run out so, another run is taking over the lock.
+  let guarded = false;
   try {
     for (let attempt = 0; attempt < 400; attempt++) {
+      guarded = false;
       try {
         linkSync(mine, lock);
         return { taken: true, text };
@@ -113,6 +116,7 @@ function takeEpisodeLock(lock, command, alive) {
         }
         if (age > GUARD_STALE_MS && !(keeper && alive(keeper.pid))) rmSync(guard, { force: true });
         else pause(5);
+        guarded = true;
         continue;
       }
       try {
@@ -128,6 +132,7 @@ function takeEpisodeLock(lock, command, alive) {
       }
     }
     const held = heldBy(textOf(lock));
+    if (guarded && !(held && alive(held.pid))) return { taking: true };
     return { running: held ? held.command : "another run" };
   } finally {
     rmSync(mine, { force: true });
@@ -149,6 +154,7 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
   const lock = lockOf(home, folder);
   mkdirSync(episodeWork(home, folder), { recursive: true });
   const took = takeEpisodeLock(lock, command, alive);
+  if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
   let done;

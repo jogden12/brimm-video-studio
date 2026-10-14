@@ -929,6 +929,11 @@ async function workOn(file, deps) {
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
     finished = !missing.length;
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
+  } catch (e) {
+    // Something nobody foresaw stopped an episode's import: its status says so, so that both Macs see it failed, and it is not
+    // taken again until a person says to.
+    if (episode) progress.fail(`the work stopped (${e.code || e.message})`);
+    throw e;
   } finally {
     progress.end(finished);
     if (!keepWork) rmSync(work, { recursive: true, force: true });
@@ -1280,8 +1285,13 @@ export async function main(argv) {
   return doAsked(args, depsFor(found, log, process.env, args));
 }
 
+/** End the process with `code` once what it printed is out. A run started by the launch agent is ended so, whatever is still
+    open: a read of a placeholder that was given up is not cancelled in the kernel, and while the process lives, launchd
+    starts no new run. */
+export function finish(code, { exit = process.exit, out = process.stdout } = {}) {
+  out.write("", () => exit(code));
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
-  });
+  main(process.argv.slice(2)).then((code) => finish(code));
 }
