@@ -449,3 +449,90 @@ describe("node edit.js push", () => {
     t.done();
   });
 });
+
+describe("node edit.js bring, status and retry", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  const drop = (t) => join(t.root, "Unedited Video", "Mac Studio");
+  /** A status file, as an import would leave it, written `minutesAgo`. */
+  const status = (t, video, more = {}, minutesAgo = 1) => {
+    const folder = join(t.episodes, ".importing");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${video} (Mac Studio) 1.json`), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video, bytes: 5, seconds: 120, step: "Making the rough cut", at: new Date(NOW - minutesAgo * 60000).toISOString(), ...more }));
+  };
+  it("bring reads the files that were not whole to their end, and says which are whole now, in its result", async () => {
+    const t = setup();
+    t.episode(FOLDER);
+    let reads = 0;
+    t.deps.isWhole = (path) => !path.endsWith("Talk.mov") || reads > 0;
+    t.deps.readAll = async (path) => {
+      reads += 1;
+      return path;
+    };
+    t.deps.keepAwake = () => {};
+    const r = await t.run("bring", "--now", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    const result = JSON.parse(readFileSync(join(t.home, "BRIMM Video Work", FOLDER, "bring.result.json"), "utf8"));
+    assert.deepEqual([result.ok, result.made, result.failed, result.next], [true, ["Talk.mov"], [], 'Every file of Talk is here. Say "open Talk".']);
+    t.done();
+  });
+  it("status shows an import's step, a detached run at work on an episode, and the last result of one", async () => {
+    const t = setup();
+    t.episode(FOLDER);
+    const progress = join(t.home, "Library", "Application Support", "BRIMM Video", "progress");
+    mkdirSync(progress, { recursive: true });
+    writeFileSync(join(progress, "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Budget.mov", detail: "Making the rough cut (step 5 of 8), 40%" }));
+    writeFileSync(join(progress, "4343.json"), JSON.stringify({ version: 1, pid: 4343, video: "Old.mov", detail: "Reading the sound (step 1 of 8)" }));
+    const work = join(t.home, "BRIMM Video Work", FOLDER);
+    mkdirSync(work, { recursive: true });
+    // A run of another command is at work on the episode now; the result of bring is from before. A result of the command
+    // that is running again is not shown: the run will leave a new one.
+    writeFileSync(join(work, "episode.lock"), JSON.stringify({ pid: 4242, command: "finish" }));
+    writeFileSync(join(work, "finish.result.json"), JSON.stringify({ version: 1, command: "finish", started: NOW - 3600000, ended: NOW - 3500000, ok: true, made: [], failed: [], next: "" }));
+    writeFileSync(join(work, "bring.result.json"), JSON.stringify({ version: 1, command: "bring", started: NOW - 120000, ended: NOW - 60000, ok: false, made: ["Talk.mov"], failed: ["Talk.srt is still not whole"], next: "Say open again." }));
+    status(t, "Budget.mov");
+    t.deps.alive = (pid) => pid === 4242;
+    const r = await t.run("status");
+    assert.deepEqual(r.said, [
+      "Running on this Mac:",
+      "  Budget.mov: Making the rough cut (step 5 of 8), 40%",
+      "Imports:",
+      "  Budget.mov: being imported on Mac Studio, at Making the rough cut",
+      `${FOLDER}: finish is running.`,
+      `${FOLDER}: bring ended 1 minute ago. Made: Talk.mov. Not done: Talk.srt is still not whole. Say open again.`
+    ]);
+    const one = await t.run("status", "budget");
+    assert.ok(!one.text.includes(FOLDER), one.text);
+    t.done();
+  });
+  it("status says nothing is running when nothing is", async () => {
+    const t = setup();
+    assert.deepEqual((await t.run("status")).said, ["Nothing is running, and nothing is waiting."]);
+    t.done();
+  });
+  it("retry takes away a failed import's status and starts the import of this Mac's drop folder again", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    status(t, "Talk.mov", { failed: "the transcriber stopped" }, 30);
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again. The panel shows how far it is."]]);
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
+    assert.deepEqual(t.started, [[process.execPath, "/checkout/tool/unedited.js", "--watch", drop(t)]]);
+    t.done();
+  });
+  it("retry refuses while the import is running", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    status(t, "Talk.mov");
+    const r = await t.run("retry", "Talk.mov");
+    assert.deepEqual([r.code, r.said, t.started], [1, ["Talk.mov is being imported now, at Making the rough cut. The panel shows how far it is."], []]);
+    t.done();
+  });
+  it("retry names the videos in the drop folder when it cannot find the one said", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    writeFileSync(join(drop(t), "Budget.mov"), "video");
+    const r = await t.run("retry", "pricing");
+    assert.deepEqual([r.code, r.said], [1, [`No video in this Mac's drop folder fits "pricing". It holds: Budget.mov and Talk.mov.`]]);
+    t.done();
+  });
+});

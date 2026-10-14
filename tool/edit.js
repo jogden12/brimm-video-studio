@@ -12,20 +12,24 @@
 //   node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
 //                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
 //                                         library for the episode
+//   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
+//   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder } from "./settings.js";
+import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder } from "./settings.js";
+import { progressFolder } from "./progress.js";
+import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { isWhole, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions } from "./portable.js";
 import { projectName, timelineFile } from "./names.js";
-import { readStatuses, importState } from "./importing.js";
+import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf } from "./filing.js";
 import { isMedia } from "./lib.js";
 import { isRunning } from "./run.js";
@@ -39,7 +43,9 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
   node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
                                         library for the episode. Shown before, it asks first whether it was changed in
-                                        Final Cut: --no-hand-edits says it was not, --hand-edits that it was`;
+                                        Final Cut: --no-hand-edits says it was not, --hand-edits that it was
+  node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
+  node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped`;
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -126,6 +132,18 @@ function folderSize(folder) {
   return sum;
 }
 
+/** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
+    late check. Only those whose video `fits`, when it is given. */
+function importLines(ctx, fits = () => true) {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video)).map(({ status }) => {
+    const state = importState(status, ctx.now());
+    if (state === "failed") return `  ${status.video}: its import failed on ${status.machine}: ${status.failed}`;
+    if (state === "problem") return `  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`;
+    if (state === "stopped") return `  ${status.video}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
+    return `  ${status.video}: being imported on ${status.machine}, at ${status.step}`;
+  });
+}
+
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
     archived episode is left out. */
@@ -181,16 +199,10 @@ export async function episodes(ctx) {
     for (const line of waiting) say(line);
   }
   // The imports, from their status files.
-  const imports = readStatuses(ctx.root, ctx.now()).filter((s) => s.status);
+  const imports = importLines(ctx);
   if (imports.length) {
     say("Imports:");
-    for (const { status } of imports) {
-      const state = importState(status, ctx.now());
-      if (state === "failed") say(`  ${status.video}: its import failed on ${status.machine}: ${status.failed}`);
-      else if (state === "problem") say(`  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`);
-      else if (state === "stopped") say(`  ${status.video}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`);
-      else say(`  ${status.video}: being imported on ${status.machine}, at ${status.step}`);
-    }
+    for (const line of imports) say(line);
   }
   // This Mac's libraries, and the space left for them.
   say("On this Mac:");
@@ -267,7 +279,7 @@ export async function open(ctx, rest) {
   const name = record.name.text;
   const coming = notHere(ctx, found, record);
   if (coming.length) {
-    ctx.start(process.execPath, [join(ctx.settings.checkout, "tool", "edit.js"), "bring", "--now", found.name]);
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name });
     say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. Say "open ${name}" again when it is done; "how far is it?" shows how far it has got.`);
     return 0;
   }
@@ -418,8 +430,140 @@ export async function push(ctx, rest) {
   return pushPart(ctx, { ...found, record }, { part: "main", xml: readFileSync(source, "utf8"), noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits") });
 }
 
+/** Read a file to its end and let what is read go: Dropbox then brings all of it over to this Mac. */
+const readAll = (path) => new Promise((done, fail) => {
+  const stream = createReadStream(path);
+  stream.on("data", () => {});
+  stream.on("end", done);
+  stream.on("error", fail);
+});
+
+/** `bring --now "<episode folder>"`, the detached run `open` starts: each file of the episode that is not whole on this Mac
+    is read to its end, so that Dropbox brings it over, and the result says which are whole now. */
+export async function bring(ctx, rest) {
+  const [now, folder] = rest;
+  if (now !== "--now" || !folder) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const found = findEpisode(ctx, folder);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || `${folder}: ${found.read.why}.`);
+    return 1;
+  }
+  const { record } = found.read;
+  const name = record.name.text;
+  const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+    const coming = notHere(ctx, found, record);
+    const read = ctx.deps.readAll || readAll;
+    const failed = [];
+    for (const rel of coming) {
+      try {
+        await read(join(found.folder, rel));
+      } catch (e) {
+        failed.push(`${rel} could not be read (${e.code || e.message})`);
+      }
+    }
+    const still = notHere(ctx, found, record);
+    const made = coming.filter((rel) => !still.includes(rel));
+    for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
+    return { ok: !failed.length, made, failed, next: failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".` };
+  });
+  if (result.running) {
+    ctx.say(`${result.running} is running for ${found.name} already.`);
+    return 1;
+  }
+  return result.ok ? 0 : 1;
+}
+
+/** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
+    Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left. With words,
+    only what they fit. */
+export async function status(ctx, rest) {
+  const { say } = ctx;
+  const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
+  const fits = (text) => words.every((w) => plainly(text).includes(w));
+  const lines = [];
+  const running = [];
+  let progress = [];
+  try {
+    progress = readdirSync(progressFolder(ctx.home)).filter((n) => /^\d+\.json$/.test(n)).sort();
+  } catch (e) {
+    // Nothing has run on this Mac yet.
+  }
+  for (const name of progress) {
+    try {
+      const run = JSON.parse(readFileSync(join(progressFolder(ctx.home), name), "utf8"));
+      if (ctx.alive(run.pid) && fits(run.video)) running.push(`  ${run.video}: ${run.detail}`);
+    } catch (e) {
+      // A run is writing it.
+    }
+  }
+  if (running.length) lines.push("Running on this Mac:", ...running);
+  const imports = importLines(ctx, fits);
+  if (imports.length) lines.push("Imports:", ...imports);
+  let local = [];
+  try {
+    local = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".") && fits(n)).sort();
+  } catch (e) {
+    // There is no BRIMM Video Work yet.
+  }
+  for (const folder of local) {
+    const command = runningCommand(ctx.home, folder, ctx.alive);
+    if (command) lines.push(`${folder}: ${command} is running.`);
+    let results = [];
+    try {
+      results = readdirSync(episodeWork(ctx.home, folder)).filter((n) => n.endsWith(".result.json")).sort();
+    } catch (e) {
+      continue;
+    }
+    for (const file of results) {
+      const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
+      if (!r || r.command === command) continue;
+      const done = r.failed.length ? ` Not done: ${r.failed.join(" ").replace(/([^.])$/, "$1.")}` : "";
+      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${r.next ? ` ${r.next}` : ""}`);
+    }
+  }
+  for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
+  return 0;
+}
+
+/** `retry "<video>"`: import again a video in this Mac's drop folder whose import failed or stopped. It is found by its
+    file's name or its name without the ending, whatever their case. Refused while its import is running. Its status files
+    from this Mac are taken away, and the import of this Mac's drop folder is started detached, as the launch agent starts
+    it. */
+export async function retry(ctx, rest) {
+  const { say } = ctx;
+  const said = rest.join(" ").trim();
+  if (!said) {
+    say(HELP);
+    return 2;
+  }
+  const drop = dropFolder(ctx.root, ctx.machine);
+  let videos = [];
+  try {
+    videos = readdirSync(drop).filter(isMedia).sort();
+  } catch (e) {
+    // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
+  }
+  const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said));
+  if (!video) {
+    say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
+    return 1;
+  }
+  const mine = readStatuses(ctx.root, ctx.now()).find((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  if (mine && importState(mine.status, ctx.now()) === "running") {
+    say(`${video} is being imported now, at ${mine.status.step}. The panel shows how far it is.`);
+    return 1;
+  }
+  removeStatus(ctx.root, video, ctx.machine);
+  ctx.start(process.execPath, [join(ctx.settings.checkout, "tool", "unedited.js"), "--watch", drop]);
+  say(`${video} is imported again. The panel shows how far it is.`);
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry };
 
 /** What `node edit.js` does. Resolves 0 when it did what it was asked, 1 when it refused or something failed, and 2 when it
     was asked wrongly or this Mac is not set up. */
