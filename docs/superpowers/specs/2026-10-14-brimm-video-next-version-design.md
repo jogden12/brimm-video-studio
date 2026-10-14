@@ -54,7 +54,9 @@ Written 2026-10-14 for Jason Ogden to approve before anything is built. Design o
 | 4 | Editing session | Claude Code with a project skill, driving `node tool/edit.js` commands. Each change makes a new project version, pushed into Final Cut with `open`. Titles and captions name BRIMM Motion templates made once by hand. Build on this repo's `fcpxml.js`; do not adopt the FCPXML MCP server |
 | 5 | Finish | She Shares the finished videos into `final/`. `finish` transcribes each one again and splits Story parts from finished Reels. It writes one hand-off file, `<Episode>.brimm-ops.json` (format below) |
 | 6 | Sallie's laptop | Fourteen items (section 6). Jason gives a yes in chat for each install, after the installer has been run with `--print` |
-| 7 | Phases | 0 Final Cut facts by hand; 1 episodes on two Macs; 2 finish and hand-off; 3 lightweight Reels; 4 the session's commands; 5 layering on exports; 6 brand presets; 7 chat route (later, maybe). The transcript tool's move is phase T, at any time after 1 |
+| 7 | Phases | 0 Final Cut facts by hand; 1 episodes on two Macs; 2 finish and hand-off; 3 lightweight Reels; 4 the session's commands; 5 layering on exports; 6 brand presets; 7 chat route (later, maybe). The transcript tool's move is phase T, at any time after 1. The progress panel is phase P, which can come first |
+| — | Progress (Jason's request) | A progress file on each Mac, and a small floating panel drawn by a Swift script that reads it. Nothing is installed, and the work never waits on the panel. A status file in `Episodes/` shows the other Mac how an import is going |
+| — | Writing into Dropbox | Never in place. Every file is written whole outside Dropbox, then moved in under its final name and checked. This follows the rename bug of 2026-10-14 |
 
 ---
 
@@ -119,7 +121,7 @@ The import's files keep today's names, so the code that makes them barely change
 
 ### `episode.json`, the edit record
 
-It holds everything brimm-video has decided for the episode, so that either Mac can rebuild every timeline from it. It is written whole, to a temporary name that is then renamed, so Dropbox never syncs half a file.
+It holds everything brimm-video has decided for the episode, so that either Mac can rebuild every timeline from it. It is written as every file is written into Dropbox (below): whole, outside Dropbox first.
 
 ```json
 {
@@ -144,6 +146,14 @@ It holds everything brimm-video has decided for the episode, so that either Mac 
 ```
 
 Every time is in seconds of the raw video. `base` is null while brimm-video builds the timeline from this record, and names the Final Cut export it layers on once one has been pulled (section 4).
+
+### Writing into Dropbox
+
+**A rule for every file brimm-video makes: it is never written in place inside Dropbox.** Each file is written whole in the run's own work folder in the Mac's temp folder, which is on the same disk. Only then is it moved into Dropbox, under its final name. After the move, brimm-video checks that the final name is there with the right size. If it is not, it tries once more, then says so in the log and in the cut plan's first lines.
+
+**Why: a bug found on 2026-10-14.** The other session re-made that morning's two Zoom recordings with `--from-plan`. Today the tool writes a video as `<file>.writing` beside its final place and renames it when whole. Dropbox (the macOS File Provider) undid two of those renames, `video1323034990.rough-cut.vertical.mp4.writing` (complete, 1723.8 s) and `video2947275745.rough-cut.mp4.writing`. They stayed under their `.writing` names, although `renameSync` returned and the log said they were made. Smaller files renamed fine.
+
+**What the rule also stops:** Dropbox uploading half-written files. The fix to today's tool is a separate task the other session is suggesting to Jason. This design takes it as given. Phase 1 tests the move on both Macs with a file of over 1 GB. That moving a whole file in from outside Dropbox is safe where a rename inside it was not is *not confirmed*.
 
 ### Picking an episode up
 
@@ -363,14 +373,37 @@ Every phase follows CLAUDE.md: a failing test first, then the code. No test call
 | Phase | What it builds | Why here | Tested by |
 |---|---|---|---|
 | **0. Final Cut facts** (by hand, about 30 minutes, on the Mac Studio) | Nothing in code. Jason builds the presets research's test project (its 4.5) and also tries: a media path relative to the file; a second import into the same library and event; a title from a throwaway template in a custom Motion folder; a custom role on a title; a still with a transform; an upright project of a wide clip filled and moved sideways; Cmd-E (plain file or bundle); the default name Share gives | Every "not confirmed" above is settled by one export. The writer copies what Final Cut itself writes | The exports, of a made-up clip only, are committed as fixtures, and the facts are recorded in this spec |
-| **1. Episodes on two Macs** | `Episodes/`, `episode.json`, the claim, the per-Mac settings, a drop folder for each Mac with its marker, `install.sh --machine`, filing into episodes, relative paths and localising, a library per episode, `edit.js episodes\|open\|name\|push\|release\|adopt`, a first skill | The smallest thing that changes how they work: drop on either Mac, open the episode on either Mac, see it in Final Cut | Unit tests for filing, naming, the marker refusal, localising the phase 0 exports, library naming, the claim and conflicted copies; `install.sh --print` for each Mac's name, apostrophe included. Then the Mac Studio install (Jason's yes), Sallie's laptop setup (section 6), and one real recording dropped on each Mac |
+| **1. Episodes on two Macs** | `Episodes/`, `episode.json`, the claim, the per-Mac settings, a drop folder for each Mac with its marker, `install.sh --machine`, filing into episodes, relative paths and localising, a library per episode, `edit.js episodes\|open\|name\|push\|release\|adopt`, a first skill | The smallest thing that changes how they work: drop on either Mac, open the episode on either Mac, see it in Final Cut | Unit tests for filing, naming, the marker refusal, localising the phase 0 exports, library naming, the claim and conflicted copies; `install.sh --print` for each Mac's name, apostrophe included; every file written outside Dropbox and moved in whole. By hand: a file of over 1 GB moved into Dropbox on each Mac, and found under its final name. Then the Mac Studio install (Jason's yes), Sallie's laptop setup (section 6), and one real recording dropped on each Mac |
 | **2. Finish and hand-off** | `finish`, transcribing the videos in `final/` again, `spellings`, Story parts from finished Reels, `handoff-v1.json` and its contract | It needs no new editing: once the videos are edited by hand in Final Cut, BRIMM Ops gets final transcripts that match. It unblocks L7 | A stand-in transcriber; the fixture; `tidyTranscript` on every `srt`; matching files to parts; Story cuts at pauses |
 | **3. Lightweight Reels** | `reels.json`, previews, no full encodes or Story parts on import, `reels`, `reel pick\|drop\|add`, the upright Reel project | Import gets lighter, and picked Reels are finished in Final Cut | Preview ffmpeg arguments; `reels.json`; a Reel project's shape against the phase 0 fixture; the checker on two projects and a second format; `--from-plan` making previews. Measured: preview time and size on a 2026-10-14 recording |
 | **4. The session's commands** | `title` (recommended at import: one key added to the request to Claude), `cut`, `text`, `logo`, `captions` (built-in templates first), `spell`, `preset` with the caption builder, and the skill in full | Sallie directs edits in words | Each command on fixtures: what `episode.json` becomes, what the timeline holds, every refusal. One full session by hand on a made-up recording |
 | **5. Layering on exports** | `pull`, the export reader and writer that passes everything through, ownership by role and id, captions through the export's clips, `reset`, carrying an edit between Macs | Hand edits and brimm-video's layers live together, which was Jason's answer 2 | The phase 0 exports layered with no change come out the same; owned elements replaced; cut commands refused; a word inside a compound clip listed |
 | **6. Brand presets** | `brand/brand.json`, the four BRIMM templates (made by hand in Motion, by Jason or the editor Sallie hires), presets on the Final Cut route in the presets research's order, the looks, the logo | It waits on the typefaces Jason buys, the logo files, and design time in Motion | The research's rules as unit tests; the templates found on the Mac before a push; one Reel per preset checked by eye |
+| **P. Progress panel** (small, and can come first: it needs nothing from the other phases) | The progress file written by the import, `--from-plan` and `finish`; ffmpeg's `-progress` and the transcriber's progress read; `tool/progress.swift`; the status file in `Episodes/.importing/` once phase 1 has made `Episodes/` | Jason asked for it, and a run takes minutes with no sign | The progress file's contents step by step with stand-in programs that print progress; a run whose panel fails to start, or is closed, finishes exactly as one with no panel; a left-over file from a dead run is ignored. By hand: the panel seen during one real import from the launch agent, on each Mac |
 | **7. Claude chat** (later, maybe) | A local MCP server that offers the same `edit.js` commands to Claude chat | Only if the Code tab is not enough for Sallie | Not designed now |
 | **T. The transcript tool moves in** (any time after 1) | `transcribe.js` moves to `tool/` beside `unedited.js`. The parts copied into `tool/lib.js` and `tool/run.js` become the originals again, and the copies' notes go. `localDay` comes from `tool/shared/text.js`. The agent `com.thebrimm.transcribe` keeps its label and its folders, on the Mac Studio only, and is pointed at this repo by its installer (Jason's yes). brimm-operations removes `transcribe/` in a session there | BRIMM Ops becomes the page alone, as Jason decided | Its own tests, moved and passing here. **A contract test on the `.srt`:** a fixture `.srt` the tool writes is read by `tool/shared/transcript.js` (the page's `tidyTranscript`, copied) and gives the expected lines. The same fixture goes into brimm-operations, and it replaces the code shared today. A test that the tool ignores `Unedited Video/` and `Episodes/`. `install.sh --print` shows the agent pointing here |
+
+## Progress while a video is processed
+
+**The requirement.** Jason, 2026-10-14, passed on by the other session: "it would be nice for this to have a progress bar that pops up when video processing begins". A 30-minute recording now takes about 8 to 9 minutes with the x264 encodes, and the upright version alone takes about 6 of them on the Mac Studio. The import runs from a launch agent with no window. Today the only signs are the log (`~/Library/Logs/brimm-video.log`) and one notification at the end. A macOS notification cannot show a bar.
+
+It must work for a run started by the launch agent, by hand, or from a Claude session (an import, `--from-plan`, `finish`). It must never hold the work up: closing it, or its failing to open, changes nothing.
+
+**Recommended: a progress file, and a small floating panel that reads it.**
+
+- **The progress file** is the contract. Each run writes `~/Library/Application Support/BRIMM Video/progress/<run>.json`, on the Mac's own disk and never in Dropbox. It holds the video's name, the step ("Writing the transcript", "Asking Claude", "Making the upright version", "Making previews", "Filing"), the step's number out of how many, the step's own percent where one is known, time left where it can be worked out, and when it was last written. The file is written again at each new step and at most once a second within one. It is removed when the run ends, and one left by a dead run is ignored, as today's lock is.
+  - Where the percent comes from: ffmpeg's `-progress` output gives the position reached in each encode, measured against the length of what is being made. whisper-cli's `--print-progress` gives the transcriber's (not tried here). Steps with neither, such as asking Claude, show a moving bar with no number.
+  - Time left: given for an encode, from its rate so far. For the whole run it is a rough sum, using rates measured on that Mac and kept in the same folder. It is shown only once one run has been measured.
+- **The panel** is a small Swift script in the repo, `tool/progress.swift`, run with `swift` like the face finder, so nothing is installed. When a run starts and no panel is open, the tool starts it, detached, and never waits for it. It floats above other windows in a corner. It shows one line for each run on this Mac (the video's name, the step, a bar, time left) and closes itself a few seconds after the last run ends. Closing it by hand only hides it, until the next run starts. When `swift` is missing or the panel cannot open, the run goes on and the log says so once. A launch agent runs in the user's session, so it can show a window. That a Swift script started from the agent shows one is *not confirmed*, and phase P tries it first.
+- **From a Claude session** the panel opens the same way, and Claude can also read the progress file to answer "how far along is it?"
+- **The other Mac.** A video dropped in the Mac Studio's folder shows its panel on the Mac Studio, not on Sallie's laptop. So the run also writes a small status file, `Episodes/.importing/<video>.json`, when it starts, at each new step, and at most once a minute. It removes the file when the video is filed. `edit.js episodes` on either Mac then shows "Importing on Mac Studio: making the upright version, about 5 minutes left". The status file goes into Dropbox by the rule above, and `Episodes/` is watched by nobody, so writing it starts nothing.
+
+**Not recommended:**
+- A menu-bar item: it must run all the time, which means another launch agent and an app to install on each Mac.
+- A third-party menu-bar host such as SwiftBar or xbar: an install.
+- Notifications at each step: noisy, and still no bar.
+
+Because the progress file is the contract, a menu-bar item could be added later on the same file without changing the tool.
 
 ## Errors, in plain words
 
