@@ -457,10 +457,10 @@ describe("node edit.js push", () => {
     assert.deepEqual(handed, ["Talk main v2 000001", "Talk main v3 000001"]);
     t.done();
   });
-  it("says Reels are pushed from a later version", async () => {
+  it("hands \"push … reel <n>\" to the push of a Reel, which refuses a Reel the episode does not have", async () => {
     const t = setup();
     imported(t);
-    assert.deepEqual(await t.run("push", "talk", "reel", "1"), { code: 1, said: ["Reels are pushed from a later version."], text: "Reels are pushed from a later version." });
+    assert.deepEqual(await t.run("push", "talk", "reel", "1"), { code: 1, said: ["There is no Reel 1."], text: "There is no Reel 1." });
     t.done();
   });
 });

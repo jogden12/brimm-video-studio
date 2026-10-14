@@ -547,7 +547,8 @@ export function clearRuns(home, alive = isRunning) {
   const needed = new Set(readPendings(home).map((p) => resolve(p.work)));
   const gone = [];
   for (const name of names) {
-    const m = /^(?:push-)?(\d+)-\d+$/.exec(name);
+    // A run's folder is named for its process: "<pid>-<time>", or a command's word first ("push-", "finish-", "reel-").
+    const m = /^(?:[a-z]+-)?(\d+)-\d+$/.exec(name);
     if (!m || alive(Number(m[1])) || needed.has(resolve(join(runs, name)))) continue;
     rmSync(join(runs, name), { recursive: true, force: true });
     gone.push(name);

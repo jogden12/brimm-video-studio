@@ -14,6 +14,8 @@
 
 **After the review of PR #7** (2026-10-14, the lead's 12 fixes and phase 0's renamed copy): Part 1's code and tests as merged are the reference, and where they differ from the code blocks of Tasks 1 to 6 below, the merged code wins. What changed: `inMain` takes the tightest stretch (end at the earliest place the last matched word can be, start at the latest the first can be, a stray first or last word left out) and is kept within the main's length (`inMain(reelWords, mainWords, reelSeconds, mainSeconds)`); `lookFor` looks in From Final Cut and the released files together and takes the Share of the highest version pushed, keeps a part from the last finish unless something newer is there, asks only when two different files are of the highest version or a `--take` names no Share of the part, names the taken video's project in the export question, compares names in NFC, tells a never-pushed part to be shown first, and names a Share Final Cut renamed ("<project> 1"); the order is Share, Final Cut's notice that it is done, then File > Export XML…, then "finish"; `storyCuts` takes `words: null` as none; a title keeps quotation marks inside it; spellings apply to caption text alone.
 
+**After the lead's re-check of PR #12** (2026-10-14): `free "<episode>" library` is held back from this version, by the lead's ruling. It deleted before its record write could refuse, it could not see versions handed to Final Cut whose record Dropbox took away (`pushed/` holds them), and a Reel shown and then dropped blocked it for good. The command now refuses in plain words, and the finish no longer offers it. `freeLibrary` and `unkeptParts` stay, with their tests, unreachable from the command line: **phase 5** brings them back, built on the record of every version handed to Final Cut on this Mac (`pushed/` included) and with the record written before anything is deleted.
+
 **Reused from the architect's drafts** (branch `drafts/plans-1a-2-1b`, 03bd414, not merged): `contract.md`'s module, function and file names, as builder A confirmed them on 2026-10-14 (below); `decisions-2.md`'s E1 (title), E2 (records), E3 (the attended part), E4 (the worker), E5 (the hand-off), E6 (offers), E7 (`status`), E8 (tests) and E9 (review focus), each updated here to the merged design. What changed from them, and why, is in "Rulings".
 
 ## What phase 1a provides, as builder A confirmed it (2026-10-14)
@@ -230,7 +232,7 @@ git commit -m "Ask Claude for a title for the whole video, and keep it in the cu
   - `handoffText(handoff) → string` (two-space JSON and a final newline)
   - `handoffFault(handoff) → "" | why`
   - `normalWords(words) → [{ w, start, end }]` (one entry per normalised token)
-  - `inMain(reelWords, mainWords, reelSeconds) → { start, end } | null`
+  - `inMain(reelWords, mainWords, reelSeconds, mainSeconds) → { start, end } | null` (the end kept within `mainSeconds`; as merged, see "After the review of PR #7" and the code)
 - Words everywhere are `{ w, start, end }` in seconds, as `wordsOf` (cuts.js) gives them.
 
 - [ ] **Step 1: Write the failing test**
@@ -985,10 +987,12 @@ describe("lookFor", () => {
     assert.equal(got.parts[0].video.name, `${MAIN5}.mp4`);
     assert.equal(got.parts[1].export.name, `${REEL1}.fcpxmld`);
   });
-  it("passes over an empty file and one still being written under a temporary name", () => {
-    const got = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mp4`, 2000, 0), file(`${MAIN5}.mp4.partial`)]), NONE);
-    assert.deepEqual(got.parts, []);
-    assert.match(got.stops[0], /main video/);
+  it("passes over an empty file, and takes a Share Final Cut is still writing, which is under its final name from the start", () => {
+    // Phase 0 (A6): a Share is a .mov named after the project, growing under that name until done.
+    const empty = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mov`, 2000, 0)]), NONE);
+    assert.deepEqual(empty.parts, []);
+    const growing = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mov`, 2000, 7000), file(`${MAIN5}.fcpxmld`, 3000)]), NONE);
+    assert.equal(growing.parts[0].video.name, `${MAIN5}.mov`);
   });
   it("asks which is final when two Shares fit one part, and takes the one named", () => {
     const shares = [file(`${MAIN5}.mp4`, 3000), file("Pricing- what to charge- main v4 3fa9c1.mp4", 2000), file(`${MAIN5}.fcpxmld`, 4000), file(`${REEL1}.mov`), file(`${REEL1}.fcpxmld`, 2000)];
@@ -1755,7 +1759,7 @@ On the Mac Studio, on one real episode, once 1a is installed there:
 
 1. The "BRIMM final" Share destination and the `From Final Cut` folder set up (README).
 2. `title … --approve`, `reel pick` of one Reel, `push … reel <n>`: the Reel opens in Final Cut, upright, with its captions.
-3. The main and the Reel exported (File > Export XML…) and Shared into `From Final Cut`; "finish the episode": what it says, the questions, then the detached run to its end in the panel.
+3. The main and the Reel Shared into `From Final Cut`, and once Final Cut says each Share is done, exported (File > Export XML…) into it too; then "finish the episode": what it says, the questions, then the detached run to its end in the panel.
 4. `final/` holds what Task 10 says; the late check passed 15 minutes later, and `From Final Cut` was emptied of what it took.
 5. The main `.srt` from the hand-off given to the BRIMM Ops page, which reads it as it reads a transcript today; and, once builder D's reader is published, the hand-off file dropped on the page.
-6. Phase 0's open facts this rests on: Share's file name is the project's name (Task 6 matches by it); whether Share writes under a temporary name (Task 10 waits on size and ffprobe either way).
+6. Phase 0's facts this rests on, both settled on the Mac Studio on 2026-10-14 (Final Cut Pro 12.4, A6): a Share through BRIMM final is a `.mov` named exactly after the project (Task 6 matches by it), and it is written under that final name from the start, growing until done, with no temporary name; its index is written last, so a Share still being written fails ffprobe (Task 10 waits on settled size and ffprobe). The `.partial` case in Task 6's test was a guess phase 0 ruled out, and the test now takes a growing Share under its final name.

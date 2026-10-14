@@ -13,7 +13,10 @@ What the project must do, and the decision still open about the editor on Sallie
 | `docs/requirements.md` | What the project must do, and what is still to decide |
 | `docs/research/` | The research behind the tool and its presets, written in brimm-operations |
 | `tool/` | The unedited-video tool, its face finder and its installer |
-| `tool/edit.js` | The command line for episodes, which Claude runs: `episodes`, `open`, `push`, `status`, `retry` |
+| `tool/edit.js` | The command line for episodes, which Claude runs: `episodes`, `open`, `push`, `status`, `retry`, and phase 2's `name`, `title`, `reel`, `finish` |
+| `tool/finish.js`, `tool/parts.js`, `tool/final-transcript.js`, `tool/handoff.js` | Finishing an episode: its detached part, finding each part's Shares and exports, the final transcript made again, and the hand-off for BRIMM Ops |
+| `tool/reel.js` | The timeline pushed for a Reel |
+| `tool/tests/fixtures/handoff-v1*.json` | The hand-off's contract with BRIMM Ops, which brimm-operations keeps copies of |
 | `tool/filing.js`, `tool/episode.js`, `tool/importing.js` | An episode's import, its record, and the status files of imports |
 | `tool/dropbox.js` | The rule for writing into Dropbox: clones, never over a file, and the late check |
 | `tool/settings.js`, `tool/names.js`, `tool/portable.js`, `tool/detached.js` | This Mac's settings, the names made from names, Final Cut files that read the same on either Mac, and long commands run detached |
@@ -262,6 +265,57 @@ Still open: pushes while Final Cut is closed, and the clone into Dropbox's folde
 **Setting a Mac up.** `./install.sh --print --machine "Mac Studio" "<path to The BRIMM DB/BRIMM Video>"` shows what it would do and changes nothing: the drop folder, `Episodes/` and `.importing/` to make in Dropbox, the marker, this Mac's settings, `BRIMM Video Work/Backups` and `From Final Cut`, and the launch agent watching the drop folder alone. It refuses a drop folder another Mac's marker names, and BRIMM Video inside a folder the transcript tool watches. Without `--print`, and with Jason's yes, it does it.
 
 None of this has met a real recording yet: the tests run every step with stand-ins for the programs and for `cp -c`.
+
+## Finishing an episode
+
+When an episode is edited, `finish` gathers what Final Cut made of it, transcribes each finished video again, and writes one file for BRIMM Ops: the hand-off. It runs on the Mac where the episode was edited, from a Claude Code session there: `node tool/edit.js finish "<episode>"`. Like everything here, it drafts. It never posts anything.
+
+**Set up once on each Mac** (with Jason's yes):
+
+- The folder `From Final Cut`, in `BRIMM Video Work` in the home folder. Final Cut's Shares and its exports both go there. It is on the Mac's own disk, so Final Cut never writes into Dropbox. `finish` tells a finished video (`.mov`, `.mp4`, `.m4v`) from an export (`.fcpxmld`, `.fcpxml`) by its ending.
+- A Share destination named "BRIMM final" (an Export File destination): Format Video and Audio, Video Codec H.264, Resolution Same as Source, so each project keeps its own size (1080 lines for the main video, 1080 by 1920 for a Reel), and Action Save Only. Make it the default, so that Command-E is this Share. A destination keeps no folder: its save dialog opens on the folder File > Export XML… last used, so check that it says `From Final Cut` before you click Save.
+
+What phase 0 found on the Mac Studio, Final Cut Pro 12.4 (2026-10-14): a Share through BRIMM final is a `.mov` named exactly after the project, written under that name from the start and growing until it is done, with its index written last; `finish` waits until its size settles and ffprobe can read it. File > Export XML… offers the project's name too, and writes a `.fcpxmld` bundle with `Info.fcpxml` inside, at FCPXML 1.14. Saving an export over one of the same name may leave the bundle folder's time as it was, so `finish` takes the later of the folder's time and `Info.fcpxml`'s.
+
+**Before it, in the session:**
+
+| Say | Command | What it does |
+|---|---|---|
+| "Call it Pricing: what to charge?" | `name "<episode>" "<name>"` | Records the name, as given. Nothing is renamed |
+| "Use that title" | `title "<episode>" [--words "<words>"] --approve` | Approves Claude's recommended title, or the words given (at most 12, one line). An approved title changes only with `--change`, which says BRIMM Ops may already have the old one |
+| "Reel 2 says Say it again, better" | `title "<episode>" reel <n> --words "<words>"` | Sets a Reel's title on screen: the words in its picture, which the hand-off gives BRIMM Ops. It starts as Claude's hook |
+| "Finish Reels 1 and 3" / "Drop 2" | `reel pick\|drop "<episode>" <n>…` | Records which Reels are finished. A finished Reel is neither picked nor dropped again |
+| "Show reel 1 in Final Cut" | `push "<episode>" reel <n>` | Pushes a picked Reel as an upright project, through the same push as the main video, with its question about hand edits. Until a later version writes a Reel's own project, it is the clip the import cut, whole, with its captions |
+
+**For each part, in this order:** Share it into `From Final Cut` (check the save dialog says so), and wait for Final Cut's notice that the Share is done. Then click in its timeline, choose File > Export XML…, and save it into `From Final Cut`. The export keeps the hand edits: a Final Cut library is not backed up. Then say "finish the episode".
+
+**What `finish` says and asks.** It finds each part's files by the project names recorded each time the part was shown in Final Cut, never by the episode's current name, in `From Final Cut` and in what the other Mac released into the episode together, and takes the Share of the newest version. It says what each part is taken from. It asks:
+
+- which file is final, when two different files are of the newest version (`--take "main=<file>"`), saying where each is when one name is both on this Mac and from the other Mac (`--take "main=the other Mac"`, or `this Mac`);
+- about a picked Reel with no Share: Share it, or leave it out (`--without "reel 2"`);
+- for File > Export XML… of a part whose export is older than its Share, and of a part never exported, unless there were no hand edits since it was shown (`--no-hand-edits "reel 2"`);
+- about a Share that Final Cut renamed ("… 1"), which it never takes;
+- what a finished Reel's title on screen says, when it has none, naming the Reel by its number and its first words. BRIMM Ops takes that title for the words in the picture, so none is ever made up.
+
+It refuses an episode whose name is still a placeholder, an episode without an approved title (a short video needs none), a file of the episode that is not whole in Dropbox, and a finish already running. With `--yes` and nothing left to ask, it starts the rest detached and returns: "Started. The panel shows how far it is." "How far is it?" (`status`) says what it made, what failed, and what it offers.
+
+**What it does then, detached,** holding the episode's lock and keeping the Mac awake:
+
+1. Waits until each finished video is whole: its size the same twice, five seconds apart, and ffprobe able to read it. After ten minutes it stops: "… is still being written by Final Cut. Say finish again when its Share is done."
+2. Checks each video's shape: a Reel is upright, and the main video has the raw video's shape. A wrong shape stops the finish, naming the file. A video whose first words are not those of its part is named for a person to check by eye, and the finish goes on: a trim at the start changes them.
+3. Transcribes each video again, as the transcript tool does: its own pass writes the captions, with the silence filter and the show's and the episode's spellings, and the word pass writes a time for every word. When the word pass dies, the captions alone are used, and the result says the word times are missing.
+4. Cuts each finished Reel of more than a minute into the parts of a Story, each at most 60 seconds: on the last pause in the 15 seconds before each minute, else in the widest gap between words there, as when music plays under the voice, else at the minute.
+5. Writes the hand-off and copies everything into the episode's `final/` folder by the rule for writing into Dropbox: each video under the name Final Cut gave it, its `.srt`, `.transcript.txt` and `.words.json`, its Story parts, its export, and the hand-off last.
+6. Writes the record: the finish, each part's file and the export that keeps its edit (or that it had no hand edits), and each Reel finished. It shows the hand-off in Finder, to drop on the BRIMM Ops page.
+7. At least 15 minutes after the last copy, checks the copies again. Only when each is whole does it delete from `From Final Cut` the files it took from there.
+
+**The hand-off**, `final/<name>.brimm-ops.json`, version 1: the episode's id, kind, name as given, the day it was recorded, and its approved title; the main video's file, length and captions; and each finished Reel's number, title, file, length and captions, with where its words fall in the finished main video when at least 90 in 100 of them are found there in order. A second `finish` transcribes only what changed, keeps every other part as the last one made it, and raises the hand-off's `revision`. The contract with BRIMM Ops is `tool/tests/fixtures/handoff-v1.json` and `handoff-v1-short-video.json`, which brimm-operations keeps copies of: change neither without changing both.
+
+**Afterwards**, the result offers to make the episode's folder online-only on this Mac (in Finder, Control-click it and choose Make online-only), and says how to free Final Cut's render files (in Final Cut, File > Delete Generated Library Files). Deleting an episode's whole Final Cut library by command comes in a later version: `free "<episode>" library` says so, and deletes nothing.
+
+**Known limits.** Story parts and word times of an earlier cut stay in `final/` after a part is Shared again: the record no longer lists them, and nothing reads them back. A Share replaced by a file of the same size whose time was set back is taken for the one finish took. Without word times (when the transcriber's word pass died), where a Reel falls in the main video can be a second or so off when its parts lie apart there.
+
+**Not tried yet.** No real episode has been finished. Every part of `finish` has met stand-ins for ffprobe, ffmpeg and the transcriber only, on a made-up recording.
 
 ## Where this came from
 

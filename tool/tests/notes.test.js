@@ -143,6 +143,8 @@ describe("Claude's reply", () => {
     assert.equal(title('Stop saying "sorry"'), 'Stop saying "sorry"');
     assert.equal(title("'Tis the season"), "'Tis the season");
     assert.equal(title("Meet the Ogdens'"), "Meet the Ogdens'");
+    assert.equal(title('"Yes" means "yes"'), '"Yes" means "yes"');
+    assert.equal(title("“Yes” means “yes”"), "“Yes” means “yes”");
   });
   it("gives no title, and finds nothing wrong, when the reply has none or an empty one: a reply from before the title was asked for is read as it was", () => {
     assert.deepEqual(readNotes(JSON.stringify(REPLY)), { ...READ, problems: [] });

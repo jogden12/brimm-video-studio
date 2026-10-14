@@ -25,6 +25,8 @@ describe("normalWords", () => {
     assert.deepEqual(normalWords([{ w: "Twenty", start: 0, end: 0.4 }, { w: "five", start: 0.4, end: 0.8 }]), [{ w: "25", start: 0, end: 0.8 }]);
     assert.deepEqual(said("twenty"), ["20"]);
     assert.deepEqual(said("25"), ["25"]);
+    assert.deepEqual(normalWords([{ w: "twenty.", start: 0, end: 0.4 }, { w: "One", start: 0.4, end: 0.8 }]).map((x) => x.w), ["20", "1"]);
+    assert.deepEqual(normalWords([{ w: "twenty,", start: 0, end: 0.4 }, { w: "five", start: 0.4, end: 0.8 }]).map((x) => x.w), ["20", "5"]);
     assert.deepEqual(normalWords([{ w: "20", start: 0, end: 0.4 }, { w: "5", start: 0.4, end: 0.8 }]).map((x) => x.w), ["20", "5"]);
   });
   it("gives each part of a word the word's times, and leaves out what has no letter or number", () => {
@@ -53,9 +55,59 @@ describe("inMain", () => {
     const main = [...spread("Welcome to the show and so on.", 0, 7.4), ...spread("the first thing you need to do is know your costs. It is very, very important. Thank you so much, Sallie.", 8, 15)];
     assert.deepEqual(inMain(spread(REEL, 0, 7.7), main, 7.7), { start: 8, end: 15 });
   });
+  it("keeps a true first and last word when the main has a filler beside it", () => {
+    const main = [...spread("Welcome to the show.", 0, 3), ...spread("So um the first thing you need to do is know your costs. It is very, very important. Thank you so much, um Sallie.", 4.1, 12.5)];
+    const found = inMain(spread(REEL, 0, 7.7), main, 7.7);
+    assert.equal(found.start, 4.1);
+    assert.equal(found.end, 12.5);
+  });
+  it("leaves out a stray first word only when its spacing to the next word is far from the Reel's", () => {
+    const stray = [...spread("We were talking about more than one thing here today and", 0, 4), ...spread("leads is a solution, not a diagnosis. Two owners can say it and need completely different help.", 31, 37)];
+    assert.deepEqual(inMain(spread("More leads is a solution, not a diagnosis. Two owners can say it and need completely different help.", 0, 6.2), stray, 6.2), { start: 31, end: 37 });
+  });
+  it("takes the earliest place when the main says the Reel's words twice, as an outro repeats them, never the tightest", () => {
+    const twice = [...spread(REEL, 2, 9.7), ...spread("and the rest of the episode goes on here for a long time ".repeat(40), 10, 1200), ...spread(REEL, 1200, 1207.4)];
+    assert.deepEqual(inMain(spread(REEL, 0, 7.7), twice, 7.7), { start: 2, end: 9.7 });
+  });
+  it("finds a Reel whose parts lie apart in the main, when the whole stretch is within one and a half times the Reel", () => {
+    const partA = "The first thing you need to do is know your costs, and then you can see what each sale is really worth to you and to the business.";
+    const partB = "When the price covers the cost and the time, every sale you make moves the business forward instead of keeping it where it is.";
+    const reel = [...spread(partA, 0, 20), ...spread(partB, 20, 40)];
+    const story = "Let me tell you about a client of mine who sold wedding dresses from a small shop downtown for many years.";
+    const main = [...spread("Welcome back everybody to another episode of the show where we talk about growing a business.", 90, 100), ...spread(partA, 100, 120), ...spread(story, 120, 135), ...spread(partB, 135, 155), ...spread("Thanks for watching and see you next week.", 156, 160)];
+    assert.deepEqual(inMain(reel, main, 40), { start: 100, end: 155 });
+  });
+  it("leaves no word out by its spacing when the times on either side are only spread over captions", () => {
+    const reel = [...spread("So", 0, 2), ...spread("the first thing you need to do is know your costs. It is very, very important. Thank you so much, Sallie.", 2, 9.7)];
+    const main = spread("So well the first thing you need to do is know your costs. It is very, very important. Thank you so much, Sallie.", 4.1, 12.5);
+    assert.equal(inMain(reel, main, 9.7, Infinity, { spacing: false }).start, 4.1);
+    assert.notEqual(inMain(reel, main, 9.7).start, 4.1, "with real times on both sides, the spacing would leave it out");
+  });
+  it("looks no further than the Reel's own length and a little more, without word times, so an end is never half a Reel late", () => {
+    // A Reel of 17 seconds whose last word the main cut, and says again seven seconds after: within one and a half times
+    // the Reel, beyond its own length and the slack.
+    const said = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    const reel = spread(`${said} Sallie`, 0, 17);
+    const main = [...spread(said, 100, 116.5), ...spread("Sallie", 123, 123.5)];
+    assert.equal(inMain(reel, main, 17, Infinity, { spacing: false }).end, 116.5);
+  });
+  it("keeps the true opening words of a Reel tightened by hand, whose pauses the main still has", () => {
+    const tight = spread("So the first thing you need to do is know your costs. It is very, very important. Thank you so much, Sallie.", 0, 7);
+    const slow = [{ w: "So", start: 4.1, end: 4.4 }, { w: "the", start: 5.6, end: 5.9 }, { w: "first", start: 7.1, end: 7.4 }, ...spread("thing you need to do is know your costs. It is very, very important. Thank you so much, Sallie.", 7.5, 13.5)];
+    assert.equal(inMain(tight, slow, 7).start, 4.1);
+  });
+  it("leaves out by spacing no more than two seconds of the Reel's own opening or closing words", () => {
+    const said = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
+    const reel = spread(said, 0, 33);
+    const words = said.split(" ");
+    const main = [...spread(words.slice(0, 8).join(" "), 50, 52.64), ...spread("and that is the whole point of it", 52.64, 54.64), ...spread(words.slice(8).join(" "), 54.64, 85)];
+    assert.equal(inMain(reel, main, 33).start, 50);
+  });
   it("keeps the end within the main's length, where the transcriber timed the last words past the end of the file", () => {
     const main = [...MAIN.slice(0, -1), { ...MAIN[MAIN.length - 1], end: 12.2 }];
-    assert.deepEqual(inMain(spread(REEL, 0, 7.7), main, 7.7, 11.878), { start: 4.1, end: 11.87 });
+    assert.deepEqual(inMain(spread(REEL, 0, 7.7), main, 7.7, 11.878), { start: 4.1, end: 11.88 });
+    const short = [...MAIN.slice(0, -1), { ...MAIN[MAIN.length - 1], end: 12.2 }].map((w) => ({ ...w, start: w.start - 7.45, end: w.end - 7.45 })).filter((w) => w.start >= 0);
+    assert.equal(inMain(spread("very important. Thank you so much, Sallie.", 0, 4.35), short, 4.35, 4.35).end, 4.35);
   });
   it("gives nothing when fewer than 90 in 100 of the Reel's words are found there", () => {
     assert.equal(inMain(spread("Welcome to the show. Today we are... Let me do that again.", 0, 4.78), MAIN, 4.78), null);
@@ -67,6 +119,15 @@ describe("inMain", () => {
   it("gives nothing for a Reel or a main with no words", () => {
     assert.equal(inMain([], MAIN, 5), null);
     assert.equal(inMain(spread("Know your costs", 0, 2), [], 2), null);
+  });
+  it("finds a Reel of 90 seconds in an hour of talk in well under a second", () => {
+    const sentence = "So the first thing you need to do is know your costs, and then you can see what each sale is really worth to you. ";
+    const said = sentence.repeat(10).trim();
+    const talk = "and so we talk about the business and the money and the people who work in it ".repeat(300);
+    const main = [...spread(talk, 0, 1800), ...spread(said, 1800, 1890), ...spread(talk, 1890, 3600)];
+    const began = Date.now();
+    assert.deepEqual(inMain(spread(said, 0, 90), main, 90), { start: 1800, end: 1890 });
+    assert.ok(Date.now() - began < 1000, `it took ${Date.now() - began} ms`);
   });
   it("searches an hour of talk in well under a second", () => {
     const talk = "and so we talk about the business and the money and the people who work in it ".repeat(300);

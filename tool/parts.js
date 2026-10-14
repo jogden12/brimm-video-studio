@@ -35,6 +35,14 @@ export function partsOf(record) {
 const nfc = (text) => String(text).normalize("NFC");
 const newest = (files) => files.reduce((best, f) => (!best || f.mtimeMs > best.mtimeMs ? f : best), null);
 const listed = (files) => files.map((f) => f.name).sort().join(", ");
+/** Where a file is, as a person is told: "on this Mac", in From Final Cut, or "from the other Mac", which released it. */
+const placeOf = (f) => (f.where === "From Final Cut" ? "on this Mac" : "from the other Mac");
+/** Files as a person is told them: by name, and by where each is when two have one name. */
+const shown = (files) => {
+  const twice = (f) => files.filter((g) => nfc(g.name) === nfc(f.name)).length > 1;
+  const order = (f) => `${nfc(f.name)}\u0000${f.where === "From Final Cut" ? 0 : 1}`;
+  return [...files].sort((a, b) => (order(a) < order(b) ? -1 : 1)).map((f) => (twice(f) ? `${f.name} ${placeOf(f)}` : f.name)).join(", ");
+};
 const count = (n) => (n === 2 ? "two" : String(n));
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 
@@ -59,7 +67,12 @@ export function lookFor(parts, { fromFinalCut, released, finished }, answers) {
     .map((f) => ({ ...f, dir: place.dir, where, project: nfc(stem(f.name)) })));
   const whereSaid = (f) => (f.where === "From Final Cut" ? "From Final Cut" : "what the other Mac released");
   for (const part of parts) {
-    if (part.key !== "main" && without.includes(part.key)) continue;
+    if (part.key !== "main" && without.includes(part.key)) {
+      // A Reel the last finish finished stays as that finish made it: leaving it out of this one does not take it out of
+      // the hand-off.
+      if (finished && finished.parts && finished.parts[part.key]) out.push({ ...part, video: null, export: null, kept: true });
+      continue;
+    }
     const versions = new Map(part.pushes.map((p) => [nfc(p.project), p.v]));
     for (const f of all.filter((g) => kindOf(g.name) === "video")) {
       const copy = /^(.*) \d+$/.exec(f.project);
@@ -76,9 +89,17 @@ export function lookFor(parts, { fromFinalCut, released, finished }, answers) {
     const before = finished && finished.parts && finished.parts[part.key];
     let video = null;
     if (take[part.key]) {
-      const named = once(videos.filter((f) => nfc(f.name) === nfc(take[part.key])));
+      // A person names a file, or the place it is in: "this Mac" or "the other Mac".
+      const said = nfc(take[part.key]).toLowerCase();
+      const place = said === "this mac" ? "From Final Cut" : said === "the other mac" ? "the other Mac" : "";
+      const inPlace = place ? once(videos.filter((f) => f.where === place)) : [];
+      const named = place ? inPlace.filter((f) => f.v === Math.max(...inPlace.map((g) => g.v))) : once(videos.filter((f) => nfc(f.name) === nfc(take[part.key])));
       if (!named.length) {
-        asks.push(`"${take[part.key]}" is not a Shared video of ${part.label}. ${videos.length ? `The ones there are: ${listed(once(videos))}.` : "There is none there."} Which is the final one?`);
+        asks.push(`"${take[part.key]}" is not a Shared video of ${part.label}. ${videos.length ? `The ones there are: ${shown(once(videos))}.` : "There is none there."} Which is the final one?`);
+        continue;
+      }
+      if (named.length > 1) {
+        asks.push(place ? `For ${part.label} there are ${count(named.length)} Shared videos ${placeOf(named[0])}: ${listed(named)}. Which is the final one?` : `${named[0].name} is both on this Mac and from the other Mac, and they differ. Say which: this Mac, or the other Mac.`);
         continue;
       }
       video = named[0];
@@ -98,7 +119,7 @@ export function lookFor(parts, { fromFinalCut, released, finished }, answers) {
       const top = Math.max(...newer.map((f) => f.v));
       const highest = once(newer.filter((f) => f.v === top));
       if (highest.length > 1) {
-        asks.push(`For ${part.label} there are ${count(highest.length)} Shared videos of v${top}: ${listed(highest)}. Which is the final one?`);
+        asks.push(`For ${part.label} there are ${count(highest.length)} Shared videos of v${top}: ${shown(highest)}. Which is the final one?`);
         continue;
       }
       video = highest[0];
@@ -107,12 +128,31 @@ export function lookFor(parts, { fromFinalCut, released, finished }, answers) {
     const project = stem(video.name);
     if (exported && exported.mtimeMs < video.mtimeMs) asks.push(`${capital(part.label)}'s export is older than its Shared video. Once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut.`);
     else if (!exported && !noHandEdits.includes(part.key)) asks.push(`${capital(part.label)} was never exported. If you changed it by hand in Final Cut, then once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut. If you made no hand edits since it was shown, say so.`);
-    const { project: _p, v: _v, ...shown } = video;
-    out.push({ ...part, video: shown, export: exported ? (({ project: _q, ...e }) => e)(exported) : null, kept: false });
+    const { project: _p, v: _v, ...taken } = video;
+    out.push({ ...part, video: taken, export: exported ? (({ project: _q, ...e }) => e)(exported) : null, kept: false });
   }
   const names = parts.flatMap((p) => p.projects.slice(-1).flatMap((n) => VIDEOS.map((e) => n + e)));
   const looked = `Looked in ${fromFinalCut.dir} and ${released.dir} for: ${names.join(", ")}.`;
   return { parts: out, asks, stops, looked };
+}
+
+/** The parts whose hand work this Mac's Final Cut library holds and nothing else does, by their labels: each part pushed on
+    this Mac (the main video, and any Reel) whose newest version pushed here was not finished with its edit kept in an
+    export, or answered "no hand edits". A part pushed only on the other Mac is in that Mac's library, not this one's. Its
+    library may be deleted only when this is empty. */
+export function unkeptParts(record, machine) {
+  const done = (record.finished && record.finished.parts) || {};
+  const all = [{ key: "main", label: "the main video", pushed: record.main && record.main.pushed }, ...(record.reels || []).map((r) => ({ key: `reel ${r.n}`, label: `Reel ${r.n}`, pushed: r.pushed }))];
+  return all.filter((part) => {
+    const pushed = Array.isArray(part.pushed) ? part.pushed : [];
+    const here = pushed.filter((p) => p.on === machine);
+    if (!here.length) return false;
+    const newest = Math.max(...here.map((p) => p.v));
+    const kept = done[part.key];
+    if (!kept || !(kept.export || kept.noHandEdits)) return true;
+    const finishedV = Number.isInteger(kept.v) ? kept.v : (pushed.find((p) => nfc(p.project) === nfc(stem(String(kept.file).split("/").pop()))) || {}).v;
+    return !(finishedV >= newest);
+  }).map((part) => part.label);
 }
 
 /** Does a finished video start with the words its part is expected to start with? At least four of the six first words

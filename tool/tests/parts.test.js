@@ -48,10 +48,14 @@ describe("lookFor", () => {
     assert.equal(got.parts[0].video.name, `${MAIN5}.mp4`);
     assert.equal(got.parts[1].export.name, `${REEL1}.fcpxmld`);
   });
-  it("passes over an empty file and one still being written under a temporary name", () => {
-    const got = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mp4`, 2000, 0), file(`${MAIN5}.mp4.partial`)]), NONE);
-    assert.deepEqual(got.parts, []);
-    assert.match(got.stops[0], /main video/);
+  it("passes over an empty file, and takes a Share Final Cut is still writing, which is under its final name from the start", () => {
+    // Phase 0 (A6): a Share through BRIMM final is a .mov named exactly after the project, written under that name and
+    // growing until done. The detached part waits for it to settle and for ffprobe to read it.
+    const empty = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mov`, 2000, 0)]), NONE);
+    assert.deepEqual(empty.parts, []);
+    assert.match(empty.stops[0], /main video/);
+    const growing = lookFor(partsOf(RECORD), folders([file(`${MAIN5}.mov`, 2000, 7000), file(`${MAIN5}.fcpxmld`, 3000)]), NONE);
+    assert.equal(growing.parts[0].video.name, `${MAIN5}.mov`);
   });
   it("takes the Share of the highest version pushed, wherever it is, when Shares of two versions fit one part", () => {
     const shares = [file(`${MAIN5}.mp4`, 3000), file("Pricing- what to charge- main v4 3fa9c1.mp4", 2000), file(`${MAIN5}.fcpxmld`, 4000), file(`${REEL1}.mov`), file(`${REEL1}.fcpxmld`, 2000)];
@@ -76,6 +80,19 @@ describe("lookFor", () => {
     assert.deepEqual(got.asks, []);
     assert.equal(got.parts[0].video.where, "From Final Cut");
   });
+  it("says where each Share is when the same name is in both places with different files, and takes the place named", () => {
+    const shares = [file(`${MAIN5}.mp4`, 3000, 5000), file(`${MAIN5}.fcpxmld`, 4000), file(`${REEL1}.mov`), file(`${REEL1}.fcpxmld`, 2000)];
+    const released = [file(`${MAIN5}.mp4`, 2500, 6000), file(`${MAIN5}.fcpxmld`, 3500)];
+    const asked = lookFor(partsOf(RECORD), folders(shares, released), NONE);
+    assert.match(asked.asks[0], /For the main video there are two Shared videos of v5: Pricing- what to charge- main v5 3fa9c1\.mp4 on this Mac, Pricing- what to charge- main v5 3fa9c1\.mp4 from the other Mac\. Which is the final one\?/);
+    const there = lookFor(partsOf(RECORD), folders(shares, released), { ...NONE, take: { main: "the other Mac" } });
+    assert.deepEqual(there.asks, []);
+    assert.deepEqual([there.parts[0].video.where, there.parts[0].video.bytes], ["the other Mac", 6000]);
+    const here = lookFor(partsOf(RECORD), folders(shares, released), { ...NONE, take: { main: "this Mac" } });
+    assert.deepEqual([here.parts[0].video.where, here.parts[0].video.bytes], ["From Final Cut", 5000]);
+    const byName = lookFor(partsOf(RECORD), folders(shares, released), { ...NONE, take: { main: `${MAIN5}.mp4` } });
+    assert.match(byName.asks[0], /Pricing- what to charge- main v5 3fa9c1\.mp4 is both on this Mac and from the other Mac, and they differ\. Say which: this Mac, or the other Mac\./);
+  });
   it("keeps a part from the last finish when what is there now is of an older version", () => {
     const record = { ...RECORD, main: { pushed: [...RECORD.main.pushed, push(6, "Pricing- what to charge- main v6 3fa9c1")] } };
     const finished = { revision: 1, parts: { main: { file: "final/Pricing- what to charge- main v6 3fa9c1.mp4", source: { bytes: 7000, mtimeMs: 5000 }, export: "final/Pricing- what to charge- main v6 3fa9c1.fcpxmld" } } };
@@ -84,6 +101,12 @@ describe("lookFor", () => {
     assert.equal(got.parts[0].kept, true);
     const again = lookFor(partsOf(record), { ...folders([file("Pricing- what to charge- main v6 3fa9c1.mp4", 8000, 7100), file("Pricing- what to charge- main v6 3fa9c1.fcpxmld", 8500), file(`${REEL1}.mov`, 2000), file(`${REEL1}.fcpxmld`, 3000)]), finished }, NONE);
     assert.equal(again.parts[0].video.name, "Pricing- what to charge- main v6 3fa9c1.mp4", "a new Share of the same version is newer");
+  });
+  it("keeps a Reel the last finish finished when a person says to leave it out, rather than drop it from the hand-off", () => {
+    const finished = { revision: 1, parts: { "reel 1": { v: 1, file: `final/${REEL1}.mov`, noHandEdits: true } } };
+    const got = lookFor(partsOf(RECORD), { ...folders([file(`${MAIN5}.mp4`, 2000), file(`${MAIN5}.fcpxmld`, 3000), file(`${REEL1}.mov`, 9000)]), finished }, { ...NONE, without: ["reel 1"] });
+    assert.deepEqual(got.asks, []);
+    assert.deepEqual(got.parts.map((p) => [p.key, p.kept]), [["main", false], ["reel 1", true]]);
   });
   it("takes the file a person names, wherever it is, and asks again when it names no Share of that part", () => {
     const shares = [file(`${MAIN5}.mp4`, 3000), file(`${MAIN5}.fcpxmld`, 4000), file(`${REEL1}.mov`), file(`${REEL1}.fcpxmld`, 2000)];

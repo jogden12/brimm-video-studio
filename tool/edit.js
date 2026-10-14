@@ -14,6 +14,10 @@
 //                                         library for the episode
 //   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
 //   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+//   node edit.js name, title, reel pick|drop, push … reel <n>
+//                                         the episode's name, its title, its Reels, and a Reel shown in Final Cut Pro
+//   node edit.js finish "<episode>"       gather what Final Cut Shared and exported, ask what it must, and then, detached,
+//                                         transcribe again, copy into final/ and write the hand-off for BRIMM Ops
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
@@ -23,14 +27,18 @@ import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder } from "./settings.js";
-import { progressFolder } from "./progress.js";
+import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { isWhole, readThrough, textWriter } from "./dropbox.js";
-import { localMedia, retitle, withImportOptions } from "./portable.js";
+import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, projectName, timelineFile } from "./names.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey } from "./filing.js";
+import { reelTimeline } from "./reel.js";
+import { partsOf, lookFor, unkeptParts } from "./parts.js";
+import { finishNow, expectedWords } from "./finish.js";
+import { findPrograms } from "./unedited.js";
 import { isMedia } from "./lib.js";
 import { isRunning, lastLine } from "./run.js";
 
@@ -45,7 +53,23 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         library for the episode. Shown before, it asks first whether it was changed in
                                         Final Cut: --no-hand-edits says it was not, --hand-edits that it was
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
-  node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped`;
+  node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+  node edit.js name "<episode>" "<name>"
+                                        give the episode its name. Nothing is renamed
+  node edit.js title "<episode>" [--words "<words>"] [--approve] [--change]
+                                        show its title, or set it and approve it. An approved title changes only with
+                                        --change, since BRIMM Ops may already have it
+  node edit.js title "<episode>" reel <n> [--words "<words>"]
+                                        show or set the title on screen of a Reel: the words in its picture
+  node edit.js reel pick|drop "<episode>" <n>…
+                                        pick Reels to finish, or drop them
+  node edit.js push "<episode>" reel <n> [--no-hand-edits | --hand-edits]
+                                        show a picked Reel in Final Cut Pro, upright
+  node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--no-hand-edits "<part>"]
+                     [--without "reel <n>"]
+                                        find what Final Cut Shared and exported of each part, and ask what it must. With
+                                        --yes and nothing left to ask, it transcribes the finished videos again, copies them
+                                        into final/ and writes the hand-off for BRIMM Ops, detached`;
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -509,14 +533,17 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
   }
 }
 
-/** `push "<episode>" [main] [--no-hand-edits | --hand-edits]`: show the main timeline in Final Cut Pro as a new version
-    (pushPart). In phase 1a the main timeline is the import's own, edit/main.v0.fcpxml. A Reel is pushed from phase 2. */
+/** `push "<episode>" [main | reel <n>] [--no-hand-edits | --hand-edits]`: show the main timeline in Final Cut Pro as a new
+    version (pushPart): the import's own, edit/main.v0.fcpxml. A picked Reel is pushed by pushReel. */
 export async function push(ctx, rest) {
   const flags = new Set(rest.filter((word) => word.startsWith("--")));
   const words = rest.filter((word) => !word.startsWith("--"));
   if (words.length >= 2 && words[words.length - 2] === "reel" && /^\d+$/.test(words[words.length - 1])) {
-    ctx.say("Reels are pushed from a later version.");
-    return 1;
+    const n = Number(words.pop());
+    words.pop();
+    const got = episodeFor(ctx, words, { newerEnds: 1 });
+    if (!got.found) return got.code;
+    return pushReel(ctx, { ...got.found, record: got.record }, n, { noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits") });
   }
   if (words[words.length - 1] === "main") words.pop();
   const got = episodeFor(ctx, words, { newerEnds: 1 });
@@ -533,7 +560,8 @@ export async function push(ctx, rest) {
 /** `bring --now "<episode folder>"`, the detached run `open` starts: each file of the episode that is not whole on this Mac
     is read to its end, so that Dropbox brings it over, and the result says which are whole now. */
 export async function bring(ctx, rest) {
-  const [now, folder] = rest;
+  // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
+  const [now, folder, ...only] = rest;
   if (now !== "--now" || !folder) {
     ctx.say(HELP);
     return 2;
@@ -546,7 +574,8 @@ export async function bring(ctx, rest) {
   const { record } = found.read;
   const name = record.name.text;
   const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
-    const coming = notHere(ctx, found, record);
+    const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
+    const coming = wanted();
     const read = ctx.deps.readAll || readThrough;
     const failed = [];
     for (const rel of coming) {
@@ -556,7 +585,7 @@ export async function bring(ctx, rest) {
         failed.push(`${rel} could not be read (${e.code || e.message})`);
       }
     }
-    const still = notHere(ctx, found, record);
+    const still = wanted();
     const made = coming.filter((rel) => !still.includes(rel));
     for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
     return { ok: !failed.length, made, failed, next: failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".` };
@@ -600,7 +629,9 @@ export async function status(ctx, rest) {
   if (imports.length) lines.push("Imports:", ...imports);
   let local = [];
   try {
-    local = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".") && fits(n)).sort();
+    // An episode is found by its folder's name, or by its own name as findEpisode finds it.
+    const named = words.length ? findEpisode(ctx, rest.join(" ")) : {};
+    local = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".") && (fits(n) || n === named.name)).sort();
   } catch (e) {
     // There is no BRIMM Video Work yet.
   }
@@ -687,8 +718,333 @@ export async function retry(ctx, rest) {
   return 0;
 }
 
+/** A command's words, and its flags: each `--name`, with the word after it as its value when `valued` names it. A flag given
+    more than once keeps each of its values. */
+function flagsOf(rest, valued = []) {
+  const words = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const word = rest[i];
+    if (!word.startsWith("--")) words.push(word);
+    else if (valued.includes(word.slice(2))) {
+      flags[word.slice(2)] = [...(flags[word.slice(2)] || []), rest[i + 1] ?? ""];
+      i += 1;
+    } else flags[word.slice(2)] = true;
+  }
+  return { words, flags };
+}
+
+/** Who writes a record from this Mac: this checkout's commit, for information only, and the Mac. */
+const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine });
+
+/** Write the episode's next record, `record`, and say `done`. When the other Mac wrote meanwhile, or Dropbox holds a conflicted
+    copy, nothing is written and the person is told why. Resolves 0 when written, 1 when not. */
+async function save(ctx, found, record, done) {
+  // A change Dropbox took away is said, as 1a's commands say it, and never written over in silence.
+  const gone = undone(found.record, ctx.home);
+  if (gone) {
+    ctx.say(`${gone} Nothing was written.`);
+    acceptRev(ctx.home, found.record.id, found.record.rev);
+    return 1;
+  }
+  const work = join(runsFolder(ctx.home), `record-${process.pid}-${ctx.now()}`);
+  try {
+    writeEpisode(found.folder, record, { expectRev: found.record.rev, writeText: textWriter({ work, ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
+  } catch (e) {
+    ctx.say(e.code === "CHANGED" ? "Nothing was written: this episode changed on the other Mac: open it again." : `Nothing was written: ${String(e.message).replace(/\.$/, "")}.`);
+    return 1;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  ctx.say(done);
+  return 0;
+}
+const refuse = (ctx, why) => {
+  ctx.say(why);
+  return 1;
+};
+const oneLine = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+
+/** Record the episode's name as it is given (spec section 1, "The episode's name"). Nothing is renamed: the folder keeps its
+    name, and a project keeps the name it was pushed with. */
+export async function nameEpisode(ctx, found, words) {
+  const text = oneLine(words);
+  if (!text) return refuse(ctx, "Say the name to give the episode.");
+  return save(ctx, found, { ...found.record, name: { text, placeholder: false } }, `It is called "${text}" now. Nothing was renamed.`);
+}
+
+/** How many words a title on screen may have, when a person gives it. */
+const TITLE_MOST = 12;
+
+/** Show the episode's title, or set and approve it (spec section 4, `title`). Claude's recommended title is approved as it is,
+    or a person's words take its place. An approved title is locked: changing it needs `change`, because BRIMM Ops may already
+    have it. */
+export async function titleEpisode(ctx, found, { words, approve = false, change = false, reel } = {}) {
+  if (reel) return reelTitle(ctx, found, reel, words);
+  const now = found.record.title;
+  if (words == null && !approve) {
+    ctx.say(now ? `The title is "${now.text}", ${now.from === "claude" ? "recommended by Claude" : "given by a person"}, ${now.approved ? "approved" : "not yet approved"}.` : "There is no title yet. Say the words to put on screen.");
+    return 0;
+  }
+  if (now && now.approved && !change) return refuse(ctx, `The title "${now.text}" is approved already. To change it, say to change it (--change): BRIMM Ops may already have it.`);
+  if (words != null && /[\r\n]/.test(words)) return refuse(ctx, "A title is one line.");
+  const text = words == null ? (now ? now.text : "") : oneLine(words);
+  if (!text) return refuse(ctx, "There is no title to approve. Say the words to put on screen.");
+  const count = text.split(" ").length;
+  if (count > TITLE_MOST) return refuse(ctx, `A title is at most ${TITLE_MOST} words, and that is ${count}.`);
+  const title = { text, from: words == null ? now.from : "person", approved: approve };
+  const changed = change && now && now.approved && now.text !== text ? " BRIMM Ops may already have the old title, so change it there too." : "";
+  return save(ctx, found, { ...found.record, title }, `The title is "${text}", ${approve ? "approved" : "not yet approved"}.${changed}`);
+}
+
+/** Show or set a Reel's title on screen: the words in its picture, which the hand-off gives BRIMM Ops. A Reel's title is
+    Claude's hook until a person says otherwise. */
+async function reelTitle(ctx, found, n, words) {
+  const reels = (found.record.reels || []).map((r) => ({ ...r }));
+  const reel = reels.find((r) => r.n === n);
+  if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  if (words == null) {
+    ctx.say(reel.title ? `Reel ${n}'s title on screen is "${reel.title}".` : `Reel ${n} has no title on screen. Say what it says.`);
+    return 0;
+  }
+  if (/[\r\n]/.test(words)) return refuse(ctx, "A title is one line.");
+  const text = oneLine(words);
+  if (!text) return refuse(ctx, `Say what Reel ${n}'s title on screen says.`);
+  const count = text.split(" ").length;
+  if (count > TITLE_MOST) return refuse(ctx, `A title is at most ${TITLE_MOST} words, and that is ${count}.`);
+  reel.title = text;
+  return save(ctx, found, { ...found.record, reels }, `Reel ${n}'s title on screen is "${text}".`);
+}
+
+/** Mark Reels picked or dropped, by their numbers. A record only: phase 3 also writes a picked Reel's project here. */
+async function markReels(ctx, found, ns, status) {
+  const { record } = found;
+  if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
+  if (!ns.length) return refuse(ctx, "Say which Reels, by their numbers.");
+  const reels = (record.reels || []).map((reel) => ({ ...reel }));
+  for (const n of ns) {
+    const reel = reels.find((r) => r.n === n);
+    if (!reel) return refuse(ctx, `There is no Reel ${n}. The Reels are ${reels.map((r) => r.n).join(", ") || "none"}.`);
+    if (reel.status === "finished") return refuse(ctx, `Reel ${n} is finished: it is in the hand-off already.`);
+    reel.status = status;
+  }
+  const said = ns.map((n) => (status === "picked" ? `Reel ${n} is picked. Say "show reel ${n} in Final Cut" to have it pushed.` : `Reel ${n} is dropped.`));
+  return save(ctx, found, { ...record, reels }, said.join(" "));
+}
+export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked");
+export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
+
+/** Show a picked Reel in Final Cut Pro (spec section 7, phase 2): its timeline (reelTimeline: until phase 3, the clip the
+    import cut, upright, with its captions), through the push every part shares, with its guard. */
+export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false } = {}) {
+  const { record } = found;
+  if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
+  const reel = (record.reels || []).find((r) => r.n === n);
+  if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
+  const made = await reelTimeline(found, reel, ctx);
+  if (made.coming) {
+    // As open does: a detached run reads the Reel's own files to their end, so that Dropbox brings them over.
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: (reel.files || []).filter((f) => f in found.record.files) });
+    return refuse(ctx, `Dropbox is bringing ${made.coming} over to this Mac. Say "show reel ${n} in Final Cut" again when it is done.`);
+  }
+  if (made.why) return refuse(ctx, made.why);
+  return pushPart(ctx, found, { part: { reel: n }, xml: made.xml, noHandEdits, handEdits });
+}
+
+/** The files of one folder, each {name, bytes, mtimeMs}: none when the folder is not there. An export bundle is a folder,
+    and is as new as the later of its own time and its Info.fcpxml's: saving over a bundle of the same name may leave the
+    folder's time as it was (phase 0, A5). */
+function listing(dir) {
+  try {
+    return readdirSync(dir).map((file) => {
+      const found = statSync(join(dir, file));
+      if (!found.isDirectory()) return { name: file, bytes: found.size, mtimeMs: found.mtimeMs };
+      const info = statSync(join(dir, file, "Info.fcpxml"), { throwIfNoEntry: false });
+      return { name: file, bytes: 1, mtimeMs: Math.max(found.mtimeMs, info ? info.mtimeMs : 0) };
+    });
+  } catch (e) {
+    return [];
+  }
+}
+const capital = (text) => text[0].toUpperCase() + text.slice(1);
+
+/** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, say what each
+    is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what it was told in
+    finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once. */
+export async function finishEpisode(ctx, found, answers = {}) {
+  const { record } = found;
+  const stops = [];
+  const gone = undone(record, ctx.home);
+  if (gone) {
+    acceptRev(ctx.home, record.id, record.rev);
+    stops.push(gone);
+  }
+  if (record.name && record.name.placeholder) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
+  if (record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
+  const problems = filesProblems(found.folder, record);
+  if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) stops.push(`${running} is running for this episode. Say "how far is it?"`);
+  const here = fromFinalCutFolder(ctx.home);
+  mkdirSync(here, { recursive: true });
+  const released = join(found.folder, "edit", "from-final-cut");
+  const looked = lookFor(partsOf(record), { fromFinalCut: { dir: here, files: listing(here) }, released: { dir: released, files: listing(released) }, finished: record.finished }, answers);
+  const noHandEdits = answers.noHandEdits || [];
+  // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
+  const plan = (() => {
+    try {
+      return JSON.parse(readFileSync(join(found.folder, `${basename(record.video.file, extname(record.video.file))}.cut-plan.json`), "utf8"));
+    } catch (e) {
+      return null;
+    }
+  })();
+  for (const part of looked.parts.filter((p) => p.reel)) {
+    const reel = (record.reels || []).find((r) => r.n === part.reel);
+    if (reel && String(reel.title || "").trim()) continue;
+    const opening = expectedWords(part, record, plan);
+    looked.asks.push(`Reel ${part.reel} has no title on screen. Say what it says${opening ? `: it starts "${opening}"` : ""}.`);
+  }
+  for (const part of looked.parts) {
+    if (part.kept) ctx.say(`${capital(part.label)}: kept as the last finish made it.`);
+    else ctx.say(`${capital(part.label)}: ${part.video.name}, from ${part.video.where}${part.export ? `, with its export ${part.export.name}` : noHandEdits.includes(part.key) ? ", with no hand edits" : ""}.`);
+  }
+  for (const line of [...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
+  if (looked.stops.length || stops.length) {
+    ctx.say(looked.looked);
+    return 1;
+  }
+  if (looked.asks.length || !answers.yes) {
+    if (!looked.asks.length) ctx.say('Say "yes, finish it" to start.');
+    return 0;
+  }
+  const asked = { version: 1, at: localStamp(new Date(ctx.now())), rev: record.rev, parts: looked.parts.map((p) => ({ key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects, video: p.video, export: p.export, kept: p.kept, noHandEdits: noHandEdits.includes(p.key) })) };
+  const work = episodeWork(ctx.home, found.name);
+  mkdirSync(work, { recursive: true });
+  writeFileSync(join(work, "finish.asked.json"), JSON.stringify(asked, null, 2) + "\n");
+  startDetached(ctx, { command: "finish", folder: found.name });
+  ctx.say("Started. The panel shows how far it is.");
+  return 0;
+}
+
+/** `finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"]… [--no-hand-edits "<part>"]…
+    [--without "reel <n>"]…`, and the
+    detached part it starts, `finish --now "<episode folder>"`, which runs finishNow holding the episode's lock. */
+async function finish(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["take", "no-hand-edits", "without"]);
+  if (flags.now) {
+    const found = findEpisode(ctx, words.join(" "));
+    if (!found.read || !found.read.record) {
+      ctx.say(found.why || `${words.join(" ")}: ${found.read.why}.`);
+      return 1;
+    }
+    // The progress panel shows the finish as it shows an import (phase P).
+    const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
+    const result = await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
+    if (result.taking) {
+      ctx.say(`Another run is taking over ${found.name}'s lock. Say finish again in a moment.`);
+      return 1;
+    }
+    if (result.running) {
+      ctx.say(`${result.running} is running for ${found.name} already.`);
+      return 1;
+    }
+    return result.ok ? 0 : 1;
+  }
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
+  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [] });
+}
+
+/** Is a program running on this Mac, by its name, as pgrep finds it? */
+const programRunning = async (name) => spawnSync("/usr/bin/pgrep", ["-x", name], { stdio: "ignore" }).status === 0;
+/** The size of a library, as a person reads it. */
+const librarySize = (folder) => sizeText(folderSize(folder));
+
+/** Delete an episode's Final Cut library on this Mac, to free space (spec section 5, step 9). Only when the episode is
+    finished; each part's edit is kept in an export copied into final/, or the part had no hand edits; every medium those
+    exports name is inside the episode's folder; and Final Cut Pro is not running. Without `yes` it says what it would delete
+    and how large it is. It deletes only inside this Mac's work folder for the episode. Render files alone are freed in
+    Final Cut, with File > Delete Generated Library Files. */
+export async function freeLibrary(ctx, found, { yes = false } = {}) {
+  const { record } = found;
+  const { finished } = record;
+  if (!finished) return refuse(ctx, "It is not finished yet, so its library holds work kept nowhere else.");
+  const work = resolve(episodeWork(ctx.home, found.name));
+  const library = resolve(libraryFor(ctx.home, found.name));
+  if (!library.startsWith(`${work}/`) || !work.startsWith(`${resolve(workFolder(ctx.home))}/`)) return refuse(ctx, "Its library is not in this Mac's work folder for the episode, so it is left alone.");
+  const unkept = unkeptParts(record, ctx.machine);
+  if (unkept.length) return refuse(ctx, `The hand work of ${listed(unkept)} is kept only in the library: finish it with its export, or say it had no hand edits, first.`);
+  for (const [key, p] of Object.entries(finished.parts || {}).filter(([, part]) => part.export)) {
+    const at = join(found.folder, p.export);
+    const xml = existsSync(join(at, "Info.fcpxml")) ? join(at, "Info.fcpxml") : at;
+    let media = [];
+    try {
+      media = mediaIn(readFileSync(xml, "utf8"), xml);
+    } catch (e) {
+      return refuse(ctx, `The export of ${key}, ${p.export}, cannot be read, so its library is kept.`);
+    }
+    const outside = media.filter((path) => !path.normalize("NFC").includes(`/Episodes/${found.name}/`.normalize("NFC")));
+    if (outside.length) return refuse(ctx, `The export of ${key} uses media outside the episode folder (${outside[0]}). Copy it into media/ first.`);
+  }
+  if (await (ctx.deps.running || programRunning)("Final Cut Pro")) return refuse(ctx, "Quit Final Cut Pro first.");
+  if (!existsSync(library)) return refuse(ctx, "There is no library of it on this Mac.");
+  const size = librarySize(library);
+  if (!yes) {
+    ctx.say(`This deletes ${library}, ${size}. Its edits are kept in final/. Say yes to delete it.`);
+    return 0;
+  }
+  rmSync(library, { recursive: true, force: true });
+  // The record stops naming a library on this Mac, so the next push names the Backups step for the new one.
+  const { [ctx.machine]: gone, ...libraries } = record.libraries || {};
+  return save(ctx, found, { ...record, libraries }, `Deleted its Final Cut library on this Mac, ${size}.`);
+}
+
+/** `free "<episode>" library`: held back from this version (the lead's ruling, 2026-10-14). Deleting a library by command
+    needs the record of every version handed to Final Cut on this Mac, which phase 5 brings. freeLibrary and unkeptParts
+    stay, with their tests, for then; nothing on the command line reaches them. */
+async function free(ctx) {
+  ctx.say("Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.");
+  return 1;
+}
+
+/** `name "<episode>" "<name>"`. */
+async function name(ctx, rest) {
+  const [said, ...words] = rest;
+  const got = episodeFor(ctx, said ? [said] : [], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  return nameEpisode(ctx, { ...got.found, record: got.record }, words.join(" "));
+}
+
+/** `title "<episode>" [reel <n>] [--words "<words>"] [--approve] [--change]`: the episode's title, or a Reel's. */
+async function title(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["words"]);
+  let reel = 0;
+  if (words.length >= 2 && words[words.length - 2] === "reel" && /^\d+$/.test(words[words.length - 1])) {
+    reel = Number(words.pop());
+    words.pop();
+  }
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  return titleEpisode(ctx, { ...got.found, record: got.record }, { words: flags.words ? flags.words.join(" ") : undefined, approve: Boolean(flags.approve), change: Boolean(flags.change), ...(reel ? { reel } : {}) });
+}
+
+/** `reel pick|drop "<episode>" <n>…`. */
+async function reel(ctx, rest) {
+  const [what, said, ...numbers] = rest;
+  if ((what !== "pick" && what !== "drop") || !said) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, [said], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const ns = numbers.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  return (what === "pick" ? pickReels : dropReels)(ctx, { ...got.found, record: got.record }, ns);
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, finish, free };
 
 /** What `node edit.js` does. Resolves 0 when it did what it was asked, 1 when it refused or something failed, and 2 when it
     was asked wrongly or this Mac is not set up. */

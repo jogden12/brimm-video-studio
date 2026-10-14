@@ -74,9 +74,15 @@ export function notesRequest(plan, about) {
 
 /** Quotation marks, each opening one with the closing one that matches it. */
 const QUOTES = { '"': '"', "“": "”", "'": "'", "‘": "’" };
-/** A title without the one pair of quotation marks that encloses all of it. Marks inside it, and an apostrophe that is part
-    of a word ("'Tis the season", "Meet the Ogdens'"), stay. */
-const unquoted = (t) => (t.length > 1 && QUOTES[t[0]] === t[t.length - 1] ? t.slice(1, -1).trim() : t);
+/** A title without the one pair of quotation marks that encloses all of it: a pair with no mark of its kind between them.
+    Marks inside it ('"Yes" means "yes"'), and an apostrophe that is part of a word ("'Tis the season", "Meet the Ogdens'"),
+    stay. */
+const unquoted = (t) => {
+  if (t.length < 2 || QUOTES[t[0]] !== t[t.length - 1]) return t;
+  const inner = t.slice(1, -1);
+  // '"Yes" means "yes"' starts and ends with a mark, and is not enclosed by them: the marks inside say so.
+  return inner.includes(t[0]) || inner.includes(t[t.length - 1]) ? t : inner.trim();
+};
 
 /** The four things Claude is asked for. */
 const ASKED = ["decisions", "notes", "graphics", "clips"];

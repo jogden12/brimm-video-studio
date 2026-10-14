@@ -88,24 +88,32 @@ const UNITS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
     left out. */
 export function normalWords(words) {
   const out = [];
+  // May the next token join the one before it into one figure? Only across a space or a hyphen: "twenty five",
+  // "twenty-five", never "twenty. One".
+  let joins = false;
   for (const word of words) {
-    for (const token of tokens(word.w)) {
-      const figure = NUMBERS[token];
-      const last = out[out.length - 1];
-      if (figure && UNITS.has(figure) && last && last.tens) out[out.length - 1] = { w: String(Number(last.w) + Number(figure)), start: last.start, end: word.end };
-      else out.push({ w: figure || token, start: word.start, end: word.end, ...(figure && TENS.has(figure) ? { tens: true } : {}) });
-    }
+    const parts = String(word.w).split("-");
+    parts.forEach((part, p) => {
+      tokens(part).forEach((token, t) => {
+        const figure = NUMBERS[token];
+        const last = out[out.length - 1];
+        if (figure && UNITS.has(figure) && last && last.tens && joins && t === 0) out[out.length - 1] = { w: String(Number(last.w) + Number(figure)), start: last.start, end: word.end };
+        else out.push({ w: figure || token, start: word.start, end: word.end, ...(figure && TENS.has(figure) ? { tens: true } : {}) });
+        joins = false;
+      });
+      // A hyphen joins what is either side of it; so does a space, after a word that ends in a letter or a figure.
+      joins = p < parts.length - 1 ? /[\p{L}\p{N}]$/u.test(part) : /[\p{L}\p{N}]$/u.test(String(word.w).trim());
+    });
   }
   return out.map(({ tens, ...said }) => said);
 }
 
-/** The tightest stretch of `b` that holds the most of `a`'s words in the same order, not all side by side: {count, first,
-    last}, the places in `b` of the first and the last word of it. Its end is the earliest place the last of them can be,
-    and its start the latest place the first of them can be, so a later repeat of the last words, or an earlier copy of the
-    first, is not taken. Then a first or last word found apart from the rest, with words of `b` between it and the next one
-    found, is left out while at least `need` words are still found: such a word is most often a stray copy of one the main
-    video cut ("and so on" just before a Reel's "So" that was trimmed). */
-function tightest(a, b, need) {
+/** The tightest stretch of `b` that holds the most of `a`'s words in the same order, not all side by side: {count, early,
+    late}, the pairs [place in a, place in b] of the words found, taken as early as they can be from the stretch's start and
+    as late as they can be back from its end. The stretch's end is the earliest place the last of them can be, and its start
+    the latest place the first of them can be, so a later repeat of the last words, or an earlier copy of the first, is not
+    taken. */
+function tightest(a, b) {
   const [R, W] = [a.length, b.length];
   // forward[i][j]: the most of a's first i words found in b's first j.
   const forward = Array.from({ length: R + 1 }, () => new Uint16Array(W + 1));
@@ -113,7 +121,7 @@ function tightest(a, b, need) {
     for (let j = 1; j <= W; j++) forward[i][j] = a[i - 1] === b[j - 1] ? forward[i - 1][j - 1] + 1 : Math.max(forward[i - 1][j], forward[i][j - 1]);
   }
   const count = forward[R][W];
-  if (!count) return { count: 0, first: -1, last: -1 };
+  if (!count) return { count: 0, early: [], late: [] };
   let end = 1;
   while (forward[R][end] < count) end += 1;
   // backward[i][j]: the most of a's words from i found in b from j, up to the end.
@@ -123,11 +131,10 @@ function tightest(a, b, need) {
   }
   let start = end - 1;
   while (backward[0][start] < count) start -= 1;
-  // The places found, taken as early as they can be from the start, and as late as they can be back from the end.
   const early = [];
   for (let i = 0, j = start; i < R && j < end;) {
     if (a[i] === b[j]) {
-      early.push(j);
+      early.push([i, j]);
       i += 1;
       j += 1;
     } else if (backward[i + 1][j] >= backward[i][j + 1]) i += 1;
@@ -136,53 +143,125 @@ function tightest(a, b, need) {
   const late = [];
   for (let i = R, j = end; i > 0 && j > start;) {
     if (a[i - 1] === b[j - 1]) {
-      late.unshift(j - 1);
+      late.unshift([i - 1, j - 1]);
       i -= 1;
       j -= 1;
     } else if (forward[i - 1][j] >= forward[i][j - 1]) i -= 1;
     else j -= 1;
   }
-  let found = count;
-  let k = 0;
-  while (found - 1 >= need && early[k + 1] - early[k] > 1) {
-    k += 1;
-    found -= 1;
-  }
-  let m = late.length - 1;
-  while (found - 1 >= need && late[m] - late[m - 1] > 1 && late[m - 1] > early[k]) {
-    m -= 1;
-    found -= 1;
-  }
-  return { count: found, first: early[k], last: late[m] };
+  return { count, early, late };
 }
 
-const hundredths = (t) => Math.round(t * 100) / 100;
+/** How far apart two places of the Reel's words may be in the main, beyond how far apart the Reel says them, for a first or
+    last word found to be taken for the Reel's own. A filler or a word the two passes heard differently changes the spacing
+    by a fraction of a second; a stray copy of a word the main cut is most often a second or more away. Leaving out a true
+    first word costs the gap to the next one, a few tenths of a second; keeping a stray costs its whole distance. */
+const SPACING = 0.75;
+/** The most of the Reel's own opening or closing words, in seconds of the Reel, that spacing may leave out: a stray copy is a
+    word or two, and a longer run is the Reel's own. */
+const MAX_DROP = 2;
+/** The width of the clock offsets the Reel's words vote on, in seconds, and how many places are tried at most. */
+const BIN = 2;
+const PLACES = 8;
+/** A place whose spacing is within this of the best is as good: the earliest of them is taken. */
+const SAME_FIT = 0.25;
+
+/** A time to the hundredth of a second. A sum such as 4.35 * 100 comes to 434.99999…, which is still 4.35. */
+const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
 
 /** Where a finished Reel's words fall in the finished main video, as {start, end} in seconds of the main, or null. They fall
-    there when at least 90 in 100 of the Reel's words are found in the main in the same order, inside one stretch no longer
-    than one and a half times the Reel. Its start and end are those of the tightest such stretch (see tightest), kept within
-    the main's length, `mainSeconds`: the transcriber may time the last words past the end of the file. A stretch is tried
-    from each place in the main where one of the Reel's first words is said: the first of those words that must be found. */
-export function inMain(reelWords, mainWords, reelSeconds, mainSeconds = Infinity) {
-  const reel = normalWords(reelWords).map((x) => x.w);
+    there when at least 90 in 100 of the Reel's words are found in the main in the same order, inside one stretch of the main
+    no longer than one and a half times the Reel. Its start and end are those of the tightest such stretch, kept within the
+    main's length, `mainSeconds`: the transcriber may time the last words past the end of the file.
+    - Where to look: each word the Reel and the main share votes for the difference between the two clocks there, and the
+      places with the most votes are tried, the most first.
+    - At each place, the tightest stretch (see tightest), as far as one and a half times the Reel, so parts of the Reel that
+      lie apart in the main are found with what is between them. Then a run of first or last words found there is left out
+      when its spacing to the next word found differs from the Reel's own by more than SPACING seconds with other words of
+      the main between them: it is most often a stray copy of a word the main cut. At most MAX_DROP seconds of the Reel's
+      words go so, and 90 in 100 are still found. With `spacing` false, as when either side's times are only spread over
+      captions, nothing is left out by spacing.
+    - Between places, the one that finds more words; then the one whose words are spaced most as the Reel's are; then the
+      earliest, as when an outro says the Reel's words again. A place that finds every word, spaced as the Reel's are, ends
+      the search. */
+export function inMain(reelWords, mainWords, reelSeconds, mainSeconds = Infinity, { spacing = true } = {}) {
+  const reel = normalWords(reelWords);
   const main = normalWords(mainWords);
   if (!reel.length || !main.length) return null;
   const need = Math.ceil(reel.length * IN_MAIN_SHARE);
-  const opening = new Set(reel.slice(0, reel.length - need + 1));
   const reach = reelSeconds * IN_MAIN_REACH;
+  const places = new Map();
+  main.forEach((m, j) => places.set(m.w, [...(places.get(m.w) || []), j]));
+  const votes = new Map();
+  for (const r of reel) for (const j of places.get(r.w) || []) {
+    const bin = Math.floor((main[j].start - r.start) / BIN);
+    votes.set(bin, (votes.get(bin) || 0) + 1);
+  }
+  const near = (bin) => (votes.get(bin - 1) || 0) + (votes.get(bin) || 0) + (votes.get(bin + 1) || 0);
+  const tried = [];
+  for (const bin of [...votes.keys()].filter((k) => near(k) >= need / 2).sort((x, y) => near(y) - near(x) || x - y)) {
+    if (tried.length === PLACES) break;
+    if (!tried.some((t) => Math.abs(t - bin) <= 2)) tried.push(bin);
+  }
+  const slack = Math.max(3, reelSeconds / 4);
+  const words = reel.map((r) => r.w);
   let best = null;
-  for (let k = 0; k < main.length; k++) {
-    if (!opening.has(main[k].w)) continue;
-    let end = k;
-    while (end + 1 < main.length && main[end + 1].end - main[k].start <= reach) end += 1;
-    const found = tightest(reel, main.slice(k, end + 1).map((x) => x.w), need);
+  for (const bin of tried) {
+    const offset = (bin + 0.5) * BIN;
+    const from = offset + reel[0].start - slack;
+    // As far as the stretch may reach: a Reel's parts may lie apart in the main, with a story between them.
+    // Without word times, though, only as far as the Reel's own length and the slack: spread over captions, a later repeat
+    // of a few words could otherwise end the stretch half a Reel late.
+    const to = spacing ? offset + reel[0].start + Math.max(reel[reel.length - 1].end - reel[0].start + slack, reach) : offset + reel[reel.length - 1].end + slack;
+    const k = main.findIndex((m) => m.start >= from);
+    if (k === -1) continue;
+    let last = k;
+    while (last + 1 < main.length && main[last + 1].end <= to) last += 1;
+    const found = tightest(words, main.slice(k, last + 1).map((m) => m.w));
     if (found.count < need) continue;
-    const stretch = { count: found.count, first: k + found.first, last: k + found.last };
-    const span = (s) => main[s.last].end - main[s.first].start;
-    if (!best || stretch.count > best.count || (stretch.count === best.count && span(stretch) < span(best))) best = stretch;
+    // The words found before the last break in spacing near the start, and after the first near the end, are left out,
+    // while 90 in 100 are still found: a run of stray words ("you need" said a few seconds before the Reel's "You need
+    // to…", whose "You" the main cut) keeps its own spacing, and breaks it only where it meets the Reel's true words.
+    const gapOff = ([i0, j0], [i1, j1], at) => Math.abs((main[k + j1][at] - main[k + j0][at]) - (reel[i1][at] - reel[i0][at]));
+    // Near the start the words after the first are taken as late as they can be, and near the end the words before the last
+    // as early as they can be: a stray run then meets the Reel's true words at one clear break.
+    const fromStart = found.late;
+    const fromEnd = found.early;
+    // A word is left out only when other words of the main lie between it and the next one found (a filler, or a pause the
+    // Reel was tightened by hand to cut, changes the spacing without that), and only while what is left out is at most
+    // MAX_DROP seconds of the Reel's own words and 90 in 100 are still found. With times only spread over captions on either
+    // side, spacing says nothing, and nothing is left out by it.
+    let first = 0;
+    if (spacing) {
+      for (let q = 0; q + 1 < fromStart.length; q++) {
+        if (reel[fromStart[q + 1][0]].start - reel[fromStart[0][0]].start > MAX_DROP || found.count - (q + 1) < need) break;
+        if (fromStart[q + 1][1] - fromStart[q][1] > 1 && gapOff(fromStart[q], fromStart[q + 1], "start") > SPACING) first = q + 1;
+      }
+    }
+    let end = fromEnd.length - 1;
+    if (spacing) {
+      const last = fromEnd.length - 1;
+      for (let q = last; q - 1 >= 0; q--) {
+        if (reel[fromEnd[last][0]].end - reel[fromEnd[q - 1][0]].end > MAX_DROP || found.count - first - (last - q + 1) < need) break;
+        if (fromEnd[q][1] - fromEnd[q - 1][1] > 1 && gapOff(fromEnd[q - 1], fromEnd[q], "end") > SPACING) end = q - 1;
+      }
+    }
+    if (fromEnd[end][1] <= fromStart[first][1]) continue;
+    const count = found.count - first - (fromEnd.length - 1 - end);
+    const startAt = k + fromStart[first][1];
+    const endAt = k + fromEnd[end][1];
+    if (main[endAt].end - main[startAt].start > reach) continue;
+    // How far the clock offset wanders across the words found: little where the main says them as the Reel does.
+    const offsets = fromStart.slice(first).map(([i, j]) => main[k + j].start - reel[i].start).sort((x, y) => x - y);
+    const middle = offsets[Math.floor(offsets.length / 2)];
+    const fit = offsets.reduce((sum, o) => sum + Math.abs(o - middle), 0) / offsets.length;
+    const place = { count, fit, startAt, endAt };
+    const better = !best || place.count > best.count || (place.count === best.count && (place.fit < best.fit - SAME_FIT || (Math.abs(place.fit - best.fit) <= SAME_FIT && main[startAt].start < main[best.startAt].start)));
+    if (better) best = place;
+    if (best.count === reel.length && best.fit <= SAME_FIT && best === place && tried.every((t) => (t + 0.5) * BIN >= offset || near(t) < reel.length)) break;
   }
   if (!best) return null;
-  const start = hundredths(main[best.first].start);
-  const end = Math.min(hundredths(main[best.last].end), Math.floor(mainSeconds * 100) / 100);
+  const start = hundredths(main[best.startAt].start);
+  const end = Math.min(hundredths(main[best.endAt].end), hundredths(mainSeconds));
   return end > start ? { start, end } : null;
 }

@@ -523,7 +523,7 @@ async function cutClips(file, clips, { plan, facts, stills }, deps) {
 
 /** What ffprobe wrote of the file's sound, as the Final Cut file says it: how many channels it has, and its samples a second.
     Either is left out when ffprobe does not say. */
-function soundOf(printed) {
+export function soundOf(printed) {
   try {
     const sound = JSON.parse(printed).streams.find((stream) => stream.codec_type === "audio") || {};
     return { audioChannels: Number(sound.channels) || undefined, audioRate: Number(sound.sample_rate) || undefined };
