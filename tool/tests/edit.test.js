@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { editMain, findEpisode, contextFor } from "../edit.js";
+import { editMain, findEpisode, contextFor, openApp } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
@@ -531,14 +531,15 @@ describe("node edit.js bring, status and retry", () => {
     assert.deepEqual((await t.run("status")).said, ["Nothing is running, and nothing is waiting."]);
     t.done();
   });
-  it("retry takes away a failed import's status and starts the import of this Mac's drop folder again", async () => {
+  it("retry takes away a failed import's status and asks the launch agent to look again", async () => {
     const t = setup();
     writeFileSync(join(drop(t), "Talk.mov"), "video");
     status(t, "Talk.mov", { failed: "the transcriber stopped" }, 30);
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again. The panel shows how far it is."]]);
-    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
-    assert.deepEqual(t.started, [[process.execPath, "/checkout/tool/unedited.js", "--watch", drop(t)]]);
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."]]);
+    assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked, t.started], [[], 1, []]);
     t.done();
   });
   it("retry refuses while the import is running", async () => {
@@ -555,6 +556,71 @@ describe("node edit.js bring, status and retry", () => {
     writeFileSync(join(drop(t), "Budget.mov"), "video");
     const r = await t.run("retry", "pricing");
     assert.deepEqual([r.code, r.said], [1, [`No video in this Mac's drop folder fits "pricing". It holds: Budget.mov and Talk.mov.`]]);
+    t.done();
+  });
+});
+
+describe("what the final review found in edit.js", () => {
+  const imported = (t) => {
+    const folder = "2026-10-13 Talk (Mac Studio)";
+    const v0 = fcpxml({ video: join(t.episodes, folder, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
+    const made = t.episode(folder, {}, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
+    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
+    return made;
+  };
+  const projects = (t) => t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name);
+  it("stops a push given both a yes and a no to the guard: a yes always stops it", async () => {
+    const t = setup();
+    imported(t);
+    await t.run("push", "talk");
+    const r = await t.run("push", "talk", "--no-hand-edits", "--hand-edits");
+    assert.equal(r.code, 1);
+    assert.match(r.text, /^Your changes stay in v1 in Final Cut\./);
+    assert.equal(t.opened.length, 1);
+    t.done();
+  });
+  it("pushes again after saying once that Dropbox undid a push, and never hands Final Cut a project name twice", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    await t.run("push", "talk");
+    rmSync(recordFile(path, 2));
+    const said = await t.run("push", "talk", "--no-hand-edits");
+    assert.deepEqual([said.code, said.said], [1, ["Dropbox undid this Mac's last change to Talk. Say it again."]]);
+    const again = await t.run("push", "talk", "--no-hand-edits");
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual(projects(t), ["Talk main v1 000001", "Talk main v2 000001"]);
+    t.done();
+  });
+  it("says Final Cut Pro could not be opened when open fails, and not that it was shown", () => {
+    assert.throws(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 1, stderr: "Unable to find application named 'Final Cut Pro'\n" })), { message: "Final Cut Pro could not be opened (Unable to find application named 'Final Cut Pro')" });
+    assert.doesNotThrow(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 0, stderr: "" })));
+  });
+  it("retry asks the launch agent to look again, and starts no run of its own", async () => {
+    const t = setup();
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "video");
+    const kicked = [];
+    t.deps.kickstart = () => kicked.push("com.thebrimm.unedited");
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, kicked, t.started], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"], []]);
+    t.done();
+  });
+  it("retry says so when the launch agent is not there to ask", async () => {
+    const t = setup();
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "video");
+    t.deps.kickstart = () => {
+      throw new Error("Could not find service");
+    };
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [1, ["The launch agent com.thebrimm.unedited could not be asked to look (Could not find service). Jason runs install.sh --machine on this Mac."]]);
+    t.done();
+  });
+  it("retry says a video an episode already holds is imported, and does nothing", async () => {
+    const t = setup();
+    t.episode("2026-10-13 Talk (Mac Studio)");
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "video");
+    t.deps.kickstart = () => assert.fail("nothing is asked");
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [1, ["Talk.mov is already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]]);
     t.done();
   });
 });

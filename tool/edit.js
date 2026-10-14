@@ -22,7 +22,7 @@ import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev } from "./episode.js";
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder } from "./settings.js";
 import { progressFolder } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
@@ -30,9 +30,9 @@ import { isWhole, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions } from "./portable.js";
 import { projectName, timelineFile } from "./names.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf } from "./filing.js";
+import { heldBy, commitOf, episodeHolding } from "./filing.js";
 import { isMedia } from "./lib.js";
-import { isRunning } from "./run.js";
+import { isRunning, lastLine } from "./run.js";
 
 const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -67,6 +67,7 @@ export function contextFor(deps = {}) {
     isWhole: deps.isWhole || ((path) => isWhole(path)),
     start: deps.start || startProgram,
     openApp: deps.openApp || openApp,
+    kickstart: deps.kickstart || kickstart,
     deps
   };
 }
@@ -310,9 +311,23 @@ export async function open(ctx, rest) {
   return 0;
 }
 
-/** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. */
-function openApp(app, file) {
-  spawnSync("/usr/bin/open", ["-a", app, file], { stdio: "ignore" });
+/** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. Throws,
+    saying why in open's words, when the app could not be opened. `run` is how a program is run, for a test to give
+    another. */
+export function openApp(app, file, run = spawnSync) {
+  const ran = run("/usr/bin/open", ["-a", app, file], { encoding: "utf8" });
+  if (ran.status !== 0) throw new Error(`${app} could not be opened (${lastLine(ran.stderr)})`);
+}
+
+/** The launch agent that imports this Mac's drop folder. */
+const AGENT = "com.thebrimm.unedited";
+
+/** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
+    arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
+    looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
+function kickstart() {
+  const ran = spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  if (ran.status !== 0) throw new Error(lastLine(ran.stderr));
 }
 
 /** The options the rule for writing into Dropbox is given: the clone and the check of one disk a test gives. */
@@ -339,9 +354,12 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     say(`${record.name.text} has no Reel ${part.reel}.`);
     return 1;
   }
+  // A push Dropbox took away is said once, and the record as it is now is taken as this Mac's: the push said again then goes
+  // through, as a version of its own (below).
   const gone = undone(record, ctx.home);
   if (gone) {
     say(gone);
+    acceptRev(ctx.home, record.id, record.rev);
     return 1;
   }
   const problems = filesProblems(found.folder, record);
@@ -351,8 +369,18 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     return 1;
   }
   const pushed = Array.isArray(target.pushed) ? target.pushed : [];
-  const last = pushed.reduce((most, p) => Math.max(most, p.v), 0);
-  if (last && !noHandEdits) {
+  // The version is one more than any the record lists and any this Mac has handed Final Cut, whose copies are kept in
+  // pushed/: a push whose record Dropbox took away has used up its version, and its project's name is never handed over twice.
+  const kind = part === "main" ? "main" : `reel-${part.reel}`;
+  let handed = [];
+  try {
+    handed = readdirSync(pushedFolder(ctx.home, found.name)).map((n) => new RegExp(`^${kind}\\.v(\\d+)\\.`).exec(n)).filter(Boolean).map((m) => Number(m[1]));
+  } catch (e) {
+    // Nothing has been handed to Final Cut on this Mac yet.
+  }
+  const last = Math.max(0, ...pushed.map((p) => p.v), ...handed);
+  // A yes to the guard always stops the push, whatever else is said with it.
+  if (last && (handEdits || !noHandEdits)) {
     say(handEdits
       ? `Your changes stay in v${last} in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v${last}.`
       : `Did you change v${last} of ${record.name.text} in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.`);
@@ -529,9 +557,8 @@ export async function status(ctx, rest) {
 }
 
 /** `retry "<video>"`: import again a video in this Mac's drop folder whose import failed or stopped. It is found by its
-    file's name or its name without the ending, whatever their case. Refused while its import is running. Its status files
-    from this Mac are taken away, and the import of this Mac's drop folder is started detached, as the launch agent starts
-    it. */
+    file's name or its name without the ending, whatever their case. Refused when an episode holds it already, and while its
+    import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart). */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();
@@ -551,14 +578,26 @@ export async function retry(ctx, rest) {
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
     return 1;
   }
+  const held = episodeHolding({ root: ctx.root, video, bytes: statSync(join(drop, video)).size });
+  if (held) {
+    say(`${video} is ${held}`);
+    return 1;
+  }
   const mine = readStatuses(ctx.root, ctx.now()).find((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
   if (mine && importState(mine.status, ctx.now()) === "running") {
     say(`${video} is being imported now, at ${mine.status.step}. The panel shows how far it is.`);
     return 1;
   }
   removeStatus(ctx.root, video, ctx.machine);
-  ctx.start(process.execPath, [join(ctx.settings.checkout, "tool", "unedited.js"), "--watch", drop]);
-  say(`${video} is imported again. The panel shows how far it is.`);
+  // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
+  // --rules-only, its environment and its lock.
+  try {
+    ctx.kickstart();
+  } catch (e) {
+    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    return 1;
+  }
+  say(`${video} is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
   return 0;
 }
 

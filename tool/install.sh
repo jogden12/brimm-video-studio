@@ -55,6 +55,9 @@ rules_only=""
 # With --machine, this Mac's name: the Mac is set up for episodes, and the one folder named is BRIMM Video.
 machine=""
 machined="no"
+# What came after --machine when it was an option and not a name, such as --print: refused below, so a print run is never
+# taken for an install of a Mac of that name.
+machine_option=""
 while (( $# )); do
   arg="$1"
   shift
@@ -63,7 +66,9 @@ while (( $# )); do
     --remove) mode="remove" ;;
     --rules-only) rules_only="$arg" ;;
     --yes) yes="yes" ;;
-    --machine) machined="yes"; machine="${1-}"; (( $# )) && shift ;;
+    --machine)
+      machined="yes"
+      if [[ "${1-}" == -* ]]; then machine_option="$1"; else machine="${1-}"; (( $# )) && shift; fi ;;
     # The help is the comment this file opens with, down to the line before the script begins.
     -h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
     -*) say "Not an option this script knows: $arg"; exit 2 ;;
@@ -173,6 +178,7 @@ root=""
 drop=""
 marker=""
 if [[ "$machined" == "yes" ]]; then
+  if [[ -n "$machine_option" ]]; then say "Name this Mac after --machine, as --machine \"Mac Studio\": $machine_option is an option, not a name."; exit 2; fi
   if [[ -z "$machine" ]]; then say "Name this Mac: --machine \"Mac Studio\" or --machine \"Sallie's laptop\"."; exit 2; fi
   if [[ ${#folders[@]} -ne 1 ]]; then say 'With --machine, name the one folder BRIMM Video: ./install.sh --machine "Mac Studio" "<path to BRIMM Video>"'; exit 2; fi
   # The rules for a Mac's name are settings.js's machineFault: a name a folder in Dropbox can carry, of 40 characters at most.

@@ -412,3 +412,15 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     d.done();
   });
 });
+
+describe("what the final review found in the installer", { skip: notAMac }, () => {
+  it("refuses an option where the Mac's name should be, so --machine --print is never taken for a name", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    const r = ask("--machine", "--print", root);
+    assert.deepEqual([r.status, r.out], [2, "Name this Mac after --machine, as --machine \"Mac Studio\": --print is an option, not a name.\n"]);
+    assert.deepEqual([r.left, r.ran], [[], ""]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

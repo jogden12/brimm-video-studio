@@ -362,3 +362,14 @@ describe("who is editing an episode", () => {
     assert.match(released(held, files).released.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
   });
 });
+
+describe("what the final review found in the record", () => {
+  it("takes Dropbox's own names for a conflicted copy, and not a name that has the word conflict in it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-episode-"));
+    for (const name of ["Leadership (managing conflict).mov", "Talk (conflict resolution).srt"]) writeFileSync(join(dir, name), "x");
+    assert.deepEqual(conflictedCopies(dir), []);
+    for (const name of ["Talk (Case Conflict).srt", "Talk (Unicode Encoding Conflict).srt", "Talk (Selective Sync Conflict).srt", "Talk (Jason Ogden's conflicted copy 2026-10-14).srt"]) writeFileSync(join(dir, name), "x");
+    assert.equal(conflictedCopies(dir).length, 4);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -50,7 +50,7 @@ import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./r
 import { fcpxml, checkFcpxml, relativeUrl } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, textWriter } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt } from "./filing.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt, fileId } from "./filing.js";
 import { readSettings, runsFolder } from "./settings.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -880,7 +880,7 @@ async function workOn(file, deps) {
         filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work }, deps);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
-        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
+        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: fileId(file), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
         try {
           writePending(episode.home, pending);
           log(`${name}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
@@ -1081,7 +1081,23 @@ export async function videosFromPlan(file, deps) {
     instead, and checked again in Dropbox 15 minutes after it was copied in (filing.js); the run waits for that, kept awake. */
 export async function uneditedFolder(dir, deps) {
   const { log = () => {}, alive = isRunning } = deps;
-  const lock = lockFile(dir, deps.lockDir || undefined);
+  const { settings } = deps;
+  const episodic = episodeMode(dir, settings);
+  // A drop folder for episodes is never worked the old way, which renames the video into a folder for the day in Dropbox:
+  // when this Mac's settings cannot be used for it, nothing is done there, and the log says why.
+  const marker = join(dir, ".brimm-watched-by");
+  const dropFolderOf = existsSync(marker) || (basename(dirname(resolve(dir))) === "Unedited Video" && basename(dirname(dirname(resolve(dir)))) === "BRIMM Video");
+  if (!episodic && dropFolderOf) {
+    const owner = existsSync(marker) ? readFileSync(marker, "utf8").split("\n")[0] : "";
+    log(`This is a drop folder for episodes (${owner ? `${marker} names ${owner}` : "it is in BRIMM Video/Unedited Video"}), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`);
+    return [];
+  }
+  // The lock of this Mac's drop folder is kept in BRIMM Video Work, so that a run started by hand and the launch agent's,
+  // whose temp folders differ, share it.
+  const home = deps.home || homedir();
+  const lockDir = deps.lockDir || (episodic ? runsFolder(home) : undefined);
+  if (lockDir) mkdirSync(lockDir, { recursive: true });
+  const lock = lockFile(dir, lockDir);
   const held = takeLock(lock, alive);
   if (held) {
     log(held);
@@ -1090,9 +1106,8 @@ export async function uneditedFolder(dir, deps) {
   try {
     // When this is this Mac's drop folder, each video is made into an episode, and checked again 15 minutes after it was
     // copied into Dropbox (filing.js).
-    const { settings } = deps;
-    if (episodeMode(dir, settings)) {
-      const episode = { root: settings.root, machine: settings.machine, checkout: settings.checkout, home: deps.home || homedir() };
+    if (episodic) {
+      const episode = { root: settings.root, machine: settings.machine, checkout: settings.checkout, home };
       const withEpisode = { ...deps, episode };
       return await importEpisodes(dir, withEpisode, (name) => uneditedFile(join(dir, name), { ...withEpisode, outDir: "", watched: dir }));
     }

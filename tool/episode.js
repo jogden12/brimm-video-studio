@@ -28,9 +28,10 @@ const KINDS = ["episode", "short video"];
 /** Where a Reel candidate has got to: Claude's pick, kept by a person, dropped by one, or finished. */
 const REEL_STATUSES = ["candidate", "picked", "dropped", "finished"];
 /** Dropbox's names for the copy it keeps when two Macs changed one file at once: "talk (Jason Ogden's conflicted copy
-    2026-10-14).mp4", and "talk (Case Conflict).mp4" and the like for its other kinds. Phase 1b learns what Dropbox's File
-    Provider calls them, and this follows it. */
-const CONFLICTED = /\(.*conflicted copy.*\)|\([^()]*\bconflict\)/i;
+    2026-10-14).mp4", and "talk (Case Conflict).mp4", "(Unicode Encoding Conflict)" and "(Selective Sync Conflict)" for its
+    other kinds. Only these are taken: a name such as "Leadership (managing conflict).mov" is a video's own. Phase 1b learns
+    what Dropbox's File Provider calls them, and this follows it. */
+const CONFLICTED = /\(.*conflicted copy.*\)|\((Case|Unicode Encoding|Selective Sync) Conflict\)/i;
 /** A creation time before this year is a file's empty date (QuickTime counts from 1904, Unix from 1970), not the day it was
     recorded. */
 const FIRST_YEAR = 2000;
@@ -223,6 +224,10 @@ function noteWritten(home, id, rev) {
     rmSync(`${file}.writing`, { force: true });
   }
 }
+
+/** Take the record as Dropbox has it now as the one this Mac last wrote, once it has said that Dropbox undid a change: so the
+    person can say the change again, and it goes through. */
+export const acceptRev = (home, id, rev) => noteWritten(home, id, rev);
 
 /** Why a record read now cannot be gone on with, because Dropbox took away a change this Mac made: the newest record is
     older than the last one this Mac wrote. "" when it is not. Commands that write only the record have no late check of
