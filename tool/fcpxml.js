@@ -41,7 +41,12 @@ function timeOf(count, rate) {
 }
 
 /** Where a file is, as Final Cut writes it: file:// and the path, with every character an address cannot hold as %xx. */
-const fileUrl = (path) => "file://" + String(path).split("/").map(encodeURIComponent).join("/");
+export const fileUrl = (path) => "file://" + String(path).split("/").map(encodeURIComponent).join("/");
+
+/** Where a file is from the folder of the Final Cut file that names it, as an address: each folder's name and the file's with
+    every character an address cannot hold as %xx, joined by slashes, and ".." left as it is. "../Pricing talk.mp4" is
+    "../Pricing%20talk.mp4". A file kept in Dropbox names its video this way, so it reads the same from either Mac. */
+export const relativeUrl = (path) => String(path).split("/").map(encodeURIComponent).join("/");
 
 /** Text from outside, without the characters XML does not allow: the control characters other than a tab and a line break, and
     one half alone of a character that is written as two. */
@@ -57,6 +62,10 @@ const wordsOf = (text) => clean(text).split(/\r\n?|\n/).map((line) => line.trim(
 /** Text with the three characters that would be read as part of a tag written out. */
 const escaped = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/** Text as the value of an attribute: on one line, and with the characters that would end it or start a tag written out. Every
+    attribute in the file is written this way, and code that changes a name in a file this module wrote uses it too. */
+export const attribute = (text) => escaped(oneLine(text)).replace(/"/g, "&quot;");
+
 /** How a caption looks, as Final Cut writes it for a caption of its own: white letters on black. */
 const STYLE = { font: ".AppleSystemUIFont", fontSize: 13, fontFace: "Regular", fontColor: "1 1 1 1", backgroundColor: "0 0 0 1" };
 
@@ -64,7 +73,7 @@ const STYLE = { font: ".AppleSystemUIFont", fontSize: 13, fontFace: "Regular", f
     they are, since a space there would be read as part of them. An attribute with no value is left off. */
 function tag(name, attributes, inside) {
   const head = `<${name}` + Object.entries(attributes).filter(([, value]) => value != null)
-    .map(([key, value]) => ` ${key}="${escaped(oneLine(value)).replace(/"/g, "&quot;")}"`).join("");
+    .map(([key, value]) => ` ${key}="${attribute(value)}"`).join("");
   if (inside === undefined) return [head + "/>"];
   if (typeof inside === "string") return [`${head}>${escaped(inside)}</${name}>`];
   return [head + ">", ...inside.flat().map((line) => "    " + line), `</${name}>`];
@@ -75,7 +84,7 @@ function tag(name, attributes, inside) {
     Cut Pro made the library and asked nothing. Nobody has tried the address with a slash at its end.
     Anything but the whole path of a library, which is a name ending .fcpbundle, is refused: Final Cut would be sent to a place
     nobody meant. */
-function libraryUrl(library) {
+export function libraryUrl(library) {
   const path = String(library).replace(/\/+$/, "");
   if (!/^\/(?:.*\/)?[^/]+\.fcpbundle$/.test(path)) throw new Error(`The library must be given by its whole path, with a name ending .fcpbundle: ${library}`);
   return fileUrl(path);
@@ -111,11 +120,14 @@ export function reelPosition(facts, crop, frame) {
     library when it is not there, and imports the file with no question asked. Given none, Final Cut asks where the project
     goes. Final Cut Pro cannot keep a library in a folder that syncs to a cloud drive, so name one that does not. It throws
     when the library is not such a path.
+    `src`, when it is given, is where the file says the video is, written as it is given: an address from the file's own
+    folder, such as "../Pricing%20talk.mp4" (relativeUrl makes one), for a file that is kept beside its video in Dropbox and
+    is read on either Mac. Given none, the file names the video by its whole path, as before.
     `frame` is {width, height} of the project, for an upright project of a wide video: then each piece is filled into the
     frame and moved onto the face by its `crop`, {x, y, w, h} in pixels of the picture as it is shown, and the project has a
     format of its own. Given none, the project is the video's own shape. It throws when the frame is not whole pixels, and
     when a piece of an upright project has no crop. */
-export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], project, event, library, frame }) {
+export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], project, event, library, src, frame }) {
   if (frame && !(Number.isInteger(frame.width) && frame.width > 0 && Number.isInteger(frame.height) && frame.height > 0)) throw new Error(`The frame of the project must be given in whole pixels: ${frame.width} by ${frame.height}.`);
   const rate = rateOf(facts.frameRate);
   const time = (count) => timeOf(count, rate);
@@ -197,7 +209,7 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
     tag("resources", {}, [
       tag("format", { id: "r1", name: size && speed ? `FFVideoFormat${size}${speed}` : undefined, frameDuration: time(1), width: facts.width, height: facts.height }),
       tag("asset", { id: "r2", name, start: "0s", duration: time(total), hasVideo: 1, format: "r1", videoSources: 1, ...sound }, [
-        tag("media-rep", { kind: "original-media", src: fileUrl(video) })
+        tag("media-rep", { kind: "original-media", src: src || fileUrl(video) })
       ]),
       // An upright project's timeline has a format of its own, written as Final Cut 12.4 writes the 1080x1920 format of a
       // project made by hand (phase 0): no name, and its colour space.

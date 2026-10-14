@@ -2,7 +2,7 @@
 // to suggest cutting. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
+import { probeArgs, factsOf, createdOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
 import { whisperArgs, stampedText, captionCount } from "../lib.js";
 import { probed, told, TOLD, PAUSES } from "./fixtures.js";
 
@@ -25,6 +25,18 @@ describe("what it asks the programs for, before any cutting", () => {
     assert.equal(a[a.indexOf("-af") + 1], "apad=whole_dur=23.423,silencedetect=noise=-35dB:d=0.3");
     assert.deepEqual([a.slice(0, 5), a.slice(-3)], [pauseArgs("/tmp/x.wav").slice(0, 5), ["-f", "null", "-"]]);
     assert.equal(pauseArgs("/tmp/x.wav", 0)[6], "silencedetect=noise=-35dB:d=0.3");
+  });
+});
+
+describe("when a file says it was recorded", () => {
+  it("is the creation time ffprobe read from the file, as it gave it", () => {
+    const printed = JSON.stringify({ streams: [], format: { duration: "23.4", tags: { creation_time: "2026-10-01T15:04:05.000000Z" } } });
+    assert.equal(createdOf(printed), "2026-10-01T15:04:05.000000Z");
+  });
+  it("is null when ffprobe gave none, or wrote nothing that can be read", () => {
+    assert.equal(createdOf(probed()), null);
+    assert.equal(createdOf(JSON.stringify({ format: { tags: { creation_time: "" } } })), null);
+    assert.equal(createdOf("{"), null);
   });
 });
 

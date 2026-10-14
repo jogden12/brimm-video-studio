@@ -2,7 +2,9 @@
 
 Video editing for The BRIMM, run through Claude Code or Claude chat. Since 2026-10-14 it is a project of its own, apart from BRIMM Ops, the page that writes Sallie's drafts. Today it holds one tool, for unedited video, which runs on the Mac Studio: for a raw recording it writes a transcript and a cut plan, has Claude read the plan, and makes a rough cut, an upright version for Instagram, short clips and a Final Cut Pro project file. Everything it makes is a draft for a person to check. It never posts, sends or publishes anything.
 
-What the project must do, and the decision still open about the editor on Sallie's laptop, are in `docs/requirements.md`.
+Since phase 1a of the design, a video for the Mac Studio is dropped in `The BRIMM DB/BRIMM Video/Unedited Video/Mac Studio/` in Dropbox, once the installer has been run there with `--machine`, and is imported into an episode of its own in `The BRIMM DB/BRIMM Video/Episodes/`. See "Episodes" below. Until then the Mac Studio watches `Unedited Video Transfer`, as it always has.
+
+What the project must do, and the decision still open about the editor on Sallie's laptop, are in `docs/requirements.md`. The design of the next version is `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md`.
 
 ## What is where
 
@@ -11,6 +13,10 @@ What the project must do, and the decision still open about the editor on Sallie
 | `docs/requirements.md` | What the project must do, and what is still to decide |
 | `docs/research/` | The research behind the tool and its presets, written in brimm-operations |
 | `tool/` | The unedited-video tool, its face finder and its installer |
+| `tool/edit.js` | The command line for episodes, which Claude runs: `episodes`, `open`, `push`, `status`, `retry` |
+| `tool/filing.js`, `tool/episode.js`, `tool/importing.js` | An episode's import, its record, and the status files of imports |
+| `tool/dropbox.js` | The rule for writing into Dropbox: clones, never over a file, and the late check |
+| `tool/settings.js`, `tool/names.js`, `tool/portable.js`, `tool/detached.js` | This Mac's settings, the names made from names, Final Cut files that read the same on either Mac, and long commands run detached |
 | `tool/shared/` | Copies of BRIMM Ops modules the tool uses |
 | `tool/tests/` | The tests and the made-up recording they use |
 
@@ -121,7 +127,8 @@ Claude's read: once the rules have made a plan, and before anything is made from
 - What Claude is asked for, as one JSON object: decisions, only where it disagrees with the rules (an abandoned take the rules kept, a sentence that trails off, or something the rules cut that is a repeat for emphasis); up to 200 words of notes for the editor; up to six ideas for a graphic, each on a kept phrase; up to five clips of 15 to 90 seconds that would stand alone; and one title of at most eight words to put on screen for the whole video. A reply without a title is read as it was before the title was asked for, on 2026-10-14.
 - What Claude cannot do: **it reads the words and never sees the picture or hears the sound.** It cannot tell which take looks or sounds better, and it is told so. The transcriber also mis-hears a word now and then. So every cut Claude adds, and every cut of the rules that it takes back, is for a person to check. Each is listed in `<name>.edit-notes.txt` with its reason, and `CUT  Claude:` marks its cuts in `<name>.cut-plan.txt`.
 - What is done with its reply: a decision is only applied to a phrase the plan has, only at a pause, and never when it would leave nothing kept. Phrases with no pause between them are cut or kept together. The plan is then made again by the rules' own code, with the pauses ffmpeg heard, so a cut of Claude's falls where a cut of the rules would. That plan is the plan for everything after it: the rough cut and its captions, the upright version, the Final Cut file and the two plan files. What was left out of the reply, and why, is at the end of the notes and in `<name>.cut-plan.json`.
-- How it is asked: the tool runs `claude -p --tools "" --strict-mcp-config --disable-slash-commands --no-session-persistence --setting-sources "" --output-format json`, in a new empty folder, with the request on its standard input. So Claude Code has none of its own tools and no skills, starts no tool server (MCP) that is set up for this user, reads no settings file and no project files, and saves no session. The words of a recording are a stranger’s text as far as Claude is concerned, so it is given nothing it could act with: all it can do is answer, and the tool reads that answer as data. It is given ten minutes. The tool looks for `claude` on the PATH, then in `/opt/homebrew/bin`, `/usr/local/bin` and `.local/bin` in the home folder.
+- How it is asked: the tool runs `claude -p --model claude-opus-5-5 --tools "" --strict-mcp-config --disable-slash-commands --no-session-persistence --setting-sources "" --output-format json`, in a new empty folder, with the request on its standard input. So Claude Code has none of its own tools and no skills, starts no tool server (MCP) that is set up for this user, reads no settings file and no project files, and saves no session. The words of a recording are a stranger’s text as far as Claude is concerned, so it is given nothing it could act with: all it can do is answer, and the tool reads that answer as data. It is given ten minutes. The tool looks for `claude` on the PATH, then in `/opt/homebrew/bin`, `/usr/local/bin` and `.local/bin` in the home folder.
+- The model is named (`CLAUDE_MODEL` in `tool/unedited.js`), not left to the account's default, so that both Macs read a plan with the same one, and a change of default changes nothing. It was added on 2026-10-14; before that the account's default read every plan.
 - That was asked once: on 2026-10-13, with these options, Claude was asked which tools it had and answered none. That is its own word and not a proof, which is why the options are given and not trusted to a default.
 - What a call leaves on the Mac: Claude Code keeps a folder of its own for every folder it is run in, in `.claude/projects` in the home folder, named after that folder's path. Each call is run in a newly named folder, so each call leaves one more there, and a call that is tried twice leaves two. The one real run left `-private-var-folders-…-T-brimm-unedited-28031-1791927837336-claude-1`, with an empty folder named `memory` in it and nothing of the request or the reply. The tool takes away the folder it made for the call and leaves that one, because it deletes nothing under `.claude`. Such a folder holds nothing, and can be deleted by hand.
 - What leaves the Mac: only that request, which is the words of the transcript with their times, the rules' plan, and the video's file name and length. So a name such as a client's, when it is in the file's name or is said on camera, is sent. It goes to Claude through Claude Code, on the Claude account signed in on this Mac, and counts against that account's use. The video and its sound never leave the Mac.
@@ -190,6 +197,69 @@ The watched folder was tried the same day, with the launch agent installed: that
 That is one run, of made-up speech. Claude has never read the plan of a real recording, so nobody knows yet how good its decisions, its notes or its choice of clips are on real talk, how often its reply comes back in a form that cannot be used, or how long it takes over an hour of video. In that one run it made no decision, so no cut of Claude's has been made by the real programs. No clip has been cut from real footage, cropped on a real face, cut into the parts of a Story, or posted. No Final Cut file with a marker for a graphic idea has been opened in Final Cut Pro. And the tool has not been run with Claude from the launch agent: the call alone was tried from one.
 
 Its tests: `cd tool && node --test`. The installer's tests only ever run it with `--print`. No test asks Claude anything: a stand-in says what Claude Code would print.
+
+## Episodes
+
+Phase 1a of the design, built on 2026-10-14: the Mac Studio alone. Sallie's laptop, the claim on an episode, `release` and `resolve` come in phase 1b; the title, picking Reels and `finish` in phase 2.
+
+**The folders.** In Dropbox, `The BRIMM DB/BRIMM Video/` sits beside `BRIMM VIDEO Transfer/`, and never inside it: the transcript tool's launch agent watches that folder, and launchd would wake it at every change an editing session makes.
+
+```
+The BRIMM DB/BRIMM Video/
+  Unedited Video/
+    Mac Studio/            drop a video here to have the Mac Studio import it. Its .brimm-watched-by names the Mac
+  Episodes/
+    .importing/            a small status file for each import: which Mac, which video, the step it is at
+    2026-10-14 Talk (Mac Studio)/
+      record/0001.json …   the episode's record: a new file for each change, never written into
+      Talk.mov             the raw video, and every file made of it, as for any video
+      edit/main.v0.fcpxml  the import's own Final Cut timeline, naming its video ../Talk.mov and no library
+      edit/main.v1.mac-studio.fcpxml …   each version shown in Final Cut
+```
+
+On the Mac's own disk: `~/BRIMM Video Work/<episode folder>/` holds the copies of timelines handed to Final Cut (`pushed/`), the episode's Final Cut library (`<episode folder>.fcpbundle`), and what detached runs left; `~/BRIMM Video Work/.runs/` holds an import's own folder until its late check; `~/Library/Application Support/BRIMM Video/` holds this Mac's `settings.json`, `written.json` (the last record this Mac wrote of each episode), `pending/` (the late checks still to make) and `seen.json` (when this Mac's import first saw each video in its drop folder).
+
+**Writing into Dropbox: the rule.** Dropbox undid two renames on 2026-10-14, minutes after they had returned. So nothing in Dropbox is written into, renamed or moved. Every file is written whole on this Mac's own disk, then put into Dropbox under its final name as an APFS clone, by `/bin/cp -c`. `cp -c` makes a plain byte copy, without a word, when the two folders are on different disks (its manual says so), so the tool checks they are on one disk first, and where a clone cannot be made it stops and says why: nothing is copied byte by byte. A file already there is deleted first and the new one cloned in. Each file is looked at right after, and again at least 15 minutes after the import's last copy, the late check. A file missing or short then is put in again from its work copy. Only after the late check passes are the run's folder and the raw video in the drop folder deleted. Whether a clone into Dropbox's folder is safe where a rename was not has still to be seen by hand (the deployment note of the pull request that built this).
+
+**A video arrives** when its size has settled and it is whole on this Mac: its blocks on the disk cover its size, or the disk does not mark it dataless. Dropbox can show a file at its full size before any of it is here, as it does for a video dropped from another device into a folder that is not kept offline, and ffprobe could then hang. Such a placeholder is read through once, which has Dropbox bring it down, and then looked at again. This holds for every watched folder. So that a video comes down at once, mark the drop folder once in Finder: Control-click it and choose Make available offline. The installer says so.
+
+**What the import does**, for a video in this Mac's drop folder (`tool/filing.js`):
+
+1. It leaves alone a video an episode already holds (by its name and size), and one whose import is running on either Mac (at that size), failed, or found a problem at its late check. The log says why, once. A held video is looked at again each minute, so one whose failed status is taken away (`retry`) is imported. A status file this Mac's stopped run left is taken away, and the video imported again, and so are the folders stopped runs left in `.runs`.
+2. It writes a status file in `Episodes/.importing/` at the start, at each step and once a minute: a new file each time, `<video> (<Mac>) <import id> <n>.json`, the one before deleted. The import id keeps two imports of one name apart.
+3. It makes everything as for any video, in its own folder in `~/BRIMM Video Work/.runs/`, and writes nothing beside the video in the drop folder: a file there of the video's name is a person's own. An upright, square or short recording (under 90 seconds) is a short video: it gets no upright version and no clips. A video replaced in the drop folder while it is worked on, as by a corrected export of the same name, stops that import before anything is filed, and the new file is imported on its own.
+4. It files the episode into `Episodes/<day> <name> (<Mac>)/`: the raw video cloned in from the drop folder, each file cloned in, the Final Cut file as `edit/main.v0.fcpxml`, and the first record last. The banner says "Ready: Talk. In Claude, say "open Talk"." and the progress window closes.
+5. It waits, kept awake by `caffeinate`, until the late check is due, looking in the drop folder once a minute for new videos, and writing each waiting video's status so the other Mac sees it is still at it. The late check deletes the raw video from the drop folder only when it is still the file that was imported. The log says when the check is due. A file still wrong at the late check keeps the raw video in the drop folder, puts the problem in the status file and in the first lines of the cut plan, and shows a banner. The next run checks it again. A run stopped before the late check leaves it for this Mac's next run, which makes it first.
+
+**The record** (`tool/episode.js`) is `record/0001.json`, `0002.json` and on: the highest number that reads whole is the record. A command writes the next number only when no record above the one it read is there; otherwise it says the episode changed on the other Mac. A conflicted copy of any file stops every command, naming it. A record written by a newer brimm-video is read and never written. The record lists every file of the episode with its size, and each command checks the folder against it.
+
+**From Claude** (`node tool/edit.js …`):
+
+| Command | What it does |
+|---|---|
+| `episodes` | Each episode, newest first: its name, length, kind, short id, what was shown in Final Cut, and any file not right. The videos waiting in each drop folder, and for how long: from when this Mac's import first saw it, or, in the other Mac's drop folder, from when it came into the folder (a tag set on it since makes that later). The imports. This Mac's libraries and the free space |
+| `open "<episode>"` | Checks the episode's files, starts a detached run to bring over those Dropbox has not brought yet, and shows the name, the title, Claude's notes, the Reel candidates and the next step. The first time on this Mac it says how to keep the episode on the Mac (Finder, Make available offline) |
+| `push "<episode>" [main] [--no-hand-edits \| --hand-edits]` | Shows the main timeline in Final Cut Pro as a new version (below) |
+| `status ["<words>"]` | What is running on this Mac, the imports, and what detached runs left |
+| `retry "<video>"` | Imports again a video in this Mac's drop folder whose import failed or stopped: it takes the failed status away and asks the launch agent to look (`launchctl kickstart`), or, when the agent's run is at work, that run takes it when it next looks |
+
+An episode is found by its folder's name, its id, the last six characters of its id (which `episodes` shows), or words that are all in its name. An import that has not finished is not an episode yet. The first open or push of an episode on a Mac says how to keep its folder on that Mac (Finder, Make available offline), once.
+
+The lock that keeps one run at a time on this Mac's drop folder is in `~/BRIMM Video Work/.runs/`, not in the temp folder: the launch agent has no `TMPDIR`, so its temp folder is `/tmp`, and a run started by hand would otherwise not see its lock.
+
+**Showing a timeline in Final Cut** (`push`). Each push is a new version, `edit/main.v<n>.<mac>.fcpxml`, kept in the episode by the rule, as a project named `<name> main v<n> <short id>`, recorded before Final Cut is asked. Then a copy is written on this Mac's disk, naming this Mac's paths, the episode's own library, `copy assets` 0 and `suppress warnings` 1, and handed to Final Cut. What phase 0 settled on 2026-10-14, with Final Cut Pro 12.4:
+
+- A timeline kept in an episode reads its video from its own folder, so it opens as it is on either Mac. Opened by a double-click it asks which library to put it in, so open it through Claude.
+- A file that names no library makes Final Cut ask which one, so the copy always names it.
+- A project of a name the library has already makes Final Cut ask to replace it, and Keep Both renames it "<name> 1", whose Share would then have another name than the one recorded. So no name is ever handed over twice: each push uses up its version, even when Final Cut could not be opened. Each push is its own event, of the same name, until phase 0 says whether `suppress warnings` stops that question.
+- A new library keeps its backups in `~/Movies/Final Cut Backups`, and on the Mac Studio `~/Movies` is in Dropbox. So at an episode's first push on a Mac, the tool says to set its backups to `BRIMM Video Work/Backups` (File > Library Properties, Modify Settings).
+- Without `copy assets`, Final Cut follows its Import setting, which on the Mac Studio copies the video into the library. Whether `copy assets` 0 overrides that is still to be seen.
+
+**The guard.** A timeline shown before is shown again only when the person says it was not changed in Final Cut since (`--no-hand-edits`). Changes made by hand in Final Cut cannot be built on yet (phase 5 reads Final Cut's exports), so a "yes" stops the push: ask for brimm-video's changes first and trim by hand last, or finish that timeline by hand.
+
+**Setting a Mac up.** `./install.sh --print --machine "Mac Studio" "<path to The BRIMM DB/BRIMM Video>"` shows what it would do and changes nothing: the drop folder, `Episodes/` and `.importing/` to make in Dropbox, the marker, this Mac's settings, `BRIMM Video Work/Backups` and `From Final Cut`, and the launch agent watching the drop folder alone. It refuses a drop folder another Mac's marker names, and BRIMM Video inside a folder the transcript tool watches. Without `--print`, and with Jason's yes, it does it.
+
+None of this has met a real recording yet: the tests run every step with stand-ins for the programs and for `cp -c`.
 
 ## Where this came from
 

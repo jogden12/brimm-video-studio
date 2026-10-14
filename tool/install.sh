@@ -12,6 +12,11 @@
 #                                    the same as without --yes, but it goes ahead without asking first
 #   ./install.sh --remove            stop watching for unedited video. The folders, the model, the programs and the
 #                                    transcript tool's own launch agent stay
+#   ./install.sh --machine "Mac Studio" "/path/to/The BRIMM DB/BRIMM Video"
+#                                    set this Mac up for episodes: it watches its own drop folder, BRIMM Video/Unedited
+#                                    Video/<this Mac>, which is made, with a marker that names this Mac, and each video
+#                                    dropped there is imported into BRIMM Video/Episodes. This Mac's settings are written in
+#                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made
 #
 # It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
 # 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
@@ -47,12 +52,23 @@ print="no"
 yes="no"
 folders=()
 rules_only=""
-for arg in "$@"; do
+# With --machine, this Mac's name: the Mac is set up for episodes, and the one folder named is BRIMM Video.
+machine=""
+machined="no"
+# What came after --machine when it was an option and not a name, such as --print: refused below, so a print run is never
+# taken for an install of a Mac of that name.
+machine_option=""
+while (( $# )); do
+  arg="$1"
+  shift
   case "$arg" in
     --print) print="yes" ;;
     --remove) mode="remove" ;;
     --rules-only) rules_only="$arg" ;;
     --yes) yes="yes" ;;
+    --machine)
+      machined="yes"
+      if [[ "${1-}" == -* ]]; then machine_option="$1"; else machine="${1-}"; (( $# )) && shift; fi ;;
     # The help is the comment this file opens with, down to the line before the script begins.
     -h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
     -*) say "Not an option this script knows: $arg"; exit 2 ;;
@@ -60,7 +76,7 @@ for arg in "$@"; do
   esac
 done
 # There is no folder it would watch without being told. Stopping the watching needs none.
-if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" ]]; then
+if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; then
   say 'Name the folder to watch for unedited video: ./install.sh "<folder>"'
   exit 2
 fi
@@ -155,6 +171,39 @@ if [[ "$mode" == "remove" ]]; then
   exit 0
 fi
 
+# For one of the two Macs (--machine): the one folder named is BRIMM Video, in The BRIMM DB in Dropbox, and the folder watched
+# is this Mac's own drop folder in it. BRIMM Video sits beside BRIMM VIDEO Transfer, and never inside a folder the transcript
+# tool's launch agent watches: launchd would wake that agent at every change an editing session makes.
+root=""
+drop=""
+marker=""
+if [[ "$machined" == "yes" ]]; then
+  if [[ -n "$machine_option" ]]; then say "Name this Mac after --machine, as --machine \"Mac Studio\": $machine_option is an option, not a name."; exit 2; fi
+  if [[ -z "$machine" ]]; then say "Name this Mac: --machine \"Mac Studio\" or --machine \"Sallie's laptop\"."; exit 2; fi
+  if [[ ${#folders[@]} -ne 1 ]]; then say 'With --machine, name the one folder BRIMM Video: ./install.sh --machine "Mac Studio" "<path to BRIMM Video>"'; exit 2; fi
+  # The rules for a Mac's name are settings.js's machineFault: a name a folder in Dropbox can carry, of 40 characters at most.
+  if (( ${#machine} > 40 )) || [[ "$machine" == *[/\\:*?\"\<\>\|]* || "$machine" == *[[:cntrl:]]* || "$machine" == [[:space:].]* || "$machine" == *[[:space:]] ]]; then
+    say "A Mac's name cannot hold any of / \\ : * ? \" < > |, a control character, or a space or a dot at its start, and can be 40 characters long at most: $machine"
+    exit 2
+  fi
+  root="${folders[1]}"
+  if [[ "${root:t}" != "BRIMM Video" ]]; then say "The folder for --machine is BRIMM Video, in The BRIMM DB in Dropbox, and this is not: $root"; exit 2; fi
+  for w in "${(@f)$(watched "$TRANSCRIBE_LABEL")}"; do
+    [[ -n "$w" ]] || continue
+    if [[ "$root" == "$w" || "$root" == "$w"/* ]]; then
+      say "BRIMM Video must not be inside a folder the transcript tool watches: $root is inside $w, which $TRANSCRIBE_LABEL watches. Put it beside BRIMM VIDEO Transfer."
+      exit 2
+    fi
+  done
+  drop="$root/Unedited Video/$machine"
+  marker="$drop/.brimm-watched-by"
+  if [[ -f "$marker" ]]; then
+    owner="$(head -n 1 "$marker")"
+    if [[ "$owner" != "$machine" ]]; then say "The folder $drop is watched by $owner already. A drop folder is watched by one Mac only."; exit 2; fi
+  fi
+  folders=("$drop")
+fi
+
 # The transcript tool's launch agent goes on watching its folders, and whichever tool looked first in a folder would file the
 # video away. So a folder it watches already is refused.
 already=("${(@f)$(watched "$TRANSCRIBE_LABEL")}")
@@ -174,8 +223,35 @@ need=()
 [[ -n "$whisper" ]] || need+=(whisper-cpp)
 [[ -n "$node" ]] || need+=(node)
 
+# This Mac's settings for episodes, as JSON: settings.js writes them, and this is what it is told.
+json() { print -rn -- "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
+WORK="$HOME/BRIMM Video Work"
+CHECKOUT="${HERE:h}"
+settings_json() {
+  print -r -- "{"
+  print -r -- "  \"version\": 1,"
+  print -r -- "  \"machine\": \"$(json "$machine")\","
+  print -r -- "  \"root\": \"$(json "$root")\","
+  print -r -- "  \"checkout\": \"$(json "$CHECKOUT")\""
+  print -r -- "}"
+}
+
 say "The unedited-video tool"
-for f in "${folders[@]}"; do say "  Folder to watch for unedited video:  $f"; done
+if [[ -n "$machine" ]]; then
+  say "  This Mac:  $machine"
+  say "  BRIMM Video:  $root"
+  say "  Its drop folder, to make in Dropbox and watch:  $drop"
+  say "  Its marker there, $marker, saying:  $machine"
+  say "  Episodes, to make in Dropbox:  $root/Episodes"
+  say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
+  say "  On this Mac:  $WORK/Backups and $WORK/From Final Cut"
+  say "  Once, in Finder:  Control-click $drop and choose Make available offline, so that a video dropped there from another device is brought down at once"
+  say "  This Mac's settings, in $SETTINGS_FILE:"
+  settings_json
+else
+  for f in "${folders[@]}"; do say "  Folder to watch for unedited video:  $f"; done
+fi
 # swift finds the speaker's face for the upright version. It comes with Xcode's command line tools, and nothing here installs it.
 say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so the upright version is cropped at the centre. To get it: xcode-select --install")"
 # Claude reads each cut plan, through Claude Code. Nothing here installs that or signs in to it. When Claude is going to be
@@ -185,6 +261,7 @@ if [[ -n "$rules_only" ]]; then
 elif claude="$(find_claude)"; then
   say "  Claude Code, to read each cut plan:  here already, at $claude"
   say "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only"
+  say "  Claude model, named in unedited.js:  $(sed -n 's/^export const CLAUDE_MODEL = "\(.*\)";$/\1/p' "$HERE/unedited.js")"
 else
   say "  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
 fi
@@ -236,12 +313,30 @@ fi
 
 # Give the Mac the launch agent: write its file, check it, stop the agent of that name if one is running, and start this one.
 mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+# For one of the two Macs: Episodes and its status files in Dropbox, the marker by the rule for writing into Dropbox, this
+# Mac's settings, and its folders for Final Cut's work.
+if [[ -n "$machine" ]]; then
+  mkdir -p "$root/Episodes/.importing" "$WORK/Backups" "$WORK/From Final Cut"
+  "$node" "$HERE/settings.js" marker "$drop" "$machine"
+  "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"
+fi
 
 agent "$node" > "$AGENT_FILE"
 plutil -lint "$AGENT_FILE" >/dev/null
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
 
+if [[ -n "$machine" ]]; then
+  say ""
+  say "Done. Drop a video in:"
+  say "  $drop"
+  say "Once, in Finder: Control-click that folder and choose Make available offline, so that a video dropped there from"
+  say "another device is brought down at once. Dropbox offers no command for it."
+  say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
+  say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
+  say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
+  exit 0
+fi
 say ""
 say "Done. Put an unedited video in:"
 for f in "${folders[@]}"; do say "  $f"; done
