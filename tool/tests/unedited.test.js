@@ -4,10 +4,10 @@
 // anything from here: what it would say is written down in each test.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { uneditedFile, uneditedFolder, uneditedFolders, doAsked, findPrograms, depsFor, parseArgs } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions } from "../cuts.js";
@@ -49,6 +49,8 @@ const REPLY = {
   graphics: [{ id: "p7", idea: 'The words "Know your costs" on screen.' }],
   clips: [{ from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }]
 };
+/** Two clips of the made-up recording: its opening, and from "So the first thing" to the end. */
+const TWO = { ...REPLY, clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, REPLY.clips[0]] };
 /** What Claude Code prints when it is run with --output-format json: one JSON object, with Claude's own text as `result`. */
 const printed = (result, more = {}) => JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 19000, num_turns: 1, result, session_id: "0d9d7f8e", ...more });
 /** What Claude Code ends with when Claude has answered: with a text as it is, or with a reply written as JSON. */
@@ -197,6 +199,30 @@ function setup(script = {}) {
   const read = (...path) => readFileSync(join(dir, ...path), "utf8");
   return { dir, work, locks, home, logs, calls, notes, waits, asks, deps, video, names, inside, read, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
+
+/** A made-up talk of `count` sentences, for a clip of more than a minute: what ffprobe, the transcriber and ffmpeg would say
+    of it. Each sentence is 25 words of its own, said in five seconds, with half a second of silence after it. So sentence
+    k is phrase pk, from (k - 1) * 5.5 seconds to five seconds after that, and the rules keep all of it.
+    A test may ask for another talk, in milliseconds: `lead` is the silence before the first words, `gap` the silence after
+    each sentence but the last, and `tail` the silence after the last. With no gap every sentence runs straight on from
+    the one before it, and there is no pause in the talk. */
+const longTalk = (count, { lead = 0, gap = 500, tail = 0 } = {}) => {
+  const stamp = (ms) => `00:${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
+  const sentences = Array.from({ length: count }, (_, k) => ({ from: lead + k * (5000 + gap), words: Array.from({ length: 25 }, (_, j) => `s${k + 1}w${j + 1}${j === 24 ? "." : ""}`) }));
+  const end = lead + count * (5000 + gap) - gap;
+  const silence = (a, b) => `[silencedetect @ 0x1] silence_start: ${a / 1000}\n[silencedetect @ 0x1] silence_end: ${b / 1000} | silence_duration: ${(b - a) / 1000}\n`;
+  return {
+    probed: probed({ duration: `${((end + tail) / 1000).toFixed(6)}` }),
+    told: told(sentences.map(({ from, words }) => [from, from + 5000, words.map((w, j) => [" " + w, (from + (j + 1) * 200) / 10])])),
+    srt: sentences.map(({ from, words }, k) => `${k + 1}\n${stamp(from)} --> ${stamp(from + 5000)}\n ${words.join(" ")}\n\n`).join(""),
+    pauses: [...(lead ? [silence(0, lead)] : []), ...(gap ? sentences.slice(1).map(({ from }) => silence(from - gap, from)) : []), ...(tail ? [silence(end, end + tail)] : [])].join("")
+  };
+};
+/** The same talk as the rules plan it. */
+const planned = (talk, duration) => {
+  const pauses = pausesOf(talk.pauses);
+  return { pauses, plan: cutPlan(phrasesOf(wordsOf(talk.told), pauses), { duration, pauses }) };
+};
 
 describe("one unedited video", () => {
   it("gets a transcript, its words, a cut plan, a rough cut with its captions, an upright version and a Final Cut file beside it, and nothing is left behind", async () => {
@@ -1011,11 +1037,13 @@ describe("a video whose cut plan Claude is asked to read", () => {
       changes: [{ ids: ["p8"], was: "keep", now: "cut", why: "It adds nothing to the line before it." }],
       claude: {
         decisions: reply.decisions,
+        graphics: REPLY.graphics,
         ignored: ['Claude\'s decision for "p99" was left out: the plan has no phrase with that id.', "Clip 2 was left out: it overlaps clip 1."],
         clips: [{ ...made.clips[0], files: ["talk.reel-1.mp4", "talk.reel-1.srt"] }]
       }
     });
     assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "by", "changes", "claude"]);
+    assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphics", "ignored", "clips"]);
     assert.deepEqual([plan.claude.clips[0].n, plan.claude.clips[0].ranges], [1, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]]);
     t.done();
   });
@@ -1084,7 +1112,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(r, { ok: true, name: "talk.mov", captions: 5, kept: 11.882, cut: 11.541, folder: "", message: "" });
     assert.deepEqual(t.names(), WITH_NOTES.map((ending) => "talk." + ending));
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules", claude: { decisions: [], ignored: [], clips: [] } });
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN, "Claude read this plan and changed nothing in it. Its notes are in talk.edit-notes.txt."));
     assert.equal(t.read("talk.edit-notes.txt").split("\n").slice(2).join("\n"), "Its notes\nA short talk about pricing. Nothing to change.\n");
     assert.deepEqual(t.logs.slice(4, 7), ["talk.mov: asking Claude to read the cut plan.", "talk.mov: Claude changed nothing in the cut plan.", "talk.mov: making the rough cut."]);
@@ -1250,32 +1278,6 @@ describe("a video Claude could not be asked about", () => {
 });
 
 describe("the short clips Claude picked", () => {
-  /** Two clips of the made-up recording: its opening, and from "So the first thing" to the end. */
-  const TWO = { ...REPLY, clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, REPLY.clips[0]] };
-  /** A made-up talk of `count` sentences, for a clip of more than a minute: what ffprobe, the transcriber and ffmpeg would say
-      of it. Each sentence is 25 words of its own, said in five seconds, with half a second of silence after it. So sentence
-      k is phrase pk, from (k - 1) * 5.5 seconds to five seconds after that, and the rules keep all of it.
-      A test may ask for another talk, in milliseconds: `lead` is the silence before the first words, `gap` the silence after
-      each sentence but the last, and `tail` the silence after the last. With no gap every sentence runs straight on from
-      the one before it, and there is no pause in the talk. */
-  const longTalk = (count, { lead = 0, gap = 500, tail = 0 } = {}) => {
-    const stamp = (ms) => `00:${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
-    const sentences = Array.from({ length: count }, (_, k) => ({ from: lead + k * (5000 + gap), words: Array.from({ length: 25 }, (_, j) => `s${k + 1}w${j + 1}${j === 24 ? "." : ""}`) }));
-    const end = lead + count * (5000 + gap) - gap;
-    const silence = (a, b) => `[silencedetect @ 0x1] silence_start: ${a / 1000}\n[silencedetect @ 0x1] silence_end: ${b / 1000} | silence_duration: ${(b - a) / 1000}\n`;
-    return {
-      probed: probed({ duration: `${((end + tail) / 1000).toFixed(6)}` }),
-      told: told(sentences.map(({ from, words }) => [from, from + 5000, words.map((w, j) => [" " + w, (from + (j + 1) * 200) / 10])])),
-      srt: sentences.map(({ from, words }, k) => `${k + 1}\n${stamp(from)} --> ${stamp(from + 5000)}\n ${words.join(" ")}\n\n`).join(""),
-      pauses: [...(lead ? [silence(0, lead)] : []), ...(gap ? sentences.slice(1).map(({ from }) => silence(from - gap, from)) : []), ...(tail ? [silence(end, end + tail)] : [])].join("")
-    };
-  };
-  /** The same talk as the rules plan it. */
-  const planned = (talk, duration) => {
-    const pauses = pausesOf(talk.pauses);
-    return { pauses, plan: cutPlan(phrasesOf(wordsOf(talk.told), pauses), { duration, pauses }) };
-  };
-
   it("are each cut whole from the video, without what the plan cuts inside them, as <name>.reel-<n>.mp4", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     const file = t.video("talk.mov");
@@ -1588,6 +1590,265 @@ describe("Claude's ideas for graphics in the Final Cut file", () => {
     await uneditedFile(t.video("talk.mov"), t.deps);
     assert.equal(tags(t.read("talk.fcpxml"), "marker").length, 3);
     assert.doesNotMatch(t.read("talk.fcpxml"), /Graphic idea/);
+    t.done();
+  });
+});
+
+describe("the videos of a video, made again from its cut plan (--from-plan)", () => {
+  /** The moment every file of the run before is given, so that a test can tell which files a later run wrote. */
+  const BEFORE = new Date("2026-10-14T08:00:00Z");
+  /** Do a video as a run does it, and then mark what that run made: each video it made holds "made before", and every file
+      in the folder has the moment BEFORE. What the run called, said and showed is then forgotten here, and what it called is
+      given back as `first`. */
+  const doneOnce = async (t, name = "talk.mov") => {
+    const file = t.video(name);
+    await uneditedFile(file, t.deps);
+    const first = t.calls.slice();
+    for (const n of t.names()) {
+      if (n.endsWith(".mp4")) writeFileSync(join(t.dir, n), "made before");
+      utimesSync(join(t.dir, n), BEFORE, BEFORE);
+    }
+    for (const said of [t.calls, t.logs, t.notes]) said.length = 0;
+    return { file, first };
+  };
+  /** The files in the folder that were written since doneOnce. */
+  const written = (t) => t.names().filter((n) => statSync(join(t.dir, n)).mtimeMs !== BEFORE.getTime());
+  /** A call as it was made, with the run's own folder given one name: that folder is named for the moment it was made. */
+  const same = (c) => ({ cmd: c.cmd, args: c.args.map((a) => a.replace(/brimm-unedited-\d+-\d+/, "the run's folder")) });
+  /** The calls a run with Claude made after Claude answered: the ones that made its videos. */
+  const making = (calls) => calls.slice(calls.findIndex((c) => c.cmd === "CLAUDE") + 1);
+  /** Where the plan of the made-up recording is, and that plan written again by a test, as it is or as `change` changes it. */
+  const at = (t) => join(t.dir, "talk.cut-plan.json");
+  const rewrite = (t, text) => {
+    writeFileSync(at(t), text);
+    utimesSync(at(t), BEFORE, BEFORE);
+  };
+  /** What a run that stopped before it made anything gives back. */
+  const stopped = (why) => ({ ok: false, name: "talk.mov", made: [], stopped: true, message: why });
+
+  it("makes the rough cut, the upright version and the clips again, by the very calls the run that wrote the plan made, the faces found again, with no transcript and no Claude", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file, first } = await doneOnce(t);
+    const r = await videosFromPlan(file, t.deps);
+    assert.deepEqual(r, { ok: true, name: "talk.mov", made: ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", "talk.reel-1.mp4"], message: "" });
+    // ffprobe comes first, to see that the video is the one the plan was made of. Then, as before, the rough cut, the stills,
+    // the faces in them, the upright version and the clip. The transcriber and Claude Code are not run.
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE", "FFMPEG", "FFMPEG", "SWIFT", "FFMPEG", "FFMPEG"]);
+    assert.deepEqual(t.calls.slice(1).map(same), making(first).map(same));
+    assert.equal(t.asks.length, 1);
+    // They are written as the tool writes videos now.
+    assert.equal(after(roughCalls(t)[0].args, "-c:v"), "libx264");
+    assert.deepEqual([t.read("talk.rough-cut.mp4"), t.read("talk.rough-cut.vertical.mp4"), t.read("talk.reel-1.mp4")], ["the rough cut", "the upright version", "clip 1"]);
+    assert.deepEqual(readdirSync(t.work), []);
+    t.done();
+  });
+  it("leaves every other file as it was: the transcripts, the words, the plan's two files, the notes, the captions and the Final Cut file, and moves nothing", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    const names = t.names();
+    const others = names.filter((n) => !n.endsWith(".mp4"));
+    assert.deepEqual(others, ["talk.cut-plan.json", "talk.cut-plan.txt", "talk.edit-notes.txt", "talk.fcpxml", "talk.mov", "talk.reel-1.srt", "talk.rough-cut.srt", "talk.rough-cut.transcript.txt", "talk.srt", "talk.transcript.txt", "talk.words.json"]);
+    const held = others.map((n) => t.read(n));
+    await videosFromPlan(file, t.deps);
+    assert.deepEqual(t.names(), names);
+    assert.deepEqual(written(t), ["talk.reel-1.mp4", "talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4"]);
+    assert.deepEqual(others.map((n) => t.read(n)), held);
+    t.done();
+  });
+  it("makes each part of a clip's Story again, from the ranges the plan keeps for it", async () => {
+    const talk = longTalk(16);
+    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const t = setup({ ...talk, claude: [answers(reply)] });
+    const { file, first } = await doneOnce(t);
+    const r = await videosFromPlan(file, t.deps);
+    const reels = ["talk.reel-1.mp4", "talk.reel-1.story-1.mp4", "talk.reel-1.story-2.mp4"];
+    assert.deepEqual([r.ok, r.made], [true, ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", ...reels]]);
+    assert.equal(reelCalls(t).length, 3);
+    assert.deepEqual(reelCalls(t).map((c) => c.args), reelCalls({ calls: first }).map((c) => c.args));
+    assert.deepEqual(reels.map((n) => t.read(n)), ["clip 1", "part 1 of the Story of clip 1", "part 2 of the Story of clip 1"]);
+    t.done();
+  });
+  it("writes each video whole under another name, and only then gives it its own: until then the one made before is there as it was", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    const seen = [];
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, asked) => {
+      const r = await run(cmd, args, asked);
+      const to = args[args.length - 1];
+      if (to.endsWith(".mp4.writing")) seen.push([basename(to), readFileSync(to, "utf8"), readFileSync(to.slice(0, -".writing".length), "utf8")]);
+      return r;
+    };
+    await videosFromPlan(file, t.deps);
+    assert.deepEqual(seen, [["talk.rough-cut.mp4.writing", "the rough cut", "made before"], ["talk.rough-cut.vertical.mp4.writing", "the upright version", "made before"], ["talk.reel-1.mp4.writing", "clip 1", "made before"]]);
+    assert.ok(!t.names().some((n) => n.endsWith(".writing")));
+    t.done();
+  });
+  it("keeps the one made before when a video cannot be made again, says so in the log, and makes the others all the same", async () => {
+    const script = { claude: [answers(TWO)] };
+    const t = setup(script);
+    const { file } = await doneOnce(t);
+    // ffmpeg cannot make the rough cut or the upright version, and the work on the first clip stops. The upright version
+    // that was made before has been deleted since.
+    Object.assign(script, { rough: "fail", vertical: "fail", reels: { 1: "throw" } });
+    rmSync(join(t.dir, "talk.rough-cut.vertical.mp4"));
+    const r = await videosFromPlan(file, t.deps);
+    const why = [
+      "the rough cut could not be made again: ffmpeg stopped (Unknown encoder 'h264_videotoolbox')",
+      "the upright version could not be made again: ffmpeg stopped (Error initializing complex filters)",
+      "clip 1 could not be cut again: the work stopped (ENOSPC)"
+    ];
+    assert.deepEqual(r, { ok: false, name: "talk.mov", made: ["talk.reel-2.mp4"], message: why.join("; ") });
+    assert.deepEqual(t.logs.filter((line) => line.includes("could not")), [`talk.mov: ${why[0]}. The one made before is kept.`, `talk.mov: ${why[1]}.`, `talk.mov: ${why[2]}. The one made before is kept.`]);
+    assert.equal(t.logs[t.logs.length - 1], "talk.mov: made again: talk.reel-2.mp4.");
+    assert.deepEqual([t.read("talk.rough-cut.mp4"), t.read("talk.reel-1.mp4"), t.read("talk.reel-2.mp4")], ["made before", "made before", "clip 2"]);
+    assert.deepEqual(written(t), ["talk.reel-2.mp4"]);
+    assert.ok(!t.names().some((n) => n.endsWith(".writing") || n === "talk.rough-cut.vertical.mp4"));
+    t.done();
+  });
+  it("makes again only the clips and the parts of a Story the plan names as made: one the run before could not cut is not cut now, and the log says so", async () => {
+    const script = { claude: [answers(TWO)], reels: { 1: "fail" } };
+    const t = setup(script);
+    const { file } = await doneOnce(t);
+    delete script.reels;
+    const r = await videosFromPlan(file, t.deps);
+    assert.deepEqual([r.ok, r.made], [true, ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", "talk.reel-2.mp4"]]);
+    assert.deepEqual(t.logs.slice(-3), ["talk.mov: clip 1 was not cut by the run that wrote the plan, so it is not cut now.", "talk.mov: cutting 1 short clip.", "talk.mov: done. Made again: talk.rough-cut.mp4, talk.rough-cut.vertical.mp4 and talk.reel-2.mp4."]);
+    assert.ok(!t.names().includes("talk.reel-1.mp4"));
+    t.done();
+    // The second part of a Story that could not be cut.
+    const talk = longTalk(16);
+    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const story = { ...talk, claude: [answers(reply)], reels: { "1.2": "fail" } };
+    const s = setup(story);
+    const done = await doneOnce(s);
+    delete story.reels;
+    const again = await videosFromPlan(done.file, s.deps);
+    assert.deepEqual([again.ok, again.made], [true, ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", "talk.reel-1.mp4", "talk.reel-1.story-1.mp4"]]);
+    assert.ok(s.logs.includes("talk.mov: part 2 of the Story of clip 1 was not cut by the run that wrote the plan, so it is not cut now."));
+    s.done();
+  });
+  it("makes no upright version of a video that is upright already, and looks for no face", async () => {
+    const t = setup({ claude: [answers(REPLY)], probed: probed({ picture: { width: 1080, height: 1920 } }) });
+    const { file, first } = await doneOnce(t);
+    const r = await videosFromPlan(file, t.deps);
+    assert.deepEqual([r.ok, r.made], [true, ["talk.rough-cut.mp4", "talk.reel-1.mp4"]]);
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE", "FFMPEG", "FFMPEG"]);
+    assert.deepEqual(t.calls.slice(1).map(same), making(first).map(same));
+    t.done();
+  });
+  it("makes the rough cut and the upright version of a plan the rules alone made, with no clips", async () => {
+    const t = setup();
+    const { file } = await doneOnce(t);
+    const r = await videosFromPlan(file, t.deps);
+    assert.deepEqual(r, { ok: true, name: "talk.mov", made: ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4"], message: "" });
+    t.done();
+  });
+  it("says in its log what it is doing and what it made again", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    await videosFromPlan(file, t.deps);
+    assert.deepEqual(t.logs, [
+      "talk.mov: making its videos again from talk.cut-plan.json.",
+      "talk.mov: making the rough cut.",
+      "talk.mov: making the upright version.",
+      "talk.mov: cutting 1 short clip.",
+      "talk.mov: done. Made again: talk.rough-cut.mp4, talk.rough-cut.vertical.mp4 and talk.reel-1.mp4."
+    ]);
+    t.done();
+  });
+  it("stops with a plain line, and changes nothing, when there is no video or no cut plan beside it", async () => {
+    const t = setup();
+    const gone = join(t.dir, "talk.mov");
+    assert.deepEqual(await videosFromPlan(gone, t.deps), stopped(`there is no video at ${gone}`));
+    const file = t.video("talk.mov");
+    assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`there is no cut plan at ${at(t)}`));
+    assert.deepEqual(t.logs, [`talk.mov: there is no video at ${gone}. Nothing was made.`, `talk.mov: there is no cut plan at ${at(t)}. Nothing was made.`]);
+    assert.deepEqual([t.calls, t.names(), readdirSync(t.work)], [[], ["talk.mov"], []]);
+    t.done();
+  });
+  it("stops with a plain line, and changes nothing, when the plan cannot be read or is not one this tool wrote", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    const [clip] = plan.claude.clips;
+    const cases = [
+      ["{ not a plan", "it is not JSON"],
+      ["[]", "it is not a cut plan this tool wrote"],
+      [JSON.stringify({ ...plan, version: 2 }), "it is not a cut plan this tool wrote"],
+      [JSON.stringify({ ...plan, facts: { ...plan.facts, width: "wide" } }), "the facts of its video cannot be read"],
+      [JSON.stringify({ ...plan, ranges: [] }), "its ranges cannot be read"],
+      [JSON.stringify({ ...plan, ranges: plan.ranges.map((r, i) => (i === 2 ? { ...r, end: "later" } : r)) }), "its ranges cannot be read"],
+      [JSON.stringify({ ...plan, claude: { ...plan.claude, clips: [{ ...clip, ranges: undefined }] } }), "clip 1 in it cannot be read"],
+      [JSON.stringify({ ...plan, claude: { ...plan.claude, clips: [{ ...clip, story: [{ start: 1 }] }] } }), "clip 1 in it cannot be read"],
+      [JSON.stringify({ ...plan, claude: { ...plan.claude, clips: [{ ...clip, files: "all" }] } }), "clip 1 in it cannot be read"],
+      [JSON.stringify({ ...plan, claude: { ...plan.claude, clips: "five" } }), "its clips cannot be read"]
+    ];
+    for (const [text, problem] of cases) {
+      rewrite(t, text);
+      t.logs.length = 0;
+      const why = `the cut plan at ${at(t)} could not be read (${problem})`;
+      assert.deepEqual(await videosFromPlan(file, t.deps), stopped(why), problem);
+      assert.deepEqual(t.logs, [`talk.mov: ${why}. Nothing was made.`]);
+      assert.deepEqual([t.calls, written(t)], [[], []]);
+    }
+    // A folder where the plan would be.
+    rmSync(at(t));
+    mkdirSync(at(t));
+    assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`the cut plan at ${at(t)} could not be read (EISDIR)`));
+    assert.deepEqual([t.calls, readdirSync(t.work)], [[], []]);
+    t.done();
+  });
+  it("stops with a plain line, and changes nothing, when the plan is of another video: by its name, or by what ffprobe says of the video now", async () => {
+    const script = { claude: [answers(REPLY)] };
+    const t = setup(script);
+    const { file } = await doneOnce(t);
+    const plan = t.read("talk.cut-plan.json");
+    rewrite(t, plan.replace('"video": "talk.mov"', '"video": "talk.mp4"'));
+    assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`the cut plan at ${at(t)} is the plan of talk.mp4, and not of talk.mov`));
+    assert.deepEqual(t.calls, []);
+    rewrite(t, plan);
+    // The same name, and a video of 45 seconds where the plan's was 23.
+    script.probed = probed({ duration: "45.000000" });
+    assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`the cut plan at ${at(t)} was made of another video: one of 23.423 seconds, 1280 by 720 at 30000/1001, and talk.mov is 45 seconds, 1280 by 720 at 30000/1001`));
+    script.probed = probed({ picture: { width: 640, height: 360 } });
+    assert.deepEqual((await videosFromPlan(file, t.deps)).message, `the cut plan at ${at(t)} was made of another video: one of 23.423 seconds, 1280 by 720 at 30000/1001, and talk.mov is 23.423 seconds, 640 by 360 at 30000/1001`);
+    script.probed = probed({ picture: { r_frame_rate: "25/1", avg_frame_rate: "25/1" } });
+    assert.deepEqual((await videosFromPlan(file, t.deps)).message, `the cut plan at ${at(t)} was made of another video: one of 23.423 seconds, 1280 by 720 at 30000/1001, and talk.mov is 23.423 seconds, 1280 by 720 at 25/1`);
+    // ffprobe cannot read the video at all.
+    script.probed = undefined;
+    script.probe = "fail";
+    assert.deepEqual(await videosFromPlan(file, t.deps), stopped("the video could not be read (moov atom not found)"));
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE", "FFPROBE", "FFPROBE", "FFPROBE"]);
+    assert.deepEqual([written(t), readdirSync(t.work)], [[], []]);
+    // A length a few hundredths of a second off is the same video, read by another ffprobe.
+    delete script.probe;
+    script.probed = probed({ duration: "23.480000" });
+    assert.equal((await videosFromPlan(file, t.deps)).ok, true);
+    t.done();
+  });
+  it("stops with a plain line, and changes nothing, when the plan's video has no picture, or the plan keeps nothing", async () => {
+    const sound = setup({ probed: probed({ picture: null }) });
+    const { file } = await doneOnce(sound, "talk.m4a");
+    const r = await videosFromPlan(file, sound.deps);
+    assert.deepEqual(r, { ...stopped("its cut plan says it has no picture, so it has no videos to make"), name: "talk.m4a" });
+    assert.deepEqual(sound.calls.map((c) => c.cmd), ["FFPROBE"]);
+    sound.done();
+    const t = setup();
+    const done = await doneOnce(t);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    rewrite(t, JSON.stringify({ ...plan, ranges: plan.ranges.map((r) => ({ ...r, keep: false })) }));
+    assert.deepEqual(await videosFromPlan(done.file, t.deps), stopped("its cut plan keeps nothing, so it has no videos to make"));
+    assert.deepEqual([t.calls.map((c) => c.cmd), written(t)], [["FFPROBE"], []]);
+    t.done();
+  });
+  it("never moves the video, and never takes a lock on its folder", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    await videosFromPlan(file, { ...t.deps, watched: t.dir });
+    assert.ok(t.names().includes("talk.mov"));
+    assert.deepEqual(readdirSync(t.locks), []);
+    assert.ok(!t.names().some((n) => /^\d{4}-\d{2}-\d{2}/.test(n)));
     t.done();
   });
 });
@@ -1985,27 +2246,34 @@ describe("before it starts", () => {
     assert.equal(depsFor(programs, () => {}, { HOME }, parseArgs(["--rules-only", "/in/a.mov"])).rulesOnly, true);
   });
   it("reads what it is asked to do", () => {
-    assert.deepEqual(parseArgs(["/in/a.mov"]), { file: "/in/a.mov", folders: [], out: "", rulesOnly: false, help: false });
-    assert.deepEqual(parseArgs(["/in/a.mov", "--out", "/out"]), { file: "/in/a.mov", folders: [], out: "/out", rulesOnly: false, help: false });
-    assert.deepEqual(parseArgs(["--watch", "/in"]), { file: "", folders: ["/in"], out: "", rulesOnly: false, help: false });
+    assert.deepEqual(parseArgs(["/in/a.mov"]), { file: "/in/a.mov", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false });
+    assert.deepEqual(parseArgs(["/in/a.mov", "--out", "/out"]), { file: "/in/a.mov", folders: [], out: "/out", rulesOnly: false, fromPlan: false, help: false });
+    assert.deepEqual(parseArgs(["--watch", "/in"]), { file: "", folders: ["/in"], out: "", rulesOnly: false, fromPlan: false, help: false });
     assert.deepEqual(parseArgs(["--watch", "/b", "--watch", "/a"]).folders, ["/b", "/a"]);
     assert.equal(parseArgs([]).help, true);
     assert.equal(parseArgs(["--help"]).help, true);
     assert.equal(parseArgs(["--watch"]).help, true);
   });
   it("reads --rules-only wherever in the line it comes, as the word not to ask Claude, and never as the name of a file", () => {
-    assert.deepEqual(parseArgs(["--rules-only", "--watch", "/in"]), { file: "", folders: ["/in"], out: "", rulesOnly: true, help: false });
-    assert.deepEqual(parseArgs(["--watch", "/in", "--rules-only"]), { file: "", folders: ["/in"], out: "", rulesOnly: true, help: false });
-    assert.deepEqual(parseArgs(["/in/a.mov", "--rules-only", "--out", "/out"]), { file: "/in/a.mov", folders: [], out: "/out", rulesOnly: true, help: false });
+    assert.deepEqual(parseArgs(["--rules-only", "--watch", "/in"]), { file: "", folders: ["/in"], out: "", rulesOnly: true, fromPlan: false, help: false });
+    assert.deepEqual(parseArgs(["--watch", "/in", "--rules-only"]), { file: "", folders: ["/in"], out: "", rulesOnly: true, fromPlan: false, help: false });
+    assert.deepEqual(parseArgs(["/in/a.mov", "--rules-only", "--out", "/out"]), { file: "/in/a.mov", folders: [], out: "/out", rulesOnly: true, fromPlan: false, help: false });
     // By itself it names nothing to work on.
-    assert.deepEqual(parseArgs(["--rules-only"]), { file: "", folders: [], out: "", rulesOnly: true, help: true });
+    assert.deepEqual(parseArgs(["--rules-only"]), { file: "", folders: [], out: "", rulesOnly: true, fromPlan: false, help: true });
+  });
+  it("reads --from-plan wherever in the line it comes, and never as the name of a file", () => {
+    assert.deepEqual(parseArgs(["--from-plan", "/in/a.mov"]), { file: "/in/a.mov", folders: [], out: "", rulesOnly: false, fromPlan: true, help: false });
+    assert.deepEqual(parseArgs(["/in/a.mov", "--from-plan", "--out", "/out"]), { file: "/in/a.mov", folders: [], out: "/out", rulesOnly: false, fromPlan: true, help: false });
+    // By itself it names nothing to work on.
+    assert.deepEqual(parseArgs(["--from-plan"]), { file: "", folders: [], out: "", rulesOnly: false, fromPlan: true, help: true });
   });
 });
 
 describe("a run, once it knows what it was asked and what is on this Mac", () => {
   const NOT_ASKED = "Claude is not asked in this run (--rules-only): each cut plan is the rules' alone.";
   const NOT_THERE = "Claude Code is not installed, so Claude is not asked in this run: each cut plan is the rules' alone.";
-  const asked = (over) => ({ file: "", folders: [], out: "", rulesOnly: false, help: false, ...over });
+  const FROM_PLAN = "Claude is not asked in this run (--from-plan), and no transcript is made: the videos are made again from the cut plan an earlier run wrote, as it is.";
+  const asked = (over) => ({ file: "", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false, ...over });
   /** The lines of a log that say something of Claude. The line that names the folder is not one of them: the folder is made
       under the system's temp folder, and that folder's own path may have the word in it. */
   const ofClaude = (logs) => logs.filter((line) => !line.startsWith("Folder: ") && line.includes("Claude"));
@@ -2056,6 +2324,51 @@ describe("a run, once it knows what it was asked and what is on this Mac", () =>
     assert.equal(t.asks.length, 1);
     t.done();
   });
+  it("makes the videos of one video again with --from-plan, where it is or in the folder asked for, asks Claude nothing, says so once, and ends with 0 when every one was made", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const file = t.video("talk.mov");
+    assert.equal(await doAsked(asked({ file }), t.deps), 0);
+    writeFileSync(join(t.dir, "talk.rough-cut.mp4"), "made before");
+    t.logs.length = 0;
+    assert.equal(await doAsked(asked({ file, fromPlan: true }), t.deps), 0);
+    assert.equal(t.read("talk.rough-cut.mp4"), "the rough cut");
+    assert.equal(t.asks.length, 1);
+    assert.equal(t.logs[0], FROM_PLAN);
+    assert.deepEqual(ofClaude(t.logs), [FROM_PLAN]);
+    // With --out, the plan is read from that folder, where a run with --out wrote it, and the videos are written there.
+    const out = join(t.dir, "made");
+    assert.equal(await doAsked(asked({ file, out, rulesOnly: true }), { ...t.deps, rulesOnly: true }), 0);
+    writeFileSync(join(out, "talk.rough-cut.mp4"), "made before");
+    assert.equal(await doAsked(asked({ file, out, fromPlan: true }), t.deps), 0);
+    assert.equal(readFileSync(join(out, "talk.rough-cut.mp4"), "utf8"), "the rough cut");
+    t.done();
+  });
+  it("ends --from-plan with 1 when a video could not be made again, and with 2, having made nothing, when there is no such file or no plan", async () => {
+    const t = setup({ rough: "fail" });
+    const file = t.video("talk.mov");
+    assert.equal(await doAsked(asked({ file, fromPlan: true }), t.deps), 2);
+    assert.deepEqual(t.names(), ["talk.mov"]);
+    // Nor is the folder asked for made, when the plan is not there.
+    assert.equal(await doAsked(asked({ file, out: join(t.dir, "made"), fromPlan: true }), t.deps), 2);
+    assert.deepEqual(t.names(), ["talk.mov"]);
+    assert.equal(await doAsked(asked({ file, rulesOnly: true }), t.deps), 1);
+    assert.equal(await doAsked(asked({ file, fromPlan: true }), t.deps), 1);
+    const gone = join(t.dir, "not there.mov");
+    assert.equal(await doAsked(asked({ file: gone, fromPlan: true }), t.deps), 2);
+    assert.equal(t.logs[t.logs.length - 1], `There is no file at ${gone}.`);
+    t.done();
+  });
+  it("never does --from-plan on a watched folder: it says so, ends with 2, and moves and makes nothing", async () => {
+    const t = setup();
+    const file = t.video("talk.mov");
+    for (const given of [asked({ folders: [t.dir], fromPlan: true }), asked({ file, folders: [t.dir], fromPlan: true })]) {
+      t.logs.length = 0;
+      assert.equal(await doAsked(given, t.deps), 2);
+      assert.deepEqual(t.logs, ["--from-plan is for one video, named by its file, and never for a watched folder. Nothing was made."]);
+      assert.deepEqual([t.calls, t.names()], [[], ["talk.mov"]]);
+    }
+    t.done();
+  });
   it("ends with 1 when something of the one video could not be made, and with 2 when there is no such file", async () => {
     const t = setup({ rough: "fail" });
     assert.equal(await doAsked(asked({ file: t.video("talk.mov"), rulesOnly: true }), t.deps), 1);
@@ -2080,6 +2393,10 @@ describe("what the tool says of itself", () => {
   it("says the same in its help, and names the option that keeps everything on the Mac", () => {
     assert.ok(help.includes(LEAVES), help);
     assert.ok(help.includes(" --rules-only never ask Claude: the plan is the rules' alone, there are no notes and no clips, and nothing leaves this Mac "), help);
+  });
+  it("names --from-plan in its first lines and in its help, as the way to make one video's videos again from its plan", () => {
+    assert.ok(first.replace(/\s+/g, " ").includes(" --from-plan make the videos of one video again from the cut plan an earlier run wrote beside it: "), first);
+    assert.ok(help.includes(" --from-plan make the videos of one video again from the cut plan an earlier run wrote beside it: "), help);
   });
   /** The whole file as one line, for what a comment further down says. */
   const whole = text.replace(/\s+/g, " ");
