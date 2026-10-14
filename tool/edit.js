@@ -369,7 +369,6 @@ export async function open(ctx, rest) {
   const pushed = record.main.pushed;
   say(pushed.length ? `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}.` : "Not shown in Final Cut yet.");
   offlineStep(ctx, found);
-  backupsCheck(ctx, found);
   say('Say "show it in Final Cut" to see the main video there.');
   return 0;
 }
@@ -386,29 +385,14 @@ export function openApp(app, file, run = spawnSync) {
 const AGENT = "com.thebrimm.unedited";
 
 /** The keys a property list holds, as { key: true }, or null when it is not there or cannot be read. It is read as XML, since
-    a library's Settings.plist holds bookmark data that JSON cannot carry. Nothing here writes it. */
+    a library's Settings.plist holds bookmark data that JSON cannot carry. Nothing here writes it. Kept for later: a
+    library's backups stay on Final Cut's default, by the lead's ruling of 2026-10-14 (phase 0, B4), since a library whose
+    backups were set to BRIMM Video Work/Backups wrote none there in two hours, so nothing reads it now. */
 export function readPlist(file) {
   if (!existsSync(file)) return null;
   const ran = spawnSync("/usr/bin/plutil", ["-convert", "xml1", "-o", "-", file], { encoding: "utf8" });
   if (ran.status !== 0) return null;
   return Object.fromEntries([...ran.stdout.matchAll(/<key>([^<]*)<\/key>/g)].map((m) => [m[1], true]));
-}
-
-/** Say how to set an episode's library's backups while they go to Final Cut's own place, ~/Movies, which is in Dropbox on the
-    Mac Studio: Final Cut sets that for a library a push makes (phase 0, B4), and no import option sets another. The library's
-    Settings.plist names `backupLocation` once a person has set it, and is only read here, never written. Final Cut makes
-    the library as it opens a push, after the push has returned, so at a push it may not be there yet: then it says to set
-    them once it is. At an open before any push, there is nothing to say. */
-function backupsCheck(ctx, found, { pushed = false } = {}) {
-  const library = libraryFor(ctx.home, found.name);
-  const settings = existsSync(library) ? ctx.readPlist(join(library, "Settings.plist")) : null;
-  if (settings && settings.backupLocation) return;
-  if (!existsSync(library) || !settings) {
-    if (pushed) ctx.say(`Final Cut makes this episode's library, ${found.name}.fcpbundle, as it opens the project. Once it has, select it in Final Cut's sidebar and set its backups: File > Library Properties, Modify Settings beside Storage Locations, Backups to BRIMM Video Work/Backups. The next push or open looks again.`);
-    return;
-  }
-  // Library Properties shows the library selected in Final Cut's sidebar, so the library is named.
-  ctx.say(`In Final Cut, select the library ${found.name}.fcpbundle in the sidebar, then choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups: this episode's library keeps its backups in ~/Movies, which is in Dropbox on the Mac Studio.`);
 }
 
 /** Whether the launch agent's run is at work now: launchctl names its process while it runs. */
@@ -523,7 +507,6 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     ctx.openApp("Final Cut Pro", copy);
     say(`Shown in Final Cut as "${project}", in the library ${found.name}.fcpbundle in BRIMM Video Work.`);
     offlineStep(ctx, found);
-    backupsCheck(ctx, found, { pushed: true });
     return 0;
   } catch (e) {
     say(`It could not be shown in Final Cut: ${String(e.message).replace(/\.$/, "")}.`);

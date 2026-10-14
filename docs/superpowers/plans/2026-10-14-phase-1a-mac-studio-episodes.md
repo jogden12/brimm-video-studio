@@ -104,10 +104,11 @@ Phase 0 ran on the Mac Studio with Final Cut Pro 12.4 on 2026-10-14 (the spec ha
 | `copy assets` 0 when the Import setting says to copy | Settled (A3): honoured; the library holds a link to the video. A stored file opened by a double-click follows the Import setting and copies, so episodes are opened through Claude. |
 | "Replace or keep both" on a second push | Settled (A4, A4c): a new project in the same event asks nothing, so every push of an episode goes into one event named for the episode folder; a name the library holds asks even with `suppress warnings`, so a push's version is above any this Mac has handed over. |
 | `library location` with or without a slash at its end | Settled: without works, and is what is written. |
-| Library backups set other than by hand | Open (B4): a push-made library backs up into `~/Movies`, which is Dropbox on the Mac Studio. Each push and open reads the library's `Settings.plist` and says to set Backups while it names no `backupLocation`. |
+| Library backups set other than by hand | Ruled by the lead (B4): backups stay on Final Cut's default, in `~/Movies` (Dropbox on the Mac Studio), since a library set to `~/BRIMM Video Work/Backups` wrote none there; no push or open speaks of them, and the finish's exports keep the hand work. The `Settings.plist` reader is kept, unused. Open: what a missing `backupsEnabled` means. |
 | An iPhone video's colour (B3) | Settled: HDR, "9-18-9 (Rec. 2020 HLG)", with no start timecode. The video's format names the colour space ffprobe finds. |
 | Whether a clone into Dropbox's File Provider folder is safe | Open: checked by hand after the deploy (deployment note). |
-| Pushes while Final Cut is closed | Open. |
+| Pushes while Final Cut is closed | Open: by hand on the Mac Studio, when Final Cut can be quit: a push with Final Cut quit first, and a second push into the same library after Final Cut has closed it. |
+| An iPhone clip's sound (B3) | Settled: APAC beside AAC; the import maps the first sound its ffmpeg can read, and refuses a file whose only sound is APAC. |
 
 ## The lead's answers and changes (2026-10-14, approving df60480)
 

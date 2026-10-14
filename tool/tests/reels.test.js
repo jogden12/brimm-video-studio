@@ -395,3 +395,13 @@ describe("new candidates from asking Claude again", () => {
     assert.deepEqual(merged.candidates.map((c) => c.n), [1]);
   });
 });
+
+describe("the streams a preview is made from", () => {
+  it("are named in each part's graph when they are given, and the parts are as before when not", () => {
+    const at = { video: "/in/a.mov", ranges: [{ start: 1, end: 3, crop: { x: 0, y: 0, w: 404, h: 720 } }], out: "/out/a.mp4", fps: "30/1", duration: 10, work: "/work", size: { width: 1280, height: 720 } };
+    const graph = (steps) => steps.parts[0].args[steps.parts[0].args.indexOf("-filter_complex") + 1];
+    const mapped = graph(previewSteps({ ...at, streams: { video: 0, audio: 2 } }));
+    assert.ok(mapped.includes("[0:0]fps=") && mapped.includes("[1:2]aresample="), mapped);
+    assert.deepEqual(previewSteps({ ...at, streams: { video: 0, audio: null } }), previewSteps(at));
+  });
+});

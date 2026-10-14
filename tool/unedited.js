@@ -44,7 +44,7 @@ import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
-import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
@@ -347,7 +347,7 @@ async function askClaude(name, plan, facts, work, deps) {
 
 /** Make the rough cut of a video from the kept ranges of its plan. Resolves "" when it is made, or why it is not. It is
     written whole in the run's own folder and then put where it belongs, as every other file is. */
-async function roughCut(file, to, { plan, facts, spans }, { run, tools, files, log = () => {}, progress = noProgress }) {
+async function roughCut(file, to, { plan, facts, spans, streams = null }, { run, tools, files, log = () => {}, progress = noProgress }) {
   if (!facts.height) return "there is no picture in the file";
   if (!spans.length) return "the plan keeps nothing";
   log(`${basename(file)}: making the rough cut.`);
@@ -357,7 +357,7 @@ async function roughCut(file, to, { plan, facts, spans }, { run, tools, files, l
   const watch = progress.encoding(secondsIn(spans));
   let made;
   try {
-    made = await run(tools.ffmpeg, [...watch.args, ...roughCutArgs(file, writing, { ranges: plan.ranges, fps: roughRate(facts) })]);
+    made = await run(tools.ffmpeg, [...watch.args, ...roughCutArgs(file, writing, { ranges: plan.ranges, fps: roughRate(facts), streams })]);
   } finally {
     watch.stop();
   }
@@ -396,12 +396,12 @@ async function facesIn(file, work, { run, tools }) {
 /** Have ffmpeg write stretches of a video, joined, as one file at `to`: each with its crop, and the whole made 1080 by 1920,
     or with no crops for a video that keeps its shape. Resolves "" when the file is made, or why it is not. It is written
     whole in the run's own folder and then put where it belongs, as every other file is. */
-async function joined(file, to, { ranges, crops }, { run, tools, files, progress = noProgress }) {
+async function joined(file, to, { ranges, crops, streams = null }, { run, tools, files, progress = noProgress }) {
   const writing = files.at(to);
   const watch = progress.encoding(secondsIn(ranges));
   let made;
   try {
-    made = await run(tools.ffmpeg, [...watch.args, ...verticalArgs({ video: file, ranges, crops, out: writing })]);
+    made = await run(tools.ffmpeg, [...watch.args, ...verticalArgs({ video: file, ranges, crops, out: writing, streams })]);
   } finally {
     watch.stop();
   }
@@ -418,7 +418,7 @@ async function joined(file, to, { ranges, crops }, { run, tools, files, progress
     was. When the faces could not be looked for, every stretch is cropped at the centre of the picture, the log says so, and
     `centred` is the reason. `stills` is what the face finder said of the video, for the short clips to be cropped by: the
     faces are looked for once. Nothing is thrown from here, so a failure costs this file and no other. */
-async function upright(file, to, { facts, spans }, work, deps) {
+async function upright(file, to, { facts, spans, streams = null }, work, deps) {
   const { log = () => {}, progress = noProgress } = deps;
   const name = basename(file);
   let seen = {};
@@ -435,7 +435,7 @@ async function upright(file, to, { facts, spans }, work, deps) {
         : `${name}: no face was found in the video, so the upright version is cropped at the centre of the picture.`);
     }
     progress.step("Making the upright version");
-    return { why: await joined(file, to, { ranges, crops }, deps), centred: seen.why || "", stills: seen.stills || [] };
+    return { why: await joined(file, to, { ranges, crops, streams }, deps), centred: seen.why || "", stills: seen.stills || [] };
   } catch (e) {
     rmSync(deps.files.at(to), { force: true });
     return { why: `the work stopped (${e.code || e.message})`, centred: seen.why || "", stills: seen.stills || [] };
@@ -468,14 +468,14 @@ function noLonger(spans, most, fps) {
     pictures over that are left off its end, and are in no part. Resolves {spans}, the stretches as they were taken, each
     with the moment it starts in the file, or {why} the file could not be made. Nothing is thrown from here, so a failure
     costs this file and no other. */
-async function cutPiece(file, to, given, { facts, stills, most = 0 }, deps) {
+async function cutPiece(file, to, given, { facts, stills, most = 0, streams = null }, deps) {
   try {
     if (!facts.height) return { why: "there is no picture in the file" };
     const whole = keptSpans(given.map((range) => ({ ...range, keep: true })), roughRate(facts));
     const spans = most ? noLonger(whole, most, roughRate(facts)) : whole;
     if (!spans.length) return { why: "it is shorter than one picture" };
     const ranges = stretchesOf(spans);
-    const why = await joined(file, to, { ranges, crops: needsReframe(facts) ? cropsFor(facts, ranges, stills) : null }, deps);
+    const why = await joined(file, to, { ranges, crops: needsReframe(facts) ? cropsFor(facts, ranges, stills) : null, streams }, deps);
     return why ? { why } : { spans };
   } catch (e) {
     rmSync(deps.files.at(to), { force: true });
@@ -489,7 +489,7 @@ async function cutPiece(file, to, given, { facts, stills, most = 0 }, deps) {
     and what could not be made and why, each as the log says it. A clip that could not be cut has no captions and no Story,
     and the clips after it are cut all the same. A clip is cut whether or not it fits a Reel: the notes say when it does
     not. Nothing is burned into the picture: this Mac's ffmpeg has no filter for captions, so they come as a file. */
-async function cutClips(file, clips, { plan, facts, stills }, deps) {
+async function cutClips(file, clips, { plan, facts, stills, streams = null }, deps) {
   const { progress = noProgress } = deps;
   const cut = [];
   for (const [i, clip] of clips.entries()) {
@@ -497,7 +497,7 @@ async function cutClips(file, clips, { plan, facts, stills }, deps) {
     const out = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
     const files = [];
     const failed = [];
-    const whole = await cutPiece(file, out.video, clip.ranges, { facts, stills }, deps);
+    const whole = await cutPiece(file, out.video, clip.ranges, { facts, stills, streams }, deps);
     if (whole.why) failed.push(`clip ${clip.n} could not be cut: ${whole.why}`);
     else {
       files.push(out.video);
@@ -511,7 +511,7 @@ async function cutClips(file, clips, { plan, facts, stills }, deps) {
         failed.push(`the captions of clip ${clip.n} could not be written: the work stopped (${e.code || e.message})`);
       }
       for (const [k, to] of out.story.entries()) {
-        const part = await cutPiece(file, to, clip.story[k].ranges, { facts, stills, most: STORY_MAX }, deps);
+        const part = await cutPiece(file, to, clip.story[k].ranges, { facts, stills, most: STORY_MAX, streams }, deps);
         if (part.why) failed.push(`part ${k + 1} of the Story of clip ${clip.n} could not be cut: ${part.why}`);
         else files.push(to);
       }
@@ -640,6 +640,10 @@ async function workOn(file, deps) {
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     const facts = printed ? factsOf(printed) : null;
     if (facts && !facts.sound) return fail("there is no sound in the file");
+    // The picture and the first sound this Mac's ffmpeg can read, which every ffmpeg the run asks for is told to take: an
+    // iPhone's clip carries Apple's APAC beside its AAC, and ffmpeg on its own takes the sound with the most channels.
+    const streams = streamsOf(printed);
+    if (facts && streams.audio === null && streams.unreadable.length) return fail(`its sound is in a form this Mac's ffmpeg cannot read (${streams.unreadable.join(", ")})`);
     // An episode of a recording that is upright, square or short is a short video: it gets no upright version and no clips.
     const kind = episode && facts ? episodeKind(facts) : "";
     const wide = (f) => needsReframe(f) && kind !== "short video";
@@ -648,7 +652,7 @@ async function workOn(file, deps) {
       progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && kind !== "short video", watched }));
     }
     const wav = join(work, "sound.wav");
-    const a = await run(tools.ffmpeg, ffmpegArgs(file, wav));
+    const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
     if (a.code !== 0 || !existsSync(wav)) return fail(`the sound could not be read from the file (${lastLine(a.stderr)})`);
     progress.step("Writing the transcript");
     log(`${name}: writing the transcript, with a time for every word.`);
@@ -756,7 +760,7 @@ async function workOn(file, deps) {
         const roughSrt = roughCaptions(plan.phrases, spans);
         files.text(out.roughTxt, stampedText(roughSrt));
         files.text(out.roughSrt, roughSrt);
-        why = await roughCut(file, out.rough, { plan, facts, spans }, deps);
+        why = await roughCut(file, out.rough, { plan, facts, spans, streams }, deps);
       } catch (e) {
         // Something nobody foresaw, such as a file that cannot be written. What was made is kept, and the plan names the rest.
         why = `the work stopped (${e.code || e.message})`;
@@ -779,7 +783,7 @@ async function workOn(file, deps) {
         log(`${name}: it is a short video, so it gets no upright version.`);
       } else if (!spans.length) lacks.push({ what: "upright version", why: "the plan keeps nothing" });
       else {
-        const made = await upright(file, out.vertical, { facts, spans }, work, deps);
+        const made = await upright(file, out.vertical, { facts, spans, streams }, work, deps);
         ({ stills, centred } = made);
         if (made.why) lacks.push({ what: "upright version", why: made.why });
         else atCentre.push("the upright version");
@@ -788,7 +792,7 @@ async function workOn(file, deps) {
       // The short clips Claude picked, each cut whole from the video. One that cannot be cut does not stop the others.
       if (clips.length) {
         log(`${name}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
-        cut = await cutClips(file, clips, { plan, facts, stills }, deps);
+        cut = await cutClips(file, clips, { plan, facts, stills, streams }, deps);
         if (wide(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
       }
 
@@ -1000,7 +1004,10 @@ export async function videosFromPlan(file, deps) {
     // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
     const probed = join(work, "facts.json");
     const probe = await run(tools.ffprobe, probeArgs(file, probed));
-    const now = probe.code === 0 && existsSync(probed) ? factsOf(readFileSync(probed, "utf8")) : null;
+    const reprinted = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
+    const now = reprinted ? factsOf(reprinted) : null;
+    // The streams to take, as a run takes them (streamsOf).
+    const streams = streamsOf(reprinted);
     if (!now) return stop(`the video could not be read (${lastLine(probe.stderr)})`);
     const { facts } = plan;
     if (!sameVideo(facts, now)) return stop(`the cut plan at ${out.plan} was made of another video: one of ${described(facts)}, and ${name} is ${described(now)}`);
@@ -1025,7 +1032,7 @@ export async function videosFromPlan(file, deps) {
     };
     let why = "";
     try {
-      why = await roughCut(file, out.rough, { plan, facts, spans }, deps);
+      why = await roughCut(file, out.rough, { plan, facts, spans, streams }, deps);
     } catch (e) {
       rmSync(files.at(out.rough), { force: true });
       why = `the work stopped (${e.code || e.message})`;
@@ -1034,7 +1041,7 @@ export async function videosFromPlan(file, deps) {
     // The faces are looked for once, for the upright version, and the clips are cropped by the same stills.
     let stills = [];
     if (needsReframe(facts)) {
-      const up = await upright(file, out.vertical, { facts, spans }, work, deps);
+      const up = await upright(file, out.vertical, { facts, spans, streams }, work, deps);
       stills = up.stills;
       madeOr(out.vertical, "the upright version could not be made again", up.why);
     }
@@ -1061,7 +1068,7 @@ export async function videosFromPlan(file, deps) {
     if (clips) log(`${name}: cutting ${clips} short clip${clips === 1 ? "" : "s"}.`);
     for (const piece of pieces) {
       progress.step("Cutting the short clips", `Cutting ${piece.what}`);
-      const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most }, deps);
+      const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most, streams }, deps);
       madeOr(piece.to, `${piece.what} could not be cut again`, cut.why || "");
     }
     if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);

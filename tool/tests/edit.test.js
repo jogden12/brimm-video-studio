@@ -839,7 +839,6 @@ describe("what phase 0 settled about pushing to Final Cut", () => {
     mkdirSync(libraryFor(t.home, FOLDER), { recursive: true });
     t.deps.readPlist = (file) => (file === join(libraryFor(t.home, FOLDER), "Settings.plist") ? settings : null);
   };
-  const SET = `In Final Cut, select the library ${FOLDER}.fcpbundle in the sidebar, then choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups: this episode's library keeps its backups in ~/Movies, which is in Dropbox on the Mac Studio.`;
   it("puts every push of an episode in one event, named for the episode folder (A4)", async () => {
     const t = setup();
     imported(t);
@@ -859,22 +858,15 @@ describe("what phase 0 settled about pushing to Final Cut", () => {
     assert.deepEqual(t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name), ["Talk main v4 000001"]);
     t.done();
   });
-  it("says at a first push, before Final Cut has made the library, that its backups are to be set once it has (B4)", async () => {
+  it("says nothing about backups at a push or an open of a library left on Final Cut's default, which is where its backups go (B4)", async () => {
     const t = setup();
     imported(t);
     t.deps.readPlist = () => null;
-    const r = await t.run("push", "talk");
-    assert.ok(r.said.includes(`Final Cut makes this episode's library, ${FOLDER}.fcpbundle, as it opens the project. Once it has, select it in Final Cut's sidebar and set its backups: File > Library Properties, Modify Settings beside Storage Locations, Backups to BRIMM Video Work/Backups. The next push or open looks again.`), r.text);
-    t.done();
-  });
-  it("says plainly at a push and at an open, while the library keeps its backups in ~/Movies, to set them (B4)", async () => {
-    const t = setup();
-    imported(t);
+    const first = await t.run("push", "talk");
     library(t, { backupsEnabled: true });
-    const pushed = await t.run("push", "talk");
-    assert.ok(pushed.said.includes(SET), pushed.text);
+    const pushed = await t.run("push", "talk", "--no-hand-edits");
     const opened = await t.run("open", "talk");
-    assert.ok(opened.said.includes(SET), opened.text);
+    for (const r of [first, pushed, opened]) assert.ok(!/backup/i.test(r.text), r.text);
     t.done();
   });
   it("says nothing of backups once the library names where they go, and nothing at an open before there is a library", async () => {

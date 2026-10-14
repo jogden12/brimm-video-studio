@@ -3580,3 +3580,34 @@ describe("the timeline of an HDR video, in both modes", () => {
     t.done();
   });
 });
+
+describe("a video with a sound this Mac's ffmpeg cannot read beside one it can, as an iPhone's", () => {
+  /** What ffprobe writes of the made-up recording when it has, after its picture, the sound streams given, in that order. */
+  const withSounds = (...codecs) => {
+    const told = JSON.parse(probed());
+    const [picture, sound] = told.streams;
+    told.streams = [{ ...picture, index: 0 }, ...codecs.map((codec, i) => ({ ...sound, index: i + 1, codec_name: codec, channels: codec === "apple_apac" ? 4 : 1 }))];
+    return JSON.stringify(told);
+  };
+  const after = (args, flag) => args[args.indexOf(flag) + 1];
+  it("takes the sound it can read, by an explicit map, in the sound, the rough cut and the upright version, though APAC is listed first", async () => {
+    const t = setup({ probed: withSounds("apple_apac", "aac") });
+    const r = await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.equal(r.ok, true, r.message);
+    const ffmpeg = t.calls.filter((c) => c.cmd === "FFMPEG");
+    const sound = ffmpeg.find((c) => c.args.includes("pcm_s16le") && c.args.includes("16000"));
+    assert.equal(after(sound.args, "-map"), "0:2");
+    const rough = ffmpeg.find((c) => c.args.includes("-vf") && after(c.args, "-vf").includes("select="));
+    assert.deepEqual(rough.args.filter((a, i) => rough.args[i - 1] === "-map"), ["0:0", "0:2"]);
+    const upright = ffmpeg.find((c) => c.args.includes("-filter_complex"));
+    assert.ok(after(upright.args, "-filter_complex").includes("[0:2]asegment="), after(upright.args, "-filter_complex"));
+    t.done();
+  });
+  it("says plainly that its sound cannot be read when its only sound is APAC, and makes nothing", async () => {
+    const t = setup({ probed: withSounds("apple_apac") });
+    const r = await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual([r.ok, r.message], [false, "its sound is in a form this Mac's ffmpeg cannot read (apple_apac)"]);
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE"]);
+    t.done();
+  });
+});

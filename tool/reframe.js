@@ -106,7 +106,7 @@ export const stretchesOf = (spans) => spans.map((span) => ({ start: below(span.s
     A crop is a hair narrower than 9:16, and setsar says the pixels are square all the same: without it the file asks to be
     shown a few pixels narrower than it is. The video must have sound: ffmpeg stops at one that has none.
     The file is told it is an mp4, so it can be written under another name and given its own when it is whole. */
-export function verticalArgs({ video, ranges, crops, out }) {
+export function verticalArgs({ video, ranges, crops, out, streams = null }) {
   // The pieces the video is split into, in time order: for each one the number of the range it keeps, or -1 for a gap that is
   // thrown away. `points` are the times it is split at.
   const pieces = [];
@@ -126,7 +126,11 @@ export function verticalArgs({ video, ranges, crops, out }) {
   });
   // What is left of the video after the last range.
   pieces.push(-1);
-  const split = (kind, filter) => `[0:${kind}]${filter}=timestamps=${points.join("|")}${pieces.map((kept, j) => `[p${kind}${j}]`).join("")}`;
+  // The picture and the sound are named by their numbers in the file when they are known, so that a sound ffmpeg cannot read,
+  // listed first, is never the one taken.
+  const named = streams && streams.video !== null && streams.audio !== null;
+  const source = (kind) => (named ? `0:${kind === "v" ? streams.video : streams.audio}` : `0:${kind}`);
+  const split = (kind, filter) => `[${source(kind)}]${filter}=timestamps=${points.join("|")}${pieces.map((kept, j) => `[p${kind}${j}]`).join("")}`;
   const each = pieces.map((kept, j) => {
     if (kept < 0) return `[pv${j}]nullsink;[pa${j}]anullsink`;
     const crop = crops ? `,crop=${crops[kept].w}:${crops[kept].h}:${crops[kept].x}:${crops[kept].y}` : "";

@@ -54,6 +54,9 @@ describe("the folder a finished video is filed in", () => {
 describe("what it asks the two programs to do", () => {
   it("has ffmpeg take the sound out as the kind of file the transcriber reads, never asking a question", () => {
     assert.deepEqual(ffmpegArgs("/in/a b.mp4", "/tmp/x.wav"), ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a b.mp4", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "/tmp/x.wav"]);
+    // Told which sound stream to take, it takes that one alone. Told none, its arguments are as they always were.
+    assert.deepEqual(ffmpegArgs("/in/a.mov", "/tmp/x.wav", 2), ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a.mov", "-map", "0:2", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "/tmp/x.wav"]);
+    assert.deepEqual(ffmpegArgs("/in/a.mov", "/tmp/x.wav", null), ffmpegArgs("/in/a.mov", "/tmp/x.wav"));
   });
   it("has the transcriber write an .srt of short lines, in English, with the show's names spelled out for it", () => {
     const a = whisperArgs({ model: "/m/model.bin", wav: "/tmp/x.wav", outBase: "/tmp/x" });

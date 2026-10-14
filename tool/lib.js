@@ -35,8 +35,10 @@ export function dayFolder(names, day) {
   return name;
 }
 
-/** Take the sound out of a video as 16 kHz mono, which is what the transcriber reads. */
-export const ffmpegArgs = (input, wav) => ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav];
+/** Take the sound out of a video as 16 kHz mono, which is what the transcriber reads. `stream`, when it is given, is the
+    number of the sound stream to take, so that a sound ffmpeg cannot read, as Apple's APAC beside an iPhone's AAC, is never
+    the one taken. Given none, the arguments are as they always were, as brimm-operations' copy has them. */
+export const ffmpegArgs = (input, wav, stream = null) => ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input, ...(stream === null || stream === undefined ? [] : ["-map", `0:${stream}`]), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav];
 
 /** Write an .srt of short lines. Short lines put a time every few seconds, which is what chapters and clip times are read from. */
 export const whisperArgs = ({ model, wav, outBase, language = "en", prompt = PROMPT }) => ["-m", model, "-f", wav, "-l", language, "-ml", "60", "-sow", "-osrt", "-of", outBase, "--prompt", prompt, "-np"];

@@ -51,6 +51,27 @@ export function factsOf(printed) {
   return { duration: ms(duration), width, height, fps, sound: Boolean(sound), soundStart: picture && sound ? ms(num(sound.start_time) - num(picture.start_time)) : 0 };
 }
 
+/** Sound codecs this Mac's ffmpeg has no decoder for: Apple's APAC, which an iPhone writes beside its AAC (phase 0, B3). */
+const UNREADABLE_SOUND = new Set(["apple_apac"]);
+
+/** The streams of a video the tool takes, by their numbers in the file: { video, audio, unreadable }. `video` is the picture
+    (a cover picture passed over), and `audio` the first sound stream this Mac's ffmpeg can read, each null when there is
+    none; `unreadable` names the sounds passed over. They are given to ffmpeg as explicit maps, since ffmpeg on its own takes
+    the sound with the most channels, which on an iPhone's clip is its APAC. */
+export function streamsOf(printed) {
+  let streams = [];
+  try {
+    streams = list(JSON.parse(printed).streams);
+  } catch (e) {
+    return { video: null, audio: null, unreadable: [] };
+  }
+  const picture = streams.find((s) => s.codec_type === "video" && !(s.disposition && s.disposition.attached_pic));
+  const sounds = streams.filter((s) => s.codec_type === "audio");
+  const readable = sounds.find((s) => s.codec_name && !UNREADABLE_SOUND.has(s.codec_name));
+  const number = (s) => (s && Number.isInteger(s.index) ? s.index : null);
+  return { video: number(picture), audio: number(readable), unreadable: sounds.filter((s) => UNREADABLE_SOUND.has(s.codec_name)).map((s) => s.codec_name) };
+}
+
 /** The colour of a video's picture as ffprobe read it: { primaries, transfer }, as "bt2020" and "arib-std-b67" for an
     iPhone's HDR video, or null when ffprobe gave neither, wrote nothing that can be read, or the file has no picture. It is
     not one of the facts a cut plan keeps, so that a plan is written as it was. */
@@ -506,11 +527,13 @@ export const encodeArgs = (crf, preset = "medium") => ["-c:v", "libx264", "-pres
       are about a fiftieth of a second long: over many cuts that would put the sound out of step with the picture.
     - scale makes a picture of more than 1080 lines 1080, and never makes one bigger. The size is made even, as H.264 needs.
     The file is told it is an mp4, so it can be written under another name and given its own when it is whole. */
-export function roughCutArgs(input, output, { ranges, fps }) {
+export function roughCutArgs(input, output, { ranges, fps, streams = null }) {
   const rate = fps || PLAIN_RATE;
   const pick = (early) => sum(keptSpans(ranges, rate).map((s) => `gte(t,${(s.start - early).toFixed(6)})*lt(t,${(s.end - early).toFixed(6)})`));
+  // The picture and the sound to take, when they are known: ffmpeg on its own takes the sound with the most channels.
+  const maps = streams && streams.video !== null && streams.audio !== null ? ["-map", `0:${streams.video}`, "-map", `0:${streams.audio}`] : [];
   return [
-    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input,
+    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input, ...maps,
     "-vf", `fps=${rate}:start_time=0,select='${pick(0.5 / framesASecond(rate))}',setpts=N/FRAME_RATE/TB,scale=-2:'2*trunc(min(1080,ih)/2)',format=yuv420p`,
     "-af", `aresample=async=1:first_pts=0,asetnsamples=n=128:p=0,aselect='${pick(0)}',asetpts=N/SR/TB`,
     "-sn", "-dn", ...encodeArgs(QUALITY), "-f", "mp4", output

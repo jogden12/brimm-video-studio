@@ -441,3 +441,16 @@ describe("stretches as ffmpeg is given them", () => {
     assert.deepEqual(stretchesOf([{ start: 5.8724, end: 9.8436, at: 0 }, { start: 13.3800001, end: 21.2879, at: 3.97 }]), [{ start: 5.872, end: 9.843 }, { start: 13.38, end: 21.287 }]);
   });
 });
+
+describe("the streams the upright version and the clips are made from", () => {
+  it("are named in the graph when they are given, so an unreadable sound listed first is never taken, and are as before when not", () => {
+    const at = { video: "/in/a.mov", ranges: [{ start: 1, end: 3 }], crops: [{ x: 0, y: 0, w: 404, h: 720 }], out: "/out/a.mp4" };
+    const plain = verticalArgs(at);
+    const graph = (args) => args[args.indexOf("-filter_complex") + 1];
+    const mapped = graph(verticalArgs({ ...at, streams: { video: 0, audio: 2 } }));
+    assert.ok(mapped.startsWith("[0:0]segment=") && mapped.includes(";[0:2]asegment="), mapped);
+    assert.ok(!mapped.includes("[0:v]") && !mapped.includes("[0:a]"), mapped);
+    assert.equal(graph(plain).startsWith("[0:v]segment="), true);
+    assert.deepEqual(verticalArgs({ ...at, streams: { video: 0, audio: null } }), plain);
+  });
+});

@@ -74,7 +74,11 @@ function previewStretches({ ranges, fps, duration }) {
       sound ended a little before its picture would make every later part's sound play early, and a part with no sound at
       all would write no sound, which a preview cannot be joined from. The sound is one channel: mixed with silence of two,
       a recording of one channel came out 3 dB quieter. A preview's sound is for judging the words, and one channel does. */
-const partArgs = ({ video, stretches, fps, seconds, out }) => {
+const partArgs = ({ video, stretches, fps, seconds, out, streams = null }) => {
+  // The picture and the sound by their numbers in the file when they are known (cuts.js streamsOf).
+  const named = streams && streams.video !== null && streams.audio !== null;
+  const picture_ = (i) => `${2 * i}:${named ? streams.video : "v"}`;
+  const sound_ = (i) => `${2 * i + 1}:${named ? streams.audio : "a"}`;
   const rate = framesASecond(fps);
   // Two pictures more are read than the stretch holds, so the trim, not the read, is where it ends.
   const inputs = stretches.flatMap((s) => {
@@ -82,8 +86,8 @@ const partArgs = ({ video, stretches, fps, seconds, out }) => {
     return [...read, "-an", "-i", video, ...read, "-vn", "-i", video];
   });
   const each = stretches.flatMap(({ pictures, seconds, crop }, i) => [
-    `[${2 * i}:v]fps=${fps}:start_time=0,trim=end_frame=${pictures},crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${PREVIEW.width}:${PREVIEW.height},setsar=1[v${i}]`,
-    `[${2 * i + 1}:a]aresample=async=1:first_pts=0,atrim=end=${seconds}[a${i}]`
+    `[${picture_(i)}]fps=${fps}:start_time=0,trim=end_frame=${pictures},crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${PREVIEW.width}:${PREVIEW.height},setsar=1[v${i}]`,
+    `[${sound_(i)}]aresample=async=1:first_pts=0,atrim=end=${seconds}[a${i}]`
   ]);
   const joined = `${stretches.map((s, i) => `[v${i}][a${i}]`).join("")}concat=n=${stretches.length}:v=1:a=1[v][c]`;
   const sound = ["[c]aformat=channel_layouts=mono[m]", `anullsrc=r=48000:cl=mono,atrim=end=${seconds}[s]`, "[s][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"];
@@ -117,7 +121,7 @@ const listed = (path) => `file '${String(path).replace(/'/g, "'\\''")}'`;
     `video` is the raw video, `ranges` the candidate's stretches, `fps` and `duration` as previewStretches takes them, and
     `size` the picture's {width, height} as it is shown. Anything previewStretches refuses is refused, and so is a size that
     cannot be read. */
-export function previewSteps({ video, ranges, out, fps, duration, work, size }) {
+export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null }) {
   if (!(size && Number.isInteger(size.width) && size.width > 0 && Number.isInteger(size.height) && size.height > 0)) throw new Error(`A preview needs the size of the video's picture, and this one cannot be read: ${size && size.width} by ${size && size.height}`);
   const stretches = previewStretches({ ranges, fps, duration });
   const most = perPart(size);
@@ -127,7 +131,7 @@ export function previewSteps({ video, ranges, out, fps, duration, work, size }) 
     const these = stretches.slice(k, k + most);
     const file = join(work, `${stem}.part-${parts.length + 1}.mov`);
     const seconds = exact(these.reduce((sum, s) => sum + s.seconds, 0));
-    parts.push({ file, seconds, args: partArgs({ video, stretches: these, fps, seconds, out: file }) });
+    parts.push({ file, seconds, args: partArgs({ video, stretches: these, fps, seconds, out: file, streams }) });
   }
   const list = { file: join(work, `${stem}.parts.txt`), text: parts.map((part) => `${listed(basename(part.file))}\n`).join("") };
   const join_ = ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list.file, "-map", "0:v", "-map", "0:a", "-c:v", "copy", "-af", "aresample=async=1:first_pts=0", "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart", "-f", "mp4", out];

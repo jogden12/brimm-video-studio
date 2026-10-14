@@ -2,7 +2,7 @@
 // to suggest cutting. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { probeArgs, factsOf, createdOf, colourOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
+import { probeArgs, factsOf, createdOf, colourOf, streamsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
 import { whisperArgs, stampedText, captionCount } from "../lib.js";
 import { probed, told, TOLD, PAUSES } from "./fixtures.js";
 
@@ -862,5 +862,33 @@ describe("the colour of a video's picture", () => {
     assert.equal(colourOf(printed({})), null);
     assert.equal(colourOf(JSON.stringify({ streams: [{ codec_type: "audio" }] })), null);
     assert.equal(colourOf("{"), null);
+  });
+});
+
+describe("the streams of a video the tool takes", () => {
+  /** What ffprobe writes of an iPhone clip: its picture, and its sound twice, as AAC and as Apple's APAC, in the order given. */
+  const iphone = (...sounds) => JSON.stringify({
+    streams: [{ index: 0, codec_type: "video", codec_name: "hevc", width: 1920, height: 1080 }, ...sounds.map((codec, i) => ({ index: i + 1, codec_type: "audio", codec_name: codec, channels: codec === "apple_apac" ? 4 : 2 }))],
+    format: { duration: "12.0" }
+  });
+  it("takes the picture, and the first sound this Mac's ffmpeg can read, passing over Apple's APAC wherever it is listed", () => {
+    assert.deepEqual(streamsOf(iphone("aac", "apple_apac")), { video: 0, audio: 1, unreadable: ["apple_apac"] });
+    assert.deepEqual(streamsOf(iphone("apple_apac", "aac")), { video: 0, audio: 2, unreadable: ["apple_apac"] });
+    assert.deepEqual(streamsOf(iphone("pcm_s16le")), { video: 0, audio: 1, unreadable: [] });
+  });
+  it("has no sound to take when the only sound is APAC, and says which could not be read", () => {
+    assert.deepEqual(streamsOf(iphone("apple_apac")), { video: 0, audio: null, unreadable: ["apple_apac"] });
+  });
+  it("passes over a cover picture, and has nothing when ffprobe wrote nothing that can be read", () => {
+    const cover = JSON.stringify({ streams: [{ index: 0, codec_type: "audio", codec_name: "mp3" }, { index: 1, codec_type: "video", codec_name: "mjpeg", disposition: { attached_pic: 1 } }] });
+    assert.deepEqual(streamsOf(cover), { video: null, audio: 0, unreadable: [] });
+    assert.deepEqual(streamsOf("{"), { video: null, audio: null, unreadable: [] });
+  });
+  it("is given to the rough cut as an explicit map, and the rough cut's arguments are as before without it", () => {
+    const ranges = [{ start: 0, end: 5, keep: true }];
+    const plain = roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges, fps: "30/1" });
+    const mapped = roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges, fps: "30/1", streams: { video: 0, audio: 2 } });
+    assert.deepEqual(mapped, [...plain.slice(0, 7), "-map", "0:0", "-map", "0:2", ...plain.slice(7)]);
+    assert.deepEqual(roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges, fps: "30/1", streams: { video: 0, audio: null } }), plain);
   });
 });
