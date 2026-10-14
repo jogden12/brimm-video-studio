@@ -424,3 +424,17 @@ describe("what the final review found in the installer", { skip: notAMac }, () =
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("the drop folder kept on the Mac (--machine)", { skip: notAMac }, () => {
+  it("7b. says to mark the drop folder Make available offline in Finder, once, so a video from another device comes down at once", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    const r = ask("--print", "--machine", "Mac Studio", root);
+    assert.ok(r.out.includes(`\n  Once, in Finder:  Control-click ${root}/Unedited Video/Mac Studio and choose Make available offline, so that a video dropped there from another device is brought down at once\n`), r.out);
+    const text = readFileSync(INSTALL, "utf8");
+    const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
+    assert.ok(closing.includes('say "Once, in Finder: Control-click that folder and choose Make available offline, so that a video dropped there from'), closing);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

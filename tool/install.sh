@@ -246,6 +246,7 @@ if [[ -n "$machine" ]]; then
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
   say "  On this Mac:  $WORK/Backups and $WORK/From Final Cut"
+  say "  Once, in Finder:  Control-click $drop and choose Make available offline, so that a video dropped there from another device is brought down at once"
   say "  This Mac's settings, in $SETTINGS_FILE:"
   settings_json
 else
@@ -329,6 +330,8 @@ if [[ -n "$machine" ]]; then
   say ""
   say "Done. Drop a video in:"
   say "  $drop"
+  say "Once, in Finder: Control-click that folder and choose Make available offline, so that a video dropped there from"
+  say "another device is brought down at once. Dropbox offers no command for it."
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
   say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
