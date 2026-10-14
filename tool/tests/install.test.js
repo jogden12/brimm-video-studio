@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -303,6 +303,14 @@ describe("the installer's own text", () => {
     const told = closing.replace(/"\n +say "/g, " ");
     assert.ok(told.includes("A clip that could not be cut is named in the log and at the end of the notes, and not in <name>.cut-plan.txt."), told);
   });
+  it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
+    const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
+    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$WORK/Backups" "$WORK/From Final Cut"'), made);
+    assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
+    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"'), made);
+    const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
+    assert.match(closing, /\nif \[\[ -n "\$machine" \]\]; then\n {2}say ""\n {2}say "Done\. Drop a video in:"\n {2}say " {2}\$drop"\n/);
+  });
   it("gives the launch agent the one PATH, and looks for Claude Code along that same PATH", () => {
     // It is this PATH unless another is named in BRIMM_AGENT_PATH, as a test names one.
     assert.match(text, /\nAGENT_PATH="\$\{BRIMM_AGENT_PATH:-\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin\}"\n/);
@@ -318,5 +326,89 @@ describe("the installer's own text", () => {
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
     assert.equal(text.split("plutil -extract").length - 1, 2);
+  });
+});
+
+describe("the installer for one of the two Macs (--machine), asked what it would do", { skip: notAMac }, () => {
+  /** A folder made for one test that stands for The BRIMM DB in Dropbox, with BRIMM Video in it, and what it holds. */
+  function dropbox() {
+    // The folder by its real path, as the installer reads it: on a Mac the temp folder is a link into /private.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, held: () => readdirSync(dir, { recursive: true }).sort(), done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  it("shows what it would make for this Mac, in Dropbox and on its own disk, and changes nothing", () => {
+    const d = dropbox();
+    const before = d.held();
+    const r = ask("--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    const out = said(r);
+    for (const line of [
+      "  This Mac:  Mac Studio",
+      `  BRIMM Video:  ${d.root}`,
+      `  Its drop folder, to make in Dropbox and watch:  ${d.root}/Unedited Video/Mac Studio`,
+      `  Its marker there, ${d.root}/Unedited Video/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
+      `  Episodes, to make in Dropbox:  ${d.root}/Episodes`,
+      `  The import status files, to make in Dropbox:  ${d.root}/Episodes/.importing`,
+      "  On this Mac:  <home>/BRIMM Video Work/Backups and <home>/BRIMM Video Work/From Final Cut"
+    ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
+    assert.ok(out.includes(`  This Mac's settings, in <home>/Library/Application Support/BRIMM Video/settings.json:\n{\n  "version": 1,\n  "machine": "Mac Studio",\n  "root": "${d.root}",\n  "checkout": "${dirname(HERE)}"\n}\n`), out);
+    changedNothing(r);
+    assert.deepEqual(d.held(), before);
+    d.done();
+  });
+  it("has the launch agent watch this Mac's drop folder alone", () => {
+    const d = dropbox();
+    const r = ask("--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Unedited Video/Sallie's laptop`])]);
+    d.done();
+  });
+  it("says which Claude model reads each plan", () => {
+    const d = dropbox();
+    const r = askWith({ programs: [".local/bin/claude"] }, "--print", "--machine", "Mac Studio", d.root);
+    assert.ok(r.out.includes("\n  Claude model, named in unedited.js:  claude-opus-5-5\n"), r.out);
+    d.done();
+  });
+  it("refuses a drop folder another Mac's marker names", () => {
+    const d = dropbox();
+    const drop = join(d.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, ".brimm-watched-by"), "Sallie's laptop\n");
+    const r = ask("--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 2);
+    assert.match(r.out, /^The folder .*\/Unedited Video\/Mac Studio is watched by Sallie's laptop already\. A drop folder is watched by one Mac only\.\n$/);
+    const mine = ask("--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(mine.status, 0, mine.out);
+    d.done();
+  });
+  it("refuses BRIMM Video inside a folder the transcript tool watches, which would be woken by every change", () => {
+    const d = dropbox();
+    const r = askOn({ "com.thebrimm.transcribe": transcriptAgent([join(d.dir, "The BRIMM DB")]) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 2);
+    assert.match(r.out, /^BRIMM Video must not be inside a folder the transcript tool watches: .* is inside .*The BRIMM DB, which com\.thebrimm\.transcribe watches\. Put it beside BRIMM VIDEO Transfer\.\n$/);
+    d.done();
+  });
+  it("refuses a name a Mac cannot have, and a folder that is not BRIMM Video", () => {
+    const d = dropbox();
+    for (const [args, why] of [
+      [["--machine", "Mac: Studio", d.root], "A Mac's name cannot hold any of / \\ : * ? \" < > |, a control character, or a space or a dot at its start, and can be 40 characters long at most: Mac: Studio"],
+      [["--machine", " Mac Studio", d.root], "A Mac's name cannot hold any of / \\ : * ? \" < > |, a control character, or a space or a dot at its start, and can be 40 characters long at most:  Mac Studio"],
+      [["--machine", "", d.root], "Name this Mac: --machine \"Mac Studio\" or --machine \"Sallie's laptop\"."],
+      [["--machine", "Mac Studio", d.dir], `The folder for --machine is BRIMM Video, in The BRIMM DB in Dropbox, and this is not: ${d.dir}`]
+    ]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out], [2, `${why}\n`], args.join(" "));
+    }
+    d.done();
+  });
+  it("says how it is used when --machine has no folder, or more than one", () => {
+    const d = dropbox();
+    for (const args of [["--machine", "Mac Studio"], ["--machine", "Mac Studio", d.root, d.root + " 2"]]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out], [2, 'With --machine, name the one folder BRIMM Video: ./install.sh --machine "Mac Studio" "<path to BRIMM Video>"\n'], args.join(" "));
+    }
+    d.done();
   });
 });

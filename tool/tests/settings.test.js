@@ -219,3 +219,47 @@ describe("node settings.js", () => {
     t.done();
   });
 });
+
+describe("node settings.js marker", () => {
+  /** A drop folder made for one test, and a clone that copies, as a stand-in for /bin/cp -c. */
+  function dropped() {
+    const t = setup();
+    const drop = join(t.home, "BRIMM Video", "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    const clones = [];
+    const clone = (from, to) => {
+      clones.push(to);
+      writeFileSync(to, readFileSync(from));
+    };
+    const marked = (...argv) => settingsMain(["marker", ...argv], { home: t.home, say: (line) => t.said.push(line), clone });
+    return { ...t, drop, clones, marked, marker: join(drop, ".brimm-watched-by") };
+  }
+  it("marks a drop folder with this Mac's name, by the rule for writing into Dropbox, and ends with 0", () => {
+    const t = dropped();
+    assert.equal(t.marked(t.drop, "Mac Studio"), 0);
+    assert.deepEqual([readFileSync(t.marker, "utf8"), t.clones, t.said], ["Mac Studio\n", [t.marker], [`Marked: ${t.marker}`]]);
+    t.done();
+  });
+  it("marks it again for the same Mac, by a new file in place of the old one", () => {
+    const t = dropped();
+    t.marked(t.drop, "Mac Studio");
+    assert.equal(t.marked(t.drop, "Mac Studio"), 0);
+    assert.deepEqual([readFileSync(t.marker, "utf8"), t.clones.length], ["Mac Studio\n", 2]);
+    t.done();
+  });
+  it("refuses a folder another Mac has marked, says so, changes nothing, and ends with 1", () => {
+    const t = dropped();
+    writeFileSync(t.marker, "Sallie's laptop\n");
+    assert.equal(t.marked(t.drop, "Mac Studio"), 1);
+    assert.deepEqual([readFileSync(t.marker, "utf8"), t.clones, t.said], ["Sallie's laptop\n", [], [`The folder ${t.drop} is watched by Sallie's laptop already. A drop folder is watched by one Mac only.`]]);
+    t.done();
+  });
+  it("refuses a name a Mac cannot have, and says how it is used when it is asked wrongly", () => {
+    const t = dropped();
+    assert.equal(t.marked(t.drop, ".x"), 1);
+    assert.equal(t.said[0], "Not marked: a Mac's name cannot start with a dot.");
+    assert.equal(t.marked(t.drop), 2);
+    assert.equal(t.marked(), 2);
+    t.done();
+  });
+});

@@ -8,10 +8,12 @@
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
 //   node settings.js show
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+//   node settings.js marker "<drop folder>" "<this Mac>"
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { textWriter } from "./dropbox.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -104,7 +106,10 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                write them, as install.sh --machine does, and say where
-  node settings.js show        say what they are, or why there are none`;
+  node settings.js show        say what they are, or why there are none
+  node settings.js marker "<drop folder>" "<this Mac>"
+                               mark this Mac's drop folder as its own, as install.sh --machine does, by the rule for
+                               writing into Dropbox. A folder another Mac has marked is refused`;
 
 /** The options `write` is told the settings by, and the setting each one names. */
 const WRITTEN = { "--machine": "machine", "--root": "root", "--checkout": "checkout" };
@@ -159,10 +164,43 @@ function show(home, say) {
   return 0;
 }
 
+/** The name of the marker in a drop folder, which holds the name of the Mac that watches it. */
+export const MARKER = ".brimm-watched-by";
+
+/** `marker`: mark the drop folder `drop` as this Mac's, `machine`. The marker is written by the rule for writing into Dropbox
+    (dropbox.js): whole outside it, then cloned in, a marker of this Mac's own replaced by a new file. A folder another Mac
+    has marked is refused: two Macs watching one folder would import every video twice. */
+function mark(rest, say, clone) {
+  if (rest.length !== 2) {
+    say(HELP);
+    return 2;
+  }
+  const [drop, machine] = rest;
+  const fault = machineFault(machine);
+  if (fault) {
+    say(`Not marked: ${fault}.`);
+    return 1;
+  }
+  const file = join(drop, MARKER);
+  const owner = existsSync(file) ? readFileSync(file, "utf8").split("\n")[0] : "";
+  if (owner && owner !== machine) {
+    say(`The folder ${drop} is watched by ${owner} already. A drop folder is watched by one Mac only.`);
+    return 1;
+  }
+  try {
+    textWriter({ work: join(tmpdir(), `brimm-marker-${process.pid}`), ...(clone ? { clone } : {}) })(file, `${machine}\n`, { replace: Boolean(owner) });
+    say(`Marked: ${file}`);
+    return 0;
+  } catch (e) {
+    say(`The folder could not be marked: ${String(e.message).replace(/\.$/, "")}.`);
+    return 1;
+  }
+}
+
 /** What `node settings.js` does. Ends with 0 when it did what it was asked, 1 when it refused or could not, and 2 when it
     was asked wrongly or this Mac has no settings to show. The home folder is the one HOME names, as for the launch agent and
     in a shell, and the Mac's own word for it when HOME names none. */
-export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`) } = {}) {
+export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`), clone } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
@@ -170,6 +208,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   }
   if (command === "write") return write(home, rest, say);
   if (command === "show" && !rest.length) return show(home, say);
+  if (command === "marker") return mark(rest, say, clone);
   say(HELP);
   return 2;
 }
