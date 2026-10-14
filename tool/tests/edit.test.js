@@ -197,3 +197,91 @@ describe("node edit.js episodes", () => {
     t.done();
   });
 });
+
+describe("node edit.js open", () => {
+  const NOTES = Array.from({ length: 15 }, (_, i) => `Note line ${i + 1}.`).join("\n") + "\n";
+  /** An episode as the import leaves it, with Claude's notes and one Reel candidate. */
+  const imported = (t) => t.episode("2026-10-13 Talk (Mac Studio)", { reels: [{ n: 1, status: "candidate", from: 61.2, to: 103.3, title: "Price like you mean it", why: "It stands alone.", files: ["Talk.reel-1.mp4"], pushed: [] }] }, { "Talk.mov": 5, "Talk.edit-notes.txt": NOTES.length, "edit/main.v0.fcpxml": 0 });
+  it("shows the name, the placeholder line, the title, the notes, the Reel candidates and the next step", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(join(path, "Talk.edit-notes.txt"), NOTES);
+    const r = await t.run("open", "talk");
+    assert.equal(r.code, 0, r.text);
+    const lines = r.said.filter((line) => !line.startsWith("So that Dropbox keeps this episode"));
+    assert.deepEqual(lines, [
+      "Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio)",
+      "The name is a placeholder: say what to call it.",
+      "No title yet.",
+      "Claude's notes, the first lines:",
+      ...Array.from({ length: 12 }, (_, i) => `  Note line ${i + 1}.`),
+      "Reel candidates:",
+      '  1. "Price like you mean it", 0:42. It stands alone.',
+      "Not shown in Final Cut yet.",
+      'Say "show it in Final Cut" to see the main video there.'
+    ]);
+    t.done();
+  });
+  it("refuses an episode with a conflicted copy of its record or a timeline, naming it", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(join(path, "edit", "main.v0 (Jason Ogden's conflicted copy 2026-10-14).fcpxml"), "x");
+    const r = await t.run("open", "talk");
+    assert.equal(r.code, 1);
+    assert.match(r.text, /^2026-10-13 Talk \(Mac Studio\): Dropbox has kept a conflicted copy in this episode: edit\/main\.v0 \(Jason Ogden's conflicted copy 2026-10-14\)\.fcpxml\./);
+    t.done();
+  });
+  it("refuses an episode with a file missing or short, naming it", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(join(path, "Talk.mov"), "x");
+    const r = await t.run("open", "talk");
+    assert.deepEqual([r.code, r.said], [1, ["2026-10-13 Talk (Mac Studio) is not whole in Dropbox:", "  Talk.mov is short: 1 bytes of 5", "It is not opened. Say \"what's waiting?\" to see the episodes."]]);
+    t.done();
+  });
+  it("says first that Dropbox undid this Mac's last change, when the newest record is older than the one it wrote", async () => {
+    const t = setup();
+    const { record } = imported(t);
+    mkdirSync(join(t.home, "Library", "Application Support", "BRIMM Video"), { recursive: true });
+    writeFileSync(join(t.home, "Library", "Application Support", "BRIMM Video", "written.json"), JSON.stringify({ [record.id]: 2 }));
+    const r = await t.run("open", "talk");
+    assert.equal(r.said[0], "Dropbox undid this Mac's last change to Talk. Say it again.");
+    t.done();
+  });
+  it("starts a detached run to bring over the files that are not whole yet, and returns at once", async () => {
+    const t = setup();
+    imported(t);
+    t.deps.isWhole = (path) => !path.endsWith("Talk.mov");
+    const r = await t.run("open", "talk");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said, ['Dropbox is bringing 1 file of Talk over to this Mac. Say "open Talk" again when it is done; "how far is it?" shows how far it has got.']);
+    assert.deepEqual(t.started, [[process.execPath, "/checkout/tool/edit.js", "bring", "--now", "2026-10-13 Talk (Mac Studio)"]]);
+    t.done();
+  });
+  it("says at the first open on this Mac how to keep the episode offline, and not after", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    const first = await t.run("open", "talk");
+    assert.ok(first.said.includes(`So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${path}`), first.text);
+    const again = await t.run("open", "talk");
+    assert.ok(!again.text.includes("Make available offline"), again.text);
+    t.done();
+  });
+  it("shows a record of a newer layout, and says this Mac needs updating to change it", async () => {
+    const t = setup();
+    const { path } = imported(t);
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    const r = await t.run("open", "talk");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said, ["2026-10-13 Talk (Mac Studio) was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac."]);
+    t.done();
+  });
+  it("names the episodes when it cannot tell which is meant, and how it is used when none is named", async () => {
+    const t = setup();
+    imported(t);
+    t.episode("2026-10-14 Pricing talk (Mac Studio)");
+    assert.deepEqual(await t.run("open", "talk"), { code: 1, said: ['More than one episode fits "talk": 2026-10-14 Pricing talk (Mac Studio) and 2026-10-13 Talk (Mac Studio). Say which.'], text: 'More than one episode fits "talk": 2026-10-14 Pricing talk (Mac Studio) and 2026-10-13 Talk (Mac Studio). Say which.' });
+    assert.equal((await t.run("open")).code, 2);
+    t.done();
+  });
+});

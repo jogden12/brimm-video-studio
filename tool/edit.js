@@ -7,15 +7,18 @@
 //
 //   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
 //                                         Mac's libraries
+//   node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
+//                                         decided for it
 //
 // It never posts, sends or publishes anything.
-import { readdirSync, statfsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statfsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems } from "./episode.js";
-import { readSettings, episodesFolder, workFolder } from "./settings.js";
+import { readEpisode, filesProblems, undone } from "./episode.js";
+import { readSettings, episodesFolder, workFolder, episodeWork } from "./settings.js";
+import { isWhole } from "./dropbox.js";
 import { readStatuses, importState } from "./importing.js";
 import { heldBy } from "./filing.js";
 import { isMedia } from "./lib.js";
@@ -24,7 +27,9 @@ import { isRunning } from "./run.js";
 const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
-                                        Mac's libraries`;
+                                        Mac's libraries
+  node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
+                                        decided for it`;
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -43,6 +48,8 @@ export function contextFor(deps = {}) {
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
     alive: deps.alive || isRunning,
+    isWhole: deps.isWhole || ((path) => isWhole(path)),
+    start: deps.start || startProgram,
     deps
   };
 }
@@ -195,8 +202,93 @@ export async function episodes(ctx) {
   return 0;
 }
 
+/** Start a program detached from this one, and do not wait for it: what it prints goes into the tool's log. */
+function startProgram(cmd, args) {
+  import("./detached.js").then(({ spawnDetached }) => spawnDetached(cmd, args));
+}
+
+/** The episode a command is asked about, by what the person said, with its record: { found, record }, or { code } when the
+    command is to end, having said why. A record of a newer layout is shown as such and goes no further. */
+function episodeFor(ctx, rest) {
+  const said = rest.join(" ").trim();
+  if (!said) {
+    ctx.say(HELP);
+    return { code: 2 };
+  }
+  const found = findEpisode(ctx, said);
+  if (found.why) {
+    ctx.say(found.why);
+    return { code: 1 };
+  }
+  const { read } = found;
+  if (!read.record) {
+    ctx.say(`${found.name}: ${read.why}.`);
+    return { code: 1 };
+  }
+  if (read.newer) {
+    ctx.say(`${found.name} was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac.`);
+    return { code: 0 };
+  }
+  return { found, record: read.record };
+}
+
+/** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
+const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+
+/** `open "<episode>"`: check its files against its record, and that each is whole on this Mac, and show what is decided for
+    it. When some are not whole yet, a detached run brings them over (`bring`), and it returns at once. At the first open on
+    this Mac it says how to keep the episode on this Mac. Nothing is written into the episode: the claim comes with the
+    laptop (phase 1b). */
+export async function open(ctx, rest) {
+  const got = episodeFor(ctx, rest);
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const { say } = ctx;
+  const gone = undone(record, ctx.home);
+  if (gone) say(gone);
+  const problems = filesProblems(found.folder, record);
+  if (problems.length) {
+    say(`${found.name} is not whole in Dropbox:`);
+    for (const problem of problems) say(`  ${problem}`);
+    say(`It is not opened. Say "what's waiting?" to see the episodes.`);
+    return 1;
+  }
+  const name = record.name.text;
+  const coming = notHere(ctx, found, record);
+  if (coming.length) {
+    ctx.start(process.execPath, [join(ctx.settings.checkout, "tool", "edit.js"), "bring", "--now", found.name]);
+    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. Say "open ${name}" again when it is done; "how far is it?" shows how far it has got.`);
+    return 0;
+  }
+  const kind = record.kind === "short video" ? "a short video" : "an episode";
+  say(`${name}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${found.name}`);
+  if (record.name.placeholder) say("The name is a placeholder: say what to call it.");
+  say(record.title ? `Title: ${record.title.text}${record.title.approved ? "" : " (recommended by Claude)"}` : "No title yet.");
+  const stem = basename(record.video.file, extname(record.video.file));
+  const notes = join(found.folder, `${stem}.edit-notes.txt`);
+  if (existsSync(notes)) {
+    say("Claude's notes, the first lines:");
+    for (const line of readFileSync(notes, "utf8").split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
+  }
+  const candidates = record.reels.filter((reel) => reel.status !== "dropped");
+  if (candidates.length) {
+    say("Reel candidates:");
+    for (const reel of candidates) say(`  ${reel.n}. "${reel.title}", ${stamp(reel.to - reel.from)}.${reel.why ? ` ${reel.why}` : ""}`);
+  }
+  const pushed = record.main.pushed;
+  say(pushed.length ? `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}.` : "Not shown in Final Cut yet.");
+  // The first open on this Mac makes its folder for the episode, in BRIMM Video Work, and says how to keep the episode here.
+  const work = episodeWork(ctx.home, found.name);
+  if (!existsSync(work)) {
+    mkdirSync(work, { recursive: true });
+    say(`So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${found.folder}`);
+  }
+  say('Say "show it in Final Cut" to see the main video there.');
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx) };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open };
 
 /** What `node edit.js` does. Resolves 0 when it did what it was asked, 1 when it refused or something failed, and 2 when it
     was asked wrongly or this Mac is not set up. */
