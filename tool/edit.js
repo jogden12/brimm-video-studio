@@ -9,18 +9,24 @@
 //                                         Mac's libraries
 //   node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
 //                                         decided for it
+//   node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
+//                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
+//                                         library for the episode
 //
 // It never posts, sends or publishes anything.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statfsSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork } from "./settings.js";
-import { isWhole } from "./dropbox.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp } from "./episode.js";
+import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder } from "./settings.js";
+import { isWhole, textWriter } from "./dropbox.js";
+import { localMedia, retitle, withImportOptions } from "./portable.js";
+import { projectName, timelineFile } from "./names.js";
 import { readStatuses, importState } from "./importing.js";
-import { heldBy } from "./filing.js";
+import { heldBy, commitOf } from "./filing.js";
 import { isMedia } from "./lib.js";
 import { isRunning } from "./run.js";
 
@@ -29,7 +35,11 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
   node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
-                                        decided for it`;
+                                        decided for it
+  node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
+                                        show the main timeline in Final Cut Pro, as a new version, in this Mac's
+                                        library for the episode. Shown before, it asks first whether it was changed in
+                                        Final Cut: --no-hand-edits says it was not, --hand-edits that it was`;
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -50,6 +60,7 @@ export function contextFor(deps = {}) {
     alive: deps.alive || isRunning,
     isWhole: deps.isWhole || ((path) => isWhole(path)),
     start: deps.start || startProgram,
+    openApp: deps.openApp || openApp,
     deps
   };
 }
@@ -287,8 +298,128 @@ export async function open(ctx, rest) {
   return 0;
 }
 
+/** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. */
+function openApp(app, file) {
+  spawnSync("/usr/bin/open", ["-a", app, file], { stdio: "ignore" });
+}
+
+/** The options the rule for writing into Dropbox is given: the clone and the check of one disk a test gives. */
+const ruleOpts = (ctx) => ({ ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) });
+
+/** Show a part of an episode in Final Cut Pro, as a new version: the main timeline, "main", or a Reel, { reel: n } (phase 2).
+    `found` is { folder, name, record }; `xml` is the timeline to show, as it is kept in the episode's folder: its media named
+    by paths from edit/, and no library. In order:
+    - it refuses a file of the episode not whole on this Mac, and a change Dropbox undid;
+    - the guard: a part shown before is shown again only when the person says it was not changed in Final Cut since
+      (`noHandEdits`). A yes (`handEdits`) stops it: until brimm-video can read Final Cut's exports (phase 5), it cannot build
+      on hand edits, and a new version would leave them behind;
+    - the new version's project is named by projectName, and is in an event of its own of that name, since phase 0 has not
+      yet settled whether Final Cut asks "replace or keep both" of a second push;
+    - the timeline is kept in the episode's edit/ by the rule, the record lists the push and the file, and only then is a copy
+      written on this Mac's own disk, with this Mac's paths, its library for the episode, copy assets 0 and suppress warnings
+      1, and handed to Final Cut.
+    Resolves 0 when Final Cut was asked to open it, and 1 when it refused, having said why. */
+export async function pushPart(ctx, found, { part, xml, noHandEdits = false, handEdits = false }) {
+  const { say } = ctx;
+  const { record } = found;
+  const target = part === "main" ? record.main : record.reels.find((reel) => reel.n === part.reel);
+  if (!target) {
+    say(`${record.name.text} has no Reel ${part.reel}.`);
+    return 1;
+  }
+  const gone = undone(record, ctx.home);
+  if (gone) {
+    say(gone);
+    return 1;
+  }
+  const problems = filesProblems(found.folder, record);
+  if (problems.length) {
+    say(`${found.name} is not whole in Dropbox:`);
+    for (const problem of problems) say(`  ${problem}`);
+    return 1;
+  }
+  const pushed = Array.isArray(target.pushed) ? target.pushed : [];
+  const last = pushed.reduce((most, p) => Math.max(most, p.v), 0);
+  if (last && !noHandEdits) {
+    say(handEdits
+      ? `Your changes stay in v${last} in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v${last}.`
+      : `Did you change v${last} of ${record.name.text} in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.`);
+    return 1;
+  }
+  const v = last + 1;
+  const project = projectName({ name: record.name.text, part, v, id: record.id });
+  const file = timelineFile({ part, v, machine: ctx.machine });
+  const kept = join(found.folder, file);
+  const stored = retitle(xml, { event: project, project });
+  // The copy handed to Final Cut names this Mac's paths: each medium must be in the episode's folder, and here, whole.
+  const local = localMedia(stored, { from: kept, episode: found.folder });
+  if (local.outside.length) {
+    say(`${local.outside[0]} is outside the episode's folder. Copy it into its media folder first.`);
+    return 1;
+  }
+  const media = [...local.xml.matchAll(/src="file:\/\/([^"]*)"/g)].map((m) => decodeURIComponent(m[1]));
+  const coming = [...new Set(media)].filter((path) => !ctx.isWhole(path));
+  if (coming.length) {
+    say(`Dropbox is still bringing ${coming.map((path) => basename(path)).join(", ")} over to this Mac. Say "open ${record.name.text}" first.`);
+    return 1;
+  }
+  const work = join(runsFolder(ctx.home), `push-${process.pid}-${ctx.now()}`);
+  try {
+    const opts = ruleOpts(ctx);
+    mkdirSync(join(found.folder, "edit"), { recursive: true });
+    // A timeline of this Mac's of this version that the record does not list was left by a push whose record was never
+    // written: it is no one's, and a new one is put in its place. One the record lists is never written over.
+    const entry = textWriter({ work, ...opts })(kept, stored, { replace: !(file in record.files) && existsSync(kept) });
+    const first = !(record.libraries && record.libraries[ctx.machine]);
+    const push = { v, at: localStamp(new Date(ctx.now())), on: ctx.machine, file, project, ...(last ? { answer: `no hand edits since v${last}` } : {}) };
+    const next = part === "main"
+      ? { ...record, main: { ...record.main, pushed: [...pushed, push] } }
+      : { ...record, reels: record.reels.map((reel) => (reel === target ? { ...reel, pushed: [...pushed, push] } : reel)) };
+    const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+    try {
+      writeEpisode(found.folder, { ...next, libraries: { ...record.libraries, [ctx.machine]: `${found.name}.fcpbundle` }, files: { ...record.files, [file]: entry.bytes } }, { expectRev: record.rev, writeText: textWriter({ work, ...opts }), writer, home: ctx.home });
+    } catch (e) {
+      say(e.code === "CHANGED" ? "This episode changed on the other Mac: open it again." : `${String(e.message).replace(/\.$/, "")}.`);
+      return 1;
+    }
+    const copy = join(pushedFolder(ctx.home, found.name), basename(file));
+    mkdirSync(pushedFolder(ctx.home, found.name), { recursive: true });
+    writeFileSync(copy, withImportOptions(local.xml, { library: libraryFor(ctx.home, found.name) }));
+    ctx.openApp("Final Cut Pro", copy);
+    say(`Shown in Final Cut as "${project}", in the library ${found.name}.fcpbundle in BRIMM Video Work.`);
+    if (first) say("Once, for this library: in Final Cut, choose File > Library Properties, click Modify Settings beside Storage Locations, and set Backups to BRIMM Video Work/Backups.");
+    return 0;
+  } catch (e) {
+    say(`It could not be shown in Final Cut: ${String(e.message).replace(/\.$/, "")}.`);
+    return 1;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** `push "<episode>" [main] [--no-hand-edits | --hand-edits]`: show the main timeline in Final Cut Pro as a new version
+    (pushPart). In phase 1a the main timeline is the import's own, edit/main.v0.fcpxml. A Reel is pushed from phase 2. */
+export async function push(ctx, rest) {
+  const flags = new Set(rest.filter((word) => word.startsWith("--")));
+  const words = rest.filter((word) => !word.startsWith("--"));
+  if (words.length >= 2 && words[words.length - 2] === "reel" && /^\d+$/.test(words[words.length - 1])) {
+    ctx.say("Reels are pushed from a later version.");
+    return 1;
+  }
+  if (words[words.length - 1] === "main") words.pop();
+  const got = episodeFor(ctx, words);
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const source = join(found.folder, timelineFile({ part: "main", v: 0 }));
+  if (!ctx.isWhole(source)) {
+    ctx.say(`Dropbox is still bringing edit/main.v0.fcpxml over to this Mac. Say "open ${record.name.text}" first.`);
+    return 1;
+  }
+  return pushPart(ctx, { ...found, record }, { part: "main", xml: readFileSync(source, "utf8"), noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits") });
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push };
 
 /** What `node edit.js` does. Resolves 0 when it did what it was asked, 1 when it refused or something failed, and 2 when it
     was asked wrongly or this Mac is not set up. */
