@@ -10,7 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md` (approved by Jason on 2026-10-14). This plan is phase 1 and the spec's rule for writing into Dropbox. Each later phase (P, 2, 3, 4, 5, 6, T) gets a plan of its own. Phase 0 is Jason's 30 minutes in Final Cut, by hand, and nothing here waits on it.
 
-**Status: on hold (2026-10-14).** Jason asked, through another session, for phase P alone to go ahead, and for every other phase to wait for that session's review of the design. The review has already raised two points that change this phase, and this plan is to be brought in line with the corrected design before it is built:
+**Status: superseded (2026-10-14).** The design was revised after its review: new folder places, the Dropbox rule extended to moves and other programs, no folder renames, no `adopt`, and phase 1 split into 1a, 2 and 1b. This plan is kept as a record. New plans for phases 1a, 2 and 1b are written once Jason approves the revised design.
+
+**Earlier status: on hold (2026-10-14).** Jason asked, through another session, for phase P alone to go ahead, and for every other phase to wait for that session's review of the design. The review has already raised two points that change this phase, and this plan is to be brought in line with the corrected design before it is built:
 - `Episodes/` and `Unedited Video/` inside `BRIMM VIDEO Transfer`, which the transcript tool's launch agent watches, wake that agent on every change.
 - Sharing finished videos straight into Dropbox goes against the rule on writing into Dropbox. That point is phase 2's.
 
