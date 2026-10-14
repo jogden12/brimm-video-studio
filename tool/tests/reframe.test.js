@@ -112,7 +112,9 @@ describe("a crop for each kept range", () => {
 
 describe("what it asks ffmpeg to do with the video", () => {
   const BEFORE = ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a b.mp4", "-filter_complex"];
-  const AFTER = ["-map", "[v]", "-map", "[a]", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-c:a", "aac", "-f", "mp4"];
+  /** The arguments after the filter graph, for a file written at the quality `crf`. */
+  const AFTER = (crf) => ["-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "medium", "-crf", crf, "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart", "-f", "mp4"];
   const RANGES = [{ start: 0, end: 12.5 }, { start: 30, end: 41 }];
   const CROPS = [{ x: 177, y: 0, w: 606, h: 1080, found: true }, { x: 1137, y: 0, w: 606, h: 1080, found: true }];
   /** The filter graph in an argument list, as its parts. */
@@ -128,7 +130,7 @@ describe("what it asks ffmpeg to do with the video", () => {
       "[pv3]nullsink;[pa3]anullsink;" +
       "[v0][a0][v1][a1]concat=n=2:v=1:a=1[j][a];" +
       "[j]scale=1080:1920,setsar=1[v]",
-      ...AFTER, "/out/a b.vertical.mp4"]);
+      ...AFTER("25"), "/out/a b.vertical.mp4"]);
   });
   it("splits the video once and scales it once, however many ranges are kept", () => {
     // With a branch off the whole video for each range, every frame went down every branch. Tried on ffmpeg 9, 300 ranges of a
@@ -150,12 +152,27 @@ describe("what it asks ffmpeg to do with the video", () => {
       "[v0][a0][v1][a1]concat=n=2:v=1:a=1[j][a]",
       "[j]scale=1080:1920,setsar=1[v]"]);
   });
-  it("writes h264 at 8 megabits with the Mac's own encoder, and aac sound, never asking a question", () => {
+  it("writes H.264 by quality and not at a fixed bitrate, 8-bit 4:2:0, with aac sound at 48 kHz and its index at the front, never asking a question", () => {
+    // At a fixed 8 megabits, the upright version of a 32-minute Zoom recording of 182 MB came out at 1.79 GB.
     const a = verticalArgs({ video: "/in/a b.mp4", ranges: RANGES, crops: CROPS, out: "/out/v.mp4" });
     const after = (flag) => a[a.indexOf(flag) + 1];
-    assert.deepEqual([after("-c:v"), after("-b:v"), after("-c:a")], ["h264_videotoolbox", "8M", "aac"]);
+    assert.deepEqual([after("-c:v"), after("-preset"), after("-pix_fmt")], ["libx264", "medium", "yuv420p"]);
+    assert.match(after("-crf"), /^\d+$/);
+    assert.ok(!a.includes("-b:v") && !a.includes("-maxrate"));
+    assert.deepEqual([after("-c:a"), after("-ar"), after("-movflags")], ["aac", "48000", "+faststart"]);
     assert.ok(a.includes("-nostdin") && a.includes("-y"));
     assert.equal(a[a.length - 1], "/out/v.mp4");
+  });
+  it("spends fewer bits the more the crop is enlarged: quality 23, and 2 more for each doubling, as the source has no more detail to keep", () => {
+    // The crop is the full height of the picture, made 1920 high: from 360 lines it is made more than five times its size.
+    const crf = (h) => {
+      const a = clipArgs({ video: "/in/a.mp4", start: 30, end: 41, crop: { x: 0, y: 0, w: Math.floor(h * 9 / 32) * 2, h, found: true }, out: "/out/c.mp4" });
+      return a[a.indexOf("-crf") + 1];
+    };
+    assert.deepEqual([2160, 1920, 1440, 1080, 720, 480, 360].map(crf), ["23", "23", "24", "25", "26", "27", "28"]);
+    // A video that keeps its shape is not cropped, and is taken as not enlarged.
+    const kept = clipArgs({ video: "/in/a.mp4", start: 30, end: 41, out: "/out/c.mp4" });
+    assert.equal(kept[kept.indexOf("-crf") + 1], "23");
   });
   it("tells the file it is an mp4, so that it can be written under another name and given its own when it is whole", () => {
     // ffmpeg goes by the ending of a name, and stops at one it does not know, such as .writing.
@@ -174,7 +191,7 @@ describe("what it asks ffmpeg to do with the video", () => {
         "[pv3]nullsink;[pa3]anullsink;" +
         "[v0][a0][v1][a1]concat=n=2:v=1:a=1[j][a];" +
         "[j]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[v]",
-        ...AFTER, "/out/a b.vertical.mp4"]);
+        ...AFTER("23"), "/out/a b.vertical.mp4"]);
     }
   });
   it("joins as many ranges as it is given, in their order", () => {
@@ -224,7 +241,7 @@ describe("what it asks ffmpeg to do with the video", () => {
       "[pv2]nullsink;[pa2]anullsink;" +
       "[v0][a0]concat=n=1:v=1:a=1[j][a];" +
       "[j]scale=1080:1920,setsar=1[v]",
-      ...AFTER, "/out/a b.reel-1.mp4"]);
+      ...AFTER("25"), "/out/a b.reel-1.mp4"]);
   });
   it("cuts a clip from a video that needs no new shape without a crop", () => {
     assert.deepEqual(graphOf(clipArgs({ video: "/in/a b.mp4", start: 30, end: 41, out: "/out/a b.reel-1.mp4" })).slice(2), [

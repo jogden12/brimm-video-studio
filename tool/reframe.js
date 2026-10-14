@@ -7,6 +7,7 @@
 // What it cannot do: it does not follow a speaker who moves inside a range, and with two people in the picture it does not
 // know who is talking. It takes the larger face.
 import { join } from "node:path";
+import { QUALITY, encodeArgs } from "./cuts.js";
 
 /** How far apart the stills are, in seconds, when nothing else is asked for. */
 const EVERY = 2;
@@ -57,14 +58,25 @@ export function cropsFor(facts, ranges, stills, every = EVERY) {
 const WIDTH = 1080;
 const HEIGHT = 1920;
 
+/** The quality an upright file is written at: QUALITY, and 2 more for each doubling of the crop's height to 1920. An enlarged
+    picture has no more detail than its source, and at QUALITY x264 spends its bits keeping the enlarged grain and blocks of
+    the source. Tried on ffmpeg 9 with a made-up 640x360 recording like a Zoom one, at 0.67 Mbit: the crop, 202x360 made
+    1080x1920, came out at 1.43 Mbit at 23 and 0.63 at 28. Against the same crop enlarged without loss, its SSIM was 0.995 and
+    0.994, and the two looked the same. 2160 lines and more are not enlarged: 23. 1080 lines are 25, 720 are 26, 360 are 28.
+    A video that keeps its shape is not cropped, and is taken as not enlarged. */
+export const uprightQuality = (crops) => {
+  const enlarged = crops && crops.length ? HEIGHT / crops[0].h : 1;
+  return enlarged > 1 ? Math.round(QUALITY + 2 * Math.log2(enlarged)) : QUALITY;
+};
+
 /** A time as it is written for ffmpeg: to the thousandth of a second, and never before 0. A computer's sums leave 0.1 + 0.2 -
     0.3 a hair off 0, JavaScript writes that as 5.551115123125783e-17, and ffmpeg cannot read it. */
 const timeOf = (seconds) => Math.max(0, Math.round(seconds * 1000) / 1000);
 
 /** Make the vertical video in one pass. The picture and the sound are each split once, at the times the kept ranges start and
     end, into pieces in time order. The gaps are thrown away, each kept range is cropped with its own crop, and the kept ones
-    are joined with their sound and made 1080 by 1920. It is written as h264 at 8 megabits a second by the Mac's own encoder,
-    with aac sound. Given no `crops`, for a video that needs no new shape, nothing is cropped and the picture is fitted inside
+    are joined with their sound and made 1080 by 1920. It is written as encodeArgs says, at the quality uprightQuality gives for
+    the crops. Given no `crops`, for a video that needs no new shape, nothing is cropped and the picture is fitted inside
     1080 by 1920 without stretching it, to an even number of pixels each way.
     The ranges must be in rising order and must not overlap, though one may start where the one before it ends, and each must
     end after it starts. Any other list is refused: it throws an error that says which range. A later moment put first would
@@ -108,7 +120,7 @@ export function verticalArgs({ video, ranges, crops, out }) {
   const joined = `${ranges.map((range, i) => `[v${i}][a${i}]`).join("")}concat=n=${ranges.length}:v=1:a=1[j][a]`;
   const sized = `[j]scale=${WIDTH}:${HEIGHT}${crops ? "" : ":force_original_aspect_ratio=decrease:force_divisible_by=2"},setsar=1[v]`;
   const graph = [split("v", "segment"), split("a", "asegment"), ...each, joined, sized].join(";");
-  return ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", video, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-c:a", "aac", "-f", "mp4", out];
+  return ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", video, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", ...encodeArgs(uprightQuality(crops)), "-f", "mp4", out];
 }
 
 /** Cut one short clip out of the video, the same way: with its crop, or with none for a video that needs no new shape. A clip

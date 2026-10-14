@@ -271,7 +271,7 @@ describe("one unedited video", () => {
     assert.deepEqual([after(pauses.args, "-i"), after(pauses.args, "-af")], [wav, "apad=whole_dur=23.423,silencedetect=noise=-35dB:d=0.3"]);
     assert.equal(after(rough.args, "-i"), file);
     assert.match(after(rough.args, "-vf"), /^fps=30000\/1001:start_time=0,select='gte\(t,5\.855850\)\*lt\(t,9\.826483\)\+gte\(t,13\.363350\)\*lt\(t,21\.271250\)',/);
-    assert.equal(after(rough.args, "-c:v"), "h264_videotoolbox");
+    assert.equal(after(rough.args, "-c:v"), "libx264");
     // Then the upright version: stills of the video, the faces in them, and one pass over the video itself.
     assert.equal(after(stills.args, "-i"), file);
     assert.equal(faces.args[1], dirname(stills.args[stills.args.length - 1]));

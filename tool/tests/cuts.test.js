@@ -632,7 +632,8 @@ describe("the rough cut", () => {
       "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a b.mov",
       "-vf", "fps=30000/1001:start_time=0,select='gte(t,5.855850)*lt(t,9.826483)+gte(t,13.363350)*lt(t,21.271250)',setpts=N/FRAME_RATE/TB,scale=-2:'2*trunc(min(1080,ih)/2)',format=yuv420p",
       "-af", "aresample=async=1:first_pts=0,asetnsamples=n=128:p=0,aselect='gte(t,5.872533)*lt(t,9.843167)+gte(t,13.380033)*lt(t,21.287933)',asetpts=N/SR/TB",
-      "-sn", "-dn", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-c:a", "aac", "-f", "mp4", "/in/a b.rough-cut.mp4.writing"
+      "-sn", "-dn", "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000",
+      "-movflags", "+faststart", "-f", "mp4", "/in/a b.rough-cut.mp4.writing"
     ]);
   });
   it("is asked for as a tree of brackets when many ranges are kept: ffmpeg cannot read a row of a hundred added together", () => {
@@ -673,11 +674,18 @@ describe("the rough cut", () => {
     const a = roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges: plan.ranges, fps: "30000/1001" });
     assert.match(a[a.indexOf("-af") + 1], /^aresample=async=1:first_pts=0,asetnsamples=n=128:p=0,aselect='/);
   });
-  it("scales the picture down to 1080 lines at most and never up, and is encoded as H.264 at 8 Mbit with AAC sound", () => {
+  it("scales the picture down to 1080 lines at most and never up, and is encoded as H.264 by quality, not at a fixed bitrate", () => {
+    // At a fixed 8 megabits, the rough cut of a 32-minute Zoom recording of 182 MB came out at 1.32 GB.
     const a = roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges: plan.ranges, fps: "30000/1001" });
     const after = (flag) => a[a.indexOf(flag) + 1];
     assert.match(after("-vf"), /,scale=-2:'2\*trunc\(min\(1080,ih\)\/2\)',/);
-    assert.deepEqual([after("-c:v"), after("-b:v"), after("-c:a"), after("-f")], ["h264_videotoolbox", "8M", "aac", "mp4"]);
+    assert.deepEqual([after("-c:v"), after("-preset"), after("-crf"), after("-pix_fmt"), after("-f")], ["libx264", "medium", "23", "yuv420p", "mp4"]);
+    assert.ok(!a.includes("-b:v") && !a.includes("-maxrate"));
+  });
+  it("has AAC sound at 48 kHz, whatever the recording's own rate, and its index at the front, so it plays before it is all read", () => {
+    const a = roughCutArgs("/in/a.mov", "/out/a.mp4", { ranges: plan.ranges, fps: "30000/1001" });
+    const after = (flag) => a[a.indexOf(flag) + 1];
+    assert.deepEqual([after("-c:a"), after("-ar"), after("-movflags")], ["aac", "48000", "+faststart"]);
   });
   it("is made at the file's own rate, or at 30 pictures a second for a picture that gives none, and a file with no picture has no rate", () => {
     assert.equal(roughRate({ fps: "30000/1001", height: 720 }), "30000/1001");
