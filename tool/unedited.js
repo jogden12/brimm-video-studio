@@ -33,6 +33,8 @@
 // install.sh sets them up. swift, which comes with Xcode's command line tools, runs faces.swift to find the speaker's face for
 // the upright version and the clips: without it they are cropped at the centre of the picture. claude is Claude Code:
 // without it, or when Claude cannot be reached, the plan is the rules' alone. Final Cut Pro is never opened from here.
+// While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
+// progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
@@ -618,6 +620,8 @@ async function workOn(file, deps) {
   const watched = Boolean(deps.watched);
   progress.begin(name);
   progress.steps(stepsFor({ claude: asking, wide: true, clips: asking, watched }));
+  // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
+  let finished = false;
   try {
     progress.step("Reading the sound");
     log(`${name}: reading the sound.`);
@@ -834,9 +838,10 @@ async function workOn(file, deps) {
     const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (plan) notify(`The cut plan for ${name} is ready${where}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}.${unasked}`);
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
+    finished = !missing.length;
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } finally {
-    progress.end();
+    progress.end(finished);
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -927,6 +932,7 @@ export async function videosFromPlan(file, deps) {
   // Each video goes through `files`, and is put in place as soon as it is whole.
   const files = filesOf(work, { name, log, move: deps.move, copy: deps.copy });
   deps = { ...deps, files };
+  let finished = false;
   try {
     // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
     const probed = join(work, "facts.json");
@@ -997,9 +1003,10 @@ export async function videosFromPlan(file, deps) {
     }
     if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);
     else log(made.length ? `${name}: made again: ${listed(made)}.` : `${name}: nothing was made again.`);
+    finished = !failed.length;
     return { ok: !failed.length, name, made, message: failed.join("; ") };
   } finally {
-    progress.end();
+    progress.end(finished);
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -1091,6 +1098,9 @@ clips it picked.
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
 its length go with them.
+
+While it works, a small window in the top right corner of the screen shows how far each video has got: the step, a bar,
+and how long is left. Closing it changes nothing about the work.
 `;
 
 /** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. */

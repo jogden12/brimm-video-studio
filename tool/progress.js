@@ -62,10 +62,6 @@ export function readRates(folder) {
   }
 }
 
-/** A step shorter than this is not measured: it was cut short, as when ffmpeg stopped at once, and would make the time left
-    in all look shorter than it is. */
-const SHORTEST_MS = 1000;
-
 /** A rate measured again: the new one counts for half, so the estimate follows the Mac without jumping. */
 export const blended = (old, now) => (Number.isFinite(old) ? (old + now) / 2 : now);
 
@@ -102,7 +98,9 @@ export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, frac
     - fraction(f): how far the step has got, from 0 to 1;
     - encoding(seconds): ffmpeg is about to write a file of so many seconds. Gives back {args}, which go before the others
       ffmpeg is given, and stop(), to call when ffmpeg has ended. Meanwhile its progress is read once a second;
-    - end(): the video is done, or the work on it stopped. The file is taken away, and what each step took is kept in RATES.
+    - end(finished): the video is done, or the work on it stopped. The file is taken away. When the work on it finished,
+      what each of its steps took is kept in RATES. A run that stopped part-way, as when ffmpeg stopped at once, is not
+      measured: its steps would make the time left look shorter than it is.
     No call ever throws. */
 export function reporter({ folder, swift = "", log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, timer = { every: setInterval, cancel: clearInterval } }) {
   const file = join(folder, `${pid}.json`);
@@ -116,11 +114,12 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
   };
   let v = null;
 
-  /** How long is left in all, in seconds, by the rates measured: null while any step still to come has none. */
+  /** How long is left in all, in seconds, by the rates measured: null while any step still to come has none, and on the last
+      step, where it would only say again how long is left of that step. */
   const inAll = (at) => {
     if (!(v.length > 0)) return null;
     const i = v.steps.indexOf(v.step);
-    if (i === -1) return null;
+    if (i === -1 || i === v.steps.length - 1) return null;
     const later = v.steps.slice(i + 1);
     if (!later.every((name) => Number.isFinite(v.rates[name]))) return null;
     const rest = later.reduce((sum, name) => sum + v.rates[name] * v.length, 0);
@@ -235,12 +234,12 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
         }
       };
     },
-    end() {
+    end(finished = false) {
       if (!v) return;
       spend(now());
-      if (v.length > 0) {
+      if (finished === true && v.length > 0) {
         const rates = readRates(folder);
-        for (const [name, ms] of Object.entries(v.spent)) if (ms >= SHORTEST_MS) rates[name] = blended(rates[name], ms / 1000 / v.length);
+        for (const [name, ms] of Object.entries(v.spent)) if (ms > 0) rates[name] = blended(rates[name], ms / 1000 / v.length);
         try {
           mkdirSync(folder, { recursive: true });
           writeFileSync(join(folder, RATES + ".writing"), JSON.stringify(rates, null, 2) + "\n");

@@ -176,7 +176,7 @@ describe("the time left in all", () => {
     t.clock.t += 20_000;
     t.r.step("Writing the transcript");
     t.clock.t += 30_000;
-    t.r.end();
+    t.r.end(true);
     assert.deepEqual(readRates(t.folder), { "Reading the sound": 0.2, "Writing the transcript": 0.3 });
     // The next run, of a video of 200 seconds, is told about 100 seconds in all at its start: 40 of reading and 60 of the
     // transcript.
@@ -192,7 +192,25 @@ describe("the time left in all", () => {
     assert.equal(t.file().total, 90);
     t.done();
   });
-  it("is not measured from a step cut short, as when ffmpeg stopped at once, which would make it look shorter than it is", () => {
+  it("is measured from every step of a video whose work finished, however short a step was, so the next run can say it", () => {
+    const t = setup();
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Making the cut plan", "Making the rough cut"]);
+    t.r.step("Making the cut plan");
+    t.clock.t += 200;
+    t.r.step("Making the rough cut");
+    t.clock.t += 3000;
+    t.r.end(true);
+    assert.deepEqual(readRates(t.folder), { "Making the cut plan": 0.002, "Making the rough cut": 0.03 });
+    t.r.begin("b.mov");
+    t.r.length(100);
+    t.r.steps(["Making the cut plan", "Making the rough cut"]);
+    t.r.step("Making the cut plan");
+    assert.equal(t.file().total, 3);
+    t.done();
+  });
+  it("is not measured from a video whose work did not finish, as when ffmpeg stopped at once, which would make it look shorter", () => {
     const t = setup();
     t.r.begin("a.mov");
     t.r.length(100);
@@ -201,8 +219,21 @@ describe("the time left in all", () => {
     t.clock.t += 200;
     t.r.step("Filing");
     t.clock.t += 3000;
-    t.r.end();
-    assert.deepEqual(readRates(t.folder), { Filing: 0.03 });
+    t.r.end(false);
+    assert.deepEqual(readRates(t.folder), {});
+    t.done();
+  });
+  it("is not said on the last step, where it would only say again how long is left of that step", () => {
+    const t = setup();
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, RATES), JSON.stringify({ "Making the rough cut": 0.2 }));
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Making the rough cut"]);
+    t.r.step("Making the rough cut");
+    t.clock.t += 10_000;
+    t.r.fraction(0.5);
+    assert.deepEqual([t.file().left, t.file().total, t.file().detail], [10, null, "Making the rough cut (step 1 of 1), 50%, less than a minute left"]);
     t.done();
   });
   it("is not said while a step still to come has never been measured", () => {

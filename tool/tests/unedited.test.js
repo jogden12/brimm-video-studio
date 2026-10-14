@@ -2204,7 +2204,7 @@ describe("what the progress panel is told", () => {
         told.push(["encoding", Math.round(seconds * 1000) / 1000]);
         return { args: ["-progress", "/progress/ffmpeg.txt"], stop: () => told.push(["stopped"]) };
       },
-      end: () => told.push(["end"])
+      end: (finished) => told.push(["end", finished])
     };
     return told;
   };
@@ -2215,7 +2215,7 @@ describe("what the progress panel is told", () => {
     const told = watching(t);
     await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(told[0], ["begin", "talk.mov"]);
-    assert.deepEqual(told[told.length - 1], ["end"]);
+    assert.deepEqual(told[told.length - 1], ["end", true]);
     assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript", "Making the cut plan", "Asking Claude", "Making the rough cut", "Finding the faces", "Making the upright version", "Cutting short clip 1 of 1"]);
     assert.deepEqual(told.find(([what]) => what === "length"), ["length", 23.423]);
     assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [ALL_STEPS, ALL_STEPS, ALL_STEPS]);
@@ -2252,7 +2252,8 @@ describe("what the progress panel is told", () => {
     const told = watching(t);
     await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript"]);
-    assert.deepEqual(told[told.length - 1], ["end"]);
+    // The work did not finish, so what its steps took is not kept as a measure.
+    assert.deepEqual(told[told.length - 1], ["end", false]);
     t.done();
   });
   it("is told the videos made again from a plan (--from-plan): the rough cut, the faces, the upright version and each clip", async () => {
@@ -2263,7 +2264,14 @@ describe("what the progress panel is told", () => {
     await videosFromPlan(file, t.deps);
     assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [["Making the rough cut", "Finding the faces", "Making the upright version", "Cutting the short clips"]]);
     assert.deepEqual(steps(told), ["Making the rough cut", "Finding the faces", "Making the upright version", "Cutting clip 1"]);
-    assert.deepEqual([told[0], told[told.length - 1]], [["begin", "talk.mov"], ["end"]]);
+    assert.deepEqual([told[0], told[told.length - 1]], [["begin", "talk.mov"], ["end", true]]);
+    t.done();
+  });
+  it("is told at the end that the work did not finish when a file could not be made, so its steps are not measured", async () => {
+    const t = setup({ rough: "fail" });
+    const told = watching(t);
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(told[told.length - 1], ["end", false]);
     t.done();
   });
   it("is the real reporter in a run from the command line, writing in Application Support in the home folder, with this Mac's swift", () => {
