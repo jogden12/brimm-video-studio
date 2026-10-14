@@ -65,7 +65,11 @@ const LIBRARY = join("BRIMM Video Work", "BRIMM rough cuts.fcpbundle");
 const FACES = fileURLToPath(new URL("./faces.swift", import.meta.url));
 const FACES_PRINTED = 20000000;
 
-/** What Claude Code is run with, so that it answers once and does nothing else: it prints and stops, has none of its own
+/** The Claude model a plan is read with. It is named, and not left to the account's default, so that both Macs pick the same
+    clips and Reels for the same plan, and a change of the account's default does not change what is picked. */
+export const CLAUDE_MODEL = "claude-opus-5-5";
+
+/** What Claude Code is run with, so that it answers once, with the model named above, and does nothing else: it prints and stops, has none of its own
     tools and no skills, saves no session, and reads no settings file, this user's or a project's. It then prints one JSON
     object, in which `result` holds Claude's text and `is_error` is false when it worked. The request is never among
     these: it goes in on standard input. Tried by hand on this Mac on 2026-10-13, from a shell and from a launch agent, on
@@ -74,7 +78,7 @@ const FACES_PRINTED = 20000000;
     help it uses only the servers named with --mcp-config, and none is named here. The words of a recording are a
     stranger's text as far as Claude is concerned, so it is given nothing it could act with. Asked on this Mac on
     2026-10-13, with these arguments, which tools it had, Claude answered none. */
-const CLAUDE_ARGS = ["-p", "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--setting-sources", "", "--output-format", "json"];
+const CLAUDE_ARGS = ["-p", "--model", CLAUDE_MODEL, "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--setting-sources", "", "--output-format", "json"];
 /** How long Claude may take over one plan before Claude Code is stopped: ten minutes. On 2026-10-13 the plan of a recording
     of 58 seconds took 19 seconds. */
 const CLAUDE_MS = 10 * 60 * 1000;

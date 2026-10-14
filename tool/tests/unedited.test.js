@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions } from "../cuts.js";
@@ -1005,11 +1005,14 @@ describe("a video whose cut plan Claude is asked to read", () => {
     assert.deepEqual(t.waits, [5000]);
     t.done();
   });
+  it("names its model, so that both Macs read a plan with the same one", () => {
+    assert.equal(CLAUDE_MODEL, "claude-opus-5-5");
+  });
   it("gives Claude Code these arguments and no others, and the request on its standard input, never as an argument", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     await uneditedFile(t.video("talk.mov"), t.deps);
     const [ask] = t.asks;
-    assert.deepEqual(ask.args, ["-p", "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--setting-sources", "", "--output-format", "json"]);
+    assert.deepEqual(ask.args, ["-p", "--model", CLAUDE_MODEL, "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--setting-sources", "", "--output-format", "json"]);
     assert.equal(ask.input, notesRequest(PLAN, { video: "talk.mov", duration: 23.423 }));
     // What is sent: the file's name and its length, and each phrase with its time, what the rules decided, and its words.
     assert.match(ask.input, /\nFile: talk\.mov\nLength: 0:23\nThe rules keep 0:12 of it and cut 0:11\.\n/);
