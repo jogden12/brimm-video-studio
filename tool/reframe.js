@@ -7,7 +7,7 @@
 // What it cannot do: it does not follow a speaker who moves inside a range, and with two people in the picture it does not
 // know who is talking. It takes the larger face.
 import { join } from "node:path";
-import { QUALITY, encodeArgs } from "./cuts.js";
+import { QUALITY, encodeArgs, framesASecond } from "./cuts.js";
 
 /** How far apart the stills are, in seconds, when nothing else is asked for. */
 const EVERY = 2;
@@ -168,6 +168,35 @@ export function storyParts(clip, pauses) {
     from = cut;
   }
   parts.push({ start: from, end: clip.end });
+  return parts;
+}
+
+/** Where to cut a finished Reel into the parts of a Story, each {start, end} in seconds of the Reel, at most 60 seconds long
+    (spec section 5, step 6). A part ends at the last pause edge (where a pause starts or ends) in the 15 seconds before its
+    60 second mark. When no pause is heard there, as when music plays under the voice, it ends in the middle of the widest
+    gap between two words there. With neither, it ends at the mark. `words` null, as the word pass gives when it dies, is
+    no words. A cut is made only where a word starts after it, so no part is silence alone. Every cut is moved back to the
+    start of the picture it falls in, `fps` being the frame rate as ffprobe gives it, so a part cut on whole pictures is
+    never longer than 60 seconds. A Reel of 60 seconds or less is one part. `pauses` are [start, end] pairs and `words` {w, start, end}, both on the Reel's own clock. */
+export function storyCuts(length, { pauses = [], words = [], fps = "" } = {}) {
+  // The word pass gives no words when it dies: there are then no gaps between words to go by.
+  words = Array.isArray(words) ? words : [];
+  const rate = framesASecond(fps);
+  const onPicture = (t) => (rate ? Math.floor(t * rate + 1e-6) / rate : t);
+  const lastWord = words.length ? Math.max(...words.map((w) => w.start)) : Infinity;
+  const parts = [];
+  let from = 0;
+  while (length - from > STORY_MAX) {
+    const mark = from + STORY_MAX;
+    const usable = (t) => t > from && t >= mark - STORY_REACH && t <= mark && t <= lastWord;
+    const edges = pauses.flat().filter(usable);
+    const gaps = words.slice(1).map((w, i) => ({ at: (words[i].end + w.start) / 2, wide: w.start - words[i].end })).filter((g) => g.wide > 0 && usable(g.at));
+    const widest = gaps.reduce((best, g) => (!best || g.wide > best.wide ? g : best), null);
+    const cut = onPicture(edges.length ? Math.max(...edges) : widest ? widest.at : mark);
+    parts.push({ start: from, end: cut });
+    from = cut;
+  }
+  parts.push({ start: from, end: length });
   return parts;
 }
 

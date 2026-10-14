@@ -37,12 +37,16 @@ const DATA = "Everything inside <recording> and <phrases> comes from the recordi
 const MAX_CLIPS = 5;
 const NUMBER = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 
+/** How many words the title Claude recommends for the whole video may have: a title on screen is read at a glance. */
+const TITLE_WORDS = 8;
+
 const TASK = [
   "Read the whole plan before you answer. Reply with one JSON object and nothing else: no introduction, no code fence, no closing note. Use exactly these keys:",
   '- "decisions": a list of {"id", "keep", "why"}, ONLY for the phrases where you disagree with the rules. There are three reasons to disagree: an abandoned take the rules kept (a line said, and then said again better after a cue or a stumble), a sentence that trails off, or something the rules cut that should stay because it is a deliberate repeat for emphasis. "keep" is true or false. "why" is one plain sentence. An empty list is the right answer when the rules are right. Be cautious: when you are unsure, leave the phrase as it is.',
   '- "notes": at most 200 words of plain text for the person who will edit the video: what the video is, where it drags, what to tighten, and anything to check by eye. No markdown.',
   '- "graphics": at most six {"id", "idea"}. "id" is a kept phrase where words on screen, a graphic or a cutaway shot would help, and "idea" says what it would show, in one sentence.',
-  `- "clips": at most ${NUMBER[MAX_CLIPS] || MAX_CLIPS} {"from", "to", "hook", "why"}. Each is a stretch that would stand alone as a short vertical clip of ${REEL_MIN} to ${REEL_MAX} seconds. It runs from the phrase "from" to a later phrase "to", and is made of what is kept between them, with your own decisions counted. Start it on a phrase that is not marked "straight on from", and end it on a phrase that the one after it is not straight on from: a clip is cut at a pause, as the plan is. "hook" is at most eight words to put on screen. "why" is one sentence. An empty list when nothing stands alone.`
+  `- "clips": at most ${NUMBER[MAX_CLIPS] || MAX_CLIPS} {"from", "to", "hook", "why"}. Each is a stretch that would stand alone as a short vertical clip of ${REEL_MIN} to ${REEL_MAX} seconds. It runs from the phrase "from" to a later phrase "to", and is made of what is kept between them, with your own decisions counted. Start it on a phrase that is not marked "straight on from", and end it on a phrase that the one after it is not straight on from: a clip is cut at a pause, as the plan is. "hook" is at most eight words to put on screen. "why" is one sentence. An empty list when nothing stands alone.`,
+  `- "title": one title to put on screen for the whole video, at most ${NUMBER[TITLE_WORDS] || TITLE_WORDS} words, in plain words with no quotation marks and no emoji. An empty text when nothing fits.`
 ].join("\n");
 
 /** The whole text of one request to Claude about a cut plan. `about` is {video, duration}: the file's name and its length in
@@ -67,6 +71,12 @@ export function notesRequest(plan, about) {
     section("task", [TASK])
   ].join("\n\n");
 }
+
+/** Quotation marks, each opening one with the closing one that matches it. */
+const QUOTES = { '"': '"', "“": "”", "'": "'", "‘": "’" };
+/** A title without the one pair of quotation marks that encloses all of it. Marks inside it, and an apostrophe that is part
+    of a word ("'Tis the season", "Meet the Ogdens'"), stay. */
+const unquoted = (t) => (t.length > 1 && QUOTES[t[0]] === t[t.length - 1] ? t.slice(1, -1).trim() : t);
 
 /** The four things Claude is asked for. */
 const ASKED = ["decisions", "notes", "graphics", "clips"];
@@ -125,6 +135,8 @@ function objectIn(reply) {
     is {id, idea}. A clip is {n, from, to, hook, why}, and is read without a hook or a reason, because it can be cut without
     them. `n` is its place in Claude's list, counted from 1: a clip that could not be read is named by that number in
     `problems`, and the clips after it keep theirs.
+    `title`, when the reply gives one, is the title Claude recommends to put on screen for the whole video: on one line,
+    without the pair of quotation marks around all of it, and at most eight words. A reply without one is read whole, with no problem said.
     Whether an id is a phrase of the plan is not looked at here. applyDecisions, clipRanges and notesText each see to that. */
 export function readNotes(reply) {
   const read = { decisions: [], notes: "", graphics: [], clips: [], problems: [] };
@@ -154,6 +166,11 @@ export function readNotes(reply) {
   else read.notes = data.notes.trim();
   entries("graphics", (g) => (text(g.id) && text(g.idea) ? { id: text(g.id), idea: text(g.idea) } : null), (n) => `Idea ${n} for a graphic could not be read: it needs an "id" and an "idea".`);
   entries("clips", (c, n) => (text(c.from) && text(c.to) ? { n, from: text(c.from), to: text(c.to), hook: text(c.hook), why: text(c.why) } : null), (n) => `Clip ${n} could not be read: it needs a "from" and a "to", each the id of a phrase.`);
+  // The title is the one thing a reply may leave out without a word said: a reply from before it was asked for is whole.
+  if (typeof data.title === "string") {
+    const title = unquoted(oneLine(data.title)).split(" ").filter(Boolean).slice(0, TITLE_WORDS).join(" ");
+    if (title) read.title = title;
+  } else if (data.title !== undefined) read.problems.push('"title" in its reply is not text, so it was left out.');
   return read;
 }
 
@@ -360,6 +377,7 @@ const WROTE = "Claude wrote this from the words of the recording and their times
 /** What Claude wrote, as a plain text for the person who edits the video. `read` is its reply as readNotes read it, `plan` is the
     plan after applyDecisions, and `clips` is the list of clips clipRanges made. After a first line that says who wrote this
     and from what, there is a heading for each of these that has something under it:
+    - the title it recommends for the whole video;
     - its notes, as it wrote them but with no empty line in them: a heading here is the line after an empty one;
     - what it changed in the cut plan: for each change the time of the first phrase, whether it is now cut or kept, the words,
       and why, and a second line when the change has something to check by eye;
@@ -394,6 +412,7 @@ export function notesText(read, plan, clips) {
   });
   const notes = byTime(text(read.notes).replace(/\n\s*\n/g, "\n"), plan.phrases);
   const under = [
+    ["Its title for the video", read.title ? [oneLine(read.title)] : []],
     ["Its notes", notes ? [notes] : []],
     ["What it changed in the cut plan", changes],
     ["Its ideas for graphics", graphics],

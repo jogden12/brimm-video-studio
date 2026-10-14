@@ -822,8 +822,9 @@ async function workOn(file, deps) {
       // was held in the run's own folder goes with it. It says who made the plan. When Claude read it, it keeps what Claude
       // decided, its ideas for graphics as they were read, what was left out of its reply and why, and each clip with the
       // names of the files that were made of it, so that a person can see what changed. Nothing reads the ideas back yet:
-      // they are there for what is made of the plan later.
-      const claude = read ? { decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
+      // they are there for what is made of the plan later. The title Claude recommends comes first, when it gave one: the
+      // import of an episode takes it for the episode's title, for a person to approve.
+      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
       files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
     }
     for (const what of missing) log(`${name}: ${what}.`);
