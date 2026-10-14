@@ -1,0 +1,260 @@
+// How far a run has got, for the progress panel: the file each run writes, what ffmpeg says of an encode, the time left, and
+// starting the panel. A clock, a timer and a way of starting a program are given to the reporter, so nothing here waits, and
+// no panel is ever shown: the panel itself is run only with --print, at the end, on a Mac that has swift.
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { progressFolder, PANEL, PANEL_PID, RATES, ffmpegProgress, aboutLeft, detailOf, readRates, blended, reporter, noProgress } from "../progress.js";
+
+/** One test's progress folder, a clock that moves only when told, a timer whose ticks a test runs by hand, a stand-in for
+    starting a program, and what the log said. */
+function setup({ swift = "", alive = () => false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-progress-"));
+  const folder = join(dir, "progress");
+  const clock = { t: 1_000_000 };
+  const ticks = [];
+  const cancelled = [];
+  const started = [];
+  const logs = [];
+  const start = (cmd, args, options) => {
+    started.push({ cmd, args, options });
+    const child = new EventEmitter();
+    child.unref = () => {};
+    return child;
+  };
+  const r = reporter({ folder, swift, log: (line) => logs.push(line), pid: 4242, now: () => clock.t, start, alive, timer: { every: (fn) => (ticks.push(fn), ticks.length), cancel: (h) => cancelled.push(h) } });
+  const file = () => JSON.parse(readFileSync(join(folder, "4242.json"), "utf8"));
+  return { dir, folder, clock, ticks, cancelled, started, logs, r, file, done: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+describe("what ffmpeg writes with -progress", () => {
+  it("says how many seconds it has written, by its last block, and whether it has ended", () => {
+    const block = (us, end = false) => `frame=1\nout_time_us=${us}\nout_time_ms=${us}\nout_time=00:00:00.000000\nspeed=1x\nprogress=${end ? "end" : "continue"}\n`;
+    assert.deepEqual(ffmpegProgress(""), { seconds: 0, ended: false });
+    assert.deepEqual(ffmpegProgress(block("N/A")), { seconds: 0, ended: false });
+    assert.deepEqual(ffmpegProgress(block(1500000) + block(4100000)), { seconds: 4.1, ended: false });
+    assert.deepEqual(ffmpegProgress(block(3000000) + block(3000000, true)), { seconds: 3, ended: true });
+  });
+});
+
+describe("how long is left, as a person says it", () => {
+  it("is in minutes, and in hours and minutes from an hour", () => {
+    assert.deepEqual([20, 60, 90, 600, 3600, 3900, 7260].map(aboutLeft), ["less than a minute", "about 1 minute", "about 2 minutes", "about 10 minutes", "about 1 hour", "about 1 hour 5 minutes", "about 2 hours 1 minute"]);
+  });
+  it("is said after the step, its number of how many and how far it has got, each part only when it is known", () => {
+    assert.equal(detailOf({ step: "Writing the transcript", n: 2, of: 8, percent: null, left: null, total: null }), "Writing the transcript (step 2 of 8)");
+    assert.equal(detailOf({ step: "Making the upright version", n: 7, of: 8, percent: 42, left: 190, total: 260 }), "Making the upright version (step 7 of 8), 42%, about 3 minutes left, about 4 minutes left in all");
+    assert.equal(detailOf({ step: "Starting", n: null, of: null, percent: null, left: null, total: null }), "Starting");
+  });
+});
+
+describe("a run's progress file", () => {
+  it("is kept on this Mac's own disk, in Application Support, and never in Dropbox", () => {
+    assert.equal(progressFolder("/Users/sallie"), "/Users/sallie/Library/Application Support/BRIMM Video/progress");
+  });
+  it("says the video, the step and its number of how many, and has no percent until a step says how far it has got", () => {
+    const t = setup();
+    t.r.begin("talk.mov");
+    t.r.steps(["Reading the sound", "Writing the transcript"]);
+    t.clock.t += 2000;
+    t.r.step("Reading the sound");
+    assert.deepEqual(t.file(), { version: 1, pid: 4242, video: "talk.mov", step: "Reading the sound", n: 1, of: 2, percent: null, left: null, total: null, detail: "Reading the sound (step 1 of 2)", started: 1_000_000, updated: 1_002_000 });
+    t.r.step("Cutting the short clips", "Cutting short clip 1 of 2");
+    assert.deepEqual([t.file().step, t.file().n], ["Cutting short clip 1 of 2", null]);
+    t.done();
+  });
+  it("says how far an encode has got and how long is left of it, from what ffmpeg writes, at most once a second", () => {
+    const t = setup();
+    t.r.begin("talk.mov");
+    t.r.steps(["Making the rough cut", "Making the upright version"]);
+    t.r.step("Making the rough cut");
+    const watch = t.r.encoding(100);
+    assert.deepEqual(watch.args, ["-progress", join(t.folder, "4242.ffmpeg.txt")]);
+    assert.equal(t.ticks.length, 1);
+    // Thirty seconds in, ffmpeg has written 25 of the 100 seconds: 90 seconds are left, by the rate so far.
+    t.clock.t += 30_000;
+    writeFileSync(watch.args[1], "out_time_us=25000000\nprogress=continue\n");
+    t.ticks[0]();
+    assert.deepEqual([t.file().percent, t.file().left, t.file().detail], [25, 90, "Making the rough cut (step 1 of 2), 25%, about 2 minutes left"]);
+    // Within the same second the file is not written again.
+    writeFileSync(watch.args[1], "out_time_us=30000000\nprogress=continue\n");
+    t.ticks[0]();
+    assert.equal(t.file().percent, 25);
+    t.clock.t += 1000;
+    t.ticks[0]();
+    assert.equal(t.file().percent, 30);
+    // ffmpeg has ended: the timer stops, and its file is taken away.
+    watch.stop();
+    assert.deepEqual([t.cancelled, existsSync(watch.args[1])], [[1], false]);
+    t.done();
+  });
+  it("keeps the bar moving with no number until ffmpeg says how far it has got, and fills it when ffmpeg says it has ended", () => {
+    const t = setup();
+    t.r.begin("talk.mov");
+    t.r.step("Making the rough cut");
+    const watch = t.r.encoding(100);
+    t.clock.t += 5000;
+    t.ticks[0]();
+    writeFileSync(watch.args[1], "out_time_us=N/A\nprogress=continue\n");
+    t.clock.t += 1000;
+    t.ticks[0]();
+    assert.equal(t.file().percent, null);
+    writeFileSync(watch.args[1], "out_time_us=N/A\nprogress=end\n");
+    t.clock.t += 1000;
+    t.ticks[0]();
+    assert.equal(t.file().percent, 100);
+    watch.stop();
+    t.done();
+  });
+  it("is one file for each run, so two runs at once on this Mac, as the launch agent's and one by hand, each have a bar, and one panel", () => {
+    const t = setup({ swift: "/usr/bin/swift", alive: (pid) => pid === 4242 });
+    const other = reporter({ folder: t.folder, swift: "/usr/bin/swift", pid: 5151, now: () => t.clock.t, start: (cmd, args, options) => { t.started.push({ cmd, args, options }); return Object.assign(new EventEmitter(), { unref() {} }); }, alive: () => true });
+    t.r.begin("a.mov");
+    writeFileSync(join(t.folder, PANEL_PID), "4242");
+    other.begin("b.mov");
+    assert.deepEqual(readdirSync(t.folder).filter((n) => n.endsWith(".json")).sort(), ["4242.json", "5151.json"]);
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+  it("writes a video's name as it is, whatever characters are in it", () => {
+    const t = setup();
+    const name = 'Sallie\'s "talk" #1 & 100% \u{1F600}\n.mov';
+    t.r.begin(name);
+    assert.equal(t.file().video, name);
+    t.done();
+  });
+  it("gives ffmpeg nothing more to do for a file of no length, and nothing before a video is begun", () => {
+    const t = setup();
+    assert.deepEqual(t.r.encoding(100).args, []);
+    t.r.begin("talk.mov");
+    assert.deepEqual(t.r.encoding(0).args, []);
+    assert.equal(t.ticks.length, 0);
+    t.done();
+  });
+  it("is taken away when the video is done", () => {
+    const t = setup();
+    t.r.begin("talk.mov");
+    t.r.step("Reading the sound");
+    t.r.end();
+    assert.deepEqual(readdirSync(t.folder), []);
+    t.done();
+  });
+  it("never stops a run: when it cannot be written the log says so once, and nothing is thrown", () => {
+    const t = setup({ swift: "/usr/bin/swift" });
+    // A file is where the folder would be.
+    writeFileSync(t.folder, "not a folder");
+    t.r.begin("a.mov");
+    t.r.steps(["Reading the sound"]);
+    t.r.step("Reading the sound");
+    assert.deepEqual(t.r.encoding(10).args, []);
+    t.r.fraction(0.5);
+    t.r.end();
+    // macOS says EEXIST of a folder that cannot be made where a file is, and other systems may say ENOTDIR.
+    assert.equal(t.logs.length, 1);
+    assert.match(t.logs[0], /^The progress panel's file could not be written \((EEXIST|ENOTDIR)\)\. The work goes on without it\.$/);
+    t.done();
+  });
+  it("says nothing, and does nothing, when the run is given the reporter that says nothing", () => {
+    for (const call of ["begin", "length", "steps", "step", "fraction", "end"]) assert.equal(noProgress[call]("x"), undefined);
+    assert.deepEqual(noProgress.encoding(100).args, []);
+  });
+});
+
+describe("the time left in all", () => {
+  it("is said once a run on this Mac has measured every step still to come, from what each step took for each second of video", () => {
+    const t = setup();
+    // The first run measures: 20 seconds of reading and 30 of transcribing, for 100 seconds of video.
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Reading the sound", "Writing the transcript"]);
+    t.r.step("Reading the sound");
+    assert.equal(t.file().total, null);
+    t.clock.t += 20_000;
+    t.r.step("Writing the transcript");
+    t.clock.t += 30_000;
+    t.r.end();
+    assert.deepEqual(readRates(t.folder), { "Reading the sound": 0.2, "Writing the transcript": 0.3 });
+    // The next run, of a video of 200 seconds, is told about 100 seconds in all at its start: 40 of reading and 60 of the
+    // transcript.
+    t.r.begin("b.mov");
+    t.r.length(200);
+    t.r.steps(["Reading the sound", "Writing the transcript"]);
+    t.r.step("Reading the sound");
+    assert.equal(t.file().total, 100);
+    assert.equal(t.file().detail, "Reading the sound (step 1 of 2), about 2 minutes left in all");
+    // Ten seconds in, 30 of reading are left by the rate, and the transcript's 60.
+    t.clock.t += 10_000;
+    t.r.fraction(0.25);
+    assert.equal(t.file().total, 90);
+    t.done();
+  });
+  it("is not measured from a step cut short, as when ffmpeg stopped at once, which would make it look shorter than it is", () => {
+    const t = setup();
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Making the rough cut", "Filing"]);
+    t.r.step("Making the rough cut");
+    t.clock.t += 200;
+    t.r.step("Filing");
+    t.clock.t += 3000;
+    t.r.end();
+    assert.deepEqual(readRates(t.folder), { Filing: 0.03 });
+    t.done();
+  });
+  it("is not said while a step still to come has never been measured", () => {
+    const t = setup();
+    writeFileSync((mkdirSync(t.folder, { recursive: true }), join(t.folder, RATES)), JSON.stringify({ "Reading the sound": 0.2 }));
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Reading the sound", "Asking Claude"]);
+    t.r.step("Reading the sound");
+    assert.equal(t.file().total, null);
+    t.done();
+  });
+  it("follows the Mac, the newest measure counting for half, and reads nothing it cannot", () => {
+    assert.deepEqual([blended(undefined, 0.3), blended(0.2, 0.3)], [0.3, 0.25]);
+    const t = setup();
+    assert.deepEqual(readRates(t.folder), {});
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, RATES), "[]");
+    assert.deepEqual(readRates(t.folder), {});
+    t.done();
+  });
+});
+
+describe("the panel", () => {
+  it("is started when a video is begun, on its own and never waited for, with the folder of progress files", () => {
+    const t = setup({ swift: "/usr/bin/swift" });
+    t.r.begin("a.mov");
+    assert.deepEqual(t.started, [{ cmd: "/usr/bin/swift", args: [PANEL, t.folder], options: { detached: true, stdio: "ignore" } }]);
+    t.done();
+  });
+  it("is not started again while one is showing, by the number of its process in panel.pid", () => {
+    const t = setup({ swift: "/usr/bin/swift", alive: (pid) => pid === 77 });
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, PANEL_PID), "77");
+    t.r.begin("a.mov");
+    assert.deepEqual(t.started, []);
+    writeFileSync(join(t.folder, PANEL_PID), "78");
+    t.r.begin("b.mov");
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+  it("is not shown without swift, and one that cannot be started is said once in the log, and nothing is thrown", () => {
+    const none = setup();
+    none.r.begin("a.mov");
+    none.r.begin("b.mov");
+    assert.deepEqual([none.started, none.logs], [[], ["No progress panel is shown: swift, which draws it, is not installed."]]);
+    none.done();
+    const t = setup({ swift: "/usr/bin/swift" });
+    const r = reporter({ folder: t.folder, swift: "/usr/bin/swift", log: (line) => t.logs.push(line), now: () => 0, start: () => { throw Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" }); } });
+    r.begin("a.mov");
+    r.begin("b.mov");
+    assert.deepEqual(t.logs, ["The progress panel could not be shown (EAGAIN). The work goes on without it."]);
+    t.done();
+  });
+});
