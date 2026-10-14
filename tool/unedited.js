@@ -33,6 +33,8 @@
 // install.sh sets them up. swift, which comes with Xcode's command line tools, runs faces.swift to find the speaker's face for
 // the upright version and the clips: without it they are cropped at the centre of the picture. claude is Claude Code:
 // without it, or when Claude cannot be reached, the plan is the rules' alone. Final Cut Pro is never opened from here.
+// While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
+// progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
@@ -46,6 +48,7 @@ import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pauses
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml } from "./fcpxml.js";
+import { reporter, progressFolder, noProgress } from "./progress.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -252,6 +255,16 @@ const clause = (whole) => {
 };
 const sentence = (part) => `${capital(part)}.`;
 
+/** The steps of the work on one video, as the progress panel counts them: Claude is asked (`claude`), there is an upright
+    version to make (`wide`), there are clips to cut (`clips`), and the video is filed away after (`watched`). */
+const stepsFor = ({ claude, wide, clips, watched }) => [
+  "Reading the sound", "Writing the transcript", "Making the cut plan", ...(claude ? ["Asking Claude"] : []), "Making the rough cut",
+  ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
+];
+
+/** The seconds that stretches of a video come to. */
+const secondsIn = (stretches) => stretches.reduce((sum, s) => sum + (s.end - s.start), 0);
+
 /** The words with their times, the pauses ffmpeg heard and the cut plan the rules make, or `why` there is none. `probe` is what
     ffprobe ended with, `told` is the file the transcriber wrote its times into, `untimed` says why it wrote none, and `silent`
     is the long silences. */
@@ -327,12 +340,20 @@ async function askClaude(name, plan, facts, work, deps) {
 
 /** Make the rough cut of a video from the kept ranges of its plan. Resolves "" when it is made, or why it is not. It is
     written whole in the run's own folder and then put where it belongs, as every other file is. */
-async function roughCut(file, to, { plan, facts, spans }, { run, tools, files, log = () => {} }) {
+async function roughCut(file, to, { plan, facts, spans }, { run, tools, files, log = () => {}, progress = noProgress }) {
   if (!facts.height) return "there is no picture in the file";
   if (!spans.length) return "the plan keeps nothing";
   log(`${basename(file)}: making the rough cut.`);
+  progress.step("Making the rough cut");
   const writing = files.at(to);
-  const made = await run(tools.ffmpeg, roughCutArgs(file, writing, { ranges: plan.ranges, fps: roughRate(facts) }));
+  // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
+  const watch = progress.encoding(secondsIn(spans));
+  let made;
+  try {
+    made = await run(tools.ffmpeg, [...watch.args, ...roughCutArgs(file, writing, { ranges: plan.ranges, fps: roughRate(facts) })]);
+  } finally {
+    watch.stop();
+  }
   if (made.code !== 0 || !existsSync(writing)) {
     rmSync(writing, { force: true });
     return `ffmpeg stopped (${lastLine(made.stderr)})`;
@@ -383,9 +404,15 @@ const stretches = (spans) => spans.map((span) => ({ start: below(span.start), en
 /** Have ffmpeg write stretches of a video, joined, as one file at `to`: each with its crop, and the whole made 1080 by 1920,
     or with no crops for a video that keeps its shape. Resolves "" when the file is made, or why it is not. It is written
     whole in the run's own folder and then put where it belongs, as every other file is. */
-async function joined(file, to, { ranges, crops }, { run, tools, files }) {
+async function joined(file, to, { ranges, crops }, { run, tools, files, progress = noProgress }) {
   const writing = files.at(to);
-  const made = await run(tools.ffmpeg, verticalArgs({ video: file, ranges, crops, out: writing }));
+  const watch = progress.encoding(secondsIn(ranges));
+  let made;
+  try {
+    made = await run(tools.ffmpeg, [...watch.args, ...verticalArgs({ video: file, ranges, crops, out: writing })]);
+  } finally {
+    watch.stop();
+  }
   if (made.code !== 0 || !existsSync(writing)) {
     rmSync(writing, { force: true });
     return `ffmpeg stopped (${lastLine(made.stderr)})`;
@@ -400,11 +427,12 @@ async function joined(file, to, { ranges, crops }, { run, tools, files }) {
     `centred` is the reason. `stills` is what the face finder said of the video, for the short clips to be cropped by: the
     faces are looked for once. Nothing is thrown from here, so a failure costs this file and no other. */
 async function upright(file, to, { facts, spans }, work, deps) {
-  const { log = () => {} } = deps;
+  const { log = () => {}, progress = noProgress } = deps;
   const name = basename(file);
   let seen = {};
   try {
     log(`${name}: making the upright version.`);
+    progress.step("Finding the faces");
     seen = await facesIn(file, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
     if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the upright version is cropped at the centre of the picture.`);
     const ranges = stretches(spans);
@@ -414,6 +442,7 @@ async function upright(file, to, { facts, spans }, work, deps) {
       log(seen.stills.some((still) => still.faces.length) ? `${name}: no face was found in ${guessed} of the ${crops.length} kept stretches, so the crop of the whole video is used there.`
         : `${name}: no face was found in the video, so the upright version is cropped at the centre of the picture.`);
     }
+    progress.step("Making the upright version");
     return { why: await joined(file, to, { ranges, crops }, deps), centred: seen.why || "", stills: seen.stills || [] };
   } catch (e) {
     rmSync(deps.files.at(to), { force: true });
@@ -469,8 +498,10 @@ async function cutPiece(file, to, given, { facts, stills, most = 0 }, deps) {
     and the clips after it are cut all the same. A clip is cut whether or not it fits a Reel: the notes say when it does
     not. Nothing is burned into the picture: this Mac's ffmpeg has no filter for captions, so they come as a file. */
 async function cutClips(file, clips, { plan, facts, stills }, deps) {
+  const { progress = noProgress } = deps;
   const cut = [];
-  for (const clip of clips) {
+  for (const [i, clip] of clips.entries()) {
+    progress.step("Cutting the short clips", `Cutting short clip ${i + 1} of ${clips.length}`);
     const out = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
     const files = [];
     const failed = [];
@@ -557,7 +588,7 @@ function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { lib
 }
 
 async function workOn(file, deps) {
-  const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
+  const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk, progress = noProgress } = deps;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
   const sizes = [sizeOf(file)];
@@ -582,16 +613,31 @@ async function workOn(file, deps) {
     notify(`No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
   };
+  // The progress panel is told each step as it begins. It is told the steps to come as far as they are known, and again as
+  // more is known: whether there is an upright version to make, once the video has been read, and whether there are clips.
+  // `asking` and not `claude`: the plan's own record of Claude's reply is called claude further down, in the same scope.
+  const asking = !deps.rulesOnly && Boolean(tools.claude);
+  const watched = Boolean(deps.watched);
+  progress.begin(name);
+  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking, watched }));
+  // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
+  let finished = false;
   try {
+    progress.step("Reading the sound");
     log(`${name}: reading the sound.`);
     const probed = join(work, "facts.json");
     const probe = await run(tools.ffprobe, probeArgs(file, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     const facts = printed ? factsOf(printed) : null;
     if (facts && !facts.sound) return fail("there is no sound in the file");
+    if (facts) {
+      progress.length(facts.duration);
+      progress.steps(stepsFor({ claude: asking, wide: needsReframe(facts), clips: asking, watched }));
+    }
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav));
     if (a.code !== 0 || !existsSync(wav)) return fail(`the sound could not be read from the file (${lastLine(a.stderr)})`);
+    progress.step("Writing the transcript");
     log(`${name}: writing the transcript, with a time for every word.`);
     const outBase = join(work, "captions");
     let b = await run(tools.whisper, wordArgs({ model, wav, outBase }));
@@ -626,6 +672,7 @@ async function workOn(file, deps) {
     // From here on a step that fails costs the plan or a file made from it, and never the transcript: what was made is kept
     // and filed, and the plan's own text says what is missing. A short clip that could not be cut is the one thing it does
     // not name: the log and the notes for the editor do.
+    progress.step("Making the cut plan");
     const planned = await planFor({ facts, probe, told: outBase + ".json", untimed, silent, wav }, deps).catch((e) => ({ why: `the work on the plan stopped (${e.message})` }));
     // The plan the rules made. Claude's decisions may change it below, and the plan they give is the plan for all that follows.
     let { plan } = planned;
@@ -663,6 +710,7 @@ async function workOn(file, deps) {
       // Claude reads the rules' plan before anything is made from it. Its decisions are applied with the pauses ffmpeg heard,
       // so a cut of its own falls where the rules' cuts fall, and the clips it picked are taken from the plan as it then is.
       // Without a reply, the plan stays the rules' alone, and there are no notes and no clips.
+      if (asking) progress.step("Asking Claude");
       asked = deps.rulesOnly || !tools.claude ? null : await askClaude(name, plan, facts, work, deps);
       // What Claude wrote, as it was read, and what of it was left out on the way, each with its reason. And its clips, as
       // they can be cut.
@@ -680,6 +728,7 @@ async function workOn(file, deps) {
         log(changes ? `${name}: Claude changed the cut plan in ${changes} place${changes === 1 ? "" : "s"}: it now ${sums(plan)}.` : `${name}: Claude changed nothing in the cut plan.`);
       }
 
+      progress.steps(stepsFor({ claude: asking, wide: needsReframe(facts), clips: clips.length > 0, watched }));
       const spans = keptSpans(plan.ranges, roughRate(facts));
       let why = "";
       let note = "";
@@ -783,13 +832,16 @@ async function workOn(file, deps) {
     // names it in the folder it is filed in: when it cannot be moved there, the file is first written again to name the
     // video where it stays.
     const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...cut.flatMap((made) => made.files), out.plan];
+    if (deps.watched) progress.step("Filing");
     const folder = deps.watched ? fileAway(deps.watched, file, held.filter((f) => files.has(f)), deps, day, () => nameAgain(file)) : "";
     const where = folder ? `, in the folder ${folder}` : "";
     const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (plan) notify(`The cut plan for ${name} is ready${where}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}.${unasked}`);
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
+    finished = !missing.length;
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } finally {
+    progress.end(finished);
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -857,7 +909,7 @@ const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fp
     keeps nothing, it stops before anything is made, the log says why, and it resolves {ok: false, stopped: true} with
     `message` saying why. */
 export async function videosFromPlan(file, deps) {
-  const { run, tools, log = () => {} } = deps;
+  const { run, tools, log = () => {}, progress = noProgress } = deps;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
   const stop = (why) => {
@@ -880,6 +932,7 @@ export async function videosFromPlan(file, deps) {
   // Each video goes through `files`, and is put in place as soon as it is whole.
   const files = filesOf(work, { name, log, move: deps.move, copy: deps.copy });
   deps = { ...deps, files };
+  let finished = false;
   try {
     // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
     const probed = join(work, "facts.json");
@@ -892,6 +945,10 @@ export async function videosFromPlan(file, deps) {
     const spans = keptSpans(plan.ranges, roughRate(facts));
     if (!spans.length) return stop("its cut plan keeps nothing, so it has no videos to make");
     log(`${name}: making its videos again from ${basename(out.plan)}.`);
+    const clipped = (plan.claude ? plan.claude.clips : []).some((clip) => clip.files.length > 0);
+    progress.begin(name);
+    progress.length(facts.duration);
+    progress.steps(["Making the rough cut", ...(needsReframe(facts) ? ["Finding the faces", "Making the upright version"] : []), ...(clipped ? ["Cutting the short clips"] : [])]);
 
     const made = [];
     const failed = [];
@@ -940,13 +997,16 @@ export async function videosFromPlan(file, deps) {
     }
     if (clips) log(`${name}: cutting ${clips} short clip${clips === 1 ? "" : "s"}.`);
     for (const piece of pieces) {
+      progress.step("Cutting the short clips", `Cutting ${piece.what}`);
       const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most }, deps);
       madeOr(piece.to, `${piece.what} could not be cut again`, cut.why || "");
     }
     if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);
     else log(made.length ? `${name}: made again: ${listed(made)}.` : `${name}: nothing was made again.`);
+    finished = !failed.length;
     return { ok: !failed.length, name, made, message: failed.join("; ") };
   } finally {
+    progress.end(finished);
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -1038,6 +1098,9 @@ clips it picked.
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
 its length go with them.
+
+While it works, a small window in the top right corner of the screen shows how far each video has got: the step, a bar,
+and how long is left. Closing it changes nothing about the work.
 `;
 
 /** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. */
@@ -1051,7 +1114,8 @@ const banner = (text) => {
     as it does for the launch agent and in a shell, and the Mac's own word for it when HOME names none. `args` is what the
     run was asked to do: with --rules-only among it, the run is told never to ask Claude. */
 export function depsFor(found, log, env = process.env, args = {}) {
-  return { run: runProgram, tools: found, model: found.model, home: env.HOME || homedir(), rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)) };
+  const home = env.HOME || homedir();
+  return { run: runProgram, tools: found, model: found.model, home, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends

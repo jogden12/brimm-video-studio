@@ -88,6 +88,16 @@ The Mac then runs `node unedited.js --watch` on that folder whenever something l
 
 Add `--rules-only` to that line and the launch agent runs `node unedited.js --rules-only --watch`, so Claude is never asked. Without it, the installer's summary says whether it found Claude Code where the launch agent will look for it, and what is then sent to Claude. The installer does not install Claude Code and does not sign in to it. To have Claude asked again, run the line again without `--rules-only`.
 
+**Progress.** While a video is worked on, a small window floats in the top right corner of the screen with a bar for each
+video: the step it is at ("Making the upright version (step 7 of 8)"), how far that step has got when ffmpeg says so, and how
+long is left. Once a video has been done on a Mac, it also says roughly how long is left in all, from what each step took
+there, kept in `~/Library/Application Support/BRIMM Video/progress/rates.json`. It comes up for a run started by the launch
+agent, by hand, or from a Claude session, and goes a few seconds after the last run ends. It is drawn by `tool/progress.swift`,
+which swift runs, so nothing is installed. Without swift there is no window, and the log says so once. Each run writes a
+small file in `~/Library/Application Support/BRIMM Video/progress/`, on the Mac's own disk and never in Dropbox. Closing the
+window, or its failing to open, changes nothing about the work. A video dropped for the other Mac shows its window on that
+Mac only.
+
 **The cuts are suggestions, made by rules and then by Claude, and are for a person to check.** They have only been tested on made-up speech so far, spoken by the Mac's own voice. The recording is first split into phrases: a phrase ends at a pause, which is 0.3 seconds or more of quiet, or at the end of a sentence. Then the rules, which are in `tool/cuts.js`:
 
 - **A retake** is a phrase, or several in a row, that is said again straight after it: what comes next opens with the same four words or more, or shares at least 70% of the words, in order. The earlier telling is cut and the last one is kept. The second telling starts within 90 seconds, with no more than a spoken cue and a few words ("Sorry. Where was I?") between the two. The same words said again after other things is a point made twice, and both are kept.

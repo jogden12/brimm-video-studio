@@ -15,6 +15,7 @@ import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
+import { progressFolder } from "../progress.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -2188,6 +2189,98 @@ describe("a folder of unedited videos", () => {
   });
 });
 
+describe("what the progress panel is told", () => {
+  /** A stand-in for the progress reporter: it keeps what it is told, in order, and gives ffmpeg one more option, as the real
+      one does, so that a test can see where it goes. */
+  const watching = (t) => {
+    const told = [];
+    t.deps.progress = {
+      begin: (video) => told.push(["begin", video]),
+      length: (seconds) => told.push(["length", seconds]),
+      steps: (names) => told.push(["steps", names]),
+      step: (name, shown = name) => told.push(["step", shown]),
+      fraction: () => {},
+      encoding: (seconds) => {
+        told.push(["encoding", Math.round(seconds * 1000) / 1000]);
+        return { args: ["-progress", "/progress/ffmpeg.txt"], stop: () => told.push(["stopped"]) };
+      },
+      end: (finished) => told.push(["end", finished])
+    };
+    return told;
+  };
+  const steps = (told) => told.filter(([what]) => what === "step").map(([, shown]) => shown);
+  const ALL_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Asking Claude", "Making the rough cut", "Finding the faces", "Making the upright version", "Cutting the short clips"];
+  it("is told each step of a video as it begins, the steps to come, the video's length, and the end", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const told = watching(t);
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(told[0], ["begin", "talk.mov"]);
+    assert.deepEqual(told[told.length - 1], ["end", true]);
+    assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript", "Making the cut plan", "Asking Claude", "Making the rough cut", "Finding the faces", "Making the upright version", "Cutting short clip 1 of 1"]);
+    assert.deepEqual(told.find(([what]) => what === "length"), ["length", 23.423]);
+    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [ALL_STEPS, ALL_STEPS, ALL_STEPS]);
+    t.done();
+  });
+  it("has ffmpeg say how far it has got with each video it writes, and stops reading it when ffmpeg has ended", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const told = watching(t);
+    const file = t.video("talk.mov");
+    await uneditedFile(file, t.deps);
+    // Each encode is followed at once by the end of the watching: the rough cut, the upright version and the clip.
+    const at = told.map(([what], i) => (what === "encoding" ? i : -1)).filter((i) => i >= 0);
+    assert.equal(at.length, 3);
+    for (const i of at) assert.deepEqual(told[i + 1], ["stopped"]);
+    // The rough cut's encode is as long as the stretches it is made of, each end on a whole picture, and ffmpeg is given
+    // -progress before everything else.
+    const kept = keptSpans(USED.plan.ranges, FACTS.fps).reduce((sum, span) => sum + (span.end - span.start), 0);
+    assert.deepEqual(told[at[0]], ["encoding", Math.round(kept * 1000) / 1000]);
+    assert.deepEqual(roughCalls(t)[0].args, ["-progress", "/progress/ffmpeg.txt", ...roughCutArgs(file, inRun(t, "talk.rough-cut.mp4"), { ranges: USED.plan.ranges, fps: FACTS.fps })]);
+    assert.deepEqual(uprightCall(t).args.slice(0, 2), ["-progress", "/progress/ffmpeg.txt"]);
+    t.done();
+  });
+  it("is told less to come when the video is upright already, Claude is not asked or picks no clip, and of filing in a folder", async () => {
+    const t = setup({ probed: probed({ picture: { width: 1080, height: 1920 } }) });
+    const told = watching(t);
+    t.video("a.mov");
+    await uneditedFolder(t.dir, t.deps);
+    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names).slice(-1), [["Reading the sound", "Writing the transcript", "Making the cut plan", "Making the rough cut", "Filing"]]);
+    assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript", "Making the cut plan", "Making the rough cut", "Filing"]);
+    t.done();
+  });
+  it("is told of a video that cannot be done what was begun, and the end, so that its bar goes", async () => {
+    const t = setup({ whisper: "fail" });
+    const told = watching(t);
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript"]);
+    // The work did not finish, so what its steps took is not kept as a measure.
+    assert.deepEqual(told[told.length - 1], ["end", false]);
+    t.done();
+  });
+  it("is told the videos made again from a plan (--from-plan): the rough cut, the faces, the upright version and each clip", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const file = t.video("talk.mov");
+    await uneditedFile(file, t.deps);
+    const told = watching(t);
+    await videosFromPlan(file, t.deps);
+    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [["Making the rough cut", "Finding the faces", "Making the upright version", "Cutting the short clips"]]);
+    assert.deepEqual(steps(told), ["Making the rough cut", "Finding the faces", "Making the upright version", "Cutting clip 1"]);
+    assert.deepEqual([told[0], told[told.length - 1]], [["begin", "talk.mov"], ["end", true]]);
+    t.done();
+  });
+  it("is told at the end that the work did not finish when a file could not be made, so its steps are not measured", async () => {
+    const t = setup({ rough: "fail" });
+    const told = watching(t);
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(told[told.length - 1], ["end", false]);
+    t.done();
+  });
+  it("is the real reporter in a run from the command line, writing in Application Support in the home folder, with this Mac's swift", () => {
+    const deps = depsFor({ ffmpeg: "/f", ffprobe: "/p", whisper: "/w", swift: "", claude: "", model: "/m", missing: [] }, () => {}, { HOME: "/Users/sallie" });
+    assert.equal(typeof deps.progress.begin, "function");
+    assert.equal(progressFolder("/Users/sallie"), "/Users/sallie/Library/Application Support/BRIMM Video/progress");
+  });
+});
+
 describe("several folders of unedited videos", () => {
   it("are each worked in the order given and named in the log, and the run ends with 0", async () => {
     const t = setup();
@@ -2280,7 +2373,7 @@ describe("before it starts", () => {
     const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL, "/usr/bin/swift"], "/usr/bin");
     const log = () => {};
     const deps = depsFor(programs, log, { HOME });
-    assert.deepEqual(Object.keys(deps).sort(), ["home", "log", "model", "notify", "rulesOnly", "run", "tools", "wait"]);
+    assert.deepEqual(Object.keys(deps).sort(), ["home", "log", "model", "notify", "progress", "rulesOnly", "run", "tools", "wait"]);
     assert.deepEqual([deps.home, deps.tools, deps.model, deps.log, deps.run], [HOME, programs, MODEL, log, runProgram]);
     assert.equal(depsFor(programs, log, {}).home, homedir());
   });
