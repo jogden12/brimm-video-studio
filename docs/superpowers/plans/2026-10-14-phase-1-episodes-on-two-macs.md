@@ -10,6 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md` (approved by Jason on 2026-10-14). This plan is phase 1 and the spec's rule for writing into Dropbox. Each later phase (P, 2, 3, 4, 5, 6, T) gets a plan of its own. Phase 0 is Jason's 30 minutes in Final Cut, by hand, and nothing here waits on it.
 
+**Status: on hold (2026-10-14).** Jason asked, through another session, for phase P alone to go ahead, and for every other phase to wait for that session's review of the design. The review has already raised two points that change this phase, and this plan is to be brought in line with the corrected design before it is built:
+- `Episodes/` and `Unedited Video/` inside `BRIMM VIDEO Transfer`, which the transcript tool's launch agent watches, wake that agent on every change.
+- Sharing finished videos straight into Dropbox goes against the rule on writing into Dropbox. That point is phase 2's.
+
 **Checked before it was handed over:** on 2026-10-14 the code and the tests of Tasks 1 to 12 were applied, as written here, to a scratch copy of `main` at c709b57. All 601 tests passed on this Mac, the installer's included. Two mistakes that check found are corrected below: a test of Task 2 that the list had missed (item 16), and the number of `parseArgs` expectations in Task 5. The docs of Task 12 were not part of the check.
 
 ## Global Constraints
