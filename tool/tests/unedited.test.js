@@ -1110,6 +1110,21 @@ describe("a video whose cut plan Claude is asked to read", () => {
     assert.deepEqual([plan.claude.clips[0].n, plan.claude.clips[0].ranges], [1, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]]);
     t.done();
   });
+  it("keeps the title Claude recommends in the cut plan, first in what Claude gave, for the episode's record", async () => {
+    const t = setup({ claude: [answers({ ...REPLY, title: "Know your costs" })] });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.equal(plan.claude.title, "Know your costs");
+    assert.deepEqual(Object.keys(plan.claude), ["title", "decisions", "graphics", "ignored", "clips"]);
+    assert.match(t.read("talk.edit-notes.txt"), /\n\nIts title for the video\nKnow your costs\n\n/);
+    t.done();
+  });
+  it("writes no title into the cut plan when Claude gave none", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.equal("title" in JSON.parse(t.read("talk.cut-plan.json")).claude, false);
+    t.done();
+  });
   it("hands the pauses ffmpeg heard on with Claude's decisions, so that the silence beside a phrase Claude keeps is cut as the rules cut it", async () => {
     // Claude keeps the first telling of the opening. There is silence before it, to 1.111 seconds, which only the pauses show.
     const reply = { ...REPLY, decisions: [{ id: "p2", keep: true, why: "She trails off on purpose." }], graphics: [], clips: [] };

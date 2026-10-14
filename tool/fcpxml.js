@@ -90,6 +90,26 @@ export function libraryUrl(library) {
   return fileUrl(path);
 }
 
+/** The furthest a wide picture filled into an upright frame can be moved either way and still fill it, in the unit of
+    reelPosition. */
+export const fillMost = (facts, frame) => (100 * (facts.width - (facts.height * frame.width) / frame.height)) / 2 / facts.height;
+
+/** Where a wide picture is moved in an upright frame so that its crop is what shows: Final Cut's position, "x y". The unit
+    is hundredths of the frame's height, and a positive x moves the picture right (a positive y, up). That was seen in Final
+    Cut 12.4 in phase 0 (step B2b, 2026-10-14): with each clip naming its own format, a 1920x1080 picture filled the
+    1080x1920 frame, and "20 0" moved it right by 384 pixels, 20 hundredths of the frame's height of 1920.
+    A picture filled into an upright frame is as tall as the frame, so unmoved its middle shows. Filled, the picture is
+    scaled by the frame's height over its own, so moving it by how far the crop's middle is from the picture's comes to that
+    distance in hundredths of the picture's own height. A face right of the middle moves the picture left, by a negative x.
+    It is never moved so far that the frame is not filled: a crop is rounded down to an even width, so one pressed to the
+    edge would leave a sliver of black. */
+export function reelPosition(facts, crop, frame) {
+  const most = fillMost(facts, frame);
+  const x = (100 * (facts.width / 2 - (crop.x + crop.w / 2))) / facts.height;
+  const held = Math.max(-most, Math.min(most, x));
+  return `${Math.round(held * 10000) / 10000 || 0} 0`;
+}
+
 /** The whole project file, as text.
     `video` is the path of the video file, and `facts` is what ffprobe says of it: { duration, frameRate, width, height, hasAudio,
     audioRate, audioChannels }. `ranges` are the pieces to keep, in order, as [{ start, end, name }] in seconds of the video.
@@ -102,8 +122,13 @@ export function libraryUrl(library) {
     when the library is not such a path.
     `src`, when it is given, is where the file says the video is, written as it is given: an address from the file's own
     folder, such as "../Pricing%20talk.mp4" (relativeUrl makes one), for a file that is kept beside its video in Dropbox and
-    is read on either Mac. Given none, the file names the video by its whole path, as before. */
-export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], project, event, library, src }) {
+    is read on either Mac. Given none, the file names the video by its whole path, as before.
+    `frame` is {width, height} of the project, for an upright project of a wide video: then each piece is filled into the
+    frame and moved onto the face by its `crop`, {x, y, w, h} in pixels of the picture as it is shown, and the project has a
+    format of its own. Given none, the project is the video's own shape. It throws when the frame is not whole pixels, and
+    when a piece of an upright project has no crop. */
+export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], project, event, library, src, frame }) {
+  if (frame && !(Number.isInteger(frame.width) && frame.width > 0 && Number.isInteger(frame.height) && frame.height > 0)) throw new Error(`The frame of the project must be given in whole pixels: ${frame.width} by ${frame.height}.`);
   const rate = rateOf(facts.frameRate);
   const time = (count) => timeOf(count, rate);
   /** A time from outside as a count of frames. One that is not a number, or is not there, is refused. Let through, it would take
@@ -126,9 +151,10 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
   for (const [i, range] of ranges.entries()) {
     const from = Math.max(0, frames(range.start, `start of piece ${i + 1}`));
     const to = Math.min(total, frames(range.end, `end of piece ${i + 1}`));
+    if (frame && !range.crop) throw new Error(`Piece ${i + 1} of an upright project has no crop to move it onto the face by.`);
     if (to <= from) continue;
     if (pieces.length && from < pieces[pieces.length - 1].to) throw new Error(`The pieces to keep must follow one another in the video: piece ${i + 1} starts before the one before it ends.`);
-    pieces.push({ from, to, name: range.name || name, captions: [], notes: new Map() });
+    pieces.push({ from, to, name: range.name || name, crop: range.crop, captions: [], notes: new Map() });
   }
 
   // A caption goes on the first kept piece it shows over, and shows no longer than that piece runs. So one that starts in a piece
@@ -167,8 +193,13 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
       ]);
     });
     const noted = [...piece.notes].sort(([a], [b]) => a - b).map(([frame, texts]) => tag("marker", { start: time(frame), duration: time(1), value: texts.filter(Boolean).join(" / ") }));
-    const inside = [...shown, ...noted];
-    return tag("asset-clip", { ref: "r2", offset: time(offset), name: piece.name, start: time(piece.from), duration: time(piece.to - piece.from) }, inside.length ? inside : undefined);
+    // In an upright project each clip is first filled into the frame and moved onto the face. Final Cut's definition of the
+    // format has these before what sits on the clip.
+    const moved = frame ? [tag("adjust-conform", { type: "fill" }), tag("adjust-transform", { position: reelPosition(facts, piece.crop, frame) })] : [];
+    const inside = [...moved, ...shown, ...noted];
+    // In an upright project each clip names the video's own format. Phase 0, Final Cut 12.4: a clip that does not takes the
+    // timeline's, Final Cut takes the wide video for an upright one, warns of "an unexpected value", and does not fill.
+    return tag("asset-clip", { ref: "r2", format: frame ? "r1" : undefined, offset: time(offset), name: piece.name, start: time(piece.from), duration: time(piece.to - piece.from) }, inside.length ? inside : undefined);
   });
 
   // Nothing here needs a later version of the format than 1.10, and older copies of Final Cut Pro open that one too. Final
@@ -179,11 +210,14 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
       tag("format", { id: "r1", name: size && speed ? `FFVideoFormat${size}${speed}` : undefined, frameDuration: time(1), width: facts.width, height: facts.height }),
       tag("asset", { id: "r2", name, start: "0s", duration: time(total), hasVideo: 1, format: "r1", videoSources: 1, ...sound }, [
         tag("media-rep", { kind: "original-media", src: src || fileUrl(video) })
-      ])
+      ]),
+      // An upright project's timeline has a format of its own, written as Final Cut 12.4 writes the 1080x1920 format of a
+      // project made by hand (phase 0): no name, and its colour space.
+      ...(frame ? [tag("format", { id: "r3", frameDuration: time(1), width: frame.width, height: frame.height, colorSpace: "1-1-1 (Rec. 709)" })] : [])
     ]),
     tag("event", { name: event || "Rough cuts" }, [
       tag("project", { name: project || `${name} rough cut` }, [
-        tag("sequence", { format: "r1", duration: time(length), tcStart: "0s", tcFormat: "NDF", ...(facts.hasAudio ? { audioLayout: "stereo", audioRate: "48k" } : {}) }, [
+        tag("sequence", { format: frame ? "r3" : "r1", duration: time(length), tcStart: "0s", tcFormat: "NDF", ...(facts.hasAudio ? { audioLayout: "stereo", audioRate: "48k" } : {}) }, [
           tag("spine", {}, clips)
         ])
       ])
@@ -224,9 +258,14 @@ const POINTS_AT = { "asset-clip": "asset", "text-style": "text-style-def" };
 /** Our own checks of a project file, for what Final Cut's definition of the format cannot see: that every time is a whole number
     of frames, that the clips follow one another with no gap and no overlap, that no clip runs outside the video, that a caption
     or a note lies in its clip, that the timeline is as long as its clips, and that whatever points at a part of the file points at
-    one that is there. `facts` is what ffprobe says of the video. Gives back the problems in plain words. None means it passed.
-    It throws when the video's frame rate or its length cannot be read. */
-export function checkFcpxml(text, facts) {
+    one that is there. Each format's frames are the video's, the video's own format is the video's size, and each timeline is
+    the size it is meant to be: `frame`, {width, height}, for an upright project, and the video's own size when none is given.
+    In a timeline of another shape than the video, each clip names the video's own format, and is filled into the frame and
+    moved no further than fills it.
+    Every project in the file is checked on its own, and with more than one, each problem says which project it is in.
+    `facts` is what ffprobe says of the video. Gives back the problems in plain words. None means it passed. It throws when the
+    video's frame rate or its length cannot be read. */
+export function checkFcpxml(text, facts, { frame } = {}) {
   const rate = rateOf(facts.frameRate);
   const total = framesIn(facts, rate);
   const all = tagsIn(text);
@@ -252,31 +291,68 @@ export function checkFcpxml(text, facts) {
     }
   }
 
-  const sequence = all.find((el) => el.name === "sequence");
-  const spine = sequence && all.find((el) => el.name === "spine");
-  if (!spine) return [...problems, "The file has no timeline."];
-  let end = read(sequence, "tcStart");
-  let sum = 0;
-  all.filter((el) => el.parent === spine).forEach((clip, i) => {
-    const n = i + 1;
-    const [offset, start, length] = ["offset", "start", "duration"].map((key) => read(clip, key));
-    // A time that is not on a frame is in the list already, and nothing can be added up from it.
-    if (offset === null || start === null || length === null) {
-      end = sum = null;
-      return;
+  // Each format's frames are the video's, and the video's own format is the video's size.
+  const one = timeOf(1, rate);
+  const formats = new Map(all.filter((el) => el.name === "format").map((el) => [el.attrs.id, el]));
+  for (const format of formats.values()) {
+    if (format.attrs.frameDuration !== one) problems.push(`The format ${format.attrs.id} has frames of ${format.attrs.frameDuration}, and the video's are ${one}.`);
+  }
+  // The video's size is the one `facts` gives, and when they give none, the one its own format says.
+  const asset = all.find((el) => el.name === "asset");
+  const own = asset && formats.get(asset.attrs.format);
+  const sized = Number.isFinite(facts.width) && Number.isFinite(facts.height);
+  if (own && sized && (Number(own.attrs.width) !== facts.width || Number(own.attrs.height) !== facts.height)) problems.push(`The video's format is ${own.attrs.width} by ${own.attrs.height}, and the video is ${facts.width} by ${facts.height}.`);
+  const picture = sized ? { width: facts.width, height: facts.height } : own ? { width: Number(own.attrs.width), height: Number(own.attrs.height) } : null;
+  const meant = frame || picture;
+
+  // Each project on its own. With more than one, each problem says which project it is in.
+  const projects = all.filter((el) => el.name === "project");
+  if (!projects.length) return [...problems, "The file has no timeline."];
+  for (const project of projects) {
+    const said = projects.length > 1 ? (problem) => `In the project "${project.attrs.name}": ${problem[0].toLowerCase()}${problem.slice(1)}` : (problem) => problem;
+    const sequence = all.find((el) => el.name === "sequence" && el.parent === project);
+    const spine = sequence && all.find((el) => el.name === "spine" && el.parent === sequence);
+    if (!spine) {
+      problems.push(said("The file has no timeline."));
+      continue;
     }
-    if (end !== null && offset > end) problems.push(`There is a gap of ${count(offset - end)} before clip ${n}.`);
-    if (end !== null && offset < end) problems.push(`Clip ${n} overlaps what comes before it by ${count(end - offset)}.`);
-    if (start < 0 || start + length > total) problems.push(`Clip ${n} runs outside the video.`);
-    for (const el of all.filter((e) => e.parent === clip && (e.name === "caption" || e.name === "marker"))) {
-      const at = read(el, el.name === "caption" ? "offset" : "start");
-      const long = el.name === "caption" ? read(el, "duration") : 1;
-      if (at !== null && long !== null && (at < start || at + long > start + length)) problems.push(`A ${el.name} on clip ${n} lies outside the clip.`);
-    }
-    end = offset + length;
-    if (sum !== null) sum += length;
-  });
-  const said = read(sequence, "duration");
-  if (said !== null && sum !== null && said !== sum) problems.push(`The timeline is said to be ${count(said)} long, and its clips come to ${count(sum)}.`);
+    const shape = formats.get(sequence.attrs.format);
+    const size = shape ? { width: Number(shape.attrs.width), height: Number(shape.attrs.height) } : meant;
+    if (size && meant && (size.width !== meant.width || size.height !== meant.height)) problems.push(said(`The timeline is ${size.width} by ${size.height}, and it is meant to be ${meant.width} by ${meant.height}.`));
+    // A timeline of another shape than the video holds each clip filled into it, and moved no further than fills it.
+    const upright = Boolean(size && picture) && (size.width !== picture.width || size.height !== picture.height);
+    const most = upright ? fillMost(picture, size) : 0;
+    let end = read(sequence, "tcStart");
+    let sum = 0;
+    all.filter((el) => el.parent === spine).forEach((clip, i) => {
+      const n = i + 1;
+      if (upright) {
+        if (!asset || clip.attrs.format !== asset.attrs.format) problems.push(said(`Clip ${n} does not name the video's own format, so Final Cut takes the wide video for an upright one.`));
+        const conform = all.find((e) => e.parent === clip && e.name === "adjust-conform");
+        const moved = all.find((e) => e.parent === clip && e.name === "adjust-transform");
+        if (!conform || conform.attrs.type !== "fill") problems.push(said(`Clip ${n} is not filled into the frame.`));
+        const x = moved ? Number(String(moved.attrs.position || "0 0").split(" ")[0]) : 0;
+        if (!(Math.abs(x) <= most + 0.0001)) problems.push(said(`Clip ${n} is moved so far that the frame is not filled.`));
+      }
+      const [offset, start, length] = ["offset", "start", "duration"].map((key) => read(clip, key));
+      // A time that is not on a frame is in the list already, and nothing can be added up from it.
+      if (offset === null || start === null || length === null) {
+        end = sum = null;
+        return;
+      }
+      if (end !== null && offset > end) problems.push(said(`There is a gap of ${count(offset - end)} before clip ${n}.`));
+      if (end !== null && offset < end) problems.push(said(`Clip ${n} overlaps what comes before it by ${count(end - offset)}.`));
+      if (start < 0 || start + length > total) problems.push(said(`Clip ${n} runs outside the video.`));
+      for (const el of all.filter((e) => e.parent === clip && (e.name === "caption" || e.name === "marker"))) {
+        const at = read(el, el.name === "caption" ? "offset" : "start");
+        const long = el.name === "caption" ? read(el, "duration") : 1;
+        if (at !== null && long !== null && (at < start || at + long > start + length)) problems.push(said(`A ${el.name} on clip ${n} lies outside the clip.`));
+      }
+      end = offset + length;
+      if (sum !== null) sum += length;
+    });
+    const told = read(sequence, "duration");
+    if (told !== null && sum !== null && told !== sum) problems.push(said(`The timeline is said to be ${count(told)} long, and its clips come to ${count(sum)}.`));
+  }
   return problems;
 }

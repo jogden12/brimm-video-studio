@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTools } from "../run.js";
-import { stillsArgs, needsReframe, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames } from "../reframe.js";
+import { stillsArgs, needsReframe, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
 
 const WIDE = { width: 1920, height: 1080 };
 /** A face box whose middle is `centre` of the way across the picture. `size` is its width, as a share of the picture's. */
@@ -384,4 +384,60 @@ describe("the face finder, run for real", () => {
     assert.equal(r.stdout, "");
     assert.equal(r.stderr, `The folder of stills could not be read: ${join(dir, "not there")}\n`);
   }));
+});
+
+describe("storyCuts", () => {
+  const words = (pairs) => pairs.map(([start, end]) => ({ w: "word", start, end }));
+  it("leaves a Reel of a minute or less whole", () => {
+    assert.deepEqual(storyCuts(60, { fps: "30/1" }), [{ start: 0, end: 60 }]);
+  });
+  it("cuts at the last pause edge in the 15 seconds before the minute", () => {
+    assert.deepEqual(storyCuts(75, { pauses: [[40, 41], [50, 51.2]], words: words([[51.2, 74]]), fps: "30/1" }), [{ start: 0, end: 51.2 }, { start: 51.2, end: 75 }]);
+  });
+  it("cuts in the middle of the widest gap between words when no pause is heard there, as under music", () => {
+    assert.deepEqual(storyCuts(75, { words: words([[44, 46], [46.1, 52], [53, 58], [58.2, 74]]), fps: "30/1" }), [{ start: 0, end: 52.5 }, { start: 52.5, end: 75 }]);
+  });
+  it("cuts at the minute, on the picture before it, when there is neither", () => {
+    assert.deepEqual(storyCuts(75, { fps: "30/1" }), [{ start: 0, end: 60 }, { start: 60, end: 75 }]);
+    const [first] = storyCuts(75, { fps: "30000/1001" });
+    assert.equal(first.end, 1798 / (30000 / 1001));
+  });
+  it("never cuts where no word comes after, so no part is silence alone", () => {
+    assert.deepEqual(storyCuts(61, { pauses: [[59, 61]], words: words([[0, 59]]), fps: "30/1" }), [{ start: 0, end: 60 }, { start: 60, end: 61 }]);
+  });
+  it("counts each part's minute from the last cut, not from the Reel's start", () => {
+    assert.deepEqual(storyCuts(150, { pauses: [[50, 50.5]], fps: "30/1" }), [{ start: 0, end: 50.5 }, { start: 50.5, end: 110.5 }, { start: 110.5, end: 150 }]);
+  });
+  it("moves a cut back to the start of the picture it falls in, never forward past the minute", () => {
+    const rate = 24000 / 1001;
+    const [first] = storyCuts(75, { fps: "24000/1001" });
+    assert.equal(first.end, 1438 / rate);
+    assert.ok(first.end <= 60);
+    const [onPause] = storyCuts(75, { pauses: [[50, 50.3]], fps: "24000/1001" });
+    assert.equal(onPause.end, 1205 / rate);
+  });
+  it("cuts at a pause edge before it looks at the gaps between words, however wide a gap is", () => {
+    const said = words([[40, 46.9], [47.4, 52], [55, 59], [59.5, 74]]);
+    assert.deepEqual(storyCuts(75, { pauses: [[47, 47.4]], words: said, fps: "30/1" })[0], { start: 0, end: 47.4 });
+  });
+  it("looks for a pause or a gap only in the 15 seconds before the minute", () => {
+    assert.deepEqual(storyCuts(75, { pauses: [[43, 44.9]], fps: "30/1" })[0], { start: 0, end: 60 });
+    assert.deepEqual(storyCuts(75, { pauses: [[43, 45]], fps: "30/1" })[0], { start: 0, end: 45 });
+    assert.deepEqual(storyCuts(75, { words: words([[30, 40], [44.5, 74]]), fps: "30/1" })[0], { start: 0, end: 60 });
+  });
+  it("takes no words when the word pass gave none, as when it died", () => {
+    assert.deepEqual(storyCuts(75, { pauses: [[50, 51]], words: null, fps: "30/1" }), [{ start: 0, end: 51 }, { start: 51, end: 75 }]);
+  });
+  it("cuts a long Reel into parts of at most a minute each, each counted from the last cut", () => {
+    const parts = storyCuts(130, { fps: "30000/1001" });
+    assert.equal(parts.length, 3);
+    for (const p of parts) assert.ok(p.end - p.start <= 60, JSON.stringify(p));
+    assert.equal(parts[2].end, 130);
+  });
+});
+
+describe("stretches as ffmpeg is given them", () => {
+  it("writes each edge to the thousandth of a second below it, and keeps nothing else of the span", () => {
+    assert.deepEqual(stretchesOf([{ start: 5.8724, end: 9.8436, at: 0 }, { start: 13.3800001, end: 21.2879, at: 3.97 }]), [{ start: 5.872, end: 9.843 }, { start: 13.38, end: 21.287 }]);
+  });
 });
