@@ -723,17 +723,6 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.equal((await t.run("push", "talk")).code, 1);
     t.done();
   });
-  it("22. says how long a video has waited from when it came into the drop folder, not from its own date", async () => {
-    const t = setup();
-    const video = join(t.root, "Unedited Video", "Mac Studio", "Old.mov");
-    writeFileSync(video, "video");
-    utimesSync(video, new Date(NOW - 30 * 86400000), new Date(NOW - 30 * 86400000));
-    const came = statSync(video).ctimeMs;
-    t.deps.now = () => came + 5 * 60000;
-    const r = await t.run("episodes");
-    assert.ok(r.text.includes("  Old.mov, in Mac Studio's, for 5 minutes"), r.text);
-    t.done();
-  });
 });
 
 describe("retry, with the launch agent idle or at work", () => {
@@ -763,6 +752,50 @@ describe("retry, with the launch agent idle or at work", () => {
     const r = await t.run("retry", "talk");
     assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is."]]);
     assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
+    t.done();
+  });
+});
+
+describe("the lead's re-check of PR 11, in edit.js", () => {
+  const drop = (t) => join(t.root, "Unedited Video", "Mac Studio");
+  const status = (t, id, more) => {
+    const folder = join(t.episodes, ".importing");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `Talk.mov (Mac Studio) ${id} 1.json`), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, import: id, video: "Talk.mov", bytes: 5, seconds: 120, step: "Making the rough cut", at: new Date(NOW - 60000).toISOString(), ...more }));
+  };
+  it("4. retries the failed import of a name, and leaves a running one of that name alone", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    status(t, "aaa", {});
+    status(t, "bbb", { failed: "the transcriber stopped", at: new Date(NOW - 30 * 60000).toISOString() });
+    t.deps.agentRunning = () => true;
+    const r = await t.run("retry", "talk");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), ["Talk.mov (Mac Studio) aaa 1.json"]);
+    t.done();
+  });
+  it("4. says which failed imports it takes again when more than one of a name failed", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Talk.mov"), "video");
+    status(t, "aaa", { failed: "ffmpeg stopped" });
+    status(t, "bbb", { failed: "the transcriber stopped" });
+    t.deps.agentRunning = () => false;
+    t.deps.kickstart = () => {};
+    const r = await t.run("retry", "talk");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.said[0], /^Talk\.mov is imported again \(its imports aaa, which failed: ffmpeg stopped, and bbb, which failed: the transcriber stopped\)/);
+    assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
+    t.done();
+  });
+  it("6. says how long a video has waited from when the file was made on this disk, which a tag or a preview does not change, and from its own date when the disk keeps none", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), "Old.mov"), "video");
+    writeFileSync(join(drop(t), "Bare.mov"), "video");
+    // The file was made on this disk 5 minutes ago; a tag set on it a minute ago changed its ctime; its own date is a month old.
+    t.deps.stat = (path) => ({ size: 5, birthtimeMs: path.endsWith("Old.mov") ? NOW - 5 * 60000 : 0, ctimeMs: NOW - 60000, mtimeMs: NOW - 2 * 3600000 });
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes("  Old.mov, in Mac Studio's, for 5 minutes"), r.text);
+    assert.ok(r.text.includes("  Bare.mov, in Mac Studio's, for 2 hours"), r.text);
     t.done();
   });
 });

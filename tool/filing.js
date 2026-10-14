@@ -432,6 +432,8 @@ export async function importEpisodes(dir, deps, importOne) {
   // The videos whose import failed in this run, by their files: once the failed status is taken away, as `retry` does, the
   // video is looked at again.
   const failed = new Map();
+  // Whether the last look imported anything, which then has its late check to wait for.
+  let progressed = false;
   const importWaiting = async (first) => {
     for (const [id, name] of failed) {
       const still = readStatuses(episode.root).some(({ status }) => status && status.video === name && status.machine === episode.machine && status.failed);
@@ -478,7 +480,10 @@ export async function importEpisodes(dir, deps, importOne) {
         cancel(keep);
       }
       if (result.changed) changed = true;
-      if (!result.ok && !result.arriving) failed.set(id, name);
+      // An import that filed nothing failed. One that filed its episode with a piece missing is filed, and is not looked at
+      // again.
+      if (!result.ok && !result.arriving && !result.filed) failed.set(id, name);
+      if (!result.arriving) progressed = true;
       // A video still arriving is looked at again.
       if (result.arriving) seen.delete(id);
       results.push(result);
@@ -494,7 +499,17 @@ export async function importEpisodes(dir, deps, importOne) {
   }
   for (;;) {
     const open = mine().filter((p) => !p.problem);
-    if (!open.length) break;
+    if (!open.length) {
+      // A last look, so that a video that came, or a failed import taken again, while this run worked is not left until
+      // something lands in the folder. Anything it imports has its late check waited for, as the others had.
+      progressed = false;
+      do {
+        changed = false;
+        await importWaiting(false);
+      } while (changed);
+      if (!progressed) break;
+      continue;
+    }
     wake();
     const left = Math.min(...open.map(dueAt)) - clock();
     if (left > 0) {
@@ -508,11 +523,6 @@ export async function importEpisodes(dir, deps, importOne) {
     }
     finishDue(false);
   }
-  // A last look, so that a failed import taken again while this run worked is not left until something lands in the folder.
-  do {
-    changed = false;
-    await importWaiting(false);
-  } while (changed);
   return results;
 }
 

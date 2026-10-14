@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { LATE_CHECK_MS, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk } from "../dropbox.js";
+import { EventEmitter } from "node:events";
+import { LATE_CHECK_MS, READ_QUIET_MS, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk, readThrough } from "../dropbox.js";
 
 const notAMac = process.platform !== "darwin" ? "/bin/cp -c makes a clone on a Mac only" : false;
 const GB = 2 ** 30;
@@ -310,5 +311,27 @@ describe("what the lead's review of PR 11 found in the rule", () => {
     assert.equal(readFileSync(to, "utf8"), "{}\n");
     assert.throws(() => cloneIn(from, join(t.dest, "gone", "0001.json"), t.opts), { message: `0001.json could not be put into ${join(t.dest, "gone")}: the folder is not there. Nothing was copied.` });
     t.done();
+  });
+});
+
+describe("reading a file through, so that Dropbox brings it down", () => {
+  /** A stand-in for a file's read stream: it sends what `chunks` says, each after its pause in milliseconds, then ends, or
+      sends nothing more when `ends` is false. */
+  const streamOf = (chunks, ends = true) => () => {
+    const stream = new EventEmitter();
+    stream.destroy = () => stream.emit("close");
+    let at = 0;
+    for (const [pause, bytes] of chunks) setTimeout(() => stream.emit("data", Buffer.alloc(bytes)), (at += pause));
+    if (ends) setTimeout(() => stream.emit("end"), at + 1);
+    return stream;
+  };
+  it("reads it to its end", async () => {
+    await readThrough("/Dropbox/talk.mp4", { open: streamOf([[5, 10], [5, 10]]), quietMs: 100 });
+  });
+  it("gives up, in plain words, when no bytes come for the quiet time, as from a placeholder Dropbox does not bring down", async () => {
+    await assert.rejects(readThrough("/Dropbox/talk.mp4", { open: streamOf([[5, 10]], false), quietMs: 50 }), { message: "Dropbox sent nothing of it for 50 ms, so it was given up" });
+  });
+  it("waits two minutes of quiet by default", () => {
+    assert.equal(READ_QUIET_MS, 2 * 60 * 1000);
   });
 });

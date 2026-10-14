@@ -604,12 +604,18 @@ async function workOn(file, deps) {
   const whole = deps.isWhole || isWhole;
   // A file Dropbox shows only as a placeholder, as one dropped from another device, is not brought down until something reads
   // it: once its size has settled, it is asked for, read through once, and then looked at again.
+  // A file is read through once in a run, however often it is looked at: `deps.broughtDown` holds those read, by name, inode
+  // and size, for the run's whole folder.
   const bringDown = deps.bringDown || readThrough;
-  let broughtDown = false;
+  const broughtDown = deps.broughtDown || new Set();
+  const readKey = () => {
+    const id = fileId(file);
+    return id ? `${name}:${id.ino}:${id.size}` : name;
+  };
   const sizes = [sizeOf(file)];
   while (!settled(sizes) || !whole(file)) {
-    if (settled(sizes) && !broughtDown) {
-      broughtDown = true;
+    if (settled(sizes) && !broughtDown.has(readKey())) {
+      broughtDown.add(readKey());
       log(`${name}: Dropbox has not brought it down to this Mac yet, so it is asked for.`);
       await bringDown(file).catch((e) => log(`${name}: it could not be read through (${e.code || e.message}).`));
     }
@@ -1100,6 +1106,8 @@ export async function videosFromPlan(file, deps) {
     instead, and checked again in Dropbox 15 minutes after it was copied in (filing.js); the run waits for that, kept awake. */
 export async function uneditedFolder(dir, deps) {
   const { log = () => {}, alive = isRunning } = deps;
+  // The placeholders this run has read through, so that each is read once in the run.
+  deps = { ...deps, broughtDown: deps.broughtDown || new Set() };
   const { settings } = deps;
   const episodic = episodeMode(dir, settings);
   // A drop folder for episodes is never worked the old way, which renames the video into a folder for the day in Dropbox:

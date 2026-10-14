@@ -135,13 +135,36 @@ export function isWhole(path, { stat = statSync, flags = fileFlags } = {}) {
   }
 }
 
+/** How long a read of a placeholder may go with no bytes coming before it is given up: two minutes. */
+export const READ_QUIET_MS = 2 * 60 * 1000;
+
+/** A stretch of time as a person reads it: "50 ms", "2 minutes". */
+const spoken = (ms) => (ms < 60000 ? `${ms} ms` : `${ms / 60000} minute${ms === 60000 ? "" : "s"}`);
+
 /** Read a file to its end and let what is read go: Dropbox then brings all of it down to this Mac, as it does for a file that
-    is there only as a placeholder. Resolves when it is read, and rejects when it cannot be. */
-export const readThrough = (path) => new Promise((done, fail) => {
-  const stream = createReadStream(path);
-  stream.on("data", () => {});
-  stream.on("end", done);
-  stream.on("error", fail);
+    is there only as a placeholder. Resolves when it is read. Rejects when it cannot be read, and, in plain words, when no
+    bytes come for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run. `open` is how the file
+    is opened for reading, for a test to give another. */
+export const readThrough = (path, { open = createReadStream, quietMs = READ_QUIET_MS } = {}) => new Promise((done, fail) => {
+  const stream = open(path);
+  let timer = null;
+  const quiet = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      stream.destroy();
+      fail(new Error(`Dropbox sent nothing of it for ${spoken(quietMs)}, so it was given up`));
+    }, quietMs);
+  };
+  quiet();
+  stream.on("data", quiet);
+  stream.on("end", () => {
+    clearTimeout(timer);
+    done();
+  });
+  stream.on("error", (e) => {
+    clearTimeout(timer);
+    fail(e);
+  });
 });
 
 /** Wait for files that Dropbox may still be bringing over: each is looked at, and while any is not whole, the wait is a few

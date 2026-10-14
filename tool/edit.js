@@ -63,6 +63,7 @@ export function contextFor(deps = {}) {
     say: deps.say || ((line) => process.stdout.write(`${line}\n`)),
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
+    stat: deps.stat || ((path) => statSync(path, { throwIfNoEntry: false })),
     alive: deps.alive || isRunning,
     isWhole: deps.isWhole || ((path) => isWhole(path)),
     start: deps.start || startProgram,
@@ -211,11 +212,14 @@ export async function episodes(ctx) {
       continue;
     }
     for (const video of names) {
-      const found = statSync(join(drops, mac, video), { throwIfNoEntry: false });
+      const found = ctx.stat(join(drops, mac, video));
       if (!found) continue;
       const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
-      // How long it has waited is from when it came into the folder: copying a file keeps its own date.
-      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - found.ctimeMs)}${held ? `: ${held}` : ""}`);
+      // How long it has waited is from when the file was made on this disk, as Dropbox's download or a copy makes it: its ctime
+      // changes with a tag or a preview. When the disk keeps no such time, its own date. A known limit: macOS moves a file's
+      // birth time back when its date is set earlier, so a copy that keeps the file's own date shows that date's age.
+      const came = found.birthtimeMs > 0 ? found.birthtimeMs : found.mtimeMs;
+      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
     }
   }
   if (waiting.length) {
@@ -614,16 +618,28 @@ export async function retry(ctx, rest) {
     say(`${video} is ${held}`);
     return 1;
   }
-  const mine = readStatuses(ctx.root, ctx.now()).find((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
-  if (mine && importState(mine.status, ctx.now()) === "running") {
-    say(`${video} is being imported now, at ${mine.status.step}. The panel shows how far it is.`);
+  // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
+  // late check. One running now is left alone, and when it is the only one, nothing is done.
+  const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
+  const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
+  if (!again.length && running) {
+    say(`${video} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
     return 1;
   }
-  removeStatus(ctx.root, video, ctx.machine);
+  for (const { status } of again) removeStatus(ctx.root, video, ctx.machine, status.import || "");
+  const how = (status) => {
+    const state = importState(status, ctx.now());
+    if (state === "failed") return `which failed: ${String(status.failed).replace(/\.$/, "")}`;
+    if (state === "problem") return "whose late check found a problem";
+    return `which stopped at ${status.step}`;
+  };
+  const items = again.map(({ status }) => `${status.import || "one with no id"}, ${how(status)}`);
+  const which = items.length > 1 ? ` (its imports ${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]})` : "";
   // A run of the launch agent at work now takes the video when it next looks: it looks again each minute while it waits for
   // a late check, and once more before it ends. Asking the agent to start would do nothing while it runs.
   if (ctx.agentRunning()) {
-    say(`${video} is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
+    say(`${video} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
     return 0;
   }
   // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
@@ -634,7 +650,7 @@ export async function retry(ctx, rest) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  say(`${video} is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
+  say(`${video} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
   return 0;
 }
 

@@ -3410,3 +3410,41 @@ describe("a failed import taken again by a run that is still at work (retry with
     t.done();
   });
 });
+
+describe("the lead's re-check of PR 11", () => {
+  it("1. reads a placeholder that stays a placeholder through once in a run, however often it is looked at", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    t.put("Ghost.mov", "ghost");
+    const reads = [];
+    t.deps.isWhole = (path) => !path.endsWith("Ghost.mov");
+    t.deps.bringDown = async (path) => reads.push(path);
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(reads, [join(t.drop, "Ghost.mov")]);
+    t.done();
+  });
+  it("2. waits for the late check of a video it imports at its last look, and ends only when none is still to make", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    let dropped = false;
+    t.deps.log = (line) => {
+      t.logs.push(line);
+      if (!dropped && line.startsWith("Talk.mov: the late check passed")) {
+        dropped = true;
+        t.put("Other.mov", "other");
+      }
+    };
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.folders(), ["2026-10-13 Other (Mac Studio)", "2026-10-13 Talk (Mac Studio)"]);
+    assert.deepEqual(readdirSync(t.drop), []);
+    assert.ok(t.logs.some((line) => line.startsWith("Other.mov: the late check passed")), t.logs.join("\n"));
+    t.done();
+  });
+  it("5. counts an import that filed its episode with a piece missing as filed, not failed, and does not look at it again", async () => {
+    const t = episodic({ rough: "fail" });
+    t.put("Talk.mov");
+    const results = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(results.map((r) => [r.name, r.ok, Boolean(r.held)]), [["Talk.mov", false, false]]);
+    t.done();
+  });
+});
