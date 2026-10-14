@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fcpxml, checkFcpxml } from "../fcpxml.js";
+import { fcpxml, checkFcpxml, reelPosition } from "../fcpxml.js";
 
 const VIDEO = "/Users/sallie/Movies/Episode 12.mp4";
 /** What ffprobe says of a video: one of 60 seconds at 30 frames a second, and one of 3,600 frames at 29.97. */
@@ -453,6 +453,99 @@ describe("our own checks of a file", () => {
   });
 });
 
+describe("an upright project of a wide video, for a Reel", () => {
+  const REEL = { width: 1080, height: 1920 };
+  /** A crop of the 1920x1080 picture, 606 wide, that starts `x` pixels in. */
+  const crop = (x, found = true) => ({ x, y: 0, w: 606, h: 1080, found });
+  const upright = (over = {}) => fcpxml({ video: VIDEO, facts: AT_30, ranges: [{ start: 0, end: 5, crop: crop(438) }, { start: 10, end: 20, crop: crop(657) }], frame: REEL, ...over });
+
+  it("has the timeline in a format of its own, 1080 by 1920, as Final Cut writes one, and the video in its own", () => {
+    // Phase 0, Final Cut 12.4: the 1080x1920 format of a project made by hand has no name, and has its colour space.
+    const xml = upright();
+    assert.deepEqual(tags(xml, "format"), [
+      { id: "r1", name: "FFVideoFormat1080p30", frameDuration: "1/30s", width: "1920", height: "1080" },
+      { id: "r3", frameDuration: "1/30s", width: "1080", height: "1920", colorSpace: "1-1-1 (Rec. 709)" }
+    ]);
+    assert.equal(tags(xml, "sequence")[0].format, "r3");
+    assert.equal(tags(xml, "asset")[0].format, "r1");
+  });
+  it("names the video's own format on each clip, so Final Cut does not take the wide video for an upright one", () => {
+    // Phase 0, Final Cut 12.4: a clip with no format of its own takes the timeline's, the wide video is taken for an upright
+    // one, Final Cut warns of "an unexpected value", and the fill is not honoured.
+    assert.deepEqual(tags(upright(), "asset-clip").map((c) => c.format), ["r1", "r1"]);
+    assert.deepEqual(tags(make(), "asset-clip").map((c) => c.format), [undefined, undefined]);
+  });
+  it("fills the frame with each clip and moves it onto the face, before what sits on the clip", () => {
+    const xml = upright({ markers: [{ at: 1, text: "A note" }] });
+    assert.deepEqual(tags(xml, "adjust-conform"), [{ type: "fill" }, { type: "fill" }]);
+    assert.deepEqual(tags(xml, "adjust-transform"), [{ position: "20.2778 0" }, { position: "0 0" }]);
+    assert.match(clips(xml)[0], /^<asset-clip [^>]*>\n<adjust-conform type="fill"\/>\n<adjust-transform position="20\.2778 0"\/>\n<marker /);
+  });
+  it("moves the picture as Final Cut 12.4 did in phase 0: by hundredths of the frame's height, to the right for a positive x", () => {
+    // Phase 0, step B2b, 2026-10-14: position "20 0" moved a filled 1920x1080 picture right by 384 pixels of the 1080x1920
+    // frame, 20 hundredths of its height of 1920. Filled, the picture is 1920/1080 its own size, so a face 216 pixels of the
+    // picture left of its middle (crop middle 744 of 1920) is brought to the middle by "20 0"; one right of it, by a negative x.
+    assert.equal(reelPosition(AT_30, crop(441), REEL), "20 0");
+    assert.equal(reelPosition(AT_30, crop(873), REEL), "-20 0");
+  });
+  it("moves a picture no further than fills the frame, when the face is at its very edge", () => {
+    // The crop is rounded down to an even width, 606 where 9:16 of 1080 is 607.5, so a crop pressed to the edge would move the
+    // picture half a pixel too far and leave a sliver of black.
+    assert.equal(reelPosition(AT_30, crop(0), REEL), "60.7639 0");
+    assert.equal(reelPosition(AT_30, crop(1314), REEL), "-60.7639 0");
+  });
+  it("leaves a project of the video's own shape as it is today", () => {
+    const xml = make();
+    assert.deepEqual(tags(xml, "format").map((f) => f.id), ["r1"]);
+    assert.deepEqual([tags(xml, "adjust-conform"), tags(xml, "adjust-transform")], [[], []]);
+  });
+  it("refuses a frame that cannot be read, and a clip in an upright project without its crop", () => {
+    assert.throws(() => upright({ frame: { width: 0, height: 1920 } }), { message: "The frame of the project must be given in whole pixels: 0 by 1920." });
+    assert.throws(() => upright({ ranges: [{ start: 0, end: 5 }] }), { message: "Piece 1 of an upright project has no crop to move it onto the face by." });
+  });
+});
+
+describe("our own checks of an upright project, and of a file of more than one", () => {
+  const REEL = { width: 1080, height: 1920 };
+  const crop = (x) => ({ x, y: 0, w: 606, h: 1080, found: true });
+  const reel = fcpxml({ video: VIDEO, facts: AT_30, ranges: [{ start: 0, end: 5, crop: crop(438) }, { start: 10, end: 20, crop: crop(657) }], frame: REEL, project: "Reel 1" });
+  /** The same file with one piece of it changed. */
+  const changedReel = (from, to) => {
+    assert.ok(reel.includes(from), `the file has ${from}`);
+    return reel.replace(from, to);
+  };
+  /** A file of two projects: the Reel's, and a copy of it named "Reel 2" with whatever `change` does to the copy. */
+  const twoProjects = (change = (p) => p) => {
+    const project = reel.match(/ {8}<project [\s\S]*?<\/project>\n/)[0];
+    return reel.replace(project, project + change(project.replace('name="Reel 1"', 'name="Reel 2"')));
+  };
+
+  it("pass a project of the frame it is meant to have", () => {
+    assert.deepEqual(checkFcpxml(reel, AT_30, { frame: REEL }), []);
+  });
+  it("find a timeline of another size than it is meant to be, and a format whose frame is not one of the video's", () => {
+    assert.deepEqual(checkFcpxml(reel, AT_30), ["The timeline is 1080 by 1920, and it is meant to be 1920 by 1080."]);
+    assert.deepEqual(checkFcpxml(changedReel('<format id="r3" frameDuration="1/30s"', '<format id="r3" frameDuration="1/25s"'), AT_30, { frame: REEL }), ["The format r3 has frames of 1/25s, and the video's are 1/30s."]);
+    assert.deepEqual(checkFcpxml(changedReel('width="1920" height="1080"', 'width="1280" height="720"'), AT_30, { frame: REEL }), ["The video's format is 1280 by 720, and the video is 1920 by 1080."]);
+  });
+  it("find a clip of an upright project that does not name the video's own format", () => {
+    assert.deepEqual(checkFcpxml(changedReel('<asset-clip ref="r2" format="r1" offset="0s"', '<asset-clip ref="r2" offset="0s"'), AT_30, { frame: REEL }), ["Clip 1 does not name the video's own format, so Final Cut takes the wide video for an upright one."]);
+    assert.deepEqual(checkFcpxml(changedReel('<asset-clip ref="r2" format="r1" offset="0s"', '<asset-clip ref="r2" format="r3" offset="0s"'), AT_30, { frame: REEL }), ["Clip 1 does not name the video's own format, so Final Cut takes the wide video for an upright one."]);
+  });
+  it("find a clip of an upright project that is not filled into the frame, or is moved so far the frame is not filled", () => {
+    assert.deepEqual(checkFcpxml(changedReel('<adjust-conform type="fill"/>', '<adjust-conform type="fit"/>'), AT_30, { frame: REEL }), ["Clip 1 is not filled into the frame."]);
+    assert.deepEqual(checkFcpxml(changedReel('position="20.2778 0"', 'position="61 0"'), AT_30, { frame: REEL }), ["Clip 1 is moved so far that the frame is not filled."]);
+  });
+  it("take the video's size from its own format when they are told no size", () => {
+    assert.deepEqual(checkFcpxml(reel, { duration: AT_30.duration, frameRate: AT_30.frameRate }, { frame: REEL }), []);
+    assert.deepEqual(checkFcpxml(changedReel('position="20.2778 0"', 'position="61 0"'), { duration: AT_30.duration, frameRate: AT_30.frameRate }, { frame: REEL }), ["Clip 1 is moved so far that the frame is not filled."]);
+  });
+  it("check each project of a file on its own, and say which project a problem is in", () => {
+    assert.deepEqual(checkFcpxml(twoProjects(), AT_30, { frame: REEL }), []);
+    assert.deepEqual(checkFcpxml(twoProjects((p) => p.replace('offset="5s"', 'offset="6s"')), AT_30, { frame: REEL }), ['In the project "Reel 2": there is a gap of 30 frames before clip 2.']);
+  });
+});
+
 describe("Final Cut Pro's own definition of the format", () => {
   // The definition comes with Final Cut Pro. xmllint takes where it is as a file:// address, and fails on the plain path.
   const DTD = "file:///Applications/Final%20Cut%20Pro.app/Contents/Frameworks/Interchange.framework/Versions/A/Resources/FCPXMLv1_10.dtd";
@@ -477,6 +570,18 @@ describe("Final Cut Pro's own definition of the format", () => {
       const wrong = check("wrong.fcpxml", lines.join("\n"));
       assert.notEqual(wrong.status, 0);
       assert.match(wrong.stderr, /asset-clip content does not follow the DTD/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("passes an upright project of a wide video, with each clip filled and moved", { skip: cannot }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-fcpxml-"));
+    try {
+      const xml = fcpxml({ ...RICH, ranges: RICH.ranges.map((r, i) => ({ ...r, crop: { x: 100 * i, y: 0, w: 606, h: 1080, found: i !== 1 } })), frame: { width: 1080, height: 1920 } });
+      assert.equal(tags(xml, "adjust-transform").length, 3);
+      writeFileSync(join(dir, "reel.fcpxml"), xml);
+      const right = spawnSync("xmllint", ["--noout", "--dtdvalid", DTD, join(dir, "reel.fcpxml")], { encoding: "utf8" });
+      assert.equal(right.status, 0, right.stderr);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -44,9 +44,9 @@ import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
-import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
-import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
+import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 
@@ -386,21 +386,6 @@ async function facesIn(file, work, { run, tools }) {
   return { why: "what the face finder printed could not be read" };
 }
 
-/** A time written to the thousandth of a second below it. */
-const below = (t) => Math.floor(t * 1000) / 1000;
-
-/** Stretches of a video as ffmpeg is given them, when the stretches are the rough cut's own, each end on a whole picture.
-    ffmpeg gives a picture to the stretch whose start it comes at or after. A stretch starts and ends on a picture's own
-    time, which has more decimals than ffmpeg is given. Written to the thousandth of a second above it, a start would lose
-    the stretch its first picture and an end would give it one more. Written to the one below, each stretch holds the
-    pictures the rough cut holds, and captions timed as the rough cut's are fit it too. That is so of a video whose pictures
-    come at an even rate and whose sound starts with its picture. The rough cut puts every picture on an even grid and the
-    sound on the file's clock, and what is made of these stretches keeps the video's own. So of any other video it comes
-    out a little longer than the rough cut, and the captions run ahead of it by the end. Tried on ffmpeg 9 with made-up
-    videos and 40 cuts: 0.43 seconds longer with two pictures in every nine missing, and 0.2 with sound that starts half a
-    second late. */
-const stretches = (spans) => spans.map((span) => ({ start: below(span.start), end: below(span.end) }));
-
 /** Have ffmpeg write stretches of a video, joined, as one file at `to`: each with its crop, and the whole made 1080 by 1920,
     or with no crops for a video that keeps its shape. Resolves "" when the file is made, or why it is not. It is written
     whole in the run's own folder and then put where it belongs, as every other file is. */
@@ -435,7 +420,7 @@ async function upright(file, to, { facts, spans }, work, deps) {
     progress.step("Finding the faces");
     seen = await facesIn(file, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
     if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the upright version is cropped at the centre of the picture.`);
-    const ranges = stretches(spans);
+    const ranges = stretchesOf(spans);
     const crops = cropsFor(facts, ranges, seen.stills || []);
     const guessed = crops.filter((crop) => !crop.found).length;
     if (seen.stills && guessed) {
@@ -482,7 +467,7 @@ async function cutPiece(file, to, given, { facts, stills, most = 0 }, deps) {
     const whole = keptSpans(given.map((range) => ({ ...range, keep: true })), roughRate(facts));
     const spans = most ? noLonger(whole, most, roughRate(facts)) : whole;
     if (!spans.length) return { why: "it is shorter than one picture" };
-    const ranges = stretches(spans);
+    const ranges = stretchesOf(spans);
     const why = await joined(file, to, { ranges, crops: needsReframe(facts) ? cropsFor(facts, ranges, stills) : null }, deps);
     return why ? { why } : { spans };
   } catch (e) {
@@ -538,23 +523,6 @@ function soundOf(printed) {
   } catch (e) {
     return {};
   }
-}
-
-/** The notes for the editor, one for each join: how much was taken out there and why, in the plan's own words. What is cut
-    with nothing kept in between is one join, and has one note. A note is given the moment its cut starts, and the Final Cut
-    writer puts it on the first picture after the join. */
-function joinNotes(ranges) {
-  const notes = [];
-  let open = null;
-  for (const range of ranges) {
-    if (range.keep) open = null;
-    else {
-      if (!open) notes.push(open = { at: range.start, gone: 0, why: [] });
-      open.gone += range.end - range.start;
-      open.why.push(capital(cutReason(range)));
-    }
-  }
-  return notes.map((note) => ({ at: note.at, text: `Taken out, ${note.gone.toFixed(1)} seconds. ${note.why.join(". ")}` }));
 }
 
 /** Claude's ideas for graphics as notes for the Final Cut file: one for each idea that sits on a kept phrase of the plan, at

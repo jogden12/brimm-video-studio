@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTools } from "../run.js";
-import { stillsArgs, needsReframe, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts } from "../reframe.js";
+import { stillsArgs, needsReframe, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
 
 const WIDE = { width: 1920, height: 1080 };
 /** A face box whose middle is `centre` of the way across the picture. `size` is its width, as a share of the picture's. */
@@ -433,5 +433,11 @@ describe("storyCuts", () => {
     assert.equal(parts.length, 3);
     for (const p of parts) assert.ok(p.end - p.start <= 60, JSON.stringify(p));
     assert.equal(parts[2].end, 130);
+  });
+});
+
+describe("stretches as ffmpeg is given them", () => {
+  it("writes each edge to the thousandth of a second below it, and keeps nothing else of the span", () => {
+    assert.deepEqual(stretchesOf([{ start: 5.8724, end: 9.8436, at: 0 }, { start: 13.3800001, end: 21.2879, at: 3.97 }]), [{ start: 5.872, end: 9.843 }, { start: 13.38, end: 21.287 }]);
   });
 });

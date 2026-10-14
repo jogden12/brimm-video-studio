@@ -390,6 +390,24 @@ const SHOWN_LAST = 8;
     A reason that opens with its own kind stands alone, so that such a cut is not named twice. */
 export const cutReason = ({ kind, why }) => (why.toLowerCase().startsWith(`${kind}: `) ? why : `${kind}: ${why}`);
 
+/** The notes for the editor, one for each join: how much was taken out there and why, in the plan's own words. What is cut
+    with nothing kept in between is one join, and has one note. A note is given the moment its cut starts, and the Final Cut
+    writer puts it on the first picture after the join. */
+export function joinNotes(ranges) {
+  const capital = (text) => text[0].toUpperCase() + text.slice(1);
+  const notes = [];
+  let open = null;
+  for (const range of ranges) {
+    if (range.keep) open = null;
+    else {
+      if (!open) notes.push(open = { at: range.start, gone: 0, why: [] });
+      open.gone += range.end - range.start;
+      open.why.push(capital(cutReason(range)));
+    }
+  }
+  return notes.map((note) => ({ at: note.at, text: `Taken out, ${note.gone.toFixed(1)} seconds. ${note.why.join(". ")}` }));
+}
+
 /** The plan for a person to read: a first line with the totals, then one line for each range. `note` goes above them when
     something could not be made. What is cut is shown whole, and of a long kept stretch only how it begins and ends. The exact
     times are in the plan's JSON. */
@@ -445,8 +463,8 @@ export const QUALITY = 23;
     x264 is slower than the Mac's own encoder. At 1080 lines it writes about 5 seconds of video a second, against 13.
     The picture is 8-bit 4:2:0, which every player and Instagram take. The sound is AAC at 48 kHz, whatever the recording's
     own rate. The file's index is moved to its front once it is whole ("faststart"), so it can be played before all of it is
-    read. */
-export const encodeArgs = (crf) => ["-c:v", "libx264", "-preset", "medium", "-crf", String(crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart"];
+    read. `preset` is x264's speed: medium, unless a quick and small file is wanted, as for a preview. */
+export const encodeArgs = (crf, preset = "medium") => ["-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart"];
 
 /** Have ffmpeg make the rough cut in one pass: the kept ranges joined, written as encodeArgs says at the quality QUALITY.
     - fps gives every picture a place on an even grid from 0, at the file's own rate, or at 30 a second when it has none.

@@ -2,7 +2,7 @@
 // to suggest cutting. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
+import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, encodeArgs, joinNotes, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "../cuts.js";
 import { whisperArgs, stampedText, captionCount } from "../lib.js";
 import { probed, told, TOLD, PAUSES } from "./fixtures.js";
 
@@ -823,5 +823,19 @@ describe("the videos in a folder that still wait for a cut plan", () => {
     assert.deepEqual(waitingToCut([made.video, ...made.story].map((path) => path.slice("/in/".length))), []);
     // A video somebody named reel, or a clip of a kind the tool does not make, is a video like any other.
     assert.deepEqual(waitingToCut(["a.reel.mp4", "reel-1.mp4", "a.reel-one.mp4", "a.story-1.mp4"]), ["a.reel-one.mp4", "a.reel.mp4", "a.story-1.mp4", "reel-1.mp4"]);
+  });
+});
+
+describe("how a video is written", () => {
+  it("writes at the speed it is asked for, and at x264's medium when it is not asked", () => {
+    assert.deepEqual(encodeArgs(30, "veryfast"), ["-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart"]);
+    assert.equal(encodeArgs(23)[encodeArgs(23).indexOf("-preset") + 1], "medium");
+  });
+});
+
+describe("the notes at each join", () => {
+  it("say how much was taken out at each join and why, one note for what is cut with nothing kept between", () => {
+    const ranges = [{ start: 0, end: 2, keep: false, kind: "pause", why: "a long pause" }, { start: 2, end: 5, keep: true }, { start: 5, end: 6.5, keep: false, kind: "retake", why: "said again at 0:07" }, { start: 6.5, end: 7, keep: false, kind: "claude", why: "Claude: it trails off" }, { start: 7, end: 9, keep: true }];
+    assert.deepEqual(joinNotes(ranges), [{ at: 0, text: "Taken out, 2.0 seconds. Pause: a long pause" }, { at: 5, text: "Taken out, 2.0 seconds. Retake: said again at 0:07. Claude: it trails off" }]);
   });
 });
