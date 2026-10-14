@@ -39,7 +39,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
@@ -47,9 +47,11 @@ import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnD
 import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, cutReason, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
-import { fcpxml, checkFcpxml } from "./fcpxml.js";
+import { fcpxml, checkFcpxml, relativeUrl } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole } from "./dropbox.js";
+import { episodeMode, episodeKind, fileEpisode } from "./filing.js";
+import { readSettings, runsFolder } from "./settings.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -577,14 +579,14 @@ function ideaNotes(plan, graphics) {
     starts after the picture they are moved on as the words are. `library` is where Final Cut Pro is to keep the project,
     and `writer` is what writes the file's text. The text is checked before it is given back, and one with something wrong
     in it is not: `why` then says what. */
-function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { library, writer = fcpxml }) {
+function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { library, src, writer = fcpxml }) {
   if (!facts.height) return { why: "there is no picture in the file" };
   if (!spans.length) return { why: "the plan keeps nothing" };
   const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound, ...soundOf(printed) };
   const shift = Math.max(0, facts.soundStart);
   try {
     const captions = captionsOf(srt).map((caption) => ({ ...caption, start: caption.start + shift, end: caption.end + shift }));
-    const text = writer({ video, facts: said, ranges: plan.ranges.filter((range) => range.keep), captions, markers: [...joinNotes(plan.ranges), ...ideas], library: library || undefined });
+    const text = writer({ video, facts: said, ranges: plan.ranges.filter((range) => range.keep), captions, markers: [...joinNotes(plan.ranges), ...ideas], library: library || undefined, ...(src ? { src } : {}) });
     const wrong = checkFcpxml(text, said);
     return wrong.length ? { why: `it did not pass its own check (${wrong.join(" ").replace(/\.$/, "")})` } : { text };
   } catch (e) {
@@ -608,17 +610,25 @@ async function workOn(file, deps) {
     await wait(LOOK_MS);
     sizes.push(sizeOf(file));
   }
-  const work = join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
+  // An episode's import keeps its own folder in BRIMM Video Work, on the same disk as Dropbox, until the late check: macOS
+  // may clear the temp folder before a late check that a restart left is made.
+  const { episode } = deps;
+  const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
+  // Whether the run's folder stays when the run ends: it does once an episode's files are in Dropbox, for the late check.
+  let keepWork = false;
   // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
   // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
   const files = filesOf(work, { name, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
   deps = { ...deps, files };
   const fail = (why) => {
-    writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
-    files.put(out.failed);
+    // An episode's import writes nothing into the drop folder: its status file says why (importing.js).
+    if (!episode) {
+      writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
+      files.put(out.failed);
+    }
     log(`${name}: failed. ${why}.`);
-    notify(`No transcript could be made from ${name}. See the note beside it.`);
+    notify(episode ? `No transcript could be made from ${name}. It stays in the drop folder; see the log.` : `No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
   };
   // The progress panel is told each step as it begins. It is told the steps to come as far as they are known, and again as
@@ -638,9 +648,12 @@ async function workOn(file, deps) {
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     const facts = printed ? factsOf(printed) : null;
     if (facts && !facts.sound) return fail("there is no sound in the file");
+    // An episode of a recording that is upright, square or short is a short video: it gets no upright version and no clips.
+    const kind = episode && facts ? episodeKind(facts) : "";
+    const wide = (f) => needsReframe(f) && kind !== "short video";
     if (facts) {
       progress.length(facts.duration);
-      progress.steps(stepsFor({ claude: asking, wide: needsReframe(facts), clips: asking, watched }));
+      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && kind !== "short video", watched }));
     }
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav));
@@ -732,11 +745,15 @@ async function workOn(file, deps) {
         plan = applied.plan;
         ignored = [...read.problems, ...applied.ignored, ...picked.ignored];
         clips = picked.clips;
+        if (kind === "short video" && clips.length) {
+          log(`${name}: it is a short video, so the clips Claude picked are not cut.`);
+          clips = [];
+        }
         changes = (plan.changes || []).length;
         log(changes ? `${name}: Claude changed the cut plan in ${changes} place${changes === 1 ? "" : "s"}: it now ${sums(plan)}.` : `${name}: Claude changed nothing in the cut plan.`);
       }
 
-      progress.steps(stepsFor({ claude: asking, wide: needsReframe(facts), clips: clips.length > 0, watched }));
+      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: clips.length > 0, watched }));
       const spans = keptSpans(plan.ranges, roughRate(facts));
       let why = "";
       let note = "";
@@ -764,6 +781,8 @@ async function workOn(file, deps) {
       const atCentre = [];
       if (!needsReframe(facts)) {
         if (facts.height) log(`${name}: its picture is not wider than it is tall, so it needs no upright version.`);
+      } else if (kind === "short video") {
+        log(`${name}: it is a short video, so it gets no upright version.`);
       } else if (!spans.length) lacks.push({ what: "upright version", why: "the plan keeps nothing" });
       else {
         const made = await upright(file, out.vertical, { facts, spans }, work, deps);
@@ -776,17 +795,20 @@ async function workOn(file, deps) {
       if (clips.length) {
         log(`${name}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
         cut = await cutClips(file, clips, { plan, facts, stills }, deps);
-        if (needsReframe(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
+        if (wide(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
       }
 
       // The Final Cut file names the video where it ends up. For a video in a watched folder that is in the folder for the
       // day, so the folder's name is settled here, as late as can be, and the move below is given it. The library is in the
       // home folder, and the folder it is kept in is made when it is not there.
-      day = deps.watched ? dayFor(deps.watched, deps) : "";
+      // An episode's Final Cut file is kept in its edit/ folder, and names the video by a path from there and no library, so it
+      // reads the same on either Mac: each Mac is handed a copy of its own when the timeline is shown in Final Cut (edit.js).
+      day = deps.watched && !episode ? dayFor(deps.watched, deps) : "";
       const named = resolve(day ? join(deps.watched, day) : dirname(file), name);
-      const library = deps.home ? join(deps.home, LIBRARY) : "";
+      const library = deps.home && !episode ? join(deps.home, LIBRARY) : "";
       const ideas = read ? ideaNotes(plan, read.graphics) : [];
-      const textFor = (video) => finalCut(video, { plan, facts, spans, srt, printed, ideas }, { library, writer: deps.finalCut });
+      const src = episode ? relativeUrl(`../${name}`) : "";
+      const textFor = (video) => finalCut(video, { plan, facts, spans, srt, printed, ideas }, { library, src, writer: deps.finalCut });
       const first = textFor(named);
       let wrong = first.why || "";
       try {
@@ -841,16 +863,34 @@ async function workOn(file, deps) {
     // video where it stays.
     const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...cut.flatMap((made) => made.files), out.plan];
     if (deps.watched) progress.step("Filing");
+    const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
+    if (episode) {
+      // An episode is filed into its own folder in Episodes, by clones, and the raw video stays in the drop folder until the
+      // late check. When it cannot be filed, no record is written, and the next run files it again.
+      const stem = basename(name, extname(name));
+      let filed = null;
+      try {
+        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work }, deps);
+        keepWork = true;
+      } catch (e) {
+        const why = `it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`;
+        missing.push(why);
+        log(`${name}: ${why}. It stays in the drop folder, and is done again the next time.`);
+      }
+      if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
+      else notify(`${name} could not be put into Episodes. It stays in the drop folder; see the log.`);
+      finished = !missing.length;
+      return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder: filed ? filed.name : "", ...(filed ? { filed } : {}), message: missing.join("; ") };
+    }
     const folder = deps.watched ? fileAway(deps.watched, file, held.filter((f) => files.has(f)), deps, day, () => nameAgain(file)) : "";
     const where = folder ? `, in the folder ${folder}` : "";
-    const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (plan) notify(`The cut plan for ${name} is ready${where}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}.${unasked}`);
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
     finished = !missing.length;
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } finally {
     progress.end(finished);
-    rmSync(work, { recursive: true, force: true });
+    if (!keepWork) rmSync(work, { recursive: true, force: true });
   }
 }
 
@@ -1040,7 +1080,10 @@ export async function uneditedFolder(dir, deps) {
       return [];
     }
     log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");
-    for (const name of names) results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir }));
+    // When this is this Mac's drop folder, each video is made into an episode (filing.js).
+    const { settings } = deps;
+    const episode = episodeMode(dir, settings) ? { root: settings.root, machine: settings.machine, checkout: settings.checkout, home: deps.home || homedir() } : null;
+    for (const name of names) results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir, ...(episode ? { episode } : {}) }));
   } finally {
     rmSync(lock, { force: true });
   }
@@ -1123,7 +1166,9 @@ const banner = (text) => {
     run was asked to do: with --rules-only among it, the run is told never to ask Claude. */
 export function depsFor(found, log, env = process.env, args = {}) {
   const home = env.HOME || homedir();
-  return { run: runProgram, tools: found, model: found.model, home, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
+  // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
+  const settings = readSettings(home).settings || null;
+  return { run: runProgram, tools: found, model: found.model, home, settings, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends

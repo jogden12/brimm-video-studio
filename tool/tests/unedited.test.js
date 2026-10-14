@@ -16,6 +16,8 @@ import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder } from "../progress.js";
+import { writeSettings } from "../settings.js";
+import { readEpisode } from "../episode.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -2393,9 +2395,16 @@ describe("before it starts", () => {
     const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL, "/usr/bin/swift"], "/usr/bin");
     const log = () => {};
     const deps = depsFor(programs, log, { HOME });
-    assert.deepEqual(Object.keys(deps).sort(), ["home", "log", "model", "notify", "progress", "rulesOnly", "run", "tools", "wait"]);
-    assert.deepEqual([deps.home, deps.tools, deps.model, deps.log, deps.run], [HOME, programs, MODEL, log, runProgram]);
+    assert.deepEqual(Object.keys(deps).sort(), ["home", "log", "model", "notify", "progress", "rulesOnly", "run", "settings", "tools", "wait"]);
+    assert.deepEqual([deps.home, deps.tools, deps.model, deps.log, deps.run, deps.settings], [HOME, programs, MODEL, log, runProgram, null]);
     assert.equal(depsFor(programs, log, {}).home, homedir());
+  });
+  it("gives a run from the command line this Mac's settings for episodes, from the home folder HOME names, when it has them", () => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-home-"));
+    const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL], "/usr/bin");
+    writeSettings(home, { machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout" });
+    assert.deepEqual(depsFor(programs, () => {}, { HOME: home }).settings, { version: 1, machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout" });
+    rmSync(home, { recursive: true, force: true });
   });
   it("gives a run from the command line the word that Claude is not to be asked, only when --rules-only was given", () => {
     const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL], "/usr/bin");
@@ -2707,5 +2716,171 @@ describe("what the tool says of itself", () => {
   it("says what each call to Claude leaves in the home folder, and that nothing there is taken away from here", () => {
     assert.ok(whole.includes(" Claude Code keeps a folder of its own for every folder it is run in, under .claude/projects in the home folder, named after that folder's path. So each try leaves one there, "));
     assert.ok(whole.includes(" nothing under .claude is ever deleted from here. "));
+  });
+});
+
+/** A test of the episode import: setup's folder and stand-ins, with this Mac's settings, BRIMM Video in the test's folder and
+    this Mac's drop folder in it, a recording of two minutes, so that it makes an episode and not a short video, and a clone
+    that copies and is listed in `clones`. `drop(name)` puts a video in the drop folder. Nothing is moved in an episode's
+    import, so the stand-in for a move fails the test. */
+function episodic(script = {}) {
+  const t = setup({ probed: probed({ duration: "120.000000" }), ...script });
+  const root = join(t.dir, "BRIMM Video");
+  const drop = join(root, "Unedited Video", "Mac Studio");
+  mkdirSync(drop, { recursive: true });
+  const clones = [];
+  t.deps.settings = { version: 1, machine: "Mac Studio", root, checkout: "/checkout" };
+  t.deps.clone = (from, to) => {
+    clones.push([from, to]);
+    copyFileSync(from, to);
+  };
+  t.deps.commit = "abc1234";
+  t.deps.now = () => new Date("2026-10-13T10:00:00");
+  t.deps.move = (from) => assert.fail(`nothing is moved in an episode's import, and ${from} was`);
+  const episodes = join(root, "Episodes");
+  const put = (name, bytes = "video") => {
+    writeFileSync(join(drop, name), bytes);
+    return join(drop, name);
+  };
+  const within = (folder, ...path) => readdirSync(join(episodes, folder, ...path)).sort();
+  return { ...t, root, drop, episodes, clones, put, within };
+}
+
+describe("an episode imported from this Mac's drop folder", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  /** The files an episode's folder holds at its top, of the rules' own: today's files of a video, less the Final Cut file,
+      which is in edit/, and with the folders edit/ and record/. */
+  const TOP = [...ALL.filter((ending) => ending !== "fcpxml").map((ending) => `Talk.${ending}`), "edit", "record"].sort();
+  it("files the video and everything made of it into a new folder in Episodes, named for the day, the video and this Mac", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, FOLDER]);
+    assert.deepEqual(readdirSync(t.episodes), [FOLDER]);
+    assert.deepEqual(t.within(FOLDER), TOP);
+    assert.deepEqual([t.within(FOLDER, "edit"), t.within(FOLDER, "record")], [["main.v0.fcpxml"], ["0001.json"]]);
+    t.done();
+  });
+  it("puts every file into Dropbox by a clone, the raw video from the drop folder, the rest from the run's own folder, and the record last", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const runs = join(t.home, "BRIMM Video Work", ".runs");
+    assert.deepEqual(t.clones[0], [join(t.drop, "Talk.mov"), join(t.episodes, FOLDER, "Talk.mov")]);
+    assert.ok(t.clones.slice(1, -1).every(([from]) => from.startsWith(runs + "/")), "each made file comes from the run's own folder in BRIMM Video Work");
+    assert.equal(t.clones[t.clones.length - 1][1], join(t.episodes, FOLDER, "record", "0001.json"));
+    assert.equal(t.clones.length, TOP.length - 2 + 2);
+    t.done();
+  });
+  it("writes a first record that lists every file with its size", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const folder = join(t.episodes, FOLDER);
+    const { record } = readEpisode(folder);
+    assert.match(record.id, /^e-20261013-[0-9a-f]{6}$/);
+    assert.deepEqual([record.rev, record.kind, record.writer, record.name, record.title, record.reels], [1, "episode", { commit: "abc1234", on: "Mac Studio" }, { text: "Talk", placeholder: true }, null, []]);
+    assert.deepEqual(record.video, { file: "Talk.mov", bytes: 5, seconds: 120, recorded: "2026-10-13", recordedFrom: "import" });
+    const sizes = Object.fromEntries([...TOP.filter((n) => n !== "edit" && n !== "record").map((n) => [n, statSync(join(folder, n)).size]), ["edit/main.v0.fcpxml", statSync(join(folder, "edit", "main.v0.fcpxml")).size]]);
+    assert.deepEqual(record.files, sizes);
+    t.done();
+  });
+  it("names the video in edit/main.v0.fcpxml by a path from the file, and names no library", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const xml = readFileSync(join(t.episodes, FOLDER, "edit", "main.v0.fcpxml"), "utf8");
+    assert.deepEqual(tags(xml, "media-rep").map((m) => m.src), ["../Talk.mov"]);
+    assert.doesNotMatch(xml, /import-options/);
+    t.done();
+  });
+  it("leaves the raw video in the drop folder, and the run's own folder in BRIMM Video Work/.runs, for the late check", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(readdirSync(t.drop), ["Talk.mov"]);
+    const runs = readdirSync(join(t.home, "BRIMM Video Work", ".runs"));
+    assert.equal(runs.length, 1);
+    assert.ok(readdirSync(join(t.home, "BRIMM Video Work", ".runs", runs[0], "made")).includes("Talk.rough-cut.mp4"));
+    t.done();
+  });
+  it("takes the day the file says it was recorded when it says one", async () => {
+    const t = episodic({ probed: JSON.stringify({ ...JSON.parse(probed({ duration: "120.000000" })), format: { format_name: "mov", start_time: "0.000000", duration: "120.000000", tags: { creation_time: "2026-10-01T15:00:00.000000Z" } } }) });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const { video } = readEpisode(join(t.episodes, FOLDER)).record;
+    assert.deepEqual([video.recorded, video.recordedFrom], [new Date("2026-10-01T15:00:00.000000Z").toLocaleDateString("en-CA"), "video"]);
+    t.done();
+  });
+  it("makes a short or upright recording a short video: no upright version and no clips, and Claude's notes kept", async () => {
+    for (const probedAs of [probed(), probed({ picture: { width: 1080, height: 1920 }, duration: "120.000000" })]) {
+      const t = episodic({ probed: probedAs, claude: [answers(REPLY)] });
+      t.put("Talk.mov");
+      await uneditedFolder(t.drop, t.deps);
+      const names = t.within(FOLDER);
+      assert.ok(!names.includes("Talk.rough-cut.vertical.mp4") && !names.some((n) => n.includes(".reel-")), names.join(", "));
+      assert.ok(names.includes("Talk.edit-notes.txt"));
+      const { record } = readEpisode(join(t.episodes, FOLDER));
+      assert.deepEqual([record.kind, record.reels], ["short video", []]);
+      t.done();
+    }
+  });
+  it("puts the clips Claude picked into the record as Reel candidates", async () => {
+    const t = episodic({ claude: [answers(REPLY)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const { record } = readEpisode(join(t.episodes, FOLDER));
+    const plan = JSON.parse(readFileSync(join(t.episodes, FOLDER, "Talk.cut-plan.json"), "utf8"));
+    const clip = plan.claude.clips[0];
+    assert.deepEqual(record.reels, [{ n: 1, status: "candidate", from: clip.start, to: clip.end, title: clip.hook, why: clip.why, files: ["Talk.reel-1.mp4", "Talk.reel-1.srt"], pushed: [] }]);
+    t.done();
+  });
+  it("says in the banner what to say to Claude next", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.notes, ['Ready: Talk. In Claude, say "open Talk".']);
+    t.done();
+  });
+  it("uses again the folder of an import that stopped before its record, and writes each file again", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    const stopped = join(t.episodes, "2026-10-12 Talk (Mac Studio)");
+    mkdirSync(join(stopped, "record"), { recursive: true });
+    writeFileSync(join(stopped, "Talk.mov"), "video");
+    writeFileSync(join(stopped, "Talk.srt"), "half of the captions");
+    writeFileSync(join(stopped, "record", "0001.json"), "{");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder, readdirSync(t.episodes)], [true, "2026-10-12 Talk (Mac Studio)", ["2026-10-12 Talk (Mac Studio)"]]);
+    assert.equal(readFileSync(join(stopped, "Talk.srt"), "utf8"), SPELLED);
+    assert.equal(readEpisode(stopped).record.rev, 1);
+    t.done();
+  });
+  it("files into a dated folder as today when this Mac has no settings, or the folder is not its drop folder", async () => {
+    for (const settings of [null, "another"]) {
+      const t = setup();
+      t.deps.settings = settings && { version: 1, machine: "Mac Studio", root: join(t.dir, "BRIMM Video"), checkout: "/checkout" };
+      t.video("a.mov");
+      const [r] = await uneditedFolder(t.dir, t.deps);
+      assert.deepEqual([r.ok, r.folder], [true, "2026-10-13"]);
+      assert.deepEqual(t.inside("2026-10-13"), ALL.map((ending) => "a." + ending));
+      assert.ok(!existsSync(join(t.dir, "BRIMM Video")));
+      t.done();
+    }
+  });
+  it("says why, keeps the video in the drop folder, and writes no record, when a file cannot be put into Episodes", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    t.deps.clone = (from, to) => {
+      if (to.endsWith(".rough-cut.mp4")) throw new Error("cloning is not possible there");
+      copyFileSync(from, to);
+    };
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /^it could not be filed into Episodes: Talk\.rough-cut\.mp4 could not be put into .*: cloning is not possible there\. Nothing was copied$/);
+    assert.deepEqual([readdirSync(t.drop), readEpisode(join(t.episodes, FOLDER)).code], [["Talk.mov"], "NONE"]);
+    assert.deepEqual(t.notes, ["Talk.mov could not be put into Episodes. It stays in the drop folder; see the log."]);
+    assert.ok(!existsSync(join(t.home, "BRIMM Video Work", ".runs")) || readdirSync(join(t.home, "BRIMM Video Work", ".runs")).length === 0);
+    t.done();
   });
 });
