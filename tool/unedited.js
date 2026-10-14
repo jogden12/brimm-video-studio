@@ -49,8 +49,8 @@ import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl } from "./fcpxml.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode } from "./filing.js";
+import { isWhole, textWriter } from "./dropbox.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, heldBy, clearCrashes } from "./filing.js";
 import { readSettings, runsFolder } from "./settings.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -595,7 +595,8 @@ function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { lib
 }
 
 async function workOn(file, deps) {
-  const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk, progress = noProgress } = deps;
+  const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
+  let progress = deps.progress || noProgress;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
   // A file has arrived when its size has settled and it is whole on this Mac: Dropbox can show a file at its full size before
@@ -620,10 +621,16 @@ async function workOn(file, deps) {
   // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
   // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
   const files = filesOf(work, { name, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
-  deps = { ...deps, files };
+  // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see.
+  if (episode) {
+    const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
+    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
+  }
+  deps = { ...deps, files, progress };
   const fail = (why) => {
     // An episode's import writes nothing into the drop folder: its status file says why (importing.js).
-    if (!episode) {
+    if (episode) progress.fail(why);
+    else {
       writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
       files.put(out.failed);
     }
@@ -875,6 +882,7 @@ async function workOn(file, deps) {
       } catch (e) {
         const why = `it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`;
         missing.push(why);
+        progress.fail(why);
         log(`${name}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
       if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
@@ -1083,7 +1091,19 @@ export async function uneditedFolder(dir, deps) {
     // When this is this Mac's drop folder, each video is made into an episode (filing.js).
     const { settings } = deps;
     const episode = episodeMode(dir, settings) ? { root: settings.root, machine: settings.machine, checkout: settings.checkout, home: deps.home || homedir() } : null;
-    for (const name of names) results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir, ...(episode ? { episode } : {}) }));
+    if (episode) {
+      for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${video}: an import of it on this Mac stopped before it was done, so it is imported again.`);
+    }
+    for (const name of names) {
+      // A video an episode or an import already holds is not imported again (filing.js).
+      const held = episode ? heldBy({ root: episode.root, video: name, bytes: sizeOnDisk(join(dir, name)) }) : "";
+      if (held) {
+        log(`${name}: ${held}`);
+        results.push({ ok: true, name, held });
+        continue;
+      }
+      results.push(await uneditedFile(join(dir, name), { ...deps, outDir: "", watched: dir, ...(episode ? { episode } : {}) }));
+    }
   } finally {
     rmSync(lock, { force: true });
   }

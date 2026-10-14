@@ -14,6 +14,8 @@ import { cloneIn, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
 import { dropFolder, episodesFolder } from "./settings.js";
+import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
+import { isRunning } from "./run.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -125,4 +127,99 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
   log(`${video}: filed into Episodes as "${found.name}"${found.reused ? ", in the folder an import that stopped had made" : ""}.`);
   return { name: found.name, path, record, entries };
+}
+
+/** How often a status is written while a step runs: once a minute, so that one not written for 10 minutes is an import that
+    stopped. */
+const STATUS_EVERY_MS = 60 * 1000;
+
+/** The progress reporter of an episode's import: it tells `inner`, the progress panel's reporter, everything it is told, and
+    also writes the import's status file in Episodes/.importing/ (importing.js): at the start, at each step, and once a minute
+    while a step runs, by the timer `every`. `fail(why)` writes the status with why the import failed, and the status is left.
+    `end` stops the timer and leaves the status: the late check takes it away. A status that cannot be written costs nothing
+    but itself: the log says so once, and the work goes on. */
+export function statusReporter(inner, { root, machine, video, bytes, writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
+  const status = { version: 1, machine, pid, video, bytes, seconds: null, step: "Waiting to start" };
+  let told = false;
+  const write = (more = {}) => {
+    try {
+      writeStatus(root, { ...status, ...more, at: localStamp(new Date(now())) }, writeText);
+    } catch (e) {
+      if (!told) log(`${video}: its status could not be written into Episodes/.importing (${String(e.message).replace(/\.$/, "")}). The work goes on.`);
+      told = true;
+    }
+  };
+  let timer = null;
+  return {
+    begin(name) {
+      inner.begin(name);
+      write();
+      timer = every(() => write(), STATUS_EVERY_MS);
+      if (timer && typeof timer.unref === "function") timer.unref();
+    },
+    length(seconds) {
+      inner.length(seconds);
+      status.seconds = seconds;
+    },
+    steps: (names) => inner.steps(names),
+    step(name, shown) {
+      inner.step(name, shown);
+      status.step = name;
+      write();
+    },
+    fraction: (f) => inner.fraction(f),
+    encoding: (seconds) => inner.encoding(seconds),
+    fail(why) {
+      write({ failed: why });
+    },
+    end(finished) {
+      if (timer !== null) cancel(timer);
+      timer = null;
+      inner.end(finished);
+    }
+  };
+}
+
+/** Why the video `video`, of `bytes` bytes, in this Mac's drop folder is not to be imported now, in plain words: "" when it
+    is. An episode in `episodes` whose whole record names this video at this size holds it, and so does a status that holds
+    it (holdsVideo): an import running on either Mac, one that failed, and one whose late check found a problem.
+    The design says a video matches an episode by its size and its length. The size is enough here: this guard runs before
+    ffprobe has read the length, the name must match too, and two recordings of one name and one size to the byte are not
+    met in practice. Matching the length as well would mean an ffprobe of every video in the drop folder at every run. */
+export function heldBy({ root, video, bytes, now = Date.now() }) {
+  const episodes = episodesFolder(root);
+  let names = [];
+  try {
+    names = readdirSync(episodes).filter((n) => !n.startsWith("."));
+  } catch (e) {
+    // There are no episodes yet.
+  }
+  for (const name of names.sort()) {
+    const { record } = readEpisode(join(episodes, name));
+    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return `already imported as ${name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+  }
+  for (const { status } of readStatuses(root, now)) {
+    if (!status || status.video !== video || !holdsVideo(status, now)) continue;
+    const state = importState(status, now);
+    if (state === "failed") return `its import failed on ${status.machine}: ${String(status.failed).replace(/\.$/, "")}. Say "try it again" to import it again.`;
+    if (state === "problem") return `copied in, but the late check found a problem: ${String(status.problem).replace(/\.$/, "")}.`;
+    return `it is being imported on ${status.machine}.`;
+  }
+  return "";
+}
+
+/** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,
+    with nothing failed and no problem, that has gone unwritten for 10 minutes, or whose run is no longer running (one run
+    at a time works a drop folder, so a run of this Mac that is not this one and not running has stopped). Gives back the
+    videos whose status was taken away, to be imported again. */
+export function clearCrashes({ root, machine, now = Date.now(), alive = isRunning, pid = process.pid }) {
+  const cleared = [];
+  for (const { status } of readStatuses(root, now)) {
+    if (!status || status.machine !== machine || status.failed || status.problem) continue;
+    const gone = status.pid !== pid && !alive(status.pid);
+    if (!gone && !leftByCrash(status, now, machine)) continue;
+    removeStatus(root, status.video, machine);
+    cleared.push(status.video);
+  }
+  return cleared;
 }
