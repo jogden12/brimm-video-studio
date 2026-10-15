@@ -9,7 +9,7 @@ import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFil
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions } from "../cuts.js";
@@ -3672,5 +3672,49 @@ describe("the streams a run takes, by their numbers, when they are not their pla
     assert.deepEqual([asset.audioChannels, asset.audioRate], ["2", "44100"]);
     plain.done();
     t.done();
+  });
+});
+
+describe("the check that Claude can be asked from here (--check-claude)", () => {
+  /** A stand-in for Claude Code that ends as `ends` says, and what it was given. */
+  const claude = (ends) => {
+    const asked = [];
+    const run = async (cmd, args, given = {}) => {
+      asked.push({ cmd, args, given, there: readdirSync(given.cwd) });
+      return ends;
+    };
+    return { asked, run };
+  };
+  it("asks Claude once, locked down as the import asks it, from an empty folder, and says it answered", async () => {
+    const c = claude(answers("OK"));
+    const said = [];
+    assert.equal(await checkClaude({ run: c.run, tools: { claude: "CLAUDE" }, say: (line) => said.push(line) }), 0);
+    assert.deepEqual(said, ["Claude answered from here."]);
+    assert.equal(c.asked.length, 1);
+    const { cmd, args, given, there } = c.asked[0];
+    assert.equal(cmd, "CLAUDE");
+    assert.deepEqual(args.slice(0, 3), ["-p", "--model", CLAUDE_MODEL]);
+    for (const locked of [["--tools", ""], ["--setting-sources", ""]]) assert.ok(args.some((a, i) => a === locked[0] && args[i + 1] === locked[1]), locked[0]);
+    assert.ok(args.includes("--strict-mcp-config") && args.includes("--no-session-persistence"));
+    assert.equal(given.input, "Reply with the one word OK.");
+    assert.ok(given.limit > 0 && given.out > 0);
+    assert.deepEqual(there, []);
+  });
+  it("says why when Claude could not be asked from here, and ends with 1", async () => {
+    for (const [ends, why] of [
+      [{ code: 1, stderr: "", stdout: printed("Not logged in · Please run /login", { is_error: true }) }, "Claude Code gave an error (Not logged in · Please run /login)"],
+      [{ code: 1, stderr: "", outOfTime: true }, "it gave no answer in 2 minutes"],
+      [{ code: 0, stderr: "", stdout: "not JSON" }, "what Claude Code printed could not be read"]
+    ]) {
+      const said = [];
+      assert.equal(await checkClaude({ run: claude(ends).run, tools: { claude: "CLAUDE" }, say: (line) => said.push(line) }), 1, why);
+      assert.deepEqual(said, [`Claude could not be asked from here: ${why}.`]);
+    }
+    const said = [];
+    assert.equal(await checkClaude({ run: claude(answers("OK")).run, tools: { claude: "" }, say: (line) => said.push(line) }), 1);
+    assert.deepEqual(said, ["Claude could not be asked from here: Claude Code is not on this Mac."]);
+  });
+  it("is asked for on its own, with no video", () => {
+    assert.deepEqual(parseArgs(["--check-claude"]), { file: "", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false, checkClaude: true });
   });
 });

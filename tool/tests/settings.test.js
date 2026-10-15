@@ -4,10 +4,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { studioFolder, studioFiles } from "../studio.js";
 import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain } from "../settings.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
@@ -179,11 +180,36 @@ describe("node settings.js", () => {
     assert.ok(readSettings(t.home).why.startsWith("This Mac has no settings for episodes"));
     t.done();
   });
+  it("writes her folder for Claude from this Mac's settings and the node it is given, says where, and ends with 0", () => {
+    const t = setup();
+    writeSettings(t.home, t.given);
+    assert.equal(t.asked("studio", "--node", "/opt/homebrew/bin/node"), 0);
+    // The folder as the disk has it, which is the folder Claude Code runs in.
+    const folder = realpathSync.native(studioFolder(t.home));
+    assert.deepEqual(t.said, [`Written: ${folder}`]);
+    assert.deepEqual(readFileSync(join(folder, ".claude", "settings.json"), "utf8"), studioFiles({ checkout: CHECKOUT, node: "/opt/homebrew/bin/node", folder })[".claude/settings.json"]);
+    assert.ok(existsSync(join(folder, "Pictures")));
+    t.done();
+  });
+  it("writes no folder for Claude, and ends with 2, without this Mac's settings or a whole path to node", () => {
+    const t = setup();
+    assert.equal(t.asked("studio", "--node", "/opt/homebrew/bin/node"), 2);
+    assert.match(t.said.join("\n"), /^This Mac has no settings for episodes .* Jason runs install\.sh --machine on it\.$/);
+    writeSettings(t.home, t.given);
+    for (const argv of [["studio"], ["studio", "--node"], ["studio", "--node", "node"], ["studio", "/opt/homebrew/bin/node"], ["studio", "--node", "/opt/homebrew/bin/node", "more"]]) {
+      t.said.length = 0;
+      assert.equal(t.asked(...argv), 2, argv.join(" "));
+      assert.match(t.said[0], /^This Mac's settings for episodes/, argv.join(" "));
+    }
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    t.done();
+  });
   it("says how it is used, and ends with 0, when it is asked to", () => {
     const t = setup();
     assert.equal(t.asked("--help"), 0);
     assert.match(t.said[0], /node settings\.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"/);
     assert.match(t.said[0], /node settings\.js show/);
+    assert.match(t.said[0], /node settings\.js studio --node "<path to node>"/);
     t.done();
   });
   it("shows the settings and the folders found from them, and ends with 0", () => {

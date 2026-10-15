@@ -429,18 +429,17 @@ describe("finish, the detached part", () => {
   });
   it("never uses a hand-off's revision twice, even when the record of the last one was never written", async () => {
     let wrote = false;
-    let t = null;
-    let found = null;
-    t = setup({ programs: { WHISPER: (args) => {
-      if (!wrote && found) {
+    const t = setup();
+    const found = await asked(t);
+    // The other Mac writes the record after the hand-off is copied in, and before this Mac writes it.
+    const clone = t.ctx.deps.clone;
+    t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (!wrote && to.endsWith(HANDOFF)) {
         wrote = true;
         writeFileSync(recordFile(found.folder, found.record.rev + 1), recordText({ ...found.record, rev: found.record.rev + 1 }));
       }
-      const base = args[args.indexOf("-of") + 1];
-      writeFileSync(base + ".srt", SRT[partOf(args[args.indexOf("-f") + 1])] || SRT.main);
-      return { code: 0, stderr: "" };
-    } } });
-    found = await asked(t);
+    };
     const first = await finishNow(t.ctx, found);
     assert.equal(first.ok, false);
     assert.equal(JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8")).revision, 1);
@@ -497,7 +496,7 @@ describe("finish, the detached part", () => {
     assert.deepEqual(t.inFinal(found), []);
     t.done();
   });
-  it("keeps the files in final/ and leaves the record alone when the other Mac changes the episode while it works", async () => {
+  it("copies nothing into final/ and leaves the record alone when the other Mac changes the episode while it works", async () => {
     let wrote = false;
     let t = null;
     let found = null;
@@ -514,8 +513,8 @@ describe("finish, the detached part", () => {
     found = await asked(t);
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, false);
-    assert.match(result.failed.join(" "), /this episode changed on the other Mac: open it again/);
-    assert.ok(existsSync(join(found.folder, "final", HANDOFF)));
+    assert.match(result.failed.join(" "), /The episode changed while finish was working, so nothing was copied into final\/\. Say finish again\./);
+    assert.ok(!existsSync(join(found.folder, "final")));
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], "the hand-off is not shown when the record was not written");
     assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, "From Final Cut keeps every file");
     t.done();

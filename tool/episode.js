@@ -135,8 +135,27 @@ const everything = (folder) => readdirSync(folder, { recursive: true });
     is kept there on purpose. */
 const conflictedIn = (names) => names.filter((n) => !/^history(\/|$)/.test(n) && CONFLICTED.test(basename(n))).sort();
 
-/** Why an episode cannot be gone on with while Dropbox keeps conflicted copies in it, naming them. */
-const conflictWhy = (copies) => `Dropbox has kept a conflicted copy in this episode: ${copies.join(", ")}. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept`;
+/** Why an episode cannot be gone on with while Dropbox keeps conflicted copies in it, naming them, and what to say: `resolve`
+    sorts it out. With no full stop, since its callers add one. */
+const conflictWhy = (copies) => `Dropbox has kept a conflicted copy in this episode: ${copies.join(", ")}. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict"`;
+
+/** The file a conflicted copy is a copy of, as a path from the episode's folder: the copy's path with Dropbox's bracketed words,
+    and the space before them, taken out. "record/0008 (Sallie's conflicted copy 2026-10-20).json" is a copy of
+    "record/0008.json". */
+export function conflictedOf(path) {
+  const where = dirname(path);
+  const name = basename(path).replace(OWN_WORDS, "");
+  return where === "." ? name : `${where}/${name}`;
+}
+
+/** Text that may sit inside Dropbox's brackets: anything but a bracket, or a bracketed part of its own, as in a Mac's name
+    "MacBook Air (2)". */
+const INSIDE = String.raw`(?:[^()]|\([^()]*\))*`;
+/** Dropbox's bracketed words alone, with the space before them, so that a file whose own name has brackets keeps them:
+    "Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20).mov" is a copy of
+    "Leadership (managing conflict).mov". A number Dropbox puts after the words, for a second copy, goes with them. Finding
+    copies goes by CONFLICTED, as it always has. */
+const OWN_WORDS = new RegExp(String.raw` ?(?:\(${INSIDE}conflicted copy${INSIDE}\)|\((?:Case|Unicode Encoding|Selective Sync) Conflict\))(?: \(\d+\))?`, "i");
 
 /** The conflicted copies Dropbox has kept in an episode's folder, at any depth, as paths from the folder with "/", in order.
     [] when there are none, or when the folder cannot be read. */
@@ -177,8 +196,9 @@ function recordIn(folder, n) {
     a later brimm-video wrote it; or {why, code} in plain words. It stops on a conflicted copy of any file in the folder, a
     record's or a timeline's alike (code CONFLICTED), since the record may then not say what the folder holds. A folder with
     no whole record is an import that has not finished (code NONE). A record above the one read that is not whole yet, as
-    while Dropbox brings it over, is passed over here, and stops a write (writeEpisode). */
-export function readEpisode(folder) {
+    while Dropbox brings it over, is passed over here, and stops a write (writeEpisode). With `pastCopies`, which `resolve`
+    alone gives, the conflicted copies are passed over, and the newest whole record is read as if they were not there. */
+export function readEpisode(folder, { pastCopies = false } = {}) {
   let names;
   try {
     names = everything(folder);
@@ -186,7 +206,7 @@ export function readEpisode(folder) {
     return { why: `the folder ${basename(folder)} could not be read (${e.code === "ENOENT" ? "it is not there" : e.message})`, code: "UNREADABLE" };
   }
   const copies = conflictedIn(names);
-  if (copies.length) return { why: conflictWhy(copies), code: "CONFLICTED" };
+  if (copies.length && !pastCopies) return { why: conflictWhy(copies), code: "CONFLICTED" };
   for (const n of recordNumbers(folder)) {
     const read = recordIn(folder, n);
     if (read) return { record: read.record, file: recordFile(folder, n), ...(read.newer ? { newer: true } : {}) };
@@ -247,12 +267,12 @@ export function undone(record, home) {
     Otherwise the record is written as record/<expectRev + 1>.json, a new file, with that rev and with `writer`, { commit, on },
     through `writeText(to, text)`, the rule's text writer, which never writes over a file; this Mac notes the rev in
     written.json in `home`; and the record is given back as written. Any field this version does not know is written as it
-    was. */
-export function writeEpisode(folder, record, { expectRev, writeText, writer, home }) {
+    was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. */
+export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false }) {
   if (!Number.isInteger(expectRev) || expectRev < 0) throw new Error("the episode's record was not written, because the rev it was read at was not given");
   if (isObject(record) && Number.isInteger(record.version) && record.version > RECORD_VERSION) throw Object.assign(new Error("Jason has a newer brimm-video. Ask him to update this Mac."), { code: "NEWER" });
   const copies = conflictedCopies(folder);
-  if (copies.length) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
+  if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });
   const next = { ...record, rev: expectRev + 1, writer };
   const fault = episodeFault(next);
@@ -312,6 +332,8 @@ export const heldElsewhere = (record, machine) => (record.editing && record.edit
 /** The record with `machine` editing it since `at`. */
 export const claimed = (record, machine, at) => ({ ...record, editing: { by: machine, since: at } });
 
-/** The record let go at `at`: nobody is editing it, and `files`, the files the episode holds now with their sizes, are kept as
-    what it held then, so that the other Mac's `open` can wait until they have all arrived. */
-export const released = (record, files, at = localStamp()) => ({ ...record, editing: null, released: { at, files } });
+/** The record let go at `at` by the Mac `by`: nobody is editing it, and `files`, the files the episode holds now with their
+    sizes, are kept as what it held then, so that the other Mac's `open` can wait until they have all arrived. `answers` are
+    what that Mac said of each part it pushed last, by its key ("main", "reel 2"): { v, said }, where `said` is "no changes"
+    or "changes stay on <Mac>", which the other Mac's push takes in place of asking (spec section 4). */
+export const released = (record, files, { at = localStamp(), by, answers = {} } = {}) => ({ ...record, editing: null, released: { at, by, files, answers } });

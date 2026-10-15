@@ -37,7 +37,7 @@
 // progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1168,10 +1168,11 @@ export function parseArgs(argv) {
     else if (v === "--out") a.out = argv[++i] || "";
     else if (v === "--rules-only") a.rulesOnly = true;
     else if (v === "--from-plan") a.fromPlan = true;
+    else if (v === "--check-claude") a.checkClaude = true;
     else if (!a.file) a.file = v;
   }
   a.folders = a.folders.filter(Boolean);
-  if (!a.file && !a.folders.length) a.help = true;
+  if (!a.file && !a.folders.length && !a.checkClaude) a.help = true;
   return a;
 }
 
@@ -1187,6 +1188,8 @@ clips it picked.
   --out <folder>     where to write, for one file
   --rules-only       never ask Claude: the plan is the rules' alone, there are no notes and no clips, and nothing leaves
                      this Mac
+  --check-claude     ask Claude once, as the import does, and say whether it answered: the installer runs this from a
+                     launch agent of its own, to see that the background job can reach Claude
   --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
                      cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
                      is made, Claude is not asked, and no other file is touched. Never with --watch
@@ -1246,12 +1249,46 @@ export async function doAsked(args, deps) {
   return r.ok ? 0 : 1;
 }
 
+/** How long the check of Claude may take: two minutes. */
+const CHECK_MS = 2 * 60 * 1000;
+
+/** Ask Claude once, as the import asks it (CLAUDE_ARGS, the model named above, from a new empty folder), to reply with one
+    word, and say whether it answered: "Claude answered from here." or why it could not be asked. The installer runs this
+    from a launch agent of its own, once, so that a sign-in the background job cannot see shows at setup and not at the first
+    import. Resolves 0 when Claude answered, and 1 when it did not. */
+export async function checkClaude({ run, tools, say, tmpDir = tmpdir() }) {
+  const no = (why) => {
+    say(`Claude could not be asked from here: ${why}.`);
+    return 1;
+  };
+  if (!tools.claude) return no("Claude Code is not on this Mac");
+  const folder = mkdtempSync(join(tmpDir, "brimm-claude-check-"));
+  try {
+    const ended = await run(tools.claude, CLAUDE_ARGS, { input: "Reply with the one word OK.", cwd: folder, limit: CHECK_MS, out: CLAUDE_PRINTED });
+    if (ended.outOfTime) return no(`it gave no answer in ${CHECK_MS / 60000} minutes`);
+    let told = null;
+    try {
+      told = JSON.parse(ended.stdout);
+    } catch (e) {
+      // It is not JSON, and the line below says so.
+    }
+    if (told && told.is_error === true) return no(`Claude Code gave an error (${lastLine(typeof told.result === "string" ? told.result : "")})`);
+    if (ended.code !== 0) return no(`Claude Code stopped (${reasonOf(ended)})`);
+    if (!told || told.is_error !== false || typeof told.result !== "string") return no("what Claude Code printed could not be read");
+    say("Claude answered from here.");
+    return 0;
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
 export async function main(argv) {
   const args = parseArgs(argv);
   if (args.help) {
     process.stdout.write(HELP);
     return 0;
   }
+  if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`) });
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const found = findPrograms();
   if (found.missing.length) {

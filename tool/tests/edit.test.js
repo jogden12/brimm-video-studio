@@ -55,6 +55,8 @@ function setup({ settings = true } = {}) {
     },
     wait: async () => {},
     alive: () => false,
+    // No test looks anything up on the network: this Mac is online unless a test says otherwise.
+    online: async () => true,
     statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }),
     // No test asks launchctl about this Mac's own launch agent: it is idle unless a test says otherwise.
     agentRunning: () => false
@@ -274,12 +276,12 @@ describe("node edit.js open", () => {
     assert.ok(!again.text.includes("Make available offline"), again.text);
     t.done();
   });
-  it("shows a record of a newer layout, and says this Mac needs updating to change it", async () => {
+  it("does not open a record of a newer layout, since opening writes the claim, and says this Mac needs updating", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
-    assert.equal(r.code, 0);
+    assert.equal(r.code, 1);
     assert.deepEqual(r.said, ["2026-10-13 Talk (Mac Studio) was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac."]);
     t.done();
   });

@@ -15,6 +15,14 @@ const HERE = dirname(INSTALL);
 const notAMac = process.platform !== "darwin" ? "the installer is for a Mac, and so is plutil, which reads what it would write" : false;
 const PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const MODEL = "Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin";
+/** What Claude Code prints for `claude auth status --json` when it is signed in: its email is never to be shown. */
+const SIGNED_IN = '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","email":"sallie@example.com","orgName":"The BRIMM"}';
+/** Stand-ins for the programs that say what the Mac has: Xcode's command line tools there or not, and the Mac's macOS. */
+const XCODE_HERE = '[ "$1" = "-p" ] && echo /Library/Developer/CommandLineTools\n';
+const XCODE_MISSING = 'echo "xcode-select: error: unable to get active developer directory" >&2\nexit 2\n';
+const MACOS = (version) => `[ "$1" = "-productVersion" ] && echo ${version}\n`;
+/** A PATH for a launch agent of folders on no Mac, so that this Mac's own Claude Code is not found. */
+const NOWHERE_ELSE = "/nowhere/bin:/nowhere/else/bin";
 
 /** Ask the installer what it would do. Gives back how it ended, what it printed, each launch agent it showed, as plutil reads
     it, and what was changed: `left` is what is in the home folder afterwards, and `ran` the programs it ran that change
@@ -25,11 +33,19 @@ const ask = (...args) => askOn({}, ...args);
     what those files hold afterwards. `programs` names stand-ins to put in the home folder first, each by its path from
     there, such as ".local/bin/claude": a file that can be run and does nothing. `files` names plain files to put there, such
     as the transcriber's model. `agentPath` is the PATH the installer is told to give a launch agent, in place of its own:
-    folders with no programs in them, for a test that must not find the Claude Code of the Mac it runs on. */
+    folders with no programs in them, for a test that must not find the Claude Code of the Mac it runs on.
+    For one of the two Macs (--machine) the installer asks Claude Code whether it is signed in, and its version, so such a run
+    is given a stand-in for it, and no test runs the real one: `claude` is what the stand-in prints for `auth status --json`,
+    by default signed in, with an email the installer must never print, and `claudeVersion` what it prints for --version.
+    With `claude: null` there is no stand-in: give `agentPath` too, so that this Mac's own Claude Code is not found. `onPath` names more stand-ins to put first on
+    its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". `finalCut` is the version of a made-up
+    Final Cut Pro the installer is pointed at, or null for none; without it the installer looks at this Mac's own. With
+    `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
+    holds the stand-ins and /usr/bin and /bin. */
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "" }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, finalCut, finalCutText, settings, bare = false }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -52,11 +68,39 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "" }, 
       mkdirSync(dirname(join(home, file)), { recursive: true });
       writeFileSync(join(home, file), "made for the test");
     }
-    for (const name of ["launchctl", "brew", "curl"]) {
+    for (const name of ["launchctl", ...(bare ? [] : ["brew"]), "curl"]) {
       writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${join(dir, "ran")}"\n`);
       chmodSync(join(bin, name), 0o755);
     }
-    const r = spawnSync("/bin/zsh", [INSTALL, ...args], { encoding: "utf8", input: "", env: { HOME: home, PATH: `${bin}:${process.env.PATH}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}) } });
+    // The stand-in for Claude Code answers what --print asks, signed out as the real one is, with exit 1, and writes any
+    // other call into `ran`, so that a --print that updated it or signed it in would show. So does xcode-select's, for any
+    // call but -p.
+    const ran = join(dir, "ran");
+    const signedOut = claude !== null && claude.includes('"loggedIn":false');
+    const stands = { ...onPath, ...(args.includes("--machine") && claude !== null ? { "claude-stand-in": `case "$*" in\n  "auth status --json") printf '%s' '${claude}'; exit ${signedOut ? 1 : 0} ;;\n  --version) echo '${claudeVersion}'; exit ${versionExit} ;;\n  *) echo "claude $*" >> "${ran}" ;;\nesac\n` } : {}) };
+    for (const [name, script] of Object.entries(stands)) {
+      const logged = name === "xcode-select" ? `[ "$1" = "-p" ] || echo "xcode-select $*" >> "${ran}"\n` : "";
+      writeFileSync(join(bin, name), `#!/bin/sh\n${logged}${script}`);
+      chmodSync(join(bin, name), 0o755);
+    }
+    // This Mac's settings, when a test gives them: --print reads them and must write nothing from them.
+    if (settings) {
+      mkdirSync(join(home, "Library", "Application Support", "BRIMM Video"), { recursive: true });
+      writeFileSync(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify({ version: 1, ...settings }));
+    }
+    let app = "";
+    if (finalCut !== undefined) {
+      app = join(dir, "Applications", "Final Cut Pro.app");
+      if (finalCut !== null) {
+        mkdirSync(join(app, "Contents"), { recursive: true });
+        writeFileSync(join(app, "Contents", "Info.plist"), finalCutText ?? `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${finalCut}</string></dict></plist>\n`);
+      }
+    }
+    const env = {
+      HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
+      ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(app ? { BRIMM_FINAL_CUT: app } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
+    };
+    const r = spawnSync("/bin/zsh", [INSTALL, ...args], { encoding: "utf8", input: "", env });
     const agents = (r.stdout.match(/<\?xml[\s\S]*?<\/plist>\n/g) || []).map((text, i) => {
       const file = join(dir, `agent-${i}.plist`);
       writeFileSync(file, text);
@@ -289,10 +333,38 @@ describe("the installer's own text", () => {
     assert.match(given, /^\nagent "\$node" > "\$AGENT_FILE"\nplutil -lint "\$AGENT_FILE" >\/dev\/null\nlaunchctl bootout "gui\/\$\(id -u\)\/\$LABEL" 2>\/dev\/null \|\| true\nlaunchctl bootstrap "gui\/\$\(id -u\)" "\$AGENT_FILE"\n/);
     // Nowhere else is a launch agent's file written or an agent loaded, and the writer is the one place the agent is made.
     const count = (what) => text.split(what).length - 1;
-    assert.deepEqual([count('> "$AGENT_FILE"'), count("launchctl bootstrap"), count('\n  agent "'), count('\nagent "')], [1, 1, 1, 1]);
+    assert.deepEqual([count('> "$AGENT_FILE"'), count('launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"'), count('\n  agent "'), count('\nagent "')], [1, 1, 1, 1]);
+    // The one other agent is the one-shot check of Claude, loaded once and taken away (below).
+    assert.equal(count("launchctl bootstrap"), 2);
     assert.match(text, /\nLABEL="com\.thebrimm\.unedited"\n/);
     assert.match(text, /\nAGENT_FILE="\$HOME\/Library\/LaunchAgents\/\$LABEL\.plist"\n/);
     assert.match(text, /\nLOG="\$HOME\/Library\/Logs\/brimm-video\.log"\n/);
+  });
+  // The check of Claude from the background job's own context is only made when the installer sets a Mac up, which no test
+  // does. So its lines are read here, and its launch agent is written by its own writer and read by plutil.
+  it("ends a Mac's setup with one real call to Claude from a launch agent's context, then takes that agent away", { skip: notAMac }, () => {
+    const check = text.slice(text.indexOf("# The check of Claude"), text.indexOf("\nif [[ -n \"$machine\" ]]; then\n  say \"\"\n  say \"Done. Drop a video in:\""));
+    for (const step of ['check_agent "$node" > "$CHECK_FILE"', 'plutil -lint "$CHECK_FILE" >/dev/null', 'launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"', 'launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true', 'rm -f "$CHECK_FILE"'])
+      assert.ok(check.includes(step), `${step}\n---\n${check}`);
+    assert.ok(check.indexOf('launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"') < check.indexOf('rm -f "$CHECK_FILE"'));
+    assert.match(check, /\nif \[\[ -n "\$machine" \]\] && claude="\$\(find_claude\)"; then\n/);
+    // Its launch agent: unedited.js --check-claude, once, at load, with the main agent's PATH, writing into a log of its own.
+    const writer = text.slice(text.indexOf("check_agent() {"), text.indexOf("\n}\n", text.indexOf("check_agent() {")) + 3);
+    const xml = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
+    const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
+    const file = join(dir, "check.plist");
+    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node > "${file}"`], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
+    assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
+      Label: "com.thebrimm.claude-check",
+      ProgramArguments: ["/opt/homebrew/bin/node", "/the tool/unedited.js", "--check-claude"],
+      RunAtLoad: true,
+      EnvironmentVariables: { PATH: "/opt/homebrew/bin:/usr/bin" },
+      StandardOutPath: "/home/Library/Logs/brimm-video-claude-check.log",
+      StandardErrorPath: "/home/Library/Logs/brimm-video-claude-check.log"
+    });
+    rmSync(dir, { recursive: true, force: true });
   });
   // The lines it ends with are only said once it has set the Mac up, which no test does. So they are read here, not run.
   it("ends by saying what the folder for unedited video gives", () => {
@@ -309,7 +381,11 @@ describe("the installer's own text", () => {
     // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them.
     assert.ok(!/backup/i.test(text), "the installer names no backups");
     assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
-    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"'), made);
+    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"\n  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi\n'), made);
+    // Her folder for Claude is written only when Claude Code is new enough for its guard, and the install says so at the end
+    // when it is not, and ends with 1.
+    const end = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    assert.match(end, /\n {2}if \[\[ -n "\$studio_why" \]\]; then\n {4}say "Her folder for Claude was not written: \$studio_why\."\n {4}exit 1\n {2}fi\n {2}exit 0\n/);
     const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
     assert.match(closing, /\nif \[\[ -n "\$machine" \]\]; then\n {2}say ""\n {2}say "Done\. Drop a video in:"\n {2}say " {2}\$drop"\n/);
   });
@@ -327,7 +403,10 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    assert.equal(text.split("plutil -extract").length - 1, 2);
+    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of Final Cut Pro's own
+    // Info.plist and of what Claude Code says of its sign-in.
+    const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Final Cut", "Claude", "Claude"]);
   });
 });
 
@@ -365,6 +444,107 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     const r = ask("--print", "--machine", "Sallie's laptop", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Unedited Video/Sallie's laptop`])]);
+    d.done();
+  });
+  it("tells, for her laptop, the tools it finds and the steps by hand, and never prints her email", () => {
+    const d = dropbox();
+    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    const out = said(r);
+    for (const line of [
+      "  Xcode's command line tools (git, swift):  here already",
+      "  Homebrew:  here already",
+      "  macOS:  27.0.1",
+      "  Final Cut Pro:  12.4, here",
+      "  Claude Code, signed in:  yes (max)",
+      "  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)",
+      "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)",
+      "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so step 9 of the setup guide, in the Code tab, is what proves her folder is locked down there",
+      "  At the end:  one real call to Claude from the background job, to prove its sign-in is seen there",
+      "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+    ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
+    // The checks come after the line about swift, in this order.
+    const at = (line) => out.indexOf(`\n  ${line}`);
+    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), out);
+    assert.ok(!order.includes(-1), out);
+    assert.doesNotMatch(r.out, /sallie@example\.com|The BRIMM"|orgName/);
+    changedNothing(r);
+    d.done();
+  });
+  it("says how to get Homebrew, Xcode's tools, Final Cut and Claude's sign-in when they are missing, and the macOS that Final Cut 12.4 needs", () => {
+    const d = dropbox();
+    const r = askWith({ bare: true, claude: '{"loggedIn":false}', onPath: { "xcode-select": XCODE_MISSING, sw_vers: MACOS("26.5") }, finalCut: null }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    for (const line of [
+      "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
+      '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      "  macOS:  26.5; Final Cut Pro 12.4 needs macOS 26.6 or later (System Settings > General > Software Update)",
+      "  Final Cut Pro:  not here. Install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push.",
+      "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
+      "  Programs to install with Homebrew:  ffmpeg whisper-cpp node"
+    ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+    changedNothing(r);
+    d.done();
+  });
+  it("says that a Final Cut Pro older than 12.4 was not what phase 0 checked, and how to update it, on the macOS 12.4 needs or not, as on her laptop", () => {
+    const d = dropbox();
+    for (const [macos, macosLine, after] of [
+      ["26.5", "26.5; Final Cut Pro 12.4 needs macOS 26.6 or later (System Settings > General > Software Update)", "update macOS first, then App Store > Updates"],
+      ["26.6", "26.6", "update it in App Store > Updates"],
+      ["27.0.1", "27.0.1", "update it in App Store > Updates"]
+    ]) {
+      const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS(macos) }, finalCut: "12.3" }, "--print", "--machine", "Sallie's laptop", d.root);
+      assert.ok(r.out.includes(`\n  macOS:  ${macosLine}\n  Final Cut Pro:  12.3, here; phase 0 was checked with 12.4: ${after}\n`), r.out);
+    }
+    const newer = askWith({ onPath: { sw_vers: MACOS("27.0.1") }, finalCut: "12.4.1" }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.ok(newer.out.includes("\n  Final Cut Pro:  12.4.1, here\n"), newer.out);
+    d.done();
+  });
+  it("says when Claude Code is older than her folder's guard needs, or its version cannot be read, or it is not here: the install then does not write her folder", () => {
+    const d = dropbox();
+    for (const [given, line] of [
+      [{ claudeVersion: "2.1.290 (Claude Code)" }, "  Claude Code's version:  2.1.290, older than the 2.1.295 her folder's guard needs: on it the guard could let a call through. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude."],
+      [{ claudeVersion: "2.0.9" }, "  Claude Code's version:  2.0.9, older than the 2.1.295 her folder's guard needs: on it the guard could let a call through. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude."],
+      [{ claudeVersion: "unknown" }, "  Claude Code's version:  could not be read (claude --version), so the install does not write her folder for Claude."],
+      [{ claude: null, agentPath: NOWHERE_ELSE }, "  Claude Code's version:  not here, so the install does not write her folder for Claude until it is."]
+    ]) {
+      const r = askWith({ onPath: { "xcode-select": XCODE_HERE }, ...given }, "--print", "--machine", "Sallie's laptop", d.root);
+      assert.equal(r.status, 0, r.out);
+      assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+      // It says what to run, and runs none of it.
+      assert.equal(r.ran, "", line);
+    }
+    const newer = askWith({ claudeVersion: "2.2.0 (Claude Code)" }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.ok(newer.out.includes("\n  Claude Code's version:  2.2.0 (her folder's guard needs 2.1.295 or later)\n"), newer.out);
+    d.done();
+  });
+  it("goes on to the end when a check fails: macOS, Final Cut's version and Claude Code's each unreadable, and Xcode's tools missing", () => {
+    const d = dropbox();
+    const r = askWith({ onPath: { "xcode-select": XCODE_MISSING, sw_vers: "exit 1\n" }, finalCut: "12.4", finalCutText: "not a plist", claudeVersion: "", versionExit: 3, claude: '{"loggedIn":false}' }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    for (const line of [
+      "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
+      "  macOS:  could not be read",
+      "  Final Cut Pro:  of a version that could not be read, here; phase 0 was checked with 12.4: update it in App Store > Updates",
+      "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
+      "  Claude Code's version:  could not be read (claude --version), so the install does not write her folder for Claude."
+    ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+    changedNothing(r);
+    d.done();
+  });
+  it("writes nothing from this Mac's settings when it only prints, her folder for Claude among them", () => {
+    const d = dropbox();
+    const r = askWith({ settings: { machine: "Sallie's laptop", root: d.root, checkout: dirname(HERE) } }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.deepEqual(r.left.filter((n) => n.startsWith("BRIMM Video Studio")), []);
+    assert.equal(r.ran, "");
+    d.done();
+  });
+  it("says when Claude Code's answer about its sign-in cannot be read", () => {
+    const d = dropbox();
+    const r = askWith({ claude: "not JSON", onPath: { "xcode-select": XCODE_HERE } }, "--print", "--machine", "Sallie's laptop", d.root);
+    assert.ok(r.out.includes("\n  Claude Code, signed in:  could not be checked (claude auth status said nothing that could be read)\n"), r.out);
     d.done();
   });
   it("says which Claude model reads each plan", () => {

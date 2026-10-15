@@ -9,11 +9,13 @@
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
 //   node settings.js show
 //   node settings.js marker "<drop folder>" "<this Mac>"
+//   node settings.js studio --node "<path to node>"
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
+import { writeStudio } from "./studio.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -109,7 +111,11 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js show        say what they are, or why there are none
   node settings.js marker "<drop folder>" "<this Mac>"
                                mark this Mac's drop folder as its own, as install.sh --machine does, by the rule for
-                               writing into Dropbox. A folder another Mac has marked is refused`;
+                               writing into Dropbox. A folder another Mac has marked is refused
+  node settings.js studio --node "<path to node>"
+                               write the folder for Claude, ~/BRIMM Video Studio, as install.sh --machine does: its
+                               CLAUDE.md, its settings that let Claude run only edit.js, run with that node, its skill and
+                               Pictures/`;
 
 /** The options `write` is told the settings by, and the setting each one names. */
 const WRITTEN = { "--machine": "machine", "--root": "root", "--checkout": "checkout" };
@@ -164,6 +170,27 @@ function show(home, say) {
   return 0;
 }
 
+/** `studio`: write the folder for Claude from this Mac's settings, with the node the installer found. That node is named,
+    and is not the one running this: with Homebrew that is a versioned path that the next upgrade of node takes away. */
+function studio(home, rest, say) {
+  if (rest.length !== 2 || rest[0] !== "--node" || !isAbsolute(rest[1])) {
+    say(HELP);
+    return 2;
+  }
+  const got = readSettings(home);
+  if (got.why) {
+    say(`${got.why} Jason runs install.sh --machine on it.`);
+    return 2;
+  }
+  try {
+    say(`Written: ${writeStudio(home, { checkout: got.settings.checkout, node: rest[1] })}`);
+    return 0;
+  } catch (e) {
+    say(`The folder for Claude could not be written (${e.code || e.message}).`);
+    return 1;
+  }
+}
+
 /** The name of the marker in a drop folder, which holds the name of the Mac that watches it. */
 export const MARKER = ".brimm-watched-by";
 
@@ -209,6 +236,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   if (command === "write") return write(home, rest, say);
   if (command === "show" && !rest.length) return show(home, say);
   if (command === "marker") return mark(rest, say, clone);
+  if (command === "studio") return studio(home, rest, say);
   say(HELP);
   return 2;
 }

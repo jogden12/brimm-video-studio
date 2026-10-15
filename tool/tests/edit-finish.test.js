@@ -41,7 +41,9 @@ describe("finish, the part that looks and asks", () => {
     assert.equal(t.started.length, 1);
     assert.deepEqual(t.started[0][1].slice(-3), ["finish", "--now", FOLDER]);
     const asked = JSON.parse(readFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), "utf8"));
-    assert.equal(asked.rev, found.record.rev);
+    // An episode nobody has open is claimed for this Mac while the finish runs, as the record after the one it was asked at.
+    assert.equal(asked.rev, found.record.rev + 1);
+    assert.equal(reread(found).editing.by, "Mac Studio");
     assert.deepEqual(asked.parts.map((p) => [p.key, p.video.name, p.export && p.export.name, p.noHandEdits]), [
       ["main", `${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`, false],
       ["reel 1", `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 1"]}.fcpxmld`, false],

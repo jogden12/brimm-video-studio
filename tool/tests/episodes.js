@@ -48,11 +48,13 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
   const waits = [];
   let clock = Date.parse("2026-10-20T15:00:00-05:00");
   // A clone never writes over a file: the rule deletes one first (replaceIn). This stand-in refuses, so a test fails if
-  // anything is ever written in place.
+  // anything is ever written in place. And it keeps the file's times, as cp -c (clonefile) does.
   const clone = (from, to) => {
     if (existsSync(to)) throw new Error(`${to} is there already, and a clone never writes over a file.`);
     clones.push([from, to]);
     copyFileSync(from, to);
+    const times = statSync(from);
+    utimesSync(to, times.atime, times.mtime);
   };
   const stand = {
     FFPROBE: (args) => {
@@ -86,6 +88,8 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     openApp: (app, file) => opened.push([app, file]), start: (cmd, args) => started.push([cmd, args]),
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
+    // No test looks anything up on the network: this Mac is online unless a test says otherwise.
+    online: async () => true,
     wait: async (ms) => {
       waits.push(ms);
       clock += ms;
@@ -172,3 +176,11 @@ export function episodeFor(t, { record = {}, files = IMPORTED } = {}) {
 
 /** The episode's newest record, read again. */
 export const reread = (found) => readEpisode(found.folder).record;
+
+/** The same root seen from another Mac: its own home, and settings naming it, as contextFor takes them. The ctx shares the
+    first Mac's stand-ins (clone, clock, wait), so both Macs' writes go through the same rule and the same clock. */
+export function otherMac(t, machine = "Sallie's laptop") {
+  const home = join(t.dir, `home-${machine.replace(/\W+/g, "-")}`);
+  mkdirSync(fromFinalCutFolder(home), { recursive: true });
+  return contextFor({ ...t.ctx.deps, home, settings: { version: 1, machine, root: t.root, checkout: "/checkout" } });
+}

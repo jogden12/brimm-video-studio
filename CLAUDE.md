@@ -8,7 +8,7 @@ Video editing for The BRIMM, run through Claude Code or Claude chat, apart from 
 ## Rules that are never broken
 
 - The tool drafts. It never posts, sends or publishes anything, and nothing in this repo may add that.
-- Never read a `.env` file. There are no secrets in this project, and none are added to the repo.
+- Never read a `.env` file. The project's one secret is the read-only deploy key on Sallie's laptop, kept only in her `~/.ssh` (never in the repo or Dropbox); Jason revokes it in the repo's GitHub settings when it is no longer needed.
 - Nothing is installed on a Mac, and no launch agent is added or changed, without Jason's yes in chat first.
 - Write a failing test first, then the code.
 - The launch agent `com.thebrimm.unedited` runs `tool/unedited.js` straight from this folder's checkout. So keep this folder on `main`, and work in git worktrees.
@@ -30,6 +30,6 @@ cd tool && ./install.sh --print "<folder>"   # what the installer would do. It c
 - No test calls the real `claude` program: a stand-in says what Claude Code would print.
 - `tool/shared/`, `tool/lib.js` and `tool/run.js` are copies from brimm-operations, each named in its first line, and are kept in step by hand.
 
-## Open decision
+## Both Macs
 
-Which editor Sallie's laptop gets. It is a MacBook Pro of November 2024, M4, 16 GB, without Final Cut Pro. DaVinci Resolve Studio is being compared with the alternatives.
+Both Macs use Final Cut Pro (spec, "What this rests on"). Sallie's laptop is set up by `docs/setup/sallies-laptop.md`.

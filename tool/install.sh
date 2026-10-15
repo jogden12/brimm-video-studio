@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Sets the unedited-video tool up on this Mac, which is meant to be the Mac Studio.
+# Sets the unedited-video tool up on this Mac, for the Mac Studio or Sallie's laptop.
 #
 #   ./install.sh "/path/to/folder"   watch that folder for unedited video: unedited.js works on what lands there
 #   ./install.sh "/path/to/folder" "/path/to/another"
@@ -16,7 +16,9 @@
 #                                    set this Mac up for episodes: it watches its own drop folder, BRIMM Video/Unedited
 #                                    Video/<this Mac>, which is made, with a marker that names this Mac, and each video
 #                                    dropped there is imported into BRIMM Video/Episodes. This Mac's settings are written in
-#                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made
+#                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
+#                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro and Claude Code's
+#                                    sign-in are here, and what Jason does by hand for any that is not
 #
 # It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
 # 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
@@ -38,8 +40,22 @@ TRANSCRIBE_LABEL="com.thebrimm.transcribe"
 # A test names other folders in BRIMM_AGENT_PATH: on a Mac that has Claude Code where Homebrew puts programs, that is the one
 # way to see where else it is looked for.
 AGENT_PATH="${BRIMM_AGENT_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
+# Where programs are looked for after this shell's PATH: Homebrew's two folders. A test names none, for a Mac without Homebrew.
+HOMEBREW_DIRS="${BRIMM_HOMEBREW_DIRS-/opt/homebrew/bin:/usr/local/bin}"
+# Final Cut Pro, which this Mac is checked for. A test names a made-up one.
+FINAL_CUT="${BRIMM_FINAL_CUT:-/Applications/Final Cut Pro.app}"
+# The Final Cut Pro the tool was checked with, and the macOS it needs (its LSMinimumSystemVersion).
+FINAL_CUT_CHECKED="12.4"
+FINAL_CUT_MACOS="26.6"
+# The Claude Code her folder's guard needs: from 2.1.295 a hook that cannot run blocks the call (onFailure) rather than
+# letting it through.
+GUARD_CLAUDE="2.1.295"
 HERE="${0:A:h}"
 LOG="$HOME/Library/Logs/brimm-video.log"
+# The one-shot launch agent that checks, once, at the end of a Mac's setup, that Claude answers from a launch agent's context.
+CHECK_LABEL="com.thebrimm.claude-check"
+CHECK_FILE="$HOME/Library/LaunchAgents/$CHECK_LABEL.plist"
+CHECK_LOG="$HOME/Library/Logs/brimm-video-claude-check.log"
 MODEL_DIR="$HOME/Library/Application Support/BRIMM Transcribe"
 MODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
@@ -85,16 +101,18 @@ xml() { print -rn -- "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;
 find_program() {
   local name dir
   for name in "$@"; do
-    for dir in ${(s.:.)PATH} /opt/homebrew/bin /usr/local/bin; do
+    for dir in ${(s.:.)PATH} ${(s.:.)HOMEBREW_DIRS}; do
       if [[ -x "$dir/$name" ]]; then print -r -- "$dir/$name"; return 0; fi
     done
   done
   return 1
 }
 # Claude Code, where unedited.js finds it when a launch agent runs it: along the agent's own PATH, and then in .local/bin in
-# the home folder, where Claude Code's own installer puts it. This shell's PATH may lead to one the agent never sees.
+# the home folder, where Claude Code's own installer puts it. This shell's PATH may lead to one the agent never sees. A test
+# names a stand-in in BRIMM_CLAUDE, so that no test runs the Claude Code of the Mac it runs on.
 find_claude() {
   local dir
+  if [[ -n "${BRIMM_CLAUDE-}" ]]; then print -r -- "$BRIMM_CLAUDE"; return 0; fi
   for dir in ${(s.:.)AGENT_PATH} "$HOME/.local/bin"; do
     if [[ -x "$dir/claude" ]]; then print -r -- "$dir/claude"; return 0; fi
   done
@@ -141,6 +159,31 @@ $(watch_paths)
   <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
   <key>StandardOutPath</key><string>$(xml "$LOG")</string>
   <key>StandardErrorPath</key><string>$(xml "$LOG")</string>
+</dict>
+</plist>
+EOF
+}
+
+# The one-shot launch agent of the check of Claude: unedited.js --check-claude, run once when it is loaded, with the main
+# agent's PATH, into a log of its own. $1 is the node it is run with. It watches nothing, and is taken away once it has run.
+check_agent() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$CHECK_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(xml "$1")</string>
+    <string>$(xml "$HERE/unedited.js")</string>
+    <string>--check-claude</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
+  <key>StandardOutPath</key><string>$(xml "$CHECK_LOG")</string>
+  <key>StandardErrorPath</key><string>$(xml "$CHECK_LOG")</string>
 </dict>
 </plist>
 EOF
@@ -254,6 +297,75 @@ else
 fi
 # swift finds the speaker's face for the upright version. It comes with Xcode's command line tools, and nothing here installs it.
 say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so the upright version is cropped at the centre. To get it: xcode-select --install")"
+# For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
+# here installs Xcode's command line tools, Homebrew, Final Cut Pro or Claude Code, or signs in to Claude.
+autoload -Uz is-at-least
+# Why her folder for Claude is not written, when it is not: "" when it is.
+studio_why=""
+# Whether the setup ends with the check of Claude from a launch agent's context: when Claude Code is here.
+check_line=""
+if [[ -n "$machine" ]]; then
+  say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
+  if [[ -n "$brew" ]]; then
+    say "  Homebrew:  here already"
+  else
+    say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+  fi
+  macos="$(sw_vers -productVersion 2>/dev/null || true)"
+  old_macos=""
+  if [[ -n "$macos" ]] && ! is-at-least "$FINAL_CUT_MACOS" "$macos"; then old_macos="yes"; fi
+  if [[ -z "$macos" ]]; then
+    say "  macOS:  could not be read"
+  elif [[ -n "$old_macos" ]]; then
+    say "  macOS:  $macos; Final Cut Pro $FINAL_CUT_CHECKED needs macOS $FINAL_CUT_MACOS or later (System Settings > General > Software Update)"
+  else
+    say "  macOS:  $macos"
+  fi
+  if [[ ! -d "$FINAL_CUT" ]]; then
+    say "  Final Cut Pro:  not here. Install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push."
+  else
+    version="$(plutil -extract CFBundleShortVersionString raw -o - "$FINAL_CUT/Contents/Info.plist" 2>/dev/null || true)"
+    update="update it in App Store > Updates"
+    [[ -z "$old_macos" ]] || update="update macOS first, then App Store > Updates"
+    if [[ -n "$version" ]] && is-at-least "$FINAL_CUT_CHECKED" "$version"; then
+      say "  Final Cut Pro:  $version, here"
+    else
+      say "  Final Cut Pro:  ${version:-of a version that could not be read}, here; phase 0 was checked with $FINAL_CUT_CHECKED: $update"
+    fi
+  fi
+  # Whether Claude Code is signed in, and on which plan. Its email and its organisation are never shown. And its version: her
+  # folder's guard blocks a call when it cannot run only on Claude Code new enough for that (onFailure), so her folder is
+  # written only then.
+  if claude="$(find_claude)"; then
+    told="$("$claude" auth status --json 2>/dev/null || true)"
+    signed="$(print -rn -- "$told" | plutil -extract loggedIn raw -o - - 2>/dev/null || true)"
+    plan="$(print -rn -- "$told" | plutil -extract subscriptionType raw -o - - 2>/dev/null || true)"
+    case "$signed" in
+      true) say "  Claude Code, signed in:  yes${plan:+ ($plan)}" ;;
+      false) say "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again." ;;
+      *) say "  Claude Code, signed in:  could not be checked (claude auth status said nothing that could be read)" ;;
+    esac
+    check_line="yes"
+    printed="$("$claude" --version 2>/dev/null || true)"
+    claude_version="${printed%%[[:space:]]*}"
+    if [[ ! "$claude_version" =~ '^[0-9]+(\.[0-9]+)+$' ]]; then
+      studio_why="Claude Code's version could not be read"
+      say "  Claude Code's version:  could not be read (claude --version), so the install does not write her folder for Claude."
+    elif ! is-at-least "$GUARD_CLAUDE" "$claude_version"; then
+      studio_why="Claude Code here is $claude_version, older than the $GUARD_CLAUDE her folder's guard needs. In Terminal: claude update, then run this again"
+      say "  Claude Code's version:  $claude_version, older than the $GUARD_CLAUDE her folder's guard needs: on it the guard could let a call through. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude."
+    else
+      say "  Claude Code's version:  $claude_version (her folder's guard needs $GUARD_CLAUDE or later)"
+    fi
+  else
+    studio_why="Claude Code is not here. Install it, then run this again"
+    say "  Claude Code's version:  not here, so the install does not write her folder for Claude until it is."
+  fi
+  say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)"
+  say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so step 9 of the setup guide, in the Code tab, is what proves her folder is locked down there"
+  [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job, to prove its sign-in is seen there"
+  say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+fi
 # Claude reads each cut plan, through Claude Code. Nothing here installs that or signs in to it. When Claude is going to be
 # asked, this says what is sent to it, before anything is changed.
 if [[ -n "$rules_only" ]]; then
@@ -314,17 +426,38 @@ fi
 # Give the Mac the launch agent: write its file, check it, stop the agent of that name if one is running, and start this one.
 mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 # For one of the two Macs: Episodes and its status files in Dropbox, the marker by the rule for writing into Dropbox, this
-# Mac's settings, and its folders for Final Cut's work.
+# Mac's settings, its folders for Final Cut's work, and the folder for Claude, ~/BRIMM Video Studio.
 if [[ -n "$machine" ]]; then
   mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
   "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"
+  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
 fi
 
 agent "$node" > "$AGENT_FILE"
 plutil -lint "$AGENT_FILE" >/dev/null
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
+
+# The check of Claude from the background job: one real call, made by a launch agent of its own, which runs as the import's
+# does, so that a sign-in it cannot see shows now and not at the first import. It is taken away within 90 seconds, whatever
+# happened. Only a real setup makes it: never --print, and never a test.
+if [[ -n "$machine" ]] && claude="$(find_claude)"; then
+  rm -f "$CHECK_LOG"
+  check_agent "$node" > "$CHECK_FILE"
+  plutil -lint "$CHECK_FILE" >/dev/null
+  launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"
+  answered=""
+  for (( waited = 0; waited < 90; waited++ )); do
+    answered="$(grep -h -m 1 -e '^Claude answered from here' -e '^Claude could not be asked from here' "$CHECK_LOG" 2>/dev/null || true)"
+    [[ -z "$answered" ]] || break
+    sleep 1
+  done
+  launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true
+  rm -f "$CHECK_FILE"
+  say "From the background job: ${answered:-Claude did not answer within 90 seconds. What it said is in $CHECK_LOG.}"
+fi
 
 if [[ -n "$machine" ]]; then
   say ""
@@ -335,6 +468,10 @@ if [[ -n "$machine" ]]; then
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
   say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
+  if [[ -n "$studio_why" ]]; then
+    say "Her folder for Claude was not written: $studio_why."
+    exit 1
+  fi
   exit 0
 fi
 say ""

@@ -14,7 +14,7 @@ import { firstWordsMatch } from "./parts.js";
 import { finalTranscript } from "./final-transcript.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
-import { readEpisode, writeEpisode, localStamp, recordFile } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere } from "./episode.js";
 import { fileSafe } from "./names.js";
 import { episodeWork, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
@@ -176,6 +176,29 @@ function laterRecord(folder, n) {
 /** Do finish's detached work for an episode, as finish.asked.json says. Resolves {ok, made, failed, next}, which runDetached
     writes as the finish's result: `made` the files copied into final/, `failed` what went wrong, `next` what a person is to
     check by eye, and the offers. Nothing is thrown from here. `deps.lateCheck` stands in for the late check in a test. */
+/** Let go the claim a finish's quick part took for an episode nobody had open, when the finish did not write its record: the
+    episode goes back to as it was. Only while the record is still the one the claim wrote, and still this Mac's. Gives
+    back what to say, or "" when there was nothing to let go (the P1 check, T4 and T17). */
+export function letGoClaim(ctx, found) {
+  const asked = readJson(join(episodeWork(ctx.home, found.name), "finish.asked.json"));
+  if (!asked || !asked.claimed) return "";
+  const now = readEpisode(found.folder);
+  if (!now.record || now.record.rev !== asked.rev || !now.record.editing || now.record.editing.by !== ctx.machine) return "";
+  const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
+  const work = join(runsFolder(ctx.home), `let-go-${process.pid}-${Date.now()}`);
+  try {
+    writeEpisode(found.folder, { ...now.record, editing: null }, { expectRev: asked.rev, writeText: textWriter({ work, ...opts }), writer: { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine }, home: ctx.home });
+    return "The episode is let go again, as it was before the finish.";
+  } catch (e) {
+    // A record written since (one not whole yet, say: the other Mac's take-over on its way) is not this Mac's claim to keep
+    // (round 3, t1-5).
+    if (e.code === "CHANGED") return "The episode changed on the other Mac while finish ran, so nothing was let go here: say open to see who has it now.";
+    return `This Mac still has the episode open: it could not be let go (${String(e.message).replace(/\.$/, "")}). Say "hand it to Jason", or open it on the other Mac with "take it over".`;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 export async function finishNow(ctx, found, deps = {}) {
   const progress = deps.progress || noProgress;
   const check = deps.lateCheck || lateCheck;
@@ -193,6 +216,9 @@ export async function finishNow(ctx, found, deps = {}) {
   const work = join(runsFolder(ctx.home), `finish-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   let ended = false;
+  // Whether its record was written, and whether a record it wrote let its claim go already.
+  let recordWritten = false;
+  let letGoneAlready = false;
   try {
     const asked = readJson(join(episodeWork(ctx.home, found.name), "finish.asked.json"));
     if (!asked) {
@@ -338,6 +364,14 @@ export async function finishNow(ctx, found, deps = {}) {
     }
     if (failed.length) return result();
 
+    // Nothing goes into final/ once the episode has changed since finish was asked, as when the other Mac took it over while
+    // this ran: the copies would land under its claim, and the record could not be written (the review of PR 21, finding 2).
+    const now = readEpisode(found.folder);
+    const held = now.record ? heldElsewhere(now.record, ctx.machine) : null;
+    if (held) failed.push(`${held.by} has ${record.name.text} open now, so nothing was copied into final/. Finish it there, or take it over and say finish again.`);
+    else if (!now.record || now.record.rev !== asked.rev) failed.push("The episode changed while finish was working, so nothing was copied into final/. Say finish again.");
+    if (failed.length) return result();
+
     // Into final/, by the rule, from what was taken: each new video, its transcripts, its Story parts and its export, and the
     // hand-off last.
     progress.step("Copying into the episode");
@@ -371,6 +405,19 @@ export async function finishNow(ctx, found, deps = {}) {
       put(join(work, handoffName), handoffName);
     } catch (e) {
       failed.push(e.message);
+      // The record lists what final/ holds now: each copy made so far at its size, and one whose old file replaceIn deleted
+      // before its clone failed no more, so that a finish again goes through (the P1 check, T3).
+      const files_ = { ...record.files, ...files };
+      for (const rel of Object.keys(files_)) if (rel.startsWith("final/") && !existsSync(join(found.folder, rel))) delete files_[rel];
+      if (JSON.stringify(files_) !== JSON.stringify(record.files)) {
+        try {
+          writeEpisode(found.folder, { ...record, files: files_, ...(asked.claimed ? { editing: null } : {}) }, { expectRev: asked.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
+          if (asked.claimed) letGoneAlready = true;
+          failed.push("The record lists what final/ holds now. Say finish again.");
+        } catch (w) {
+          failed.push(`The record could not be written to list what final/ holds now: ${String(w.message).replace(/\.$/, "")}.`);
+        }
+      }
       return result();
     }
     const lastCopy = ctx.now();
@@ -399,6 +446,27 @@ export async function finishNow(ctx, found, deps = {}) {
       ...(record.editing && record.editing.by === ctx.machine ? { editing: null } : {})
     };
     // The record is written by the rule, and its work copy kept, so the late check looks at it as at every other copy.
+    // The other Mac may have taken it over while the copies were made: then the record is not written over its claim.
+    // When it is not written, final/ holds what this finish copied all the same: the record in force is written again with
+    // its list of files as final/ holds them, so that neither Mac is stuck on "not whole", and with no finish, as final/ now
+    // mixes this finish's files with the last one's: the next finish makes every part again (the P1 check, T1; round 3, t1-3).
+    const NEEDS_JASON = " If the episode then says it is not whole in Dropbox, that needs Jason.";
+    const listWhatFinalHolds = () => {
+      const newest = readEpisode(found.folder);
+      if (!newest.record) return ` The record could not be read to list what final/ holds now.${NEEDS_JASON}`;
+      try {
+        writeEpisode(found.folder, { ...newest.record, files: { ...newest.record.files, ...files }, finished: null }, { expectRev: newest.record.rev, writeText: textWriter({ work: join(work, "record-listed"), ...opts }), writer, home: ctx.home });
+        return " The record lists what final/ holds now, and no finish: the next finish makes every part again, from the Shares on the Mac that makes it.";
+      } catch (w) {
+        return ` The record could not be written to list what final/ holds now: ${String(w.message).replace(/\.$/, "")}.${NEEDS_JASON}`;
+      }
+    };
+    const before_ = readEpisode(found.folder);
+    const heldNow = before_.record ? heldElsewhere(before_.record, ctx.machine) : null;
+    if (heldNow) {
+      failed.push(`${heldNow.by} took ${record.name.text} over while finish was copying into final/, so the finish is not in the record.${listWhatFinalHolds()} Take it over and say finish again, or finish it there.`);
+      return result();
+    }
     const recordWriter = textWriter({ work: join(work, "record"), keep: true, ...opts });
     const recordEntries = [];
     let written = true;
@@ -408,9 +476,10 @@ export async function finishNow(ctx, found, deps = {}) {
         recordEntries.push(entry);
         return entry;
       }, writer, home: ctx.home });
+      recordWritten = true;
     } catch (e) {
       written = false;
-      failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}. Say finish again.`);
+      failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}.${listWhatFinalHolds()} Say finish again.`);
     }
 
     // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish.
@@ -421,7 +490,13 @@ export async function finishNow(ctx, found, deps = {}) {
     // when taken. One made again since is kept, and named.
     progress.step("Checking the copies");
     await my.wait(Math.max(0, lastCopy + LATE_CHECK_MS - ctx.now()));
-    const problems = check(entries, opts);
+    // Once the other Mac has the episode, nothing is copied into it again: what is not whole is said, for that Mac's own
+    // finish to put right (the P1 check, T20).
+    const late = readEpisode(found.folder);
+    const theirs = late.record ? heldElsewhere(late.record, ctx.machine) : null;
+    const problems = theirs
+      ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ at the late check, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say finish again there.`)
+      : check(entries, opts);
     // Its record is put back only when it is gone and no later record is there: never over a record the other Mac wrote
     // under its number, or over one written since. Then the episode is read again, and From Final Cut is emptied only
     // when its record still holds this finish.
@@ -458,6 +533,11 @@ export async function finishNow(ctx, found, deps = {}) {
     failed.push(`The finish stopped: ${e.message}`);
     return result();
   } finally {
+    // A finish that did not write its record lets go a claim its quick part took for it.
+    if (!ended && !recordWritten && !letGoneAlready) {
+      const gone = letGoClaim(ctx, found);
+      if (gone) failed.push(gone);
+    }
     progress.end(ended);
     rmSync(work, { recursive: true, force: true });
   }

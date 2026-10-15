@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, recordText, readEpisode, writeEpisode, conflictedCopies, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -175,8 +175,11 @@ describe("reading an episode's record", () => {
     const t = setup();
     t.store(RECORD);
     writeFileSync(join(t.folder, COPY), recordText({ ...RECORD, rev: 2 }));
-    assert.deepEqual(readEpisode(t.folder), { why: `Dropbox has kept a conflicted copy in this episode: ${COPY}. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept`, code: "CONFLICTED" });
+    assert.deepEqual(readEpisode(t.folder), { why: `Dropbox has kept a conflicted copy in this episode: ${COPY}. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict"`, code: "CONFLICTED" });
     assert.deepEqual(conflictedCopies(t.folder), [COPY]);
+    // resolve reads the newest record past the copies, and the copy is a copy of the record of its number.
+    assert.equal(readEpisode(t.folder, { pastCopies: true }).record.rev, RECORD.rev);
+    assert.equal(conflictedOf(COPY), COPY.replace(/ \(.*\)/, ""));
     t.done();
   });
   it("stops while Dropbox keeps a conflicted copy of a timeline in edit/, or of any other file in the folder", () => {
@@ -344,6 +347,25 @@ describe("an episode's files, against the list in its record", () => {
   });
 });
 
+describe("the file a conflicted copy is a copy of", () => {
+  it("takes out Dropbox's words alone, when the file's own name has brackets too", () => {
+    for (const [copy, of] of [
+      ["record/0002 (Sallie's laptop's conflicted copy 2026-10-20).json", "record/0002.json"],
+      ["Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20).mov", "Leadership (managing conflict).mov"],
+      ["final/Leadership (part 2) main v5 3fa9c1 (Sallie's laptop's conflicted copy 2026-10-20).mov", "final/Leadership (part 2) main v5 3fa9c1.mov"],
+      ["final/Leadership (part 2).brimm-ops (Sallie's laptop's conflicted copy 2026-10-20).json", "final/Leadership (part 2).brimm-ops.json"],
+      ["edit/main.v2.mac-studio (Sallie's MacBook Air (2)'s conflicted copy 2026-10-20).fcpxml", "edit/main.v2.mac-studio.fcpxml"],
+      ["Talk (Case Conflict).mov", "Talk.mov"],
+      // A second copy Dropbox numbers, after its words or inside them (the P2 check, R1 and R13).
+      ["edit/main.v2.mac-studio (Sallie's laptop's conflicted copy 2026-10-20) (1).fcpxml", "edit/main.v2.mac-studio.fcpxml"],
+      ["edit/main.v2.mac-studio (Sallie's laptop's conflicted copy 2026-10-20 (1)).fcpxml", "edit/main.v2.mac-studio.fcpxml"],
+      ["record/0002 (Sallie's laptop's conflicted copy 2026-10-20) (1).json", "record/0002.json"],
+      ["Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20) (2).mov", "Leadership (managing conflict).mov"],
+      ["Talk (Case Conflict) (1).mov", "Talk.mov"]
+    ]) assert.equal(conflictedOf(copy), of, copy);
+  });
+});
+
 describe("who is editing an episode", () => {
   it("is another Mac only when the claim is held by one", () => {
     const held = claimed(RECORD, "Sallie's laptop", "2026-10-14T13:40:00-05:00");
@@ -356,10 +378,12 @@ describe("who is editing an episode", () => {
   it("is nobody once the claim is let go, and the record keeps the files the episode held then, with their sizes", () => {
     const held = claimed(RECORD, "Sallie's laptop", "2026-10-14T13:40:00-05:00");
     const files = { ...RECORD.files, "edit/main.v1.sallies-laptop.fcpxml": 9400 };
-    const letGo = released(held, files, "2026-10-14T16:05:00-05:00");
-    assert.deepEqual([letGo.editing, letGo.released], [null, { at: "2026-10-14T16:05:00-05:00", files }]);
+    const answers = { main: { v: 1, said: "no changes" } };
+    const letGo = released(held, files, { at: "2026-10-14T16:05:00-05:00", by: "Sallie's laptop", answers });
+    assert.deepEqual([letGo.editing, letGo.released], [null, { at: "2026-10-14T16:05:00-05:00", by: "Sallie's laptop", files, answers }]);
     assert.equal(episodeFault(letGo), "");
-    assert.match(released(held, files).released.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
+    assert.match(released(held, files, { by: "Sallie's laptop" }).released.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
+    assert.deepEqual(released(held, files, { by: "Sallie's laptop" }).released.answers, {});
   });
 });
 
