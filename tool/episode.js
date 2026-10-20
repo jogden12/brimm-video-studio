@@ -29,9 +29,21 @@ const KINDS = ["episode", "short video"];
 const REEL_STATUSES = ["candidate", "picked", "dropped", "finished"];
 /** Dropbox's names for the copy it keeps when two Macs changed one file at once: "talk (Jason Ogden's conflicted copy
     2026-10-14).mp4", and "talk (Case Conflict).mp4", "(Unicode Encoding Conflict)" and "(Selective Sync Conflict)" for its
-    other kinds. Only these are taken: a name such as "Leadership (managing conflict).mov" is a video's own. Phase 1b learns
-    what Dropbox's File Provider calls them, and this follows it. */
-const CONFLICTED = /\(.*conflicted copy.*\)|\((Case|Unicode Encoding|Selective Sync) Conflict\)/i;
+    other kinds. `copy` is the words of the first kind; `by` is what joins the Mac's name to them, "'s" with a straight
+    apostrophe or a curly one; `kinds` are the bracketed words of the others. Only these are taken: a name such as
+    "Leadership (managing conflict).mov" is a video's own. Finding the copies (CONFLICTED), naming the file each is a copy
+    of (OWN_WORDS) and naming the Mac it came from (BY_WORDS) are all built from this list, and none of them spells a word
+    of Dropbox's itself, so what the guide's conflict step learns of what Dropbox's File Provider calls them goes here,
+    once. CONFLICTED is wider than the other two, on purpose: it finds a copy whose Mac's name has a bracket left open or
+    brackets two deep, which they cannot take apart. It may grow wider, and never narrower, since a copy it does not find
+    is passed over without a word. */
+export const CONFLICT_FORMS = { copy: "conflicted copy", by: ["'s", "’s"], kinds: ["Case Conflict", "Unicode Encoding Conflict", "Selective Sync Conflict"] };
+/** Text as a regular expression takes it, letter for letter. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Dropbox's bracketed words for its other kinds of copy, as a regular expression: "(Case Conflict)" and the rest. */
+const KIND_WORDS = String.raw`\((?:${CONFLICT_FORMS.kinds.map(literally).join("|")})\)`;
+/** A conflicted copy's name: Dropbox's bracketed words anywhere in it. */
+const CONFLICTED = new RegExp(String.raw`\(.*${literally(CONFLICT_FORMS.copy)}.*\)|${KIND_WORDS}`, "i");
 /** A creation time before this year is a file's empty date (QuickTime counts from 1904, Unix from 1970), not the day it was
     recorded. */
 const FIRST_YEAR = 2000;
@@ -154,8 +166,18 @@ const INSIDE = String.raw`(?:[^()]|\([^()]*\))*`;
 /** Dropbox's bracketed words alone, with the space before them, so that a file whose own name has brackets keeps them:
     "Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20).mov" is a copy of
     "Leadership (managing conflict).mov". A number Dropbox puts after the words, for a second copy, goes with them. Finding
-    copies goes by CONFLICTED, as it always has. */
-const OWN_WORDS = new RegExp(String.raw` ?(?:\(${INSIDE}conflicted copy${INSIDE}\)|\((?:Case|Unicode Encoding|Selective Sync) Conflict\))(?: \(\d+\))?`, "i");
+    copies goes by CONFLICTED; both are built from CONFLICT_FORMS. */
+const OWN_WORDS = new RegExp(String.raw` ?(?:\(${INSIDE}${literally(CONFLICT_FORMS.copy)}${INSIDE}\)|${KIND_WORDS})(?: \(\d+\))?`, "i");
+/** The Mac's name in Dropbox's bracketed words, before "'s conflicted copy", or "’s conflicted copy" with a curly
+    apostrophe: "Sallie's MacBook Air (2)" in "main (Sallie's MacBook Air (2)'s conflicted copy 2026-10-20).fcpxml". */
+const BY_WORDS = new RegExp(String.raw`\((${INSIDE})(?:${CONFLICT_FORMS.by.map(literally).join("|")}) ${literally(CONFLICT_FORMS.copy)}`, "i");
+
+/** The Mac a conflicted copy came from, by Dropbox's words in its name, or "" when they name none, as a "(Case Conflict)"
+    does. */
+export function conflictedBy(path) {
+  const m = BY_WORDS.exec(basename(path));
+  return m ? m[1] : "";
+}
 
 /** The conflicted copies Dropbox has kept in an episode's folder, at any depth, as paths from the folder with "/", in order.
     [] when there are none, or when the folder cannot be read. */

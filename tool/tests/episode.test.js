@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -363,6 +363,74 @@ describe("the file a conflicted copy is a copy of", () => {
       ["Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20) (2).mov", "Leadership (managing conflict).mov"],
       ["Talk (Case Conflict) (1).mov", "Talk.mov"]
     ]) assert.equal(conflictedOf(copy), of, copy);
+  });
+  /** How copies were found before the list of Dropbox's forms (PR 21): every name this found is a copy still. Finding copies
+      may grow wider when the guide's conflict step learns a form, and never narrower: a copy not found is passed over
+      without a word, and the side in it with it (the review of the plan, P10). */
+  const FOUND_BEFORE = /\(.*conflicted copy.*\)|\((Case|Unicode Encoding|Selective Sync) Conflict\)/i;
+  it("finds every copy it found before, and names the file and the Mac of each by the one list of Dropbox's forms", () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-episode-"));
+    // The list holds what joins the Mac's name to the copy's words, with a straight apostrophe and with a curly one, which the
+    // guide's conflict step may show is how the File Provider writes them.
+    assert.deepEqual([Array.isArray(CONFLICT_FORMS.by), ...["'s", "’s"].map((by) => (CONFLICT_FORMS.by || []).includes(by))], [true, true, true]);
+    // Each form in the list as Dropbox writes it, and the Mac it names: finding, naming the file and naming the Mac all take
+    // it, both ways.
+    const forms = [...CONFLICT_FORMS.by.map((by) => [`Talk (Jason Ogden${by} ${CONFLICT_FORMS.copy} 2026-10-14).srt`, "Jason Ogden"]), ...CONFLICT_FORMS.kinds.map((kind) => [`Talk (${kind}).srt`, ""])];
+    // The name, whether it is a copy, and the Mac it names.
+    const rows = [
+      ...forms.map(([name, mac]) => [name, true, mac]),
+      ["Leadership (managing conflict) (Sallie's conflicted copy 2026-10-20).mov", true, "Sallie"],
+      ["main.v2.mac-studio (Sallie's MacBook Air (2)'s conflicted copy 2026-10-20).fcpxml", true, "Sallie's MacBook Air (2)"],
+      ["main.v2.mac-studio (Sallie's laptop's conflicted copy 2026-10-20) (1).fcpxml", true, "Sallie's laptop"],
+      ["Talk (Case Conflict) (1).mov", true, ""],
+      // A Mac's name with a bracket left open, or with brackets two deep: found, though neither its file nor its Mac can be
+      // named from it.
+      ["0002 (Sallie's Mac :)'s conflicted copy 2026-10-20).json", true, ""],
+      ["0003 (Sallie's Mac (Work (2))'s conflicted copy 2026-10-20).json", true, ""],
+      // A Mac whose own name has a curly apostrophe, and a straight one before the copy's words, or the other way round.
+      ["main.v2.mac-studio (Sallie’s laptop's conflicted copy 2026-10-20).fcpxml", true, "Sallie’s laptop"],
+      ["main.v2.mac-studio (Sallie's laptop’s conflicted copy 2026-10-20).fcpxml", true, "Sallie's laptop"],
+      // The words with no Mac's name, with no date, or in other letters' case: found before, so found still. (A different
+      // date keeps the case's name from being the same file as the first form's, since a Mac's disk may not tell the case of
+      // letters apart.)
+      ["Talk (conflicted copy 2026-10-14).srt", true, ""],
+      ["Talk (Jason Ogden's conflicted copy).srt", true, "Jason Ogden"],
+      ["Talk (Jason Ogden's Conflicted Copy 2026-10-20).srt", true, "Jason Ogden"],
+      ["Leadership (managing conflict).mov", false, ""],
+      ["Talk (conflict resolution).srt", false, ""],
+      ["Pricing talk (1).mp4", false, ""]
+    ];
+    for (const [name] of rows) writeFileSync(join(dir, name), "x");
+    const found = conflictedCopies(dir);
+    assert.deepEqual(found, rows.filter(([, copy]) => copy).map(([name]) => name).sort());
+    for (const [name, , mac] of rows) {
+      if (FOUND_BEFORE.test(name)) assert.ok(found.includes(name), `found before, and not now: ${name}`);
+      // Whatever Dropbox's words conflictedOf takes out, the name is found as a copy: one way, for every name.
+      if (conflictedOf(name) !== name) assert.ok(found.includes(name), `named as a copy, and not found: ${name}`);
+      assert.equal(conflictedBy(name), mac, name);
+    }
+    for (const [name] of forms) assert.equal(conflictedOf(name), "Talk.srt", name);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("spells Dropbox's words in CONFLICT_FORMS alone, so the guide's conflict step changes them there and nowhere else (the review's #27-1)", () => {
+    const text = readFileSync(new URL("../episode.js", import.meta.url), "utf8");
+    // Finding the copies, naming the file and naming the Mac are each built as text, from the list.
+    for (const name of ["KIND_WORDS", "CONFLICTED", "OWN_WORDS", "BY_WORDS"]) assert.match(text, new RegExp(`^const ${name} = .*String\\.raw\``, "m"), name);
+    // With what each takes from elsewhere (each ${…}) and a regular expression's own escapes (\d and the like) taken out, no
+    // pattern holds a letter or an apostrophe of its own: Dropbox's words, "'s" and "Conflict" among them, come from the list.
+    const patterns = [...text.matchAll(/String\.raw`([^`]*)`/g)].map((m) => m[1]);
+    assert.ok(patterns.length >= 4, `${patterns.length} patterns`);
+    assert.deepEqual(patterns.filter((p) => /[\p{L}'’]/u.test(p.replace(/\$\{[^}]*\}/g, "").replace(/\\[A-Za-z]/g, ""))), []);
+  });
+  it("keeps an episode stopped by a record's copy whose Mac's name has a bracket left open or two deep", () => {
+    for (const copy of ["record/0002 (Sallie's Mac :)'s conflicted copy 2026-10-20).json", "record/0002 (Sallie's Mac (Work (2))'s conflicted copy 2026-10-20).json"]) {
+      const t = setup();
+      t.store(RECORD);
+      writeFileSync(join(t.folder, copy), recordText({ ...RECORD, rev: 2 }));
+      assert.equal(readEpisode(t.folder).code, "CONFLICTED", copy);
+      assert.deepEqual(conflictedCopies(t.folder), [copy]);
+      t.done();
+    }
   });
 });
 

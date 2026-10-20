@@ -27,7 +27,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, recordFile } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
@@ -137,14 +137,26 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
-    fits or more than one does. An episode with a conflicted copy, whose record cannot be read, is found by its folder. */
+    fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
+    renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
+    whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
+    every command but `resolve` refuses it. */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
   const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
+  // The records a name or an id is matched against, and only that: for a conflicted episode, the one resolve would read and
+  // the records' conflicted copies, as they are, which may not be whole.
+  const copiesOf = (e) => conflictedCopies(e.folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(e.folder, c)));
+  const records = new Map(all.map((e) => {
+    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [readEpisode(e.folder, { pastCopies: true }).record, ...copiesOf(e)] : [];
+    return [e, read.filter((r) => r !== null && typeof r === "object" && !Array.isArray(r))];
+  }));
+  const known = (e) => records.get(e);
+  const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
-  const byId = all.filter((e) => e.read.record && (e.read.record.id === said || e.read.record.id.slice(-6) === said));
-  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || (e.read.record && plainly(e.read.record.name && e.read.record.name.text).includes(w))));
+  const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
+  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
   if (fits.length === 1) return fits[0];
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => e.name))}. Say which.` };
@@ -1338,10 +1350,12 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
       with an answer: `answer` is "no changes" or "changes stay";
     - finish's rule, here: each such part's newest whole Share in this Mac's From Final Cut must have an export no older
       than it (or none, when nothing changed), since on the other Mac every copied export looks newer than its Share;
-    - each Share whole (the same size across a few seconds) and each export of the episode's projects is copied into
-      edit/from-final-cut/ by the rule, the Shares first; a Share still being written is left out and named;
+    - each Share whole (the same size across a few seconds) and the newest export of each of those parts' projects is
+      copied into edit/from-final-cut/ by the rule, the Shares first; a Share still being written is left out and named.
+      Nothing of a part the other Mac pushed last is copied: it is not this Mac's to check, nor to hand over;
     - the record is let go, with the files it lists now (its own and the copies) and the answers, each earlier answer
-      carried on while its version is still the part's newest.
+      carried on while its version is still the part's newest. A copy made here at an earlier hand-over that Dropbox has
+      taken away, and that this release has not made again, is listed no more, and named.
     Resolves 0 when it was handed over, and 1 when it refused, having said why. */
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
@@ -1354,23 +1368,18 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
-  // The other Mac waits for the files the record lists: one missing here would be waited for there for ever. A copy of
-  // this Mac's own Shares and exports, which this release makes again from From Final Cut, is left out of that check
-  // (the P1 check, T2).
-  const remade = new Set(listing(fromFinalCutFolder(ctx.home)).filter((f) => kindOf(f.name)).flatMap((f) => {
-    const from = join(fromFinalCutFolder(ctx.home), f.name);
-    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => `edit/from-final-cut/${f.name}/${rel}`) : [`edit/from-final-cut/${f.name}`];
-  }));
-  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel))) });
-  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
-  if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
-  // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes.
+  // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes, of the
+  // parts this Mac pushed last alone: those are the ones checked below. A part the other Mac pushed last is not this Mac's to
+  // hand over, and an older Share and export of it copied from here would look newer there than that Mac's own.
   const here = fromFinalCutFolder(ctx.home);
   const projects = new Map(newest.flatMap((p) => {
     const part = p.key === "main" ? record.main : (record.reels || []).find((r) => `reel ${r.n}` === p.key);
     return (part.pushed || []).filter((q) => q.project).map((q) => [q.project.normalize("NFC"), { key: p.key, v: q.v }]);
   }));
-  const ours = listing(here).filter((f) => kindOf(f.name) && projects.has(projectOf(f.name)));
+  // This Mac's Shares and exports of the episode, of every part: a copy of one in edit/from-final-cut/ was made here.
+  const own = listing(here).filter((f) => kindOf(f.name) && projects.has(projectOf(f.name)));
+  const mineKeys = new Set(mine.map((p) => p.key));
+  const ours = own.filter((f) => mineKeys.has(projects.get(projectOf(f.name)).key));
   const videos = ours.filter((f) => kindOf(f.name) === "video");
   // Of one project's exports, the newest alone is checked and copied: an older one copied too would look newest on the other
   // Mac, where a bundle's folder is made new.
@@ -1379,6 +1388,25 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (!was || f.mtimeMs > was.mtimeMs) best.set(projectOf(f.name), f);
     return best;
   }, new Map()).values()];
+  // The other Mac waits for the files the record lists: one missing here would be waited for there for ever. A copy of
+  // this Mac's own Shares and newest exports, which this release makes again from From Final Cut, is left out of that check
+  // (the P1 check, T2). So is a copy made here at an earlier hand-over that Dropbox has taken away: one this release does
+  // not make again, of a part the other Mac pushed last, of an older export, or of a Share still being written, is listed no
+  // more when it is handed over. Kept in the list, it would be waited for on the other Mac for ever, and every check of the
+  // files on either Mac would stop at it (the review of the plan, P1 and P7; PR 21's W15). Any other copy is checked as any
+  // other file.
+  const remade = new Set([...videos, ...exports].flatMap((f) => {
+    const from = join(here, f.name);
+    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => `edit/from-final-cut/${f.name}/${rel}`) : [`edit/from-final-cut/${f.name}`];
+  }));
+  const at = (rel) => join(found.folder, rel);
+  const ownNames = new Set(own.map((f) => f.name));
+  /** The name in From Final Cut that a copy in edit/from-final-cut/ was made from: its Share's, or its export bundle's. */
+  const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
+  const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
+  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
+  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
+  if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
   let notYet = [];
   if (videos.length) {
@@ -1413,7 +1441,6 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     const from = join(here, f.name);
     return statSync(from).isDirectory() ? filesUnder(from).map((rel) => ({ name: f.name, from: join(from, rel), rel: `edit/from-final-cut/${f.name}/${rel}` })) : [{ name: f.name, from, rel: `edit/from-final-cut/${f.name}` }];
   });
-  const at = (rel) => join(found.folder, rel);
   const kept = (c) => {
     const there = ctx.stat(at(c.rel));
     const source = statSync(c.from);
@@ -1450,9 +1477,12 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (part && part.last && a && part.last.v === a.v) answers[key] = a;
   }
   for (const part of mine) answers[part.key] = { v: part.last.v, said: answer === "no changes" ? "no changes" : `changes stay on ${ctx.machine}` };
-  const files = { ...record.files, ...copies };
+  // The copies made here that are still gone, now that this release has made its own, are listed no more (see above).
+  const unlisted = Object.keys(record.files).filter(goneCopy);
+  const files = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
   const later = notYet.length ? ` Not copied yet, still being written: ${listed(notYet)}.` : "";
-  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
+  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
 }
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */
@@ -1583,12 +1613,6 @@ function recordAt(path) {
 /** Whether two records hold the same, but for their rev and who wrote them: a record a keep wrote holds its side so. */
 const sameRecord = (a, b) => Boolean(a && b) && JSON.stringify({ ...a, rev: 0, writer: null }) === JSON.stringify({ ...b, rev: 0, writer: null });
 
-/** The Mac a conflicted copy came from, by Dropbox's words in its name ("Sallie's laptop's conflicted copy …"), or "". */
-const macOfCopy = (copy) => {
-  const m = /\(([^()]*(?:\([^()]*\)[^()]*)*)'s conflicted copy/i.exec(basename(copy));
-  return m ? m[1] : "";
-};
-
 /** `resolve "<episode>" [--keep A|B]`: sort out the conflicted copies Dropbox kept in an episode, one at
     a time, the records' first. A is what the episode holds (for a record, the record in force), and B the copy. Without
     --keep it shows how the two differ, and which Mac each came from, and notes on this Mac what it showed: --keep acts on
@@ -1611,7 +1635,8 @@ async function resolveConflict(ctx, rest) {
     ctx.say(HELP);
     return 2;
   }
-  // An episode with a conflicted copy is found by its folder: its record cannot be read until the copy is sorted out.
+  // findEpisode, not episodeFor, which refuses an episode with a conflicted copy: findEpisode finds it by its folder, or by its
+  // own name or id as the newest whole record past the copies gives them, or as a record's conflicted copy gives them.
   const found = findEpisode(ctx, words.join(" "));
   if (found.why) return refuse(ctx, found.why);
   try {
@@ -1654,7 +1679,8 @@ async function resolveIn(ctx, found, keep) {
   let of = conflictedOf(copy);
   // A Case Conflict's copy names its file in another case: the record's own name for it is the one kept.
   if (!isRecord && !(of in record.files)) of = Object.keys(record.files).find((key) => key.toLowerCase() === of.toLowerCase()) || of;
-  const fromMac = macOfCopy(copy);
+  // The Mac the copy came from, by Dropbox's words in its name, or "" when they name none.
+  const fromMac = conflictedBy(copy);
   const here = (rel) => ctx.stat(at(rel));
   // Why neither side can be kept now: "" when one can.
   let blocked = "";

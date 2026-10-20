@@ -4,12 +4,12 @@
 // program: every program is a stand-in.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, CLAIM_WAIT_MS } from "../edit.js";
-import { claimed, localStamp, recordFile, recordText, shown } from "../episode.js";
+import { claimed, filesProblems, localStamp, recordFile, recordText, shown } from "../episode.js";
 import { readResult } from "../detached.js";
-import { setup, episodeFor, reread, otherMac, FOLDER, EDITED, NAME, PROJECT } from "./episodes.js";
+import { setup, episodeFor, reread, otherMac, listAll, FOLDER, EDITED, NAME, PROJECT } from "./episodes.js";
 
 /** Run a command of edit.js on a Mac, by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -678,6 +678,131 @@ describe("release", () => {
     assert.ok(!existsSync(join(found.folder, "edit", "from-final-cut", `${PROJECT["reel 1"]}.mov`)));
     t.done();
   });
+  /** Reel 1 as the other Mac left it: v1 shown here, then v2 shown on Sallie's laptop, the part's newest push. */
+  const reelOneHers = () => {
+    const v2 = { v: 2, at: "2026-10-20T12:00:00-05:00", on: "Sallie's laptop", file: "edit/x.v2.sallies-laptop.fcpxml", project: "Pricing- what to charge- reel 1 v2 3fa9c1" };
+    return [{ ...EDITED.reels[0], pushed: [...EDITED.reels[0].pushed, v2] }, ...EDITED.reels.slice(1)];
+  };
+  it("copies nothing of a part the other Mac pushed last", async () => {
+    const t = setup();
+    const found = editedHere(t, { reels: reelOneHers() });
+    sharedWithExport(t, PROJECT.main, 0, 60000);
+    // This Mac's Share of reel 1's v1, and an export of it older than the Share: neither is this Mac's to hand over now.
+    sharedWithExport(t, PROJECT["reel 1"], 60000, 0);
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(listAll(join(found.folder, "edit", "from-final-cut")), [`${PROJECT.main}.fcpxmld/Info.fcpxml`, `${PROJECT.main}.mov`]);
+    assert.deepEqual(Object.keys(reread(found).files).filter((rel) => rel.includes("reel 1")), []);
+    assert.equal(r.text, `${NAME} is handed over. Copied for the other Mac: ${PROJECT.main}.mov and ${PROJECT.main}.fcpxmld. Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+    t.done();
+  });
+  it("lists no more a copy of its own that Dropbox took away, of a part the other Mac has pushed since, and she does not wait for it (the review of the plan, P1 and P7)", async () => {
+    const t = setup();
+    const found = editedHere(t);
+    const copy = `edit/from-final-cut/${PROJECT["reel 1"]}.mov`;
+    // This Mac Shares reel 1's v1 and hands the episode over: the copy is made and listed.
+    t.shared(`${PROJECT["reel 1"]}.mov`, 0, "reel one");
+    assert.equal((await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits")).code, 0);
+    assert.ok(copy in reread(found).files);
+    // Her laptop opens it, pushes reel 1's v2, and hands it back.
+    const her = otherMac(t);
+    for (const argv of [["open", FOLDER], ["push", FOLDER, "reel", "1"], ["release", FOLDER, "--no-hand-edits"]]) {
+      const r = await on(her.deps, ...argv);
+      assert.equal(r.code, 0, `${argv.join(" ")}\n---\n${r.text}`);
+    }
+    // This Mac opens it again, and then Dropbox takes its copy of reel 1's v1 away.
+    assert.equal((await on(t.ctx.deps, "open", FOLDER)).code, 0);
+    rmSync(join(found.folder, copy));
+    // Reel 1 is hers now, so this release does not make the copy again: the record lists it no more, and says so.
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text, `${NAME} is handed over. Copied for the other Mac: nothing. Gone from Dropbox, so no longer listed for the other Mac: ${PROJECT["reel 1"]}.mov. Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+    const after = reread(found);
+    assert.ok(!existsSync(join(found.folder, copy)));
+    assert.deepEqual([copy in after.files, copy in after.released.files], [false, false]);
+    assert.deepEqual(filesProblems(found.folder, after), []);
+    // Her laptop opens it: nothing is still arriving, and it is hers.
+    const opened = await on(her.deps, "open", FOLDER);
+    assert.equal(opened.code, 0, opened.text);
+    assert.doesNotMatch(opened.text, /Still arriving/);
+    assert.equal(reread(found).editing.by, "Sallie's laptop");
+    t.done();
+  });
+  it("refuses a listed copy of a part the other Mac pushed last that is there but not whole, naming it, as any other file", async () => {
+    const t = setup();
+    // An earlier hand-over copied reel 1's v1 Share, when this Mac had pushed reel 1 last. The record lists it, and what is
+    // there is short: it is not gone, so it is not this release's to stop listing.
+    const found = editedHere(t, { reels: reelOneHers() });
+    const copy = `edit/from-final-cut/${PROJECT["reel 1"]}.mov`;
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [copy]: 16 } }));
+    t.shared(`${PROJECT["reel 1"]}.mov`, 0);
+    mkdirSync(join(found.folder, "edit", "from-final-cut"), { recursive: true });
+    writeFileSync(join(found.folder, "edit", "from-final-cut", `${PROJECT["reel 1"]}.mov`), "a finished");
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 1);
+    assert.equal(r.text, `${FOLDER} is not whole in Dropbox: ${copy} is short: 10 bytes of 16. Nothing was handed over.`);
+    assert.equal(reread(found).rev, 2);
+    t.done();
+  });
+  it("refuses a listed copy the other Mac made that is missing here, naming it, since it may still be arriving or be hers (the review of the plan, P1 and P7)", async () => {
+    const t = setup();
+    // Her laptop pushed reel 1's v2 and copied its Share at a hand-over. The record lists that copy, and it is not here yet.
+    // Only a copy made from this Mac's own From Final Cut is this release's to stop listing; hers is checked as any other
+    // file, so the release stops, and her copy stays listed.
+    const found = editedHere(t, { reels: reelOneHers() });
+    const hers = "edit/from-final-cut/Pricing- what to charge- reel 1 v2 3fa9c1.mov";
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [hers]: 16 } }));
+    sharedWithExport(t, PROJECT.main, 0, 60000);
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, `${FOLDER} is not whole in Dropbox: ${hers} is missing. Nothing was handed over.`);
+    const after = reread(found);
+    assert.equal(after.rev, 2);
+    assert.equal(after.files[hers], 16);
+    assert.ok(!existsSync(join(found.folder, "edit", "from-final-cut")));
+    t.done();
+  });
+  it("lists no more a copy Dropbox took away of an older export, since this release copies only the newest export (PR 21's W15)", async () => {
+    const t = setup();
+    // An earlier hand-over copied the main video's export bundle. The record lists it, and it is gone; an .fcpxml of the same
+    // project, made since, is the export this release copies.
+    const found = editedHere(t);
+    const copy = `edit/from-final-cut/${PROJECT.main}.fcpxmld/Info.fcpxml`;
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [copy]: 200 } }));
+    sharedWithExport(t, PROJECT.main, 0, 60000);
+    t.shared(`${PROJECT.main}.fcpxml`, 120000, "<fcpxml/>");
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text, `${NAME} is handed over. Copied for the other Mac: ${PROJECT.main}.mov and ${PROJECT.main}.fcpxml. Gone from Dropbox, so no longer listed for the other Mac: ${PROJECT.main}.fcpxmld. Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+    const after = reread(found);
+    assert.deepEqual(listAll(join(found.folder, "edit", "from-final-cut")), [`${PROJECT.main}.fcpxml`, `${PROJECT.main}.mov`]);
+    assert.ok(!(copy in after.files));
+    assert.deepEqual(filesProblems(found.folder, after), []);
+    t.done();
+  });
+  it("lists no more a copy Dropbox took away of a Share still being written, and names it both ways", async () => {
+    const t = setup();
+    // An earlier hand-over copied reel 1's Share. The record lists it, and it is gone; Final Cut is writing the Share again.
+    const found = editedHere(t);
+    const copy = `edit/from-final-cut/${PROJECT["reel 1"]}.mov`;
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [copy]: 16 } }));
+    const video = t.shared(`${PROJECT["reel 1"]}.mov`, 0);
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      if (ms === 5000) t.grow(video, 10);
+    };
+    const r = await on(t.ctx.deps, "release", FOLDER, "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text, `${NAME} is handed over. Copied for the other Mac: nothing. Not copied yet, still being written: ${PROJECT["reel 1"]}.mov. Gone from Dropbox, so no longer listed for the other Mac: ${PROJECT["reel 1"]}.mov. Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+    assert.ok(!(copy in reread(found).files));
+    assert.deepEqual(filesProblems(found.folder, reread(found)), []);
+    t.done();
+  });
   it("keeps the first Mac's answer when a Mac that pushed nothing releases it", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { ...EDITED, editing: HERS, released: { at: "2026-10-20T13:00:00-05:00", by: "Mac Studio", files: {}, answers: { "reel 1": { v: 1, said: "no changes" } } } } });
@@ -729,6 +854,15 @@ describe("the guard, with the other Mac's answer", () => {
     assert.equal(r.text, `v1 of reel 1 was shown on Mac Studio, and Mac Studio has not said whether it was changed there. Ask whoever used it on Mac Studio. If it was not changed, or to start again from v1 without those changes, say "go ahead without Mac Studio's changes".`);
     assert.doesNotMatch(r.text, /Did you change v1/);
     assert.equal(reread(found).reels[0].pushed.length, 1);
+    // Only its own flag lifts it (ruling 7): her "no hand edits" is about her own Final Cut, never about Mac Studio's.
+    const rev = reread(found).rev;
+    const noEdits = await on(her.deps, "push", FOLDER, "reel", "1", "--no-hand-edits");
+    assert.deepEqual([noEdits.code, noEdits.text], [1, r.text]);
+    assert.equal(reread(found).rev, rev);
+    const without = await on(her.deps, "push", FOLDER, "reel", "1", "--without-other-macs-changes");
+    assert.equal(without.code, 0, without.text);
+    assert.deepEqual(reread(found).reels[0].pushed.map((p) => [p.v, p.on]), [[1, "Mac Studio"], [2, "Sallie's laptop"]]);
+    assert.equal(reread(found).reels[0].pushed[1].answer, "without Mac Studio's changes since v1");
     t.done();
   });
   it("on the other Mac, takes no answer given for an older version", async () => {
