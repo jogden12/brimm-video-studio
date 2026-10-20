@@ -1,10 +1,12 @@
 // The rule for writing into Dropbox (dropbox.js): each file is made whole outside Dropbox, put in under its final name as a
 // clone, never over a file there, and checked again at least 15 minutes later: Dropbox undid two renames minutes after they
 // had returned on 2026-10-14. Here the clone is a stand-in that copies into a folder made for the test, the late check is
-// asked at once, and a placeholder is a stand-in for what the disk says of a file. One test, on a Mac only, runs the Mac's
-// own /bin/cp -c, in a folder made for it. Nothing here touches Dropbox.
+// asked at once, a placeholder is a stand-in for what the disk says of a file, and python3, which reads a placeholder through,
+// is a stand-in for the program. One test, on a Mac only, runs the Mac's own /bin/cp -c, and one its own python3, each in a
+// folder made for it. Nothing here touches Dropbox, and nothing reads a real placeholder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,6 +14,7 @@ import { EventEmitter } from "node:events";
 import { LATE_CHECK_MS, READ_QUIET_MS, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk, readThrough } from "../dropbox.js";
 
 const notAMac = process.platform !== "darwin" ? "/bin/cp -c makes a clone on a Mac only" : false;
+const noPython = process.platform !== "darwin" || !existsSync("/usr/bin/python3") ? "only a Mac's python3 can turn on the reads that bring a file down" : false;
 const GB = 2 ** 30;
 /** The flag macOS sets on a file whose data is not on this Mac yet. */
 const DATALESS = 0x40000000;
@@ -314,24 +317,101 @@ describe("what the lead's review of PR 11 found in the rule", () => {
   });
 });
 
+// A program the launch agent starts cannot have a placeholder brought down by reading it: macOS refuses the read at once,
+// "Resource deadlock avoided" (EDEADLK), the transcript tool's failure on the Mac Studio on 2026-10-15. So the read is python3's.
 describe("reading a file through, so that Dropbox brings it down", () => {
-  /** A stand-in for a file's read stream: it sends what `chunks` says, each after its pause in milliseconds, then ends, or
-      sends nothing more when `ends` is false. */
-  const streamOf = (chunks, ends = true) => () => {
-    const stream = new EventEmitter();
-    stream.destroy = () => stream.emit("close");
-    let at = 0;
-    for (const [pause, bytes] of chunks) setTimeout(() => stream.emit("data", Buffer.alloc(bytes)), (at += pause));
-    if (ends) setTimeout(() => stream.emit("end"), at + 1);
-    return stream;
+  /** A stand-in for python3 as spawn starts it, listed in `runs` as {cmd, args}. It says how much of the file it has read, as
+      `reads` says, each after its pause in milliseconds, and then ends with `code`, having said `why` on standard error; with
+      `code` null it says nothing more. A kill is listed in `kills` and ends it, as the signal would. `refused` is the error it
+      cannot be started with, which spawn gives, as node's does, before the close. */
+  const python = ({ reads = [], code = 0, why = "", refused = null } = {}) => {
+    const runs = [];
+    const kills = [];
+    const start = (cmd, args) => {
+      runs.push({ cmd, args });
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      const timers = [];
+      child.kill = (signal) => {
+        kills.push(signal);
+        timers.forEach(clearTimeout);
+        setImmediate(() => child.emit("close", null, signal));
+        return true;
+      };
+      if (refused) {
+        setImmediate(() => {
+          child.emit("error", refused);
+          child.emit("close", -2, null);
+        });
+        return child;
+      }
+      let at = 0;
+      for (const [pause, bytes] of reads) timers.push(setTimeout(() => child.stdout.emit("data", Buffer.from(`${bytes}\n`)), (at += pause)));
+      if (code !== null) {
+        timers.push(setTimeout(() => {
+          if (why) child.stderr.emit("data", Buffer.from(why));
+          child.emit("close", code, null);
+        }, at + 1));
+      }
+      return child;
+    };
+    return { spawn: start, runs, kills };
   };
-  it("reads it to its end", async () => {
-    await readThrough("/Dropbox/talk.mp4", { open: streamOf([[5, 10], [5, 10]]), quietMs: 100 });
+  it("reads it with python3, which first turns on, for itself alone, the reads that have Dropbox bring a file down", async () => {
+    const p = python({ reads: [[5, 4194304], [5, 6291456]] });
+    const file = "/Users/sallie/Dropbox/BRIMM Video/Sallie's talk.mp4";
+    await readThrough(file, { spawn: p.spawn, quietMs: 100 });
+    assert.equal(p.runs.length, 1);
+    const [{ cmd, args }] = p.runs;
+    // The file is named to python3 as an argument of its own, never inside the program, whatever is in its name.
+    assert.deepEqual([cmd, args.length, args[0], args[1], args[3]], ["/usr/bin/python3", 4, "-I", "-c", file]);
+    // No test reads a real placeholder, so what the program turns on is read from its words: setiopolicy_np with
+    // IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES (3), IOPOL_SCOPE_PROCESS (0) and IOPOL_MATERIALIZE_DATALESS_FILES_ON (2).
+    assert.match(args[2], /setiopolicy_np\(3, 0, 2\)/);
   });
-  it("gives up, in plain words, when no bytes come for the quiet time, as from a placeholder Dropbox does not bring down", async () => {
-    await assert.rejects(readThrough("/Dropbox/talk.mp4", { open: streamOf([[5, 10]], false), quietMs: 50 }), { message: "Dropbox sent nothing of it for 50 ms, so it was given up" });
+  it("waits as long as more of it keeps coming, however long the whole read takes, and stops nothing once it is read", async () => {
+    // Twelve reads 20 ms apart take 240 ms in all, twice the 120 ms it may stay quiet.
+    const p = python({ reads: Array.from({ length: 12 }, (_, i) => [20, (i + 1) * 4194304]) });
+    await readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 120 });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(p.kills, []);
+  });
+  it("gives up, in plain words, when nothing more comes for the quiet time, as from a placeholder Dropbox does not bring down, and stops python3", async () => {
+    const p = python({ reads: [[5, 4194304]], code: null });
+    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 50 }), { message: "Dropbox sent nothing of it for 50 ms, so it was given up" });
+    assert.deepEqual(p.kills, ["SIGKILL"]);
+  });
+  it("says why, in python3's own words, when the file cannot be read", async () => {
+    const p = python({ reads: [[5, 4194304]], code: 1, why: "Resource deadlock avoided\n" });
+    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100 }), { message: "Resource deadlock avoided" });
+  });
+  it("says why when python3 cannot be started", async () => {
+    const p = python({ refused: Object.assign(new Error("spawn /usr/bin/python3 ENOENT"), { code: "ENOENT" }) });
+    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100 }), { message: "spawn /usr/bin/python3 ENOENT" });
   });
   it("waits two minutes of quiet by default", () => {
     assert.equal(READ_QUIET_MS, 2 * 60 * 1000);
+  });
+  it("reads a file that is here to its end with the Mac's own python3, and says why for one that is not there", { skip: noPython }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-read-"));
+    try {
+      // Nine mebibytes and one byte: 9437185 bytes.
+      writeFileSync(join(dir, "here.mp4"), Buffer.alloc(9 * 1048576 + 1, 1));
+      let said = "";
+      const heard = (cmd, args, opts) => {
+        const child = spawn(cmd, args, opts);
+        child.stdout.on("data", (d) => (said += d));
+        return child;
+      };
+      await readThrough(join(dir, "here.mp4"), { spawn: heard });
+      // It says how far it has got as it goes, and last that it has read every byte.
+      const lines = said.trim().split("\n");
+      assert.ok(lines.length > 1, said);
+      assert.equal(lines[lines.length - 1], "9437185");
+      await assert.rejects(readThrough(join(dir, "gone.mp4")), { message: "No such file or directory" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

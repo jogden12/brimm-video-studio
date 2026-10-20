@@ -490,7 +490,7 @@ describe("one unedited video", () => {
     // The size is looked at four times: it has settled at the second look, and the file is whole at the fourth.
     const t = setup({ sizes: [7, 7, 7, 7] });
     const looks = [false, false, true];
-    const r = await uneditedFile(t.video("talk.mov"), { ...t.deps, isWhole: () => looks.shift() });
+    const r = await uneditedFile(t.video("talk.mov"), { ...t.deps, isWhole: () => looks.shift(), bringDown: async () => {} });
     assert.equal(r.ok, true);
     assert.deepEqual([t.waits.slice(0, 3), looks], [[5000, 5000, 5000], []]);
     t.done();
