@@ -4,7 +4,7 @@
 
 **Goal:** brimm-operations' transcript tool runs from brimm-video on the Mac Studio and Jason's MacBook, doing exactly what it does today; the fix for Dropbox placeholders exists once, in brimm-video; and every file the two repos share has one owner, with a test in each repo that notices when a copy falls out of step. BRIMM Ops is then the page only.
 
-**Architecture:** First the placeholder fix of brimm-operations PR 29 becomes brimm-video's one way to bring a file down (Task 1), because brimm-video's own `readThrough` has the same bug today. Then the tool moves as it is (Task 2): `tool/transcribe.js` beside `unedited.js`, sharing one `lib.js`, `run.js` and `dropbox.js`, with its own installer, under the same launch agent label, folders, log, model and lock, so each Mac switches in either direction with one installer run. Its 207 tests move with it, and lose their duplicates afterwards (Task 3). BRIMM Ops keeps owning `text.js`, `answers.js`, `transcript.js` and the show's two names; brimm-video owns the hand-off fixtures and a new `.srt` fixture; each repo checks the copies the other takes from it by sha256 (Tasks 4 and 5). Each Mac is switched by hand with Jason (Task 6), and after a week of real use a session in brimm-operations removes `transcribe/` (Task 8).
+**Architecture:** First the placeholder fix lands: PR #31, built in a session of its own, makes brimm-video's `readThrough` read a file through with python3, as brimm-operations PR 29's `bringDown` does. Phase T waits for it and builds none of it (Task 1). Then the tool moves as it is (Task 2): `tool/transcribe.js` beside `unedited.js`, sharing one `lib.js`, `run.js` and `dropbox.js`, with its own installer, under the same launch agent label, folders, log, model and lock, so each Mac switches in either direction with one installer run. Its 207 tests move with it, and lose their duplicates afterwards (Task 3). BRIMM Ops keeps owning `text.js`, `answers.js`, `transcript.js` and the show's two names; brimm-video owns the hand-off fixtures and a new `.srt` fixture; each repo checks the copies the other takes from it by sha256 (Tasks 4 and 5). Each Mac is switched by hand with Jason (Task 6), and after a week of real use a session in brimm-operations removes `transcribe/` (Task 8).
 
 **Tech Stack:** Node 22 or later (ESM, `node:test`, `node:crypto`), zsh installers, launchd, `/usr/bin/python3 -I` with ctypes for `setiopolicy_np`. No packages, as now.
 
@@ -26,13 +26,13 @@
 
 ## What was checked on 2026-10-20
 
-- **No brimm-video branch or PR for the placeholder bug.** GitHub's pull requests and branches show none (the newest branches are of 2026-10-15), and no local branch on the Mac Studio has one. brimm-operations PR 29 says brimm-video's copy "is being looked at in its own session and repo": whatever the MacBook session did is not pushed (Open question 1).
+- **brimm-video's placeholder fix is PR #31,** "Read a Dropbox placeholder through with python3, which turns downloads on for itself" (https://github.com/jogden12/brimm-video/pull/31), opened at 16:45 UTC from the branch `claude/busy-chebyshev-4d1df6` by the session "Dropbox placeholder fix for brimm-video's readThrough", which the PR review session started at 16:27 UTC. It is open and not merged. It keeps `readThrough`'s name and its promise in `dropbox.js`, and has python3 read the file through with downloads turned on for itself (`setiopolicy_np(3, 0, 2)`), saying how far it has got on standard output, and given up after 2 minutes with nothing read. It changes `dropbox.js` and its tests, one line of `unedited.test.js` and one paragraph of the README. Before it, GitHub had no branch or PR for the bug (its newest branches were of 2026-10-15), and nor did this Mac.
 - **brimm-operations `main` (`ced8fe5`) holds PR 29** (`3a5eeff`, merged 15:43 UTC). `transcribe/` changed twice since `84a2f61`: the move of video editing (`19c897f`, which also took `captionsOf` out of its `lib.js`) and PR 29. Its tests, run here in a `git archive` copy: 207 pass (129 in `transcribe.test.js`, 66 in `lib.test.js`, 12 in `install.test.js`). The page's: 953 (PR 29's count).
 - **The Mac Studio's agent**, from its plist: `com.thebrimm.transcribe` runs `/opt/homebrew/bin/node "~/Claude Code/BRIMM operations/transcribe/transcribe.js" --watch "<Dropbox>/The BRIMM DB/BRIMM VIDEO Transfer" --watch "<Dropbox>/The BRIMM DB/BRIMM VIDEO Transfer/Zoom Video Transfer"`, with the same two folders as WatchPaths, RunAtLoad, and the log `~/Library/Logs/brimm-transcribe.log`. `<Dropbox>` is `~/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden`. Once PR 29 was pulled it transcribed the iPhone video that had failed on 2026-10-15 (the log, 15:48 UTC). `com.thebrimm.unedited` watches `<Dropbox>/The BRIMM DB/BRIMM Video/Unedited Video/Mac Studio` only.
 - **The page's copies are in step.** `tool/shared/text.js`, `answers.js` and `transcript.js` are brimm-operations `main`'s `app/src/` files byte for byte after their first line, and `show.js` holds `instructions.js`'s two lines as they are. `tool/lib.js` and `tool/run.js` differ from `transcribe/` only as section 2 says.
 - **The hand-off fixtures are not.** brimm-video #16 named the finished videos `.mov` on 2026-10-14, after brimm-operations had copied the fixtures at `ab72782`; its copies still say `.mp4`. The page reads `file` as text, so nothing broke, and no test noticed.
 - **Sallie's laptop does not run the transcript tool.** Its guide (`docs/setup/sallies-laptop.md`, and #28's version of it) clones brimm-video only and installs `com.thebrimm.unedited` only. Nothing there clones brimm-operations.
-- **Jason's MacBook** (from the brief, not checked from here) runs `com.thebrimm.transcribe` from a brimm-operations checkout on `The BRIMM DB/BRIMM VIDEO MacBook` since 2026-10-15. Whether it has a brimm-video checkout is not known (Open question 2).
+- **Jason's MacBook** (from the brief, not checked from here) runs `com.thebrimm.transcribe` from a brimm-operations checkout on `The BRIMM DB/BRIMM VIDEO MacBook` since 2026-10-15. Whether it has a brimm-video checkout is not known (Open question 1).
 - **CI.** brimm-video's runs `node --test` in `tool/` on every push and pull request. brimm-operations' runs only for changes to `app/**`, `transcribe/**`, `seed/**`, the brief and the workflow, with the transcript tool's tests as a step of their own.
 
 ## 1. Inventory, and the owner of each file afterwards
@@ -41,11 +41,11 @@
 
 | File | What it is | Afterwards |
 |---|---|---|
-| `transcribe.js` (723 lines) | The tool: arrival, bringing a placeholder down, transcription, filing, Zoom calls, the lock, the command line | brimm-video's `tool/transcribe.js` (Task 2). Its `runProgram`, `findTools`, `lastLine`, `sizeOnDisk`, `lockFile`, `isRunning` and `takeLock` are `tool/run.js`'s; its `isWhole` and `bringDown` are `tool/dropbox.js`'s (Tasks 1 and 2) |
+| `transcribe.js` (723 lines) | The tool: arrival, bringing a placeholder down, transcription, filing, Zoom calls, the lock, the command line | brimm-video's `tool/transcribe.js` (Task 2). Its `runProgram`, `findTools`, `lastLine`, `sizeOnDisk`, `lockFile`, `isRunning` and `takeLock` are `tool/run.js`'s; its `isWhole` is `tool/dropbox.js`'s; its `bringDown` gives way to `dropbox.js`'s `readThrough` as PR #31 makes it (Tasks 1 and 2) |
 | `lib.js` (271) | Its rules | One `tool/lib.js` (Task 2): the shared rules are there already, and the Zoom rules, `waiting` and `isDayName` join them |
 | `install.sh` (216) | The installer of `com.thebrimm.transcribe` | `tool/install-transcribe.sh` (Task 2) |
 | `package.json` | Its name, ESM, Node 22 or later | Not carried: `tool/package.json` says the same |
-| `tests/transcribe.test.js` (129 tests) | The tool end to end, with stand-ins | `tool/tests/transcribe.test.js` (Task 2); duplicates out in Task 3 |
+| `tests/transcribe.test.js` (129 tests) | The tool end to end, with stand-ins | `tool/tests/transcribe.test.js` (Task 2), but for the five tests of `bringDown` and of `runProgram`'s `quiet`, which are not carried (ruling 5); duplicates out in Task 3 |
 | `tests/lib.test.js` (66) | The rules | Into `tool/tests/lib.test.js` (Tasks 2 and 3); 20 are there already word for word, and one more with brimm-video's extra asserts |
 | `tests/install.test.js` (12) | The installer, with `--print` | `tool/tests/install-transcribe.test.js` (Task 2) |
 | All of `transcribe/`, from Task 2 to Task 8 | | Stays in brimm-operations unchanged, only as the way back, until Task 8 removes it |
@@ -71,9 +71,9 @@
 | `tool/shared/text.js`, `answers.js`, `transcript.js` | The page's helpers, reading Claude's replies, reading an `.srt` (`tidyTranscript`) | brimm-operations' `app/src/` files (the same bytes after line 1) | Owner: BRIMM Ops. brimm-video keeps copies under the guard (Tasks 4 and 5) |
 | `tool/shared/show.js` | The show's and the host's names | `app/src/instructions.js`, its `SHOW` and `HOST` lines | The same |
 | `tool/lib.js` | The rules both tools follow | `transcribe/lib.js` | Owner: brimm-video, one file (Task 2) |
-| `tool/run.js` | Running a program, finding the programs, the folder lock | The same code in `transcribe.js`, which since PR 29 also has `runProgram`'s `quiet` | Owner: brimm-video; gains `quiet` (Task 1) |
+| `tool/run.js` | Running a program, finding the programs, the folder lock | The same code in `transcribe.js`, which since PR 29 also has `runProgram`'s `quiet` | Owner: brimm-video. `quiet` is not carried: only `bringDown` used it |
 | `tool/dropbox.js` `isWhole` | Is a file here whole, or a placeholder | `transcribe.js` `isWhole`, the same code | brimm-video's, once |
-| `tool/dropbox.js` `readThrough`, used by `unedited.js` (the import's arrival check) and `edit.js` (`bring`) | Bring a placeholder down | `transcribe.js` `bringDown` (PR 29) | `bringDown` takes its place (Task 1). `readThrough` reads with node, and a program a launch agent starts has downloads off, so its read fails with "Resource deadlock avoided" (EDEADLK), as the transcript tool's did |
+| `tool/dropbox.js` `readThrough`, used by `unedited.js` (the import's arrival check) and `edit.js` (`bring`) | Bring a placeholder down | `transcribe.js` `bringDown` (PR 29) | PR #31 rebuilds it to read with python3 as `bringDown` does (Task 1), and it is the one copy. Today it reads with node, and a program a launch agent starts has downloads off, so its read fails with "Resource deadlock avoided" (EDEADLK), as the transcript tool's did |
 | `transcribeFile`, `unedited.js` `workOn`, `final-transcript.js` `finalTranscript` | Sound, captions, the silence filter, the spellings, the `.txt` | Each other | Three callers of `lib.js`'s steps, kept apart (ruling 11) |
 | The arrival loops in `transcribeFile`, `workOn` and `finish.js` | Wait until a file has arrived | Each other | Kept apart (ruling 11) |
 | `tool/install.sh` and `tool/install-transcribe.sh` | Find the programs, write and load a plist, fetch the model, refuse the other tool's folders | Each other | Two scripts (ruling 6); their shared shell lines are not made one file now |
@@ -82,26 +82,26 @@
 ## Rulings
 
 1. **Same label, folders, log, model and lock.** The label stays `com.thebrimm.transcribe`; each Mac keeps its folders, in their order; the log stays `~/Library/Logs/brimm-transcribe.log`; the model stays `~/Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin`; the lock stays `<temp folder>/brimm-transcribe-<sha1 of the folder>.lock`; dated folders, `.failed.txt` notes and file names stay. Why: an installer replaces the agent of its own label in one stop and start, so no folder is ever watched by two agents on one Mac; `tool/install.sh` already reads this label's plist to refuse its folders; and each copy understands what the other left in a folder, so going back is one installer run.
-2. **The move changes nothing the tool does.** Only lines that name a path change ("Run tool/install-transcribe.sh to set this Mac up."). Phase T's row also puts the tool "under the Dropbox rule and writing the progress file". Both change what it does in a synced folder or on the screen, so each waits until after the week of real use, as a task of its own with its own yes (Open question 3). So does mapping the first sound ffmpeg can read, which the import does for iPhone videos and the transcript tool does not: `ffmpegArgs` given no stream gives brimm-operations' arguments exactly.
+2. **The move changes nothing the tool does.** Only lines that name a path change ("Run tool/install-transcribe.sh to set this Mac up."), and the words of one reason (ruling 5). Phase T's row also puts the tool "under the Dropbox rule and writing the progress file". Both change what it does in a synced folder or on the screen, so each waits until after the week of real use, as a task of its own with its own yes (Open question 2). So does mapping the first sound ffmpeg can read, which the import does for iPhone videos and the transcript tool does not: `ffmpegArgs` given no stream gives brimm-operations' arguments exactly.
 3. **One `tool/lib.js`:** brimm-video's, with its optional sound stream in `ffmpegArgs` and its `captionsOf`, plus the transcript tool's own rules word for word, with their comments and private helpers: `zoomCall`, `isLocal`, `callKind`, `callName`, `callTag`, `waiting`, `isDayName`, `soundOf`, `companions`, `localRecordings`, `mayBeTranscript`, `TRANSCRIPT_BYTES`, `filedIn`, `zoomCalls`, `callNotes`, `looseTranscripts`, `lastCaptionEnd`, `lengthArgs`, `lengthOf`, `pairTranscripts`, `setSettled`. This is phase T's "sharing one `lib.js` and `run.js`".
-4. **`tool/transcribe.js` holds only what is its own.** It imports `runProgram`, `findTools`, `lastLine`, `sizeOnDisk`, `lockFile`, `isRunning` and `takeLock` from `run.js`, `isWhole` and `bringDown` from `dropbox.js`, and `localDay` from `shared/text.js`. Each of those pairs is the same code today, but for `quiet` (added to `run.js` in Task 1) and comments.
-5. **`bringDown` is the one way to bring a placeholder down.** It goes into `dropbox.js` as PR 29 wrote it: `/usr/bin/python3 -I` turns downloads on for itself alone (`setiopolicy_np(3, 0, 2)`), reads the file through in 4 MB pieces saying how far it has got, and is given up after 2 minutes with nothing coming. It resolves `{ ok: true }` or `{ ok: false, why }` and never rejects. `readThrough` goes. Each caller keeps its own policy: the import asks once a run and keeps looking; `bring` lists what could not be read; the transcript tool leaves a note. python3 comes with Xcode's command line tools, which both Macs have for git (brimm-video's installer checks for them).
+4. **`tool/transcribe.js` holds only what is its own.** It imports `runProgram`, `findTools`, `lastLine`, `sizeOnDisk`, `lockFile`, `isRunning` and `takeLock` from `run.js`, `isWhole` and `readThrough` from `dropbox.js`, and `localDay` from `shared/text.js`. Each of those pairs is the same code today but for comments, and but for `runProgram`'s `quiet`, which only `bringDown` used and which is not carried.
+5. **`readThrough` is the one way to bring a placeholder down.** PR #31 rebuilds it (Task 1) to work as PR 29's `bringDown` does: `/usr/bin/python3 -I` turns downloads on for itself alone (`setiopolicy_np(3, 0, 2)`), reads the file through saying how far it has got, and is given up after 2 minutes with nothing coming. It keeps its name and its promise, which rejects with the reason, so the import and `bring` call it as before. The transcript tool's `bringDown` is not carried: `transcribe.js` keeps its `{ ok, why }` with an adapter of one line, `(file) => readThrough(file).then(() => ({ ok: true }), (e) => ({ ok: false, why: e.message }))`. Its reasons read as before ("Resource deadlock avoided", "spawn /usr/bin/python3 ENOENT") but for a stall: the note then says "Dropbox sent nothing of it for 2 minutes, so it was given up" where it said "nothing of it came for 2 minutes". Each caller keeps its own policy: the import asks once a run and keeps looking; `bring` lists what could not be read; the transcript tool leaves a note. python3 comes with Xcode's command line tools, which both Macs have for git (brimm-video's installer checks for them).
 6. **A second installer, `tool/install-transcribe.sh`, not a mode of `install.sh`.** The transcript installer and its 12 tests move as they are, PR #26 is reworking `install.sh`, and each script keeps refusing the other tool's folders, as both do today. Its plist runs `<checkout>/tool/transcribe.js`.
-7. **Tests move whole, then lose their duplicates.** Task 2 adds exactly the 207 moved tests and 2 new ones, so the move can be counted. Task 3 then removes, by a written list, the moved tests that brimm-video already has.
+7. **Tests move whole, then lose their duplicates.** Task 2 adds exactly 202 of the 207 (the five of `bringDown` and `quiet` stay behind, ruling 5) and 2 new ones, so the move can be counted. Task 3 then removes, by a written list, the moved tests that brimm-video already has.
 8. **The drift guard is a pair of hash tests** (section 3).
 9. **The hand-off stays as it is.** `final/<name>.brimm-ops.json`, `format` "brimm-video hand-off", `version` 1, with its fixtures `tool/tests/fixtures/handoff-v1.json` and `handoff-v1-short-video.json` here and copies in brimm-operations' `app/tests/handoff/`. Nothing in this plan changes a byte that `finish` writes or the page reads, and the hand-off stays the two apps' only link: the transcript tool's `.srt` reaches the page as today, when Sallie gives it to the form. The only fixture work is brimm-operations copying the two fixtures again (they name `.mov` since brimm-video #16), and the guard on them.
 10. **One new contract fixture,** as phase T's row asks: `tool/tests/fixtures/transcript-v1.srt` and `transcript-v1.transcript.txt`, the two files the transcript tool writes for a made-up video. brimm-video tests that the tool writes exactly them; brimm-operations tests that the page makes the `.txt` of the `.srt`.
 11. **The three transcriptions and the arrival loops stay apart.** They already share every step through `lib.js`, and what differs differs on purpose: the import's word pass and sound stream, the finish's episode spellings, the transcript tool's filing and notes. Folding them is a change of behaviour, and touches `final-transcript.js`, which PRs #29 and #30 change.
-12. **Sallie's laptop gets no transcript agent here** (Open question 4).
+12. **Sallie's laptop gets no transcript agent here** (Open question 3).
 
 ## 2. One copy of the shared runtime code
 
 | What | brimm-video now | brimm-operations now | The one copy | Settled by |
 |---|---|---|---|---|
-| `runProgram` | `keep`, `out`, `input`, `cwd`, `limit` | The same, and `quiet` (`wentQuiet`), since PR 29 | `run.js`, with `quiet` | Task 1, with PR 29's two tests |
+| `runProgram` | `keep`, `out`, `input`, `cwd`, `limit` | The same, and `quiet` (`wentQuiet`), since PR 29 | `run.js`, without `quiet` | Only `bringDown` used `quiet`, and it is not carried |
 | `findTools`, `lastLine`, `sizeOnDisk`, `lockFile`, `isRunning`, `takeLock` | `run.js` | `transcribe.js` | `run.js` | The same code; Task 2 imports them |
 | `isWhole` | `dropbox.js` | `transcribe.js` | `dropbox.js` | The same code but for a comment |
-| Bringing a placeholder down | `readThrough`: node's `createReadStream`, rejects; EDEADLK under a launch agent | `bringDown`: python3 with downloads on, `{ ok, why }` | `bringDown`, in `dropbox.js` | Task 1 |
+| Bringing a placeholder down | `readThrough`: node's `createReadStream`, rejects; EDEADLK under a launch agent | `bringDown`: python3 with downloads on, `{ ok, why }` | `readThrough`, in `dropbox.js`, as PR #31 makes it | Task 1 (PR #31), and Task 2's adapter |
 | `ffmpegArgs` | An optional sound stream | None | brimm-video's | Given no stream it gives brimm-operations' arguments (an existing test); the transcript tool keeps calling it so |
 | `captionsOf` | Here | Taken out at `19c897f`: only video editing used it | Kept | — |
 | The Zoom rules, `waiting`, `isDayName` | Not here | `lib.js` | `lib.js` | Task 2, word for word |
@@ -164,19 +164,19 @@ The review session rehearsed merging in the order 19 (merged since), 24, 25, 26,
 |---|---|---|
 | #22, plan for the 1b follow-ups (docs) | A new plan file | Independent |
 | #23, plan for phase 4 (docs) | A new plan file; it plans nothing in `lib.js`, `run.js`, `dropbox.js` or `shared/` | Independent |
-| #24, `open` refuses a held episode | `edit.js` (`open`, `bring`), `detached.js`; tests that give `bring` a `readAll` that resolves nothing or throws ENOSPC | Merge first. Task 1 changes `bring`'s call and keeps what those tests mean: a throw is still "could not be read (ENOSPC)" |
+| #24, `open` refuses a held episode | `edit.js` (`open`, `bring`), `detached.js`; tests that give `bring` a `readAll` that resolves nothing or throws ENOSPC | Independent: neither PR #31 nor this plan changes `edit.js`, and `readThrough` still rejects, as those tests expect |
 | #25, her guard's single quotes | `studio.js` | Independent |
-| #26, the installer's check agent | `install.sh`, `unedited.js`, the README, the guide; a test that `install.sh --remove` leaves `com.thebrimm.transcribe.plist` alone | Merge first. Task 2 adds `install-transcribe.sh` and leaves `install.sh` alone (ruling 6). Task 1 touches `unedited.js` near its arrival check, and Tasks 2 and 4 the README. Task 1's one line in `install.sh` waits for it |
-| #27, resolve and release | `edit.js`, `episode.js` | Merge first (`edit.js`) |
+| #26, the installer's check agent | `install.sh`, `unedited.js`, the README, the guide; a test that `install.sh --remove` leaves `com.thebrimm.transcribe.plist` alone | Merge first: Tasks 2 and 4 edit the README. Task 2 adds `install-transcribe.sh` and leaves `install.sh` alone (ruling 6) |
+| #27, resolve and release | `edit.js`, `episode.js` | Independent |
 | #28, as-built documents | The README, the requirements, the guide, plan 1b, the spec | Merge first: Tasks 2, 4 and 9 edit the README, the requirements and the spec's phase T row |
 | #29, phase 4's pure modules | New modules; `final-transcript.js`, `fcpxml.js` | Independent: this plan leaves `final-transcript.js` alone (ruling 11), and `lib.js` keeps the `stampedText` it imports |
-| #30, phase 4's commands (based on `claude/phase-3-reels-part-2`; retarget to `main` first) | `edit.js`, `unedited.js`, the README and more; imports `captionsOf` and `stampedText` from `lib.js` | Conflicts with Task 1 (`edit.js`, `unedited.js`) and Tasks 2 and 4 (the README). Whichever lands second merges `main` in and resolves; `lib.js` keeps both exports |
+| #30, phase 4's commands (based on `claude/phase-3-reels-part-2`; retarget to `main` first) | `edit.js`, `unedited.js`, the README and more; imports `captionsOf` and `stampedText` from `lib.js` | Conflicts with Tasks 2 and 4 on the README. Whichever lands second merges `main` in and resolves; `lib.js` keeps both exports |
 
-If #29 and #30 are still open when Task 1 starts, Task 1 does not wait for them: it is the bug fix.
+PR #31's order against these is for its own session to settle (it changes the README and `unedited.test.js`, as #26 and #30 do). Phase T's Tasks 2 to 9 start once #31 has merged.
 
 ## Review Focus
 
-1. A placeholder met by the import or by `bring`, from a launch agent or a detached run: python3 reads it through with downloads on and the work goes on, and one that stalls is given up after 2 minutes, in plain words. (Task 1's tests, and its check by hand on an evicted file from a parent with downloads off.)
+1. A placeholder met by the import or by `bring`, from a launch agent or a detached run: python3 reads it through with downloads on and the work goes on, and one that stalls is given up after 2 minutes, in plain words. (PR #31's tests; Task 1 confirms what merged.)
 2. A run killed in the middle of a video at the switch: nothing is moved before its transcript is whole, and the next run takes over the lock of the gone process and does the video again. (The moved test "takes over at once from a run that is no longer there, and from one that has held the folder for half a day", and Task 6's check that nothing is running first.)
 3. One folder watched by two agents: on one Mac, each installer refuses the other's folders; across Macs, each keeps its own list. (The moved installer tests; Task 6, step 7.)
 4. A change in brimm-operations to a page module that brimm-video copies, made with no word to brimm-video: brimm-operations' test fails at once, and while its table says "not yet" every run shows a todo. (Tasks 4 and 5, each seen failing first.)
@@ -186,19 +186,16 @@ If #29 and #30 are still open when Task 1 starts, Task 1 does not wait for them:
 
 | File | Task | What |
 |---|---|---|
-| `tool/run.js` | 1, 2 | `quiet`; its header no longer says it is a copy |
-| `tool/dropbox.js` | 1 | `bringDown` in, `readThrough` out |
-| `tool/unedited.js`, `tool/edit.js` | 1 | Their calls to bring a file down |
-| `tool/install.sh` | 1 | "(git, swift, python3)" in its line on Xcode's tools, once #26 is in |
+| `tool/dropbox.js` and its tests | 1 | Changed by PR #31, not by this plan |
+| `tool/run.js` | 2 | Its header no longer says it is a copy |
 | `tool/transcribe.js`, `tool/install-transcribe.sh` | 2 | The tool and its installer, moved |
 | `tool/lib.js` | 2 | The transcript tool's rules join |
 | `tool/shared/*.js` | 4 | Line 1 names the commit and the hash |
-| `tool/tests/run.test.js`, `dropbox.test.js`, `unedited.test.js`, `edit.test.js` | 1 | `quiet`, `bringDown`, its two callers |
 | `tool/tests/transcribe.test.js`, `install-transcribe.test.js` | 2, 3, 4 | Moved; two new tests; duplicates out; the `.srt` fixture's test |
 | `tool/tests/transcribe-lib.test.js` | 2, 3 | Moved, then folded into `lib.test.js` |
 | `tool/tests/shared.test.js`, `copied-by-brimm-operations.test.js` | 4 | The guard, this side |
 | `tool/tests/fixtures/transcript-v1.srt`, `transcript-v1.transcript.txt` | 4 | The `.srt` contract |
-| `README.md`, `CLAUDE.md`, `docs/requirements.md`, the spec | 1, 2, 4, 9 | As each task says |
+| `README.md`, `CLAUDE.md`, `docs/requirements.md`, the spec | 2, 4, 9 | As each task says |
 | brimm-operations: `app/tests/copied-by-brimm-video.test.js`, `app/tests/handoff/`, `app/tests/handoff.test.js`, `CLAUDE.md` | 5 | The guard, that side, and the fixtures copied again |
 | brimm-operations: `transcribe/`, the workflow, `README.md`, `CLAUDE.md`, `docs/requirements.md` | 8 | The removal |
 
@@ -207,63 +204,34 @@ If #29 and #30 are still open when Task 1 starts, Task 1 does not wait for them:
 ### Task 0: Before starting
 
 - [ ] **Step 1:** The review is finished: read its note in the shared notes folder, and `gh pr list --repo jogden12/brimm-video --state all --limit 12`. Write down which of #22 to #30 merged, and `main`'s head.
-- [ ] **Step 2:** Jason has answered Open questions 1 and 2.
+- [ ] **Step 2:** Jason has answered Open question 1.
 - [ ] **Step 3:** `transcribe/` has not changed since PR 29: `gh api "repos/jogden12/brimm-operations/commits?path=transcribe&per_page=1" --jq '.[0].sha[0:7]'` prints `3a5eeff`. If it prints another, its changes are carried into Tasks 1 and 2 the same way.
 - [ ] **Step 4:** Baselines. brimm-video, in a worktree: `cd tool && node --test`, all pass; write the count down as N0. brimm-operations, in a worktree there or a `git archive` copy of `transcribe` and `app/src`: `cd app && node --test` (953 at `ced8fe5`) and `cd transcribe && node --test` (207).
 
-### Task 1 (brimm-video): One way to bring a placeholder down
+### Task 1: The placeholder fix lands (PR #31; phase T waits for it)
 
-The bug fix, on a branch and pull request of its own, before the move.
+brimm-video's fix for the placeholder bug is PR #31 (https://github.com/jogden12/brimm-video/pull/31), "Read a Dropbox placeholder through with python3, which turns downloads on for itself", built by the session "Dropbox placeholder fix for brimm-video's readThrough" on the branch `claude/busy-chebyshev-4d1df6` (worktree `.claude/worktrees/busy-chebyshev-4d1df6`). Phase T builds none of it, and never works in that worktree or on that branch. This PR's first commit (`2d5f0c6`) had a full Task 1 for building the fix another way; it stays in this PR's history only to compare with.
 
-**Files:** Modify `tool/run.js`, `tool/dropbox.js`, `tool/unedited.js` (the arrival check in `workOn`), `tool/edit.js` (`bring`), `README.md`, and one line of `tool/install.sh` if #26 has merged. Test `tool/tests/run.test.js`, `dropbox.test.js`, `unedited.test.js`, `edit.test.js` (and `install.test.js` for that line).
+- [ ] **Step 1: Wait until Jason has merged PR #31:** `gh pr view 31 --repo jogden12/brimm-video --json state,mergeCommit`. Pulling it onto each Mac is that PR's own step, not this plan's.
+- [ ] **Step 2: Check that what merged is what Tasks 2 and 3 assume,** as PR #31 stood at 16:45 UTC on 2026-10-20:
+  - `readThrough(path, { spawn, quietMs })` in `dropbox.js` resolves once python3 has read the file through. It rejects with python3's last line on standard error ("Resource deadlock avoided"), with the spawn error's message ("spawn /usr/bin/python3 ENOENT"), or, once `READ_QUIET_MS` (2 minutes) passes with nothing read, with "Dropbox sent nothing of it for 2 minutes, so it was given up";
+  - `run.js` has no `quiet`, and `unedited.js` and `edit.js` call `readThrough` as before;
+  - its tests in `dropbox.test.js` cover python3 with `-I` and the file as an argument of its own, a read that keeps coming, a stall, python3's reason, python3 missing, and the Mac's own python3 on a real file.
 
-**Interfaces:**
-- Produces: `runProgram(cmd, args, { keep, out, input, cwd, limit, quiet = 0 })`, which kills a program that prints nothing for `quiet` ms, as one out of time is, and adds `wentQuiet: true`; `bringDown(file, { run = runProgram } = {})` → `Promise<{ ok: true } | { ok: false, why: string }>`, which never rejects; `READ_QUIET_MS` (120 000) stays exported. `readThrough` is gone.
-
-- [ ] **Step 1: Write the failing tests.** Copied word for word from brimm-operations' `transcribe/tests/transcribe.test.js` at `ced8fe5`, where they pass:
-  - into `run.test.js`'s "running a program": "stops a program that prints nothing for as long as it may stay quiet, and says that it went quiet" and "lets a program that keeps printing run on past the time it may stay quiet, however long it runs in all";
-  - into `dropbox.test.js`, in place of the two `readThrough` tests ("reads it to its end", and "gives up, in plain words, …"; "waits two minutes of quiet by default" stays): the describe "asking Dropbox for a file" and its three tests (python3 with `-I`, a script that holds `setiopolicy_np(3, 0, 2)`, `quiet` 120 000; its three ways of failing; the Mac's own python3 on a real file, skipped off a Mac).
-
-  And two of brimm-video's own:
-
-```js
-// unedited.test.js, beside "leaves a placeholder for the next time …"
-it("says why a file could not be read through, and keeps looking for it", async () => {
-  // isWhole is false at first and true after the bring-down; bringDown resolves { ok: false, why: "Resource deadlock avoided" }
-  assert.ok(lines.includes("huge.mov: it could not be read through (Resource deadlock avoided)."));
-  assert.equal(r.ok, true);
-});
-// edit.test.js, beside #24's tests of bring
-it("lists a file that Dropbox would not bring over, with the reason it gives", async () => {
-  t.ctx.deps.readAll = async () => ({ ok: false, why: "Resource deadlock avoided" });
-  assert.deepEqual(result.failed, [`${rel} could not be read (Resource deadlock avoided)`]);
-});
-```
-
-- [ ] **Step 2: Run them to see them fail:** `cd tool && node --test tests/run.test.js tests/dropbox.test.js tests/unedited.test.js tests/edit.test.js`. Expected: the new tests fail (no `quiet`, no `bringDown`, no such line).
-- [ ] **Step 3: Implement.** `runProgram`'s `quiet` as PR 29 has it (its `stop` and `heard`). In `dropbox.js`, `bringDown` and its python script word for word from `ced8fe5:transcribe/transcribe.js` lines 162 to 196, with their comment (why python3, EDEADLK, TN3150 and the `getiopolicy_np` manual), importing `runProgram` from `run.js`; `readThrough` and `spoken` go. In `unedited.js`, `deps.bringDown || bringDown`, and on `{ ok: false, why }` the log line `${name}: it could not be read through (${why}).`, which a rejection writes today; a stand-in that resolves anything else changes nothing. In `edit.js`'s `bring`, `ctx.deps.readAll || bringDown`; on `{ ok: false, why }` it lists `${rel} could not be read (${why})`, and the `try` and `catch` stay, so a stand-in that throws or resolves nothing means what it means today.
-- [ ] **Step 4: Run the whole suite:** `cd tool && node --test`. Expected: all pass, 0 fail; N1 = N0 + 5 (2 for `quiet`, 3 for `bringDown`, 2 for the callers, less the 2 `readThrough` tests).
-- [ ] **Step 5: Documents.** The README's paragraph on files Dropbox has not brought over says why python3 reads them through, as brimm-operations' README says since PR 29. If #26 has merged: `install.sh`'s line "Xcode's command line tools (git, swift)" becomes "(git, swift, python3)", test first in `install.test.js`.
-- [ ] **Step 6: By hand, on the Mac Studio, with Jason's OK to put a small file in his iCloud Drive** (never in a watched folder): make a clip with `say -o`, evict it with `brctl evict`, and check that `stat -f "%Xf %b"` shows the dataless flag (`40000060`) and 0 blocks, as PR 29 did. Then, from a parent with downloads off, as a launch agent has them:
-
-```bash
-/usr/bin/python3 -I -c 'import ctypes, subprocess, sys; ctypes.CDLL(None).setiopolicy_np(3, 0, 1); sys.exit(subprocess.call(sys.argv[1:]))' /opt/homebrew/bin/node --input-type=module -e 'const d = await import(process.argv[1]); console.log(await d.bringDown(process.argv[2]), d.isWhole(process.argv[2]))' "<worktree>/tool/dropbox.js" "<the clip>"
-```
-
-  Expected: `{ ok: true } true`. Before that, the same from a `main` worktree with `readThrough(process.argv[2]).then(() => "read", (e) => e.code)` prints `EDEADLK`, which shows the bug is real for brimm-video. Delete the clip afterwards.
-- [ ] **Step 7: Commit and open the PR.** `git commit -m "Bring a Dropbox placeholder down with python3, as the transcript tool does: node's read fails with EDEADLK under the launch agent"`. Once Jason merges it: `git pull` in the checkout on the Mac Studio, and on Sallie's laptop at her next update, each with no import running (the guide's way).
+  If it merged in another shape, Task 2 fits its adapter (ruling 5) and the moved tests' imports to what merged, and the transcript tool still does what it does today: a file that does not come down gets its note, with the reason.
+- [ ] **Step 3: Baseline.** In a worktree on `main` with PR #31: `cd tool && node --test`, all pass; write the count down as N1.
 
 ### Task 2 (brimm-video): The transcript tool moves in, unchanged
 
 **Files:** Create `tool/transcribe.js`, `tool/install-transcribe.sh`, `tool/tests/transcribe.test.js`, `tool/tests/transcribe-lib.test.js`, `tool/tests/install-transcribe.test.js`. Modify `tool/lib.js`, `tool/run.js` (header), `README.md`, `CLAUDE.md`, `docs/requirements.md`.
 
 **Interfaces:**
-- Consumes: Task 1's `bringDown` and `runProgram`'s `quiet`; `isWhole` (`dropbox.js`); `localDay` (`shared/text.js`); `tidyTranscript` (`shared/transcript.js`, through `stampedText`).
+- Consumes: `readThrough` and `isWhole` (`dropbox.js`), as Task 1 step 2 found them; `localDay` (`shared/text.js`); `tidyTranscript` (`shared/transcript.js`, through `stampedText`).
 - Produces: `tool/transcribe.js` exports `transcribeFile`, `transcribeFolder`, `transcribeFolders`, `parseArgs` and `main(argv, { find = findTools, log } = {})`, where `log` defaults to the stamped line on standard output it writes today; the two parameters are new, so a test can give it missing programs and read what it says. `tool/lib.js` exports ruling 3's names as well as its own.
 
 - [ ] **Step 1: Copy the tests,** reading brimm-operations only: `git -C ~/"Claude Code/BRIMM operations" show ced8fe5:transcribe/tests/transcribe.test.js > tool/tests/transcribe.test.js`, and the same for `lib.test.js` (as `transcribe-lib.test.js`) and `install.test.js` (as `install-transcribe.test.js`). Change only:
   - each file's first line, `// Moved from brimm-operations transcribe/tests/<name> at commit ced8fe5 on <date>.`, with the old first lines after it;
-  - `transcribe.test.js`'s import: `{ transcribeFile, transcribeFolder, transcribeFolders, parseArgs, main }` from `../transcribe.js` (`main` for step 2's test), `{ findTools, lockFile, runProgram, isRunning }` from `../run.js`, `{ isWhole, bringDown }` from `../dropbox.js`;
+  - `transcribe.test.js`'s import: `{ transcribeFile, transcribeFolder, transcribeFolders, parseArgs, main }` from `../transcribe.js` (`main` for step 2's test), `{ findTools, lockFile, runProgram, isRunning }` from `../run.js`, `{ isWhole }` from `../dropbox.js`; and leave out the describe "asking Dropbox for a file" and the two tests of `quiet` in "running a program": five tests of code that is not carried (ruling 5), whose ground PR #31's tests of `readThrough` cover;
   - `transcribe-lib.test.js`: `../../app/src/transcript.js` becomes `../shared/transcript.js`;
   - `install-transcribe.test.js`: `../install.sh` becomes `../install-transcribe.sh`, and the three texts that say where unedited video is set up read as step 4 words them.
 - [ ] **Step 2: Add two tests** to `transcribe.test.js`. The first passes at once: it pins what the tool already does, as phase T's row asks.
@@ -286,16 +254,16 @@ it("says how to set the Mac up when a program is missing", async () => {
 
 - [ ] **Step 3: Run them to see them fail:** `cd tool && node --test tests/transcribe.test.js tests/transcribe-lib.test.js tests/install-transcribe.test.js`. Expected: they fail to load (no `../transcribe.js`, no `../install-transcribe.sh`, and `lib.js` has no `zoomCall`).
 - [ ] **Step 4: Move the code.**
-  - `tool/transcribe.js` from `ced8fe5:transcribe/transcribe.js`: ruling 4's imports; the definitions now in `run.js` and `dropbox.js` deleted, with `MODEL_NAME`, `STALE_LOCK_MS`, `SF_DATALESS`, `fileFlags`, `READ_QUIET_MS` and the python script; the header says where it came from ("Moved from brimm-operations transcribe/transcribe.js at commit ced8fe5 on <date>. Its history before that is there.") and that `install-transcribe.sh` sets it up; `main`'s line "Run tool/install-transcribe.sh to set this Mac up."; `main`'s two new parameters. Keep the `#!/usr/bin/env node` line, and mode 755.
+  - `tool/transcribe.js` from `ced8fe5:transcribe/transcribe.js`: ruling 4's imports; the definitions now in `run.js` and `dropbox.js` deleted, with `MODEL_NAME`, `STALE_LOCK_MS`, `SF_DATALESS`, `fileFlags`, `READ_QUIET_MS` and the python script; `bringDown` replaced by ruling 5's adapter, which `transcribeFile` takes when `deps.bringDown` is not given; the header says where it came from ("Moved from brimm-operations transcribe/transcribe.js at commit ced8fe5 on <date>. Its history before that is there.") and that `install-transcribe.sh` sets it up; `main`'s line "Run tool/install-transcribe.sh to set this Mac up."; `main`'s two new parameters. Keep the `#!/usr/bin/env node` line, and mode 755.
   - `tool/lib.js`: ruling 3's rules added, word for word with their comments. Its header says it holds the rules of both tools; the "Copied in part" line goes.
   - `tool/run.js`: the "Copied in part" line goes. "The lock is the one both tools take, so the two never work on one folder at the same time."
   - `tool/install-transcribe.sh` from `ced8fe5:transcribe/install.sh`, mode 755. Its usage lines name `./install-transcribe.sh`. "Unedited video is set up with install.sh, beside this one." in the header; in the message for `--unedited` and `--rules-only`, "Unedited video is set up with install.sh, beside this one. This sets up the transcript tool only."; at the end of the refusal, "The launch agent for unedited video is set up with install.sh, beside this one." `HERE` is the same code, so the plist names `tool/transcribe.js`. The label, log, model, default folder and the refusal itself do not change.
-- [ ] **Step 5: Run the three files, then the whole suite.** Expected: the three pass; `cd tool && node --test` all pass, 0 fail, N1 + 209 (207 moved, 2 new). Write N1 + 209 in the commit.
+- [ ] **Step 5: Run the three files, then the whole suite.** Expected: the three pass; `cd tool && node --test` all pass, 0 fail, N1 + 204 (202 moved, 2 new). Write N1 + 204 in the commit, and name the five tests left behind.
 - [ ] **Step 6: Documents.**
   - README: "What is where" gains `tool/transcribe.js` and `tool/install-transcribe.sh`. A section "The transcript tool", made from brimm-operations' README section of that name, with this repo's paths (`cd tool && ./install-transcribe.sh --print "<folder>"`; its tests are among `cd tool && node --test`; the Mac runs it straight from this folder, so it stays on `main`). In "Copies kept in step by hand", `lib.js` and `run.js` are this repo's own now, and the sentence on `ffmpegArgs` becomes a known difference in the new section: the transcript tool does not map a sound stream yet. "Where this came from" gains the move.
   - CLAUDE.md: "Today it holds one tool" becomes two: the unedited-video tool and the transcript tool (`tool/transcribe.js`, moved from brimm-operations on <date>). The command block gains `cd tool && ./install-transcribe.sh --print "<folder>"`. The rule on the launch agent names both agents. "Experiments never write into a watched Dropbox folder: a new file there starts a tool." The line on copies names `tool/shared/` only.
   - `docs/requirements.md`: a dated line under "Changes", naming brimm-operations' workflow 5 note (2026-10-13) as where the transcript tool came from.
-- [ ] **Step 7: Commit and open the PR.** `git commit -m "The transcript tool moves in from brimm-operations, unchanged (phase T): transcribe.js, its installer and its 207 tests"`. Nothing changes in brimm-operations: its 207 and 953 still pass there.
+- [ ] **Step 7: Commit and open the PR.** `git commit -m "The transcript tool moves in from brimm-operations, unchanged (phase T): transcribe.js, its installer and its tests"`. Nothing changes in brimm-operations: its 207 and 953 still pass there.
 
 ### Task 3 (brimm-video): One copy of each test
 
@@ -303,14 +271,13 @@ it("says how to set the Mac up when a program is missing", async () => {
 
 - [ ] **Step 1: List the duplicates.** A moved test is a duplicate when a test of the same function elsewhere has the same name and either the same body or a body that holds every assert of the moved one. Expected, as counted on 2026-10-20, to be confirmed pair by pair with `diff`:
   - `transcribe-lib.test.js` against `lib.test.js`: 20 the same, and "has ffmpeg take the sound out as the kind of file the transcriber reads, never asking a question", which brimm-video's holds with its three asserts for a sound stream;
-  - `transcribe.test.js` against `run.test.js`: 17 the same (the three of `findTools` and fourteen of "running a program"), and the two of `quiet` that Task 1 copied;
-  - `transcribe.test.js` against `dropbox.test.js`: the three of "asking Dropbox for a file" that Task 1 copied.
+  - `transcribe.test.js` against `run.test.js`: 17 the same (the three of `findTools` and fourteen of "running a program").
 
-  That is 43. The installers' tests are not compared: they test two different scripts. The two sets of `isWhole` tests have different names, and both stay.
+  That is 38. The installers' tests are not compared: they test two different scripts. The two sets of `isWhole` tests have different names, and both stay.
 - [ ] **Step 2:** Write down the names doubled before: `grep -ho 'it("[^"]*"' tool/tests/*.js | sort | uniq -d`.
 - [ ] **Step 3:** Remove the duplicates. Move what is left of `transcribe-lib.test.js` (the Zoom rules, `waiting`, `isDayName`) into `lib.test.js`, in its own describe blocks, and delete `transcribe-lib.test.js`.
 - [ ] **Step 4:** The same `grep`: none of the listed names is doubled any more, and each is still there once. `cd tool && node --test`: all pass, 0 fail, the count down by exactly the number listed (expected N1 + 166).
-- [ ] **Step 5: Commit,** with the list in its body: `git commit -m "One copy of each test of the shared code: 43 moved tests brimm-video already had"`.
+- [ ] **Step 5: Commit,** with the list in its body: `git commit -m "One copy of each test of the shared code: 38 moved tests brimm-video already had"`.
 
 ### Task 4 (brimm-video): The guard on this side, and the `.srt` contract
 
@@ -411,7 +378,7 @@ After Task 8 there is no old copy: the way back is `git revert` of the faulty co
 ### Task 7: A week of real use
 
 - [ ] Each day, on each Mac: any new "failed." line in the log is one the old tool would have written too; every video that landed was filed; no `.failed.txt` is left unexplained.
-- [ ] The week counts from the MacBook's switch (Open question 6).
+- [ ] The week counts from the MacBook's switch (Open question 5).
 - [ ] At its end, Jason's yes for Task 8.
 
 ### Task 8 (a session opened in brimm-operations): Session B, `transcribe/` removed
@@ -435,9 +402,9 @@ After Task 8 there is no old copy: the way back is `git revert` of the faulty co
 | After | brimm-video, `cd tool && node --test` | brimm-operations, `cd app && node --test` | brimm-operations, `cd transcribe && node --test` |
 |---|---|---|---|
 | Task 0 | N0, all pass | 953 | 207 |
-| Task 1 | N1 = N0 + 5, all pass | 953 | 207 |
-| Task 2 | N1 + 209 (207 moved, 2 new), all pass | 953 | 207 |
-| Task 3 | N1 + 166 (43 duplicates out), all pass | 953 | 207 |
+| Task 1 (PR #31 merged) | N1, all pass | 953 | 207 |
+| Task 2 | N1 + 204 (202 moved, 2 new), all pass | 953 | 207 |
+| Task 3 | N1 + 166 (38 duplicates out), all pass | 953 | 207 |
 | Task 4 | Plus the guard's and the fixture's tests, all pass, `todo 4` | 953 | 207 |
 | Task 5 | The todos go | 953, plus the guard's and the fixtures' tests | 207 |
 | Task 6 | All pass in each Mac's checkout, before its switch | — | — |
@@ -448,10 +415,9 @@ Every brimm-video count is taken in a checkout: in a `git archive` copy one test
 
 ## Open questions for Jason
 
-1. **The MacBook session on `readThrough`:** did it leave work that is not pushed? GitHub has no branch or PR for it. If it did, push it as a branch and Task 1 starts from it; if not, Task 1 stands alone.
-2. **Your MacBook:** does it have a brimm-video checkout (where, and on `main`?), and does it run `com.thebrimm.unedited`? If there is no checkout, Task 6 clones one there.
-3. **Phase T in the spec also puts the transcript tool under the Dropbox rule and has it write the progress file.** This plan moves it unchanged and leaves both for after the week, each with its own yes. Is that the order you want?
-4. **Sallie's laptop** does not run the transcript tool, so her YouTube and Zoom transcripts still come from your Macs. Leave it so for now (recommended), or add it after the week?
-5. **Two fixes the move does not make:** iPhone videos (the import takes the first sound ffmpeg can read, beside Apple's APAC; the transcript tool does not), and PR 29's open point (a Zoom call's length is asked of a file that may still be a placeholder). After the week, each as its own task?
-6. **The week of real use:** from the MacBook's switch, the later one (recommended), or from the Mac Studio's?
-7. **The two brimm-operations sessions:** session A right after Task 4 merges, and session B after the week (recommended). Who opens them?
+1. **Your MacBook:** does it have a brimm-video checkout (where, and on `main`?), and does it run `com.thebrimm.unedited`? If there is no checkout, Task 6 clones one there.
+2. **Phase T in the spec also puts the transcript tool under the Dropbox rule and has it write the progress file.** This plan moves it unchanged and leaves both for after the week, each with its own yes. Is that the order you want?
+3. **Sallie's laptop** does not run the transcript tool, so her YouTube and Zoom transcripts still come from your Macs. Leave it so for now (recommended), or add it after the week?
+4. **Two fixes the move does not make:** iPhone videos (the import takes the first sound ffmpeg can read, beside Apple's APAC; the transcript tool does not), and PR 29's open point (a Zoom call's length is asked of a file that may still be a placeholder). After the week, each as its own task?
+5. **The week of real use:** from the MacBook's switch, the later one (recommended), or from the Mac Studio's?
+6. **The two brimm-operations sessions:** session A right after Task 4 merges, and session B after the week (recommended). Who opens them?
