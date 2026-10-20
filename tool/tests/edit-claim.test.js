@@ -4,10 +4,11 @@
 // program: every program is a stand-in.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, CLAIM_WAIT_MS } from "../edit.js";
 import { claimed, localStamp, recordFile, recordText, shown } from "../episode.js";
+import { readResult } from "../detached.js";
 import { setup, episodeFor, reread, otherMac, FOLDER, EDITED, NAME, PROJECT } from "./episodes.js";
 
 /** Run a command of edit.js on a Mac, by its deps: { code, text }, with what it said. */
@@ -129,6 +130,343 @@ describe("the claim", () => {
     assert.equal(reread(found).rev, 2);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share]]);
     assert.deepEqual(t.waits, []);
+    t.done();
+  });
+  it("refuses at once, and brings nothing, when the other Mac has it and its files are not here", async () => {
+    const theirs = `Sallie's laptop has Pricing talk open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
+    // Online-only on this Mac, as an episode is on the Mac that is not editing it: the raw video is not whole here.
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await on(t.ctx.deps, "open", FOLDER);
+    assert.deepEqual([r.code, r.text], [1, theirs]);
+    assert.deepEqual(t.started, []);
+    assert.deepEqual([reread(found).rev, t.waits], [1, []]);
+    t.done();
+    // A file the record lists is missing in Dropbox: the claim is still said first, not the missing file.
+    const u = setup();
+    const short = episodeFor(u, { record: { editing: HERS } });
+    rmSync(join(short.folder, "Pricing talk.reel-1.srt"));
+    const s = await on(u.ctx.deps, "open", FOLDER);
+    assert.deepEqual([s.code, s.text], [1, theirs]);
+    assert.deepEqual(u.started, []);
+    u.done();
+  });
+  it("on a take-over, brings the files that are not whole here, claims nothing until they are, and says to take it over again", async () => {
+    // The take-over goes past the refusal, but a file not whole on this Mac is still brought over first. What it says next
+    // is to take it over again, not to open it: a plain open would refuse, and she would be asked a second time (the review
+    // of the follow-ups plan, P8).
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    let read = false;
+    t.ctx.deps.isWhole = (path) => read || !path.endsWith("Pricing talk.mp4");
+    const r = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.deepEqual([r.code, r.text], [0, `Dropbox is bringing 1 file of Pricing talk over to this Mac. Say "take it over" again when it is done; "how far is it?" shows how far it has got.`]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over"]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by, t.waits], [1, "Sallie's laptop", []]);
+    // The run it started says the same when it is done, for "how far is it?" to read out, in this session or a later one, but
+    // only while the claim she said to take over stands: it keeps whose claim that was. Otherwise it says to open it.
+    t.ctx.deps.readAll = async () => {
+      read = true;
+    };
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    const brought = readResult(t.home, FOLDER, "bring");
+    assert.deepEqual([brought.ok, brought.made, brought.next], [true, ["Pricing talk.mp4"], `Every file of Pricing talk is here. Say "open Pricing talk".`]);
+    assert.deepEqual(brought.takeOver, { by: "Sallie's laptop", since: HERS.since, next: `Every file of Pricing talk is here. Say "take it over" again.` });
+    assert.match((await on(t.ctx.deps, "status")).text, /bring ended .* ago\. Made: Pricing talk\.mp4\. Every file of Pricing talk is here\. Say "take it over" again\.$/);
+    // Taken over again, with the files whole now: it is claimed, and nothing more is asked.
+    const again = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(again.code, 0, again.text);
+    assert.match(again.text, /^Taken over from Sallie's laptop, who had it since 2026-10-20 14:00\./);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [2, "Mac Studio"]);
+    t.done();
+  });
+  it("on a take-over, says why when the files it brought are not all here, and to open it, not to take it over again", async () => {
+    // A bring that failed would most likely fail again the same way: a full disk, Dropbox paused, the Mac offline. Were it to
+    // say to take it over again, the skill would do so without asking her, and start the same bring again, round after round,
+    // and she would not hear why (review #24-2). So it says why, and to open it, as any bring that failed does: a plain open
+    // refuses, and she is asked again.
+    const full = async () => {
+      throw Object.assign(new Error("no space left"), { code: "ENOSPC" });
+    };
+    for (const [readAll, why] of [[async () => {}, "Pricing talk.mp4 is still not whole"], [full, "Pricing talk.mp4 could not be read (ENOSPC)"]]) {
+      const t = setup();
+      const found = episodeFor(t, { record: { editing: HERS } });
+      t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+      t.ctx.deps.readAll = readAll;
+      assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+      assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 1);
+      const brought = readResult(t.home, FOLDER, "bring");
+      assert.deepEqual([brought.ok, brought.failed, brought.next], [false, [why], `Some files of Pricing talk are not here yet. Say "open Pricing talk" to try again.`]);
+      assert.equal(brought.takeOver, undefined);
+      const howFar = (await on(t.ctx.deps, "status")).text;
+      assert.match(howFar, new RegExp(`Not done: ${why.replace(/[.()]/g, "\\$&")}\\. Some files of Pricing talk are not here yet\\. Say "open Pricing talk" to try again\\.$`));
+      assert.doesNotMatch(howFar, /take it over/);
+      // As it says: a plain open refuses, starts nothing, and she is asked again.
+      const plain = await on(t.ctx.deps, "open", FOLDER);
+      assert.equal(plain.code, 1, plain.text);
+      assert.match(plain.text, /^Sallie's laptop has Pricing talk open, since 2026-10-20 14:00\. Say "take it over"/);
+      assert.equal(t.started.length, 1);
+      assert.deepEqual([reread(found).rev, reread(found).editing.by], [1, "Sallie's laptop"]);
+      t.done();
+    }
+  });
+  it("has \"how far is it?\" stop saying to take it over again once it is taken over, and when the other Mac opens it again later", async () => {
+    // The bring of a take-over says to take it over again, and the skill then does so without asking her. Its result stays on
+    // this Mac after the take-over is done: a line that still said so when the other Mac had it again would have the skill take
+    // it from the Mac editing it, and nobody asked her (the fold's check of P8).
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    let read = false;
+    t.ctx.deps.isWhole = (path) => read || !path.endsWith("Pricing talk.mp4");
+    t.ctx.deps.readAll = async () => {
+      read = true;
+    };
+    assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    const taken = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(taken.code, 0, taken.text);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [2, "Mac Studio"]);
+    // Taken over: this Mac has it, and nothing is to be taken over. It says to open it, as any bring does.
+    const done = (await on(t.ctx.deps, "status")).text;
+    assert.doesNotMatch(done, /take it over/);
+    assert.match(done, /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    // Days later Sallie's laptop has it again, a claim she has not been asked about: still no take-over, and an open refuses.
+    const mine = reread(found);
+    writeFileSync(recordFile(found.folder, 3), recordText({ ...claimed(mine, "Sallie's laptop", "2026-10-22T09:00:00-05:00"), rev: 3, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const later = (await on(t.ctx.deps, "status")).text;
+    assert.doesNotMatch(later, /take it over again/);
+    assert.match(later, /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    const plain = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(plain.code, 1, plain.text);
+    assert.match(plain.text, /^Sallie's laptop has Pricing talk open, since 2026-10-22 09:00\. Say "take it over"/);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [3, "Sallie's laptop"]);
+    t.done();
+  });
+  it("has \"how far is it?\" say to take it over again while her claim stands, and not once she has let it go or opened it again", async () => {
+    // She said yes to taking over Sallie's laptop's claim, and the files came, but it was not taken over. A change of hers that
+    // keeps the claim leaves it to be taken over; a claim of hers made since is one she was not asked about.
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    let read = false;
+    t.ctx.deps.isWhole = (path) => read || !path.endsWith("Pricing talk.mp4");
+    t.ctx.deps.readAll = async () => {
+      read = true;
+    };
+    assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    const first = reread(found);
+    const hers = (rev, editing) => writeFileSync(recordFile(found.folder, rev), recordText({ ...first, rev, editing, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const howFar = async () => (await on(t.ctx.deps, "status")).text;
+    // A change of hers, with the same claim: still to be taken over.
+    hers(2, HERS);
+    assert.match(await howFar(), /Every file of Pricing talk is here\. Say "take it over" again\.$/);
+    // A claim of another Mac's, even since the same time, is not the one she was asked about.
+    hers(3, { ...HERS, by: "Jason's laptop" });
+    assert.match(await howFar(), /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    // Back to her claim, and then she let it go: nothing to take over, and a plain open goes through.
+    hers(4, HERS);
+    hers(5, null);
+    assert.match(await howFar(), /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    // She opened it again: a claim of hers she was not asked about. It says to open it, and an open refuses.
+    hers(6, { by: "Sallie's laptop", since: "2026-10-22T09:00:00-05:00" });
+    const later = await howFar();
+    assert.doesNotMatch(later, /take it over again/);
+    assert.match(later, /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    assert.equal((await on(t.ctx.deps, "open", FOLDER)).code, 1);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [6, "Sallie's laptop"]);
+    t.done();
+  });
+  it("has \"how far is it?\" stop saying to take it over again once a plain open has asked her again, with the claim the same", async () => {
+    // Her yes is for that once. A plain open that refuses has her asked again, and she may say no: were the yes she gave
+    // before still to count, "how far is it?" would have the skill take the episode over unasked, against her last answer,
+    // for as long as the other Mac's claim stood, through every push made there (review #24-1).
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    let read = false;
+    t.ctx.deps.isWhole = (path) => read || !path.endsWith("Pricing talk.mp4");
+    t.ctx.deps.readAll = async () => {
+      read = true;
+    };
+    const howFar = async () => (await on(t.ctx.deps, "status")).text;
+    assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    assert.match(await howFar(), /Say "take it over" again\.$/);
+    // A day later she says to open it: it refuses, with the claim she said yes to before, and she is asked again.
+    const asked = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(asked.code, 1, asked.text);
+    assert.match(asked.text, /^Sallie's laptop has Pricing talk open, since 2026-10-20 14:00\. Say "take it over"/);
+    const after = await howFar();
+    assert.doesNotMatch(after, /take it over/);
+    assert.match(after, /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    // A change of hers that keeps the claim, as a push does, brings the old yes back no more.
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    assert.doesNotMatch(await howFar(), /take it over/);
+    // She says yes again: taken over, with the files here now, and nothing more is asked.
+    const yes = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(yes.code, 0, yes.text);
+    assert.match(yes.text, /^Taken over from Sallie's laptop, who had it since 2026-10-20 14:00\./);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [3, "Mac Studio"]);
+    t.done();
+  });
+  it("has \"how far is it?\" say to open it, not to take it over again, when she was asked again while the bring was at work", async () => {
+    // The bring was started on her yes, and she was asked again, by a plain open that refused, before it ended: the result it
+    // leaves after that is not to bring the old yes back.
+    const t = setup();
+    episodeFor(t, { record: { editing: HERS } });
+    let read = false;
+    const asked = [];
+    t.ctx.deps.isWhole = (path) => read || !path.endsWith("Pricing talk.mp4");
+    t.ctx.deps.readAll = async () => {
+      asked.push((await on(t.ctx.deps, "open", FOLDER)).code);
+      read = true;
+    };
+    assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    assert.deepEqual(asked, [1]);
+    const howFar = (await on(t.ctx.deps, "status")).text;
+    assert.doesNotMatch(howFar, /take it over/);
+    assert.match(howFar, /Every file of Pricing talk is here\. Say "open Pricing talk"\.$/);
+    t.done();
+  });
+  it("has \"how far is it?\" say to open it when the other Mac's claim changed after her yes, so she is asked about the new one", async () => {
+    // Her yes was to the claim since 14:00. Before the bring started, Sallie's laptop opened it again, since 14:30: the bring
+    // takes over that newer claim, which she was never asked about, so the skill must not take it over unasked.
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    assert.equal((await on(t.ctx.deps, "open", FOLDER, "--take-over")).code, 0);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, editing: { by: "Sallie's laptop", since: "2026-10-20T14:30:00-05:00" } }));
+    t.ctx.deps.isWhole = () => true;
+    assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, "--take-over")).code, 0);
+    const howFar = (await on(t.ctx.deps, "status")).text;
+    assert.doesNotMatch(howFar, /take it over/);
+    assert.match(howFar, /Say "open Pricing talk"\.$/);
+    t.done();
+  });
+  it("says to open it again, not to take it over, when --take-over is given and no other Mac has it", async () => {
+    // Nobody had it, so nothing was taken over: a plain open goes through when the files are here.
+    const t = setup();
+    episodeFor(t);
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.deepEqual([r.code, r.text], [0, `Dropbox is bringing 1 file of Pricing talk over to this Mac. Say "open Pricing talk" again when it is done; "how far is it?" shows how far it has got.`]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER]]);
+    t.done();
+  });
+  it("refuses, and says nothing of still arriving, when the Mac that handed it over has opened it again", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const share = "edit/from-final-cut/Pricing talk main v2 3fa9c1.mov";
+    const first = reread(found);
+    // Sallie's laptop handed it over with a Share that is not here yet, then opened it again: claimed() keeps `released`.
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, editing: HERS, files: { ...first.files, [share]: 9 }, released: { at: "2026-10-20T13:30:00-05:00", by: "Sallie's laptop", files: { ...first.files, [share]: 9 } } }));
+    const r = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, `Sallie's laptop has Pricing talk open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`);
+    assert.doesNotMatch(r.text, /Still arriving/);
+    assert.deepEqual(t.started, []);
+    assert.equal(reread(found).rev, 2);
+    t.done();
+  });
+  it("says Dropbox undid the claim when its own claim is gone after the wait, and the next open goes through", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    // Dropbox takes this Mac's record write away during the wait, once: the newest record is the first again, with no claim.
+    let undid = false;
+    duringTheWait(t, () => {
+      if (undid) return;
+      undid = true;
+      rmSync(recordFile(found.folder, 2));
+    });
+    const r = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, `Dropbox undid this Mac's claim on Pricing talk. Say "open Pricing talk" again.`);
+    assert.doesNotMatch(r.text, /The other Mac|at the same time/);
+    assert.deepEqual([reread(found).rev, reread(found).editing], [1, null]);
+    // Said once: the next open claims it, and does not say again that Dropbox undid a change.
+    const again = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(again.code, 0, again.text);
+    assert.doesNotMatch(again.text, /undid/);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [2, "Mac Studio"]);
+    t.done();
+  });
+  it("on a take-over, says Dropbox undid the claim, not that the other Mac has it, when the record is back to theirs after the wait", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    let undid = false;
+    duringTheWait(t, () => {
+      if (undid) return;
+      undid = true;
+      rmSync(recordFile(found.folder, 2));
+    });
+    const r = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(r.code, 1, r.text);
+    // She said to take it over, and the record is back to the one she said it of: so it says to take it over again, since a
+    // plain open would refuse and ask her a second time (the review of the follow-ups plan, P8).
+    assert.equal(r.text.split("\n").pop(), `Dropbox undid this Mac's claim on Pricing talk. Say "take it over" again.`);
+    assert.doesNotMatch(r.text, /at the same time/);
+    assert.equal(reread(found).editing.by, "Sallie's laptop");
+    // As it says: taken over again, it goes through, and does not say again that Dropbox undid a change.
+    const again = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(again.code, 0, again.text);
+    assert.doesNotMatch(again.text, /undid/);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [2, "Mac Studio"]);
+    t.done();
+  });
+  it("on a take-over Dropbox undid, says to open it, not to take it over, when nobody has it now, and waits for what she handed over", async () => {
+    // In the same moments as the take-over, Sallie's laptop handed the episode over, with a Share that is not here yet, and
+    // Dropbox kept her record in place of this Mac's claim. Nobody has it now: there is nothing to take over, and the next
+    // open is to wait for the Share, not to call it missing (review #24-4).
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: HERS } });
+    const share = "edit/from-final-cut/Pricing talk main v2 3fa9c1.mov";
+    let undid = false;
+    duringTheWait(t, () => {
+      if (undid) return;
+      undid = true;
+      rmSync(recordFile(found.folder, 2));
+      const first = reread(found);
+      const files = { ...first.files, [share]: 9 };
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, editing: null, files, released: { at: "2026-10-20T15:00:05-05:00", by: "Sallie's laptop", files }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    });
+    const r = await on(t.ctx.deps, "open", FOLDER, "--take-over");
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text.split("\n").pop(), `Dropbox undid this Mac's claim on Pricing talk. Say "open Pricing talk" again.`);
+    assert.deepEqual([reread(found).rev, reread(found).editing], [2, null]);
+    // A take-over of a record nobody has open is a plain open: both wait for the Share, and claim nothing yet.
+    const still = `Still arriving from Sallie's laptop: 1 file. Dropbox is bringing them over; say "open Pricing talk" again when it is done.`;
+    for (const flags of [[], ["--take-over"]]) {
+      const again = await on(t.ctx.deps, "open", FOLDER, ...flags);
+      assert.deepEqual([again.code, again.text], [0, still]);
+    }
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share], ["bring", "--now", FOLDER, share]]);
+    assert.equal(reread(found).rev, 2);
+    t.done();
+  });
+  it("says Dropbox undid the claim when the record after the wait is at this Mac's rev with nobody editing it", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    // Dropbox kept the other Mac's record 2, a change of hers with no claim in it, in place of this Mac's claim, and kept no
+    // conflicted copy: the record is not older than the one this Mac wrote, but nobody is editing it.
+    let undid = false;
+    duringTheWait(t, () => {
+      if (undid) return;
+      undid = true;
+      rmSync(recordFile(found.folder, 2));
+      const first = reread(found);
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, editing: null, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    });
+    const r = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, `Dropbox undid this Mac's claim on Pricing talk. Say "open Pricing talk" again.`);
+    assert.doesNotMatch(r.text, /at the same time/);
+    assert.deepEqual([reread(found).rev, reread(found).editing, reread(found).writer.on], [2, null, "Sallie's laptop"]);
+    // As it says: the next open claims it, after her record.
+    const again = await on(t.ctx.deps, "open", FOLDER);
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by], [3, "Mac Studio"]);
     t.done();
   });
   it("warns when this Mac seems offline, and still claims", async () => {

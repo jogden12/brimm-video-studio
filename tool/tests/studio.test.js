@@ -63,6 +63,25 @@ describe("her folder's settings", () => {
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
     assert.ok(skill.split("\n").length < 160, "the skill is short");
   });
+  it("have the skill ask her once about a take-over, and take it over again unasked only in the conversation she said yes in", () => {
+    // A take-over on the Mac without the files brings them first and says to say "take it over" again; so does a take-over
+    // Dropbox undid. Asked a second time, she would be asked the same question twice (the review of the follow-ups plan, P8).
+    // But it is taken over again unasked only for the take-over she said yes to, and for a bring only once it has ended well:
+    // "how far is it?" says to take it over again only while that claim stands and she has not been asked again since (the
+    // fold's check of P8, and review #24-1).
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const row = skill.split("\n").find((line) => line.startsWith('| "Open the Pricing episode" |'));
+    assert.match(row, /If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over`\./);
+    assert.match(row, /If that take-over says Dropbox undid the claim and to say "take it over" again, run `open "<episode>" --take-over` again without asking her again\./);
+    assert.match(row, /If it is bringing files over first, wait until "how far is it\?" says the bring has ended; if it then says to say "take it over" again, run `open "<episode>" --take-over` again without asking her again;/);
+    // A bring that failed says why, and to open it: she is told, and nothing is run again until she says so (review #24-2).
+    assert.match(row, /; if it says some files are not here, tell her why, in plain words, and try again only when she says to\./);
+    // Her yes is for that conversation only: in a later one she may have changed her mind, so she is asked again (review #24-1).
+    assert.match(row, /Take it over again unasked only in the conversation in which she said yes, and only if she has not said not to since; in a later one, run `open "<episode>"` and ask her as above\. Never take an episode over unasked otherwise\./);
+    // A no she gives later in that same conversation stops it too (the fold's check of #24-1).
+    assert.doesNotMatch(row, /When it, or "how far is it\?", says/);
+    assert.doesNotMatch(row, /says so only while/);
+  });
 });
 
 describe("the guard", () => {

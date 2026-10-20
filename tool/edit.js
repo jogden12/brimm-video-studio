@@ -345,6 +345,40 @@ function offlineStep(ctx, found) {
   }
 }
 
+/** Her yes to taking an episode over from another Mac, kept in this Mac's folder for the episode: the claim she said it of,
+    { by, since }. A take-over keeps it; a plain open that refuses, which has her asked again, lets it go, since she may say no
+    this time. "How far is it?" says to take it over again only while it is kept (nextOf). */
+const yesFile = (home, folder) => join(episodeWork(home, folder), "take-over.yes.json");
+
+/** Keep her yes to taking over the claim `held`. When it cannot be kept, "how far is it?" says to open the episode, and she is
+    asked again, which is the safe way to go wrong. */
+function keepYes(ctx, folder, held) {
+  try {
+    mkdirSync(episodeWork(ctx.home, folder), { recursive: true });
+    writeFileSync(yesFile(ctx.home, folder), JSON.stringify({ by: held.by, since: held.since }) + "\n");
+  } catch (e) {
+    // She is asked again instead.
+  }
+}
+
+/** Let her yes go: she is being asked again. */
+function forgetYes(ctx, folder) {
+  try {
+    rmSync(yesFile(ctx.home, folder), { force: true });
+  } catch (e) {
+    // It stays, then. The skill still asks her again in any later conversation.
+  }
+}
+
+/** Her yes, { by, since }, or null when none is kept or it cannot be read. */
+function yesOf(ctx, folder) {
+  try {
+    return JSON.parse(readFileSync(yesFile(ctx.home, folder), "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
 const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(join(found.folder, rel)));
 
@@ -399,12 +433,18 @@ function withoutOwnAnswers(record, machine) {
 /** `open "<episode>" [--take-over]`: check its files against its record, and that each is whole on this Mac, claim it for this
     Mac, and show what is decided for it. In order:
     - a change Dropbox undid is said, and the record as it is now taken as this Mac's;
+    - another Mac's claim refuses it at once, unless it is taken over (`--take-over`): nothing is looked at or brought over
+      first, since on the Mac that is not editing an episode its files are online-only, and bringing them, raw video and all,
+      would be for nothing until it is taken over. The refusal lets go of any yes she gave before to taking it over, since she
+      is asked again; a take-over keeps her yes (keepYes);
     - files the other Mac handed over that are still on their way: a detached run brings them over (`bring`), and nothing is
-      claimed until they are here;
-    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over, as above;
-    - the claim: another Mac's refuses it, unless it is taken over (`--take-over`). Otherwise the record is written with
-      this Mac editing it, and after CLAIM_WAIT_MS it is read again: when the other Mac claimed it meanwhile, or both Macs
-      wrote the same record and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
+      claimed until they are here (not on a take-over, which goes by the record's own list);
+    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over, as above, and on a
+      take-over what it says next is to take it over again, so that she is asked only once; so does the bring's result, but
+      only when every file came, and only while the claim she said to take over stands and her yes is kept (nextOf);
+    - the claim: the record is written with this Mac editing it, and after CLAIM_WAIT_MS it is read again: when Dropbox took
+      the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
+      and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim.
     At the first open on this Mac it says how to keep the episode on this Mac. */
 export async function open(ctx, rest) {
@@ -420,9 +460,19 @@ export async function open(ctx, rest) {
     acceptRev(ctx.home, record.id, record.rev);
   }
   const name = record.name.text;
+  // Who has it is said before any file is looked at: the files of an episode another Mac has are not whole here, and a Mac
+  // that handed it over and opened it again still has its `released` list in the record, which is not still arriving.
+  const held = heldElsewhere(record, ctx.machine);
+  if (held && !flags["take-over"]) {
+    // She is asked again whether to take it over, and may say no this time: a yes she gave before counts no more.
+    forgetYes(ctx, found.name);
+    say(`${held.by} has ${name} open, since ${shownAt(held.since)}. Say "take it over" to open it here; anything not handed over stays on ${held.by}.`);
+    return 1;
+  }
+  if (held) keepYes(ctx, found.name, held);
   // The files the other Mac handed over are in the record's list too, so they are waited for before the list is checked. A
-  // take-over does not wait: it goes by the record's own list.
-  const arriving = flags["take-over"] ? [] : stillArriving(ctx, found, record);
+  // take-over does not wait: it goes by the record's own list. A take-over of a record nobody else has open is a plain open.
+  const arriving = held ? [] : stillArriving(ctx, found, record);
   if (arriving.length) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: arriving });
     say(`Still arriving from ${record.released.by}: ${arriving.length} file${arriving.length === 1 ? "" : "s"}. Dropbox is bringing them over; say "open ${name}" again when it is done.`);
@@ -435,18 +485,16 @@ export async function open(ctx, rest) {
     say(`It is not opened. Say "what's waiting?" to see the episodes.`);
     return 1;
   }
+  // Past the refusal, another Mac's claim means this is a take-over. What is said next is then to take it over again, by this
+  // open and by the bring it starts: a plain open would refuse, and she would be asked a second time.
+  const sayNext = held ? `Say "take it over" again` : `Say "open ${name}" again`;
   const coming = notHere(ctx, found, record);
   if (coming.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name });
-    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. Say "open ${name}" again when it is done; "how far is it?" shows how far it has got.`);
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: held ? ["--take-over"] : [] });
+    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. ${sayNext} when it is done; "how far is it?" shows how far it has got.`);
     return 0;
   }
   if (!record.editing || record.editing.by !== ctx.machine) {
-    const held = heldElsewhere(record, ctx.machine);
-    if (held && !flags["take-over"]) {
-      say(`${held.by} has ${name} open, since ${shownAt(held.since)}. Say "take it over" to open it here; anything not handed over stays on ${held.by}.`);
-      return 1;
-    }
     const took = held ? `Taken over from ${held.by}, who had it since ${shownAt(held.since)}.` : "";
     if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now())), { takeOver: Boolean(held) }), took)) !== 0) return 1;
     await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
@@ -455,9 +503,21 @@ export async function open(ctx, rest) {
       say(`${found.name}: ${again.why}.`);
       return 1;
     }
-    if (!again.record.editing || again.record.editing.by !== ctx.machine) {
-      const theirs = again.record.editing ? again.record.editing.by : "The other Mac";
-      say(`${theirs} opened ${name} at the same time, and it is theirs. Say "take it over" if they are done with it.`);
+    // The record read again is older than the claim this Mac wrote, or has nobody editing it: Dropbox took the claim away.
+    // That is said, not that the other Mac opened it: a claim of theirs in a record older than this Mac's is the one this Mac
+    // took over, not a new one. The record as it is now is taken as this Mac's, so the next open goes through. What is said
+    // next goes by that record: to take it over again only while it still has the claim she said to take over, and otherwise
+    // to open it, which waits for anything handed over meanwhile, or refuses a new claim, and she is asked.
+    const undid = undone(again.record, ctx.home);
+    if (undid || !again.record.editing) {
+      const still = heldElsewhere(again.record, ctx.machine);
+      const same = held && still && still.by === held.by && still.since === held.since;
+      say(`Dropbox undid this Mac's claim on ${name}. ${same ? `Say "take it over" again` : `Say "open ${name}" again`}.`);
+      if (undid) acceptRev(ctx.home, again.record.id, again.record.rev);
+      return 1;
+    }
+    if (again.record.editing.by !== ctx.machine) {
+      say(`${again.record.editing.by} opened ${name} at the same time, and it is theirs. Say "take it over" if they are done with it.`);
       return 1;
     }
     record = again.record;
@@ -674,11 +734,16 @@ export async function push(ctx, rest) {
   return pushPart(ctx, { ...found, record }, { part: "main", xml: readFileSync(source, "utf8"), noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") });
 }
 
-/** `bring --now "<episode folder>"`, the detached run `open` starts: each file of the episode that is not whole on this Mac
-    is read to its end, so that Dropbox brings it over, and the result says which are whole now. */
+/** `bring --now "<episode folder>" [--take-over]`, the detached run `open` starts: each file of the episode that is not whole
+    on this Mac is read to its end, so that Dropbox brings it over, and the result says which are whole now, and what to say
+    next: to open it, or, when a file did not come, why, and to open it to try again. The bring of a take-over (`--take-over`)
+    that brought every file also keeps whose claim it was for, and that what to say next, while that claim stands and her yes
+    to it is kept, is to take it over again: `status` says so only then (see nextOf). */
 export async function bring(ctx, rest) {
   // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
-  const [now, folder, ...only] = rest;
+  const [now, folder, ...after] = rest;
+  const takeOver = after.includes("--take-over");
+  const only = after.filter((word) => word !== "--take-over");
   if (now !== "--now" || !folder) {
     ctx.say(HELP);
     return 2;
@@ -690,6 +755,8 @@ export async function bring(ctx, rest) {
   }
   const { record } = found.read;
   const name = record.name.text;
+  // The claim she said to take over, as the record has it when the bring starts: none when nobody else has it by then.
+  const taking = takeOver ? heldElsewhere(record, ctx.machine) : null;
   const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
     const coming = wanted();
@@ -705,7 +772,12 @@ export async function bring(ctx, rest) {
     const still = wanted();
     const made = coming.filter((rel) => !still.includes(rel));
     for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
-    return { ok: !failed.length, made, failed, next: failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".` };
+    const next = failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".`;
+    // A bring that failed says why, and to open it, take-over or not: it would most likely fail again the same way (a full
+    // disk, Dropbox paused, the Mac offline), and a take-over is run again without asking her only to finish what she said
+    // yes to, never to try again what failed.
+    if (!taking || failed.length) return { ok: !failed.length, made, failed, next };
+    return { ok: true, made, failed, next, takeOver: { by: taking.by, since: taking.since, next: `Every file of ${name} is here. Say "take it over" again.` } };
   });
   if (result.taking) {
     ctx.say(`Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
@@ -718,9 +790,23 @@ export async function bring(ctx, rest) {
   return result.ok ? 0 : 1;
 }
 
+/** What a detached run's result `r`, for the episode in `folder`, says to say next. The bring of a take-over says to take it
+    over again only while the claim she said to take over is still the record's, the same Mac since the same time, and her
+    yes to it is still kept (yesOf): the skill then takes it over without asking her again. Once this Mac has it, or that Mac
+    has let it go or opened it again since, or she has been asked again since, it says to open it, as any bring does: an open
+    goes through, or, when another Mac has it, refuses, and she is asked. A record that cannot be read says to open it too. */
+function nextOf(ctx, folder, r) {
+  if (!r.takeOver) return r.next;
+  const { record } = readEpisode(join(ctx.episodes, folder));
+  const held = record && heldElsewhere(record, ctx.machine);
+  const yes = yesOf(ctx, folder);
+  const same = (claim) => Boolean(claim) && claim.by === r.takeOver.by && claim.since === r.takeOver.since;
+  return same(held) && same(yes) ? r.takeOver.next : r.next;
+}
+
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
-    Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left. With words,
-    only what they fit. */
+    Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
+    say next (nextOf). With words, only what they fit. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -765,7 +851,8 @@ export async function status(ctx, rest) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
       if (!r || r.command === command) continue;
       const done = r.failed.length ? ` Not done: ${r.failed.join(" ").replace(/([^.])$/, "$1.")}` : "";
-      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${r.next ? ` ${r.next}` : ""}`);
+      const next = nextOf(ctx, folder, r);
+      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${next ? ` ${next}` : ""}`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);

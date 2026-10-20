@@ -17,7 +17,7 @@ Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; a
 | She says | Run |
 |---|---|
 | "What's waiting?" | `episodes` |
-| "Open the Pricing episode" | `open "<episode>"`. If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over` |
+| "Open the Pricing episode" | `open "<episode>"`. If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over`. If that take-over says Dropbox undid the claim and to say "take it over" again, run `open "<episode>" --take-over` again without asking her again. If it is bringing files over first, wait until "how far is it?" says the bring has ended; if it then says to say "take it over" again, run `open "<episode>" --take-over` again without asking her again; if it says some files are not here, tell her why, in plain words, and try again only when she says to. Take it over again unasked only in the conversation in which she said yes, and only if she has not said not to since; in a later one, run `open "<episode>"` and ask her as above. Never take an episode over unasked otherwise. |
 | "Call it …" | `name "<episode>" "<name>"` |
 | "Use that title" / "Make the title …" | `title "<episode>" --approve` / `title "<episode>" --words "<words>" --approve` (an approved title changes only with `--change`; say BRIMM Ops may have it already) |
 | "Reel 2's title is …" | `title "<episode>" reel 2 --words "<words>"` |

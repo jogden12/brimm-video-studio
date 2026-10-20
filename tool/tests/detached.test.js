@@ -58,6 +58,14 @@ describe("a command run detached", () => {
     assert.equal(runningCommand(t.home, FOLDER, () => false), "");
     t.done();
   });
+  it("keeps in its result the claim a take-over's bring was for, and what to say next while that claim stands", async () => {
+    const t = setup();
+    const takeOver = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00", next: 'Every file of Talk is here. Say "take it over" again.' };
+    const r = await runDetached({ ...t.opts, command: "bring" }, async () => ({ ok: true, made: ["Talk.mov"], failed: [], next: 'Every file of Talk is here. Say "open Talk".', takeOver }));
+    assert.deepEqual(readResult(t.home, FOLDER, "bring").takeOver, takeOver);
+    assert.deepEqual([r.next, r.takeOver], ['Every file of Talk is here. Say "open Talk".', takeOver]);
+    t.done();
+  });
   it("writes a result that says what went wrong when the work throws, and lets the lock go", async () => {
     const t = setup();
     const r = await runDetached({ ...t.opts, command: "bring" }, async () => {
