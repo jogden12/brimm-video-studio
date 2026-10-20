@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-10-14.
+- **Last updated:** 2026-10-15.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -15,11 +15,11 @@ Said on 2026-10-14, word for word:
 
 ## Sallie's laptop
 
-A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It does not have Final Cut Pro.
+A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not have Final Cut Pro on 2026-10-14; it gets it, as decided below.
 
-## Open decisions
+## Decisions
 
-- **Which editor Sallie's laptop gets.** DaVinci Resolve Studio is being compared with the alternatives. Nothing is bought or installed until Jason decides. Until then the tool writes a Final Cut Pro project file, for the Mac Studio, which has Final Cut Pro, beside files any editor can take: the rough cut, the captions as `.srt` and the cut plan.
+- **Which editor Sallie's laptop gets: Final Cut Pro, as on the Mac Studio.** Jason decided it on 2026-10-14 ("Let's stick with final cut pro for now.") and installs it on her laptop, so both Macs use Final Cut Pro. The design's "What this rests on" records the decision; setting her laptop up is `docs/setup/sallies-laptop.md`.
 
 ## The items moved from brimm-operations
 
@@ -74,3 +74,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-14: saved the review of the public repo claude-reel-editor (a Claude Code skill that edits reels) in `docs/research/2026-10-13-claude-reel-editor/`, on Jason’s instruction.
 - 2026-10-14: first version of this page, in the new repo brimm-video, on Jason's decision that video editing is a project of its own, separate from BRIMM Operations and run through Claude Code or Claude chat. Recorded his direction word for word, Sallie's laptop, and the open decision on her editor. Moved in L1, L5 and L6 from brimm-operations at commit 84a2f61, with their change lines. The tool moved from `transcribe/` there to `tool/` here. L5 now says that the Short video format, the post text the BRIMM Ops page writes, stays in BRIMM Ops.
 - 2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone. A video dropped in `BRIMM Video/Unedited Video/Mac Studio/` is imported into its own folder in `BRIMM Video/Episodes/`, every file put into Dropbox as a clone and checked again 15 minutes later, and `tool/edit.js` lists, opens and shows episodes in Final Cut Pro. Described in the README, under "Episodes".
+- 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.

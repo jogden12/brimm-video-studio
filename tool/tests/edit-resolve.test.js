@@ -439,6 +439,32 @@ describe("resolve, as the P2 check found it", () => {
     assert.equal(readEpisode(found.folder).record.rev, 3);
     t.done();
   });
+  it("writes a record when A of a record's copy is kept too, though A is the record in force", async () => {
+    const t = setup();
+    const found = recordConflict(t);
+    const r = await keep(t.ctx.deps, "A");
+    assert.equal(r.code, 0, r.text);
+    const now = readEpisode(found.folder).record;
+    assert.deepEqual([now.rev, now.name.text, now.writer.on], [3, "Test A", "Mac Studio"]);
+    t.done();
+  });
+  it("writes no record when the copy already holds what the record in force holds, as when an earlier keep wrote it and its copy could not be deleted", async () => {
+    for (const side of ["A", "B"]) {
+      const t = setup();
+      const found = recordConflict(t);
+      // An earlier keep of B wrote record 3 with the copy's content, and the copy was not deleted then.
+      const b = JSON.parse(readFileSync(join(found.folder, RECORD_COPY), "utf8"));
+      writeFileSync(recordFile(found.folder, 3), recordText({ ...b, rev: 3, writer: { commit: "c709b57", on: "Mac Studio" } }));
+      const shown = await on(t.ctx.deps, "resolve", FOLDER);
+      assert.ok(shown.text.includes("B is in force already: a keep wrote it, and its copy was not deleted then."), shown.text);
+      const r = await on(t.ctx.deps, "resolve", FOLDER, "--keep", side);
+      assert.equal(r.code, 0, `${side}: ${r.text}`);
+      const now = readEpisode(found.folder).record;
+      assert.deepEqual([now.rev, now.name.text], [3, "Test B"], side);
+      assert.deepEqual(conflictedCopies(found.folder), [], side);
+      t.done();
+    }
+  });
   it("keeps nothing when the version shown was sorted out on the other Mac meanwhile, and says so", async () => {
     const t = setup();
     const found = recordConflict(t);
