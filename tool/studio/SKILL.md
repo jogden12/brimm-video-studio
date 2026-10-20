@@ -7,6 +7,7 @@ description: Use for anything about The BRIMM's videos and episodes: what is wai
 
 Run brimm-video's commands, and only these, exactly so: {{NODE}} "{{CHECKOUT}}/tool/edit.js" <command> …
 Put the episode in quotes. Never show Sallie the command, a path or a flag: say what it did, in plain words.
+Words with a `$`, a backtick, a backslash or a straight double quote go in single quotes instead of double. Words with an apostrophe stay in double quotes. Words with both cannot be passed: ask her to say them another way (for example "99 dollars").
 
 ## At the start of each session
 
