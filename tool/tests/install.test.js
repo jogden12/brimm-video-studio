@@ -2,6 +2,8 @@
 // loads or removes anything, and the installer is never run without it. It is given a home folder made for the test, and
 // stand-ins for launchctl, brew and curl come first on its PATH, so a test can see that none of them was run.
 // The tests need a Mac, which has zsh and plutil. Anywhere else they skip themselves and say why.
+// The few lines that take a launch agent away are also run alone, in zsh, never the installer whole: in a folder made for
+// the test, with a stand-in for launchctl first on the PATH, so the Mac's own launchd is never asked anything.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -13,6 +15,8 @@ import { fileURLToPath } from "node:url";
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
 const HERE = dirname(INSTALL);
 const notAMac = process.platform !== "darwin" ? "the installer is for a Mac, and so is plutil, which reads what it would write" : false;
+/** For a test that runs a few of the installer's lines alone: they need zsh, as the installer does, and nothing of a Mac. */
+const noZsh = existsSync("/bin/zsh") ? false : "the installer is a zsh script, and there is no /bin/zsh here to run its lines with";
 const PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const MODEL = "Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin";
 /** What Claude Code prints for `claude auth status --json` when it is signed in: its email is never to be shown. */
@@ -283,14 +287,22 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
 });
 
 describe("the installer, asked what it would do to stop the watching", { skip: notAMac }, () => {
-  it("names its own launch agent alone, and stops it not when it is only asked, wherever --print is and whatever folder is named", () => {
+  it("names its own launch agents alone, the setup's check of Claude among them, and stops them not when it is only asked, wherever --print is and whatever folder is named", () => {
     for (const args of [["--remove", "--print"], ["--print", "--remove"], ["--print", "--remove", "/Volumes/Work/Unedited video"]]) {
       const r = ask(...args);
       assert.equal(r.status, 0, r.err);
       assert.deepEqual(r.agents, []);
-      assert.equal(r.out, `This is what would be stopped:\n  com.thebrimm.unedited, and its file ${r.home}/Library/LaunchAgents/com.thebrimm.unedited.plist\n\nNothing was changed.\n`, args.join(" "));
+      assert.equal(r.out, `This is what would be stopped:\n  com.thebrimm.unedited, and its file ${r.home}/Library/LaunchAgents/com.thebrimm.unedited.plist\n  com.thebrimm.claude-check, if a setup left it behind\n\nNothing was changed.\n`, args.join(" "));
       changedNothing(r);
     }
+  });
+  it("names the setup's check of Claude by its file when a setup left it behind, and leaves it as it is", () => {
+    const installed = { "com.thebrimm.claude-check": "made by an earlier setup" };
+    const r = askOn(installed, "--remove", "--print");
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.includes(`\n  com.thebrimm.claude-check, and its file ${r.home}/Library/LaunchAgents/com.thebrimm.claude-check.plist, which a setup left behind\n`), r.out);
+    assert.doesNotMatch(r.out, /if a setup left it behind/);
+    assert.deepEqual([r.kept, r.ran], [installed, ""]);
   });
   it("is never refused, and leaves the transcript tool's launch agent as it is, whatever it watches", () => {
     const installed = { "com.thebrimm.transcribe": transcriptAgent(WATCHED) };
@@ -344,27 +356,130 @@ describe("the installer's own text", () => {
   // does. So its lines are read here, and its launch agent is written by its own writer and read by plutil.
   it("ends a Mac's setup with one real call to Claude from a launch agent's context, then takes that agent away", { skip: notAMac }, () => {
     const check = text.slice(text.indexOf("# The check of Claude"), text.indexOf("\nif [[ -n \"$machine\" ]]; then\n  say \"\"\n  say \"Done. Drop a video in:\""));
-    for (const step of ['check_agent "$node" > "$CHECK_FILE"', 'plutil -lint "$CHECK_FILE" >/dev/null', 'launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"', 'launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true', 'rm -f "$CHECK_FILE"'])
+    // It is given the time, three minutes on, after which it asks Claude nothing: so one that a kill -9 or a power cut left
+    // behind, which launchd runs at every login, asks nothing at the next.
+    for (const step of ['check_agent "$node" "$(( $(date +%s) + 180 ))" > "$CHECK_FILE"', 'plutil -lint "$CHECK_FILE" >/dev/null', 'launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true', 'launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"', "\n  drop_check\n"])
       assert.ok(check.includes(step), `${step}\n---\n${check}`);
-    assert.ok(check.indexOf('launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"') < check.indexOf('rm -f "$CHECK_FILE"'));
-    assert.match(check, /\nif \[\[ -n "\$machine" \]\] && claude="\$\(find_claude\)"; then\n/);
+    // The agent is taken away (drop_check, below) after it is loaded.
+    assert.ok(check.indexOf('launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"') < check.indexOf("\n  drop_check\n"));
+    // With --rules-only, Claude is never asked, not even once here.
+    assert.match(check, /\nif \[\[ -n "\$machine" && -z "\$rules_only" \]\] && claude="\$\(find_claude\)"; then\n/);
     // Its launch agent: unedited.js --check-claude, once, at load, with the main agent's PATH, writing into a log of its own.
     const writer = text.slice(text.indexOf("check_agent() {"), text.indexOf("\n}\n", text.indexOf("check_agent() {")) + 3);
     const xml = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
     const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
     const file = join(dir, "check.plist");
-    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node > "${file}"`], { encoding: "utf8" });
+    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
     assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
       Label: "com.thebrimm.claude-check",
-      ProgramArguments: ["/opt/homebrew/bin/node", "/the tool/unedited.js", "--check-claude"],
+      ProgramArguments: ["/opt/homebrew/bin/node", "/the tool/unedited.js", "--check-claude", "--until", "1800000180"],
       RunAtLoad: true,
       EnvironmentVariables: { PATH: "/opt/homebrew/bin:/usr/bin" },
       StandardOutPath: "/home/Library/Logs/brimm-video-claude-check.log",
       StandardErrorPath: "/home/Library/Logs/brimm-video-claude-check.log"
     });
     rmSync(dir, { recursive: true, force: true });
+  });
+  // The check's launch agent runs at load, so one left behind would ask Claude at every login. The check takes it away once
+  // Claude has answered or 90 seconds have gone, and traps take it away however else the setup ends.
+  it("takes the check agent away however the install ends, by one function, and stops the setup there on a Ctrl-C or a kill", () => {
+    // The one function that takes it away: it stops the agent, if it is loaded, and deletes its file.
+    assert.match(text, /\ndrop_check\(\) \{\n {2}launchctl bootout "gui\/\$\(id -u\)\/\$CHECK_LABEL" 2>\/dev\/null \|\| true\n {2}rm -f "\$CHECK_FILE"\n\}\n/);
+    // The traps are set inside the check's block, before the agent's file is written: on EXIT, for a failure, and on INT and
+    // TERM, which then end the setup with the codes a shell gives for them. Without that exit, zsh would go back to the wait.
+    assert.match(text, /\n {2}trap drop_check EXIT\n {2}trap 'drop_check; exit 130' INT\n {2}trap 'drop_check; exit 143' TERM\n {2}check_agent "\$node"/);
+    // Once the wait is over, the check takes the agent away itself, and only then lifts the traps.
+    assert.match(text, /\n {2}done\n {2}drop_check\n {2}trap - EXIT INT TERM\n {2}say "From the background job: /);
+  });
+  /** Each of these, as install.sh has it: a line that gives a name its value, or a function, whole. */
+  const valueOf = (name) => {
+    const found = new RegExp(`\\n(${name}="[^"\\n]*")\\n`).exec(text);
+    assert.ok(found, `${name}=, in install.sh`);
+    return found[1];
+  };
+  const functionOf = (name) => {
+    const at = text.indexOf(`\n${name}() {`);
+    assert.ok(at >= 0, `${name}(), in install.sh`);
+    const end = text.indexOf("\n", at + 1);
+    return text.slice(at + 1, text.slice(at + 1, end).endsWith("}") ? end + 1 : text.indexOf("\n}\n", at) + 3);
+  };
+  /** A folder made for one test, with a stand-in for launchctl that only writes down how it was called. */
+  const standIn = () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-launchctl-"));
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin", "launchctl"), `#!/bin/sh\necho "launchctl $*" >> "${join(dir, "ran")}"\n`);
+    chmodSync(join(dir, "bin", "launchctl"), 0o755);
+    return {
+      dir,
+      /** Runs the script in zsh, with the stand-in first on the PATH and the folder as the home folder. */
+      run: (script) => {
+        // Every launchctl named is the stand-in, found on the PATH: none is named by its path.
+        assert.doesNotMatch(script, /\/launchctl\b/);
+        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: join(dir, "home"), PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+      },
+      calls: () => (existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8").trimEnd().split("\n") : []),
+      done: () => rmSync(dir, { recursive: true, force: true })
+    };
+  };
+  // The traps are run here, alone, in zsh, as the installer would run them, with the agent's file in a folder made for the test.
+  it("stops there, with the check agent taken away, when the setup is stopped by Ctrl-C or a kill, or fails, during the check", { skip: noZsh }, () => {
+    const traps = (/\n {2}(trap drop_check EXIT\n {2}trap [^\n]* INT\n {2}trap [^\n]* TERM)\n/.exec(text) || [])[1];
+    assert.ok(traps, "the traps on EXIT, INT and TERM");
+    for (const [how, end, code] of [["Ctrl-C", "kill -INT $$", 130], ["a kill", "kill -TERM $$", 143], ["a failure", "false", 1]]) {
+      const s = standIn();
+      try {
+        const file = join(s.dir, "com.thebrimm.claude-check.plist");
+        // The wait polls the log in a subshell, $(…), as here: that must not run the trap and take the agent away early.
+        const poll = `answered="$(print -r -- polled)"\nprint -r -- "$answered, the file $([[ -e "$CHECK_FILE" ]] && print -r -- here || print -r -- gone)" >&2`;
+        const r = s.run(`set -euo pipefail\nCHECK_LABEL="com.thebrimm.claude-check"\nCHECK_FILE="${file}"\n${functionOf("drop_check")}${traps}\nprint made > "$CHECK_FILE"\n${poll}\n${end}\nprint -r -- "went on"\n`);
+        assert.equal(r.stderr, "polled, the file here\n", how);
+        // It ends there, as a shell ends on that signal or that failure, and goes on to nothing more.
+        assert.deepEqual([r.status, r.stdout], [code, ""], `${how}: ${r.stdout}${r.stderr}`);
+        assert.equal(existsSync(file), false, how);
+        const calls = s.calls();
+        assert.ok(calls.length > 0 && calls.every((call) => call === `launchctl bootout gui/${process.getuid()}/com.thebrimm.claude-check`), `${how}: ${calls.join(" | ")}`);
+      } finally {
+        s.done();
+      }
+    }
+  });
+  it("says, before the wait, that it is asking Claude", () => {
+    const line = 'say "Asking Claude once from the background job (up to 90 seconds)…"';
+    assert.ok(text.includes(line));
+    assert.ok(text.indexOf(line) < text.indexOf("for (( waited = 0; waited < 90; waited++ )); do"));
+  });
+  // A check agent an earlier setup left behind, by an installer from before the traps or by a kill -9, runs at every login.
+  it("takes away, at the start of every setup that goes ahead, a check agent an earlier setup left behind, whether or not this one makes a check", () => {
+    const ahead = text.indexOf('read -q "go?Go ahead? [y/N] "');
+    const installing = text.indexOf('if [[ ${#need[@]} -gt 0 ]]; then "$brew" install "${need[@]}"; fi');
+    // At the left edge, so inside no if: a setup with --rules-only, or with no Claude Code, runs it too.
+    const dropped = text.indexOf("\ndrop_check\n");
+    assert.ok(ahead > 0 && ahead < dropped && dropped < installing, `${ahead} < ${dropped} < ${installing}`);
+  });
+  it("--remove takes away the setup's check of Claude too, before it ends", () => {
+    const stop = text.slice(text.indexOf('if [[ "$mode" == "remove" ]]'), text.indexOf("\nbrew="));
+    assert.match(stop, /\n {4}exit 0\n {2}fi\n {2}launchctl bootout "gui\/\$\(id -u\)\/\$LABEL" 2>\/dev\/null \|\| true\n {2}rm -f "\$AGENT_FILE"\n(?: {2}#[^\n]*\n)* {2}drop_check\n {2}say "Stopped watching for unedited video\.[^"\n]*"\n {2}exit 0\nfi\n/);
+  });
+  // The lines --remove runs without --print are run here, alone: never the installer, which is only ever run with --print.
+  it("--remove, its own lines run alone, stops both of its launch agents and deletes their files, and leaves the transcript tool's", { skip: noZsh }, () => {
+    const s = standIn();
+    try {
+      const agents = join(s.dir, "home", "Library", "LaunchAgents");
+      mkdirSync(agents, { recursive: true });
+      for (const label of ["com.thebrimm.unedited", "com.thebrimm.claude-check", "com.thebrimm.transcribe"]) writeFileSync(join(agents, `${label}.plist`), "made for the test");
+      const at = text.indexOf('\nif [[ "$mode" == "remove" ]]; then\n');
+      assert.ok(at >= 0, "the remove mode, in install.sh");
+      const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
+      const names = ["LABEL", "AGENT_FILE", "CHECK_LABEL", "CHECK_FILE"].map(valueOf).join("\n");
+      const r = s.run(`set -euo pipefail\n${names}\n${functionOf("say")}${functionOf("drop_check")}mode="remove"\nprint="no"\n${block}print -r -- "went on"\n`);
+      assert.deepEqual([r.status, r.stdout, r.stderr], [0, "Stopped watching for unedited video. The folders, the model, the programs and the transcript tool's own launch agent are still here.\n", ""]);
+      assert.deepEqual(readdirSync(agents), ["com.thebrimm.transcribe.plist"]);
+      assert.deepEqual(s.calls(), ["com.thebrimm.unedited", "com.thebrimm.claude-check"].map((label) => `launchctl bootout gui/${process.getuid()}/${label}`));
+    } finally {
+      s.done();
+    }
   });
   // The lines it ends with are only said once it has set the Mac up, which no test does. So they are read here, not run.
   it("ends by saying what the folder for unedited video gives", () => {
@@ -389,13 +504,71 @@ describe("the installer's own text", () => {
     const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
     assert.match(closing, /\nif \[\[ -n "\$machine" \]\]; then\n {2}say ""\n {2}say "Done\. Drop a video in:"\n {2}say " {2}\$drop"\n/);
   });
+  it("names the lock-down check by a title that is a step of the setup guide it sends Jason to, and so does the README", () => {
+    const TITLE = "Check that her Claude folder only runs BRIMM Video";
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    assert.ok(text.includes(`the setup guide's \\"${TITLE}\\", in the Code tab`), "install.sh");
+    assert.ok(text.includes("the setup guide (docs/setup/sallies-laptop.md)"), "install.sh");
+    assert.ok(readme.includes(`the setup guide's lock-down check, "${TITLE}"`), "README.md");
+    // A step of the guide is a numbered line that opens with its title in bold, so a person sent there finds it by that name.
+    const steps = [...guide.slice(guide.indexOf("\n## Steps\n")).matchAll(/^\d+\. \*\*([^*]+):\*\*/gm)].map((m) => m[1]);
+    assert.ok(steps.includes(TITLE), `no step of docs/setup/sallies-laptop.md is titled "${TITLE}":\n${steps.join("\n")}`);
+  });
+  // A check agent a setup cut short left behind asks Claude at every login, and nothing on screen says so. So after a real
+  // setup, the guide (for her laptop) and the README (for either Mac) have its file looked for, by install.sh's own name for
+  // it, and say how to take that one agent away alone: --remove would stop the import's own agent too.
+  it("has the setup guide and the README look for a check agent left behind after a real setup, and take that one alone away", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const label = (/\nCHECK_LABEL="([^"\n]+)"\n/.exec(text) || [])[1];
+    assert.equal(label, "com.thebrimm.claude-check");
+    assert.match(text, /\nCHECK_FILE="\$HOME\/Library\/LaunchAgents\/\$CHECK_LABEL\.plist"\n/);
+    const file = `~/Library/LaunchAgents/${label}.plist`;
+    const look = `\`ls ${file}\``;
+    const alone = `\`launchctl bootout gui/$(id -u)/${label}; rm ${file}\``;
+    // The guide's step that runs the installer for real: it checks the line the check ends with, then looks for the file.
+    const step = guide.split("\n").find((line) => /^\d+\. \*\*/.test(line) && line.includes(`./install.sh --print --machine "Sallie's laptop"`));
+    assert.ok(step, "the guide's step that runs the installer");
+    assert.ok(text.includes('say "From the background job: '), "install.sh");
+    for (const said of ['"From the background job:"', look, "No such file or directory", alone, "not `./install.sh --remove`"])
+      assert.ok(step.includes(said), `${said}\n---\n${step}`);
+    assert.ok(step.indexOf("without `--print`") < step.indexOf(look), step);
+    const setting = readme.split("\n").find((line) => line.startsWith("**Setting a Mac up.**"));
+    assert.ok(setting, "README's Setting a Mac up");
+    for (const said of [look, alone, "not `--remove`"]) assert.ok(setting.includes(said), `${said}\n---\n${setting}`);
+  });
+  // A Mac set up with an installer from before the traps can have a check agent that a Ctrl-C left, with no time to stop
+  // at, so it asks Claude at every login. A newer brimm-video reaches a Mac by a git pull, which runs no setup and so takes
+  // no such agent away. So every git pull in the setup guide, and the README, look for its file after the pull too, and say
+  // how to take that one agent away alone.
+  it("has every git pull of a newer brimm-video in the setup guide, and the README, look for a check agent left behind, and take that one alone away", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const label = "com.thebrimm.claude-check";
+    const file = `~/Library/LaunchAgents/${label}.plist`;
+    const look = `\`ls ${file}\``;
+    const alone = `\`launchctl bootout gui/$(id -u)/${label}; rm ${file}\``;
+    // A line pulls when a command in it, between backticks, is a git pull: the Mac Studio's step and the update below.
+    const pulls = guide.split("\n").filter((line) => /`[^`]*\bgit\b[^`]*\bpull`/.test(line));
+    assert.ok(pulls.length >= 2, pulls.join("\n"));
+    assert.ok(pulls.some((line) => line.startsWith('- "Jason has a newer brimm-video"')), pulls.join("\n"));
+    for (const line of pulls) {
+      for (const said of [look, "No such file or directory", alone, "not `./install.sh --remove`"])
+        assert.ok(line.includes(said), `${said}\n---\n${line}`);
+      assert.ok(line.indexOf("pull`") < line.indexOf(look), line);
+    }
+    const setting = readme.split("\n").find((line) => line.startsWith("**Setting a Mac up.**"));
+    assert.ok(setting.includes("after a `git pull` of a newer brimm-video"), setting);
+    assert.ok(setting.indexOf("after a `git pull` of a newer brimm-video") < setting.indexOf(look), setting);
+  });
   it("gives the launch agent the one PATH, and looks for Claude Code along that same PATH", () => {
     // It is this PATH unless another is named in BRIMM_AGENT_PATH, as a test names one.
     assert.match(text, /\nAGENT_PATH="\$\{BRIMM_AGENT_PATH:-\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin\}"\n/);
     assert.ok(text.includes('<dict><key>PATH</key><string>$AGENT_PATH</string></dict>'));
     assert.match(text, /\n {2}for dir in \$\{\(s\.:\.\)AGENT_PATH\} "\$HOME\/\.local\/bin"; do\n/);
   });
-  it("stops its own launch agent alone when it is asked to stop the watching, and never writes, loads or stops the transcript tool's", () => {
+  it("stops its own launch agents when it is asked to stop the watching, and never writes, loads or stops the transcript tool's", () => {
     const stop = text.slice(text.indexOf('if [[ "$mode" == "remove" ]]'), text.indexOf("\nbrew="));
     assert.match(stop, /\n {2}launchctl bootout "gui\/\$\(id -u\)\/\$LABEL" 2>\/dev\/null \|\| true\n {2}rm -f "\$AGENT_FILE"\n/);
     // The transcript tool's agent is named once, and its file is only read, by plutil.
@@ -459,8 +632,8 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       "  Claude Code, signed in:  yes (max)",
       "  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)",
       "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)",
-      "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so step 9 of the setup guide, in the Code tab, is what proves her folder is locked down there",
-      "  At the end:  one real call to Claude from the background job, to prove its sign-in is seen there",
+      "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there",
+      "  At the end:  one real call to Claude from the background job (a launch agent of its own, com.thebrimm.claude-check, taken away when it answers or after 90 seconds), to prove its sign-in is seen there",
       "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
     // The checks come after the line about swift, in this order.
@@ -469,7 +642,35 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     assert.deepEqual(order, [...order].sort((a, b) => a - b), out);
     assert.ok(!order.includes(-1), out);
     assert.doesNotMatch(r.out, /sallie@example\.com|The BRIMM"|orgName/);
+    // The lock-down check is named by its title, which stays when the guide's steps are numbered again.
+    assert.doesNotMatch(readFileSync(INSTALL, "utf8"), /\bstep \d/i);
     changedNothing(r);
+    d.done();
+  });
+  it("with --rules-only, asks Claude nothing at the end of the setup either, so nothing leaves this Mac", () => {
+    const d = dropbox();
+    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.doesNotMatch(r.out, /\n {2}At the end:/);
+    assert.ok(r.out.includes("\n  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac\n"), r.out);
+    // Her folder for Claude is still written, so Claude Code's sign-in and version are still told.
+    assert.ok(r.out.includes("\n  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)\n"), r.out);
+    changedNothing(r);
+    d.done();
+  });
+  it("names a check agent an earlier setup left behind, which it takes away first, with --rules-only and with no Claude Code too, and changes nothing", () => {
+    const d = dropbox();
+    const installed = { "com.thebrimm.claude-check": "made by an earlier setup" };
+    const LEFT_LINE = (r) => `\n  Left behind by an earlier setup:  its check of Claude, com.thebrimm.claude-check, at ${r.home}/Library/LaunchAgents/com.thebrimm.claude-check.plist. launchd runs it at every login, so this setup takes it away first\n`;
+    for (const [how, given, more] of [["a setup that makes the check", {}, []], ["--rules-only", {}, ["--rules-only"]], ["no Claude Code", { claude: null, agentPath: NOWHERE_ELSE }, []]]) {
+      const r = askWith({ installed, ...given }, "--print", "--machine", "Sallie's laptop", ...more, d.root);
+      assert.equal(r.status, 0, `${how}: ${r.err}${r.out}`);
+      assert.ok(r.out.includes(LEFT_LINE(r)), `${how}\n---\n${r.out}`);
+      assert.deepEqual([r.kept, r.ran], [installed, ""], how);
+      // And when there is none, it says nothing of one.
+      const none = askWith(given, "--print", "--machine", "Sallie's laptop", ...more, d.root);
+      assert.doesNotMatch(none.out, /Left behind/, how);
+    }
     d.done();
   });
   it("says how to get Homebrew, Xcode's tools, Final Cut and Claude's sign-in when they are missing, and the macOS that Final Cut 12.4 needs", () => {

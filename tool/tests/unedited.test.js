@@ -4512,5 +4512,43 @@ describe("the check that Claude can be asked from here (--check-claude)", () => 
   });
   it("is asked for on its own, with no video", () => {
     assert.deepEqual(parseArgs(["--check-claude"]), { file: "", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false, checkClaude: true });
+    assert.deepEqual(parseArgs(["--check-claude", "--until", "1800000180"]), { file: "", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false, checkClaude: true, until: 1800000180 });
+  });
+  // The installer's check agent is given the time it is for. One that a setup cut short by a kill -9 or a power cut left
+  // behind is run by launchd at every login: past that time it asks Claude nothing, and says so in its log. The log says how
+  // to take that one agent away alone, as the setup guide does, and not by install.sh --remove, which would also stop the
+  // import's own agent and leave the drop folder unwatched.
+  it("asks Claude nothing once the time it was given has passed, or when that time cannot be read, and says so", async () => {
+    const ALONE = "launchctl bootout gui/$(id -u)/com.thebrimm.claude-check; rm ~/Library/LaunchAgents/com.thebrimm.claude-check.plist";
+    const OVER = `This check of Claude was for a setup that is over, so Claude was not asked. That setup was cut short and left its launch agent, com.thebrimm.claude-check, behind. To take that one agent away alone, in Terminal: ${ALONE}. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.`;
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    assert.ok(guide.includes(`\`${ALONE}\``), "the setup guide takes that one agent away by the same command");
+    for (const [how, until] of [["a second late", 1800000180], ["a time that cannot be read", Number.NaN]]) {
+      const c = claude(answers("OK"));
+      const said = [];
+      assert.equal(await checkClaude({ run: c.run, tools: { claude: "CLAUDE" }, say: (line) => said.push(line), until, now: 1800000181 * 1000 }), 0, how);
+      assert.deepEqual([said, c.asked.length], [[OVER], 0], how);
+    }
+    // An agent an older setup left (main's installer gave it no time) is known by its label, which launchd puts in
+    // XPC_SERVICE_NAME: it asks Claude nothing either, so it cannot use her account at every login (the fold's check of #26-1).
+    {
+      const c = claude(answers("OK"));
+      const said = [];
+      assert.equal(await checkClaude({ run: c.run, tools: { claude: "CLAUDE" }, say: (line) => said.push(line), job: "com.thebrimm.claude-check", now: 1800000181 * 1000 }), 0);
+      assert.deepEqual([said, c.asked.length], [[`This check of Claude was run by the launch agent an older setup left behind, com.thebrimm.claude-check, so Claude was not asked. To take that one agent away alone, in Terminal: ${ALONE}. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.`], 0]);
+    }
+    // Until then, and with no time given, run by hand (or by any other job), it asks as before.
+    for (const until of [1800000180, undefined]) {
+      const c = claude(answers("OK"));
+      const said = [];
+      assert.equal(await checkClaude({ run: c.run, tools: { claude: "CLAUDE" }, say: (line) => said.push(line), until, job: until === undefined ? "0" : "com.thebrimm.claude-check", now: 1800000180 * 1000 }), 0);
+      assert.deepEqual([said, c.asked.length], [["Claude answered from here."], 1]);
+    }
+  });
+  it("is given that time when it is run for --check-claude", () => {
+    const text = readFileSync(new URL("../unedited.js", import.meta.url), "utf8");
+    assert.match(text, /\n {2}if \(args\.checkClaude\) return checkClaude\(\{ [^\n]*until: args\.until, job: process\.env\.XPC_SERVICE_NAME[^\n]*\}\);\n/);
+    const help = /\nconst HELP = `([\s\S]*?)`;/.exec(text)[1].replace(/\s+/g, " ");
+    assert.ok(help.includes(" --until <time> with --check-claude: ask Claude nothing once this time, in seconds since 1970, has passed. "), help);
   });
 });

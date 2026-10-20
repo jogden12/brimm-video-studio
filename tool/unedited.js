@@ -1918,6 +1918,7 @@ export function parseArgs(argv) {
     else if (v === "--rules-only") a.rulesOnly = true;
     else if (v === "--from-plan") a.fromPlan = true;
     else if (v === "--check-claude") a.checkClaude = true;
+    else if (v === "--until") a.until = Number(argv[++i]);
     else if (!a.file) a.file = v;
   }
   a.folders = a.folders.filter(Boolean);
@@ -1939,6 +1940,8 @@ clips it picked.
                      this Mac
   --check-claude     ask Claude once, as the import does, and say whether it answered: the installer runs this from a
                      launch agent of its own, to see that the background job can reach Claude
+  --until <time>     with --check-claude: ask Claude nothing once this time, in seconds since 1970, has passed. The
+                     installer gives it, so that a check a cut-short setup left behind asks nothing at the next login
   --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
                      cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
                      is made, Claude is not asked, and no other file is touched. Never with --watch
@@ -2008,8 +2011,24 @@ const CHECK_MS = 2 * 60 * 1000;
 /** Ask Claude once, as the import asks it (CLAUDE_ARGS, the model named above, from a new empty folder), to reply with one
     word, and say whether it answered: "Claude answered from here." or why it could not be asked. The installer runs this
     from a launch agent of its own, once, so that a sign-in the background job cannot see shows at setup and not at the first
-    import. Resolves 0 when Claude answered, and 1 when it did not. */
-export async function checkClaude({ run, tools, say, tmpDir = tmpdir() }) {
+    import. Resolves 0 when Claude answered, and 1 when it did not.
+    `until` is the time, in seconds since 1970, that the installer gives its launch agent. That agent is taken away once the
+    check is over, but a kill -9 or a power cut during the setup can leave it, and launchd then runs it at every login. Past
+    that time, or when it cannot be read, Claude is not asked, and this resolves 0. `job` is the launchd label this runs under
+    (XPC_SERVICE_NAME): an agent of that label with no time given was left by a setup from before the time was given, and
+    asks Claude nothing either, so that it cannot use the account at every login. Run by hand, it asks. `now` is the time in
+    milliseconds. */
+export async function checkClaude({ run, tools, say, tmpDir = tmpdir(), until, job, now = Date.now() }) {
+  if (until === undefined && job === "com.thebrimm.claude-check") {
+    say("This check of Claude was run by the launch agent an older setup left behind, com.thebrimm.claude-check, so Claude was not asked. To take that one agent away alone, in Terminal: launchctl bootout gui/$(id -u)/com.thebrimm.claude-check; rm ~/Library/LaunchAgents/com.thebrimm.claude-check.plist. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.");
+    return 0;
+  }
+  if (until !== undefined && !(now <= until * 1000)) {
+    // The way out it gives is the setup guide's: that one agent taken away alone. install.sh --remove would also stop the
+    // import's own agent, and her drop folder would then not be watched until the next setup.
+    say("This check of Claude was for a setup that is over, so Claude was not asked. That setup was cut short and left its launch agent, com.thebrimm.claude-check, behind. To take that one agent away alone, in Terminal: launchctl bootout gui/$(id -u)/com.thebrimm.claude-check; rm ~/Library/LaunchAgents/com.thebrimm.claude-check.plist. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.");
+    return 0;
+  }
   const no = (why) => {
     say(`Claude could not be asked from here: ${why}.`);
     return 1;
@@ -2041,7 +2060,7 @@ export async function main(argv) {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`) });
+  if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`), until: args.until, job: process.env.XPC_SERVICE_NAME });
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const found = findPrograms();
   if (found.missing.length) {
