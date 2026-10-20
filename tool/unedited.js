@@ -37,9 +37,9 @@
 // progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
@@ -48,10 +48,15 @@ import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pauses
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
+import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, reelEntries, readReels, mergeCandidates, REELS_FILE } from "./reels.js";
+import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole, readThrough, textWriter } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, dueAt, fileId, importIdOf } from "./filing.js";
-import { readSettings, runsFolder } from "./settings.js";
+import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf } from "./filing.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder } from "./settings.js";
+import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf } from "./episode.js";
+import { runDetached } from "./detached.js";
+import { readStatuses, importState } from "./importing.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -263,10 +268,11 @@ const clause = (whole) => {
 const sentence = (part) => `${capital(part)}.`;
 
 /** The steps of the work on one video, as the progress panel counts them: Claude is asked (`claude`), there is an upright
-    version to make (`wide`), there are clips to cut (`clips`), and the video is filed away after (`watched`). */
-const stepsFor = ({ claude, wide, clips, watched }) => [
+    version to make (`wide`), there are clips to cut (`clips`), or, for an episode, Reel previews to make (`previews`), and the
+    video is filed away after (`watched`). */
+const stepsFor = ({ claude, wide, clips, previews, watched }) => [
   "Reading the sound", "Writing the transcript", "Making the cut plan", ...(claude ? ["Asking Claude"] : []), "Making the rough cut",
-  ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
+  ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(previews ? ["Making the Reel previews"] : clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
 ];
 
 /** The seconds that stretches of a video come to. */
@@ -521,6 +527,58 @@ async function cutClips(file, clips, { plan, facts, stills, streams = null }, de
   return cut;
 }
 
+/** Make the preview of each of an episode's Reel candidates, in turn: in parts and then joined (previewSteps), each step by an
+    ffmpeg run under the watchdog with a preview's limits (runGuarded and previewLimits, or `deps.runGuarded` for a test), so
+    that no preview can grow without end. Resolves the candidates, each with `preview`, its path in the episode folder, when
+    it was made, or `failed`, why not, in plain words. One that cannot be made does not stop the others. A candidate with no
+    stretch already says why. The parts and their list are deleted once the join is over, whether or not it made the preview.
+    The preview is held in the run's folder, for the episode to be filed with it. `streams` names the picture and the sound
+    to take (streamsOf), as every other ffmpeg of the run is told. Nothing is thrown from here. */
+async function makePreviews(file, given, { facts, streams = null }, deps) {
+  const { progress = noProgress, log = () => {}, files, tools } = deps;
+  const guarded = deps.runGuarded || runGuarded;
+  const made = [];
+  for (const [i, candidate] of given.entries()) {
+    progress.step("Making the Reel previews", `Making the preview of Reel ${candidate.n} (${i + 1} of ${given.length})`);
+    if (!candidate.ranges.length) {
+      made.push(candidate);
+      continue;
+    }
+    const to = join(dirname(file), previewPath(candidate.n));
+    const writing = files.at(to);
+    let steps = null;
+    let why = "";
+    try {
+      steps = previewSteps({ video: file, ranges: candidate.ranges, out: writing, fps: roughRate(facts), duration: facts.duration, work: dirname(writing), size: { width: facts.width, height: facts.height }, streams });
+      for (const step of [...steps.parts, null, steps.join]) {
+        // The list of the parts is written just before the join.
+        if (!step) {
+          writeFileSync(steps.list.file, steps.list.text);
+          continue;
+        }
+        const r = await guarded(tools.ffmpeg, step.args, previewLimits(step.seconds));
+        if (r.stopped) why = `ffmpeg was stopped: ${r.stopped}`;
+        else if (r.code !== 0) why = `ffmpeg stopped (${lastLine(r.stderr)})`;
+        if (why) break;
+      }
+      if (!why && !existsSync(writing)) why = "ffmpeg made no file";
+    } catch (e) {
+      why = `the work stopped (${String(e.code || e.message).replace(/\.$/, "")})`;
+    } finally {
+      for (const part of steps ? steps.cleanup : []) rmSync(part, { force: true });
+    }
+    if (why) {
+      rmSync(writing, { force: true });
+      log(`${basename(file)}: the preview of Reel ${candidate.n} could not be made: ${why}.`);
+      made.push({ ...candidate, failed: why });
+    } else {
+      files.done(to);
+      made.push({ ...candidate, preview: previewPath(candidate.n) });
+    }
+  }
+  return made;
+}
+
 /** What ffprobe wrote of the file's sound, as the Final Cut file says it: how many channels it has, and its samples a second.
     The sound is the one the tool takes (soundStream): of an iPhone's clip, its AAC, and not the APAC listed beside it. Either
     is left out when ffprobe does not say. */
@@ -630,7 +688,7 @@ async function workOn(file, deps) {
   const asking = !deps.rulesOnly && Boolean(tools.claude);
   const watched = Boolean(deps.watched);
   progress.begin(name);
-  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking, watched }));
+  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking && !episode, previews: asking && Boolean(episode), watched }));
   // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
   let finished = false;
   try {
@@ -650,7 +708,7 @@ async function workOn(file, deps) {
     const wide = (f) => needsReframe(f) && kind !== "short video";
     if (facts) {
       progress.length(facts.duration);
-      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && kind !== "short video", watched }));
+      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && !episode, previews: asking && Boolean(episode) && kind !== "short video", watched }));
     }
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
@@ -700,9 +758,12 @@ async function workOn(file, deps) {
     // {what, why}.
     const missing = [];
     const lacks = [];
-    // What came of asking Claude: {read} or {why}, and nothing when it was not asked. And the short clips as they were cut.
+    // What came of asking Claude: {read} or {why}, and nothing when it was not asked. And the short clips as they were cut, or,
+    // for an episode, its Reel candidates with their previews, and why there are none when there are none (reels.json).
     let asked = null;
     let cut = [];
+    let candidates = [];
+    let noReels = { none: kind === "short video" ? "it is a short video" : episode && facts && !facts.height ? "it has no picture" : "", cannotAsk: "" };
     // The folder for the day the video is to be filed in, and the Final Cut file that names it there.
     let day = "";
     let project = null;
@@ -717,6 +778,7 @@ async function workOn(file, deps) {
       }
     };
     if (!plan) {
+      if (!noReels.none) noReels = { none: "no cut plan could be made", cannotAsk: "" };
       missing.push(`no cut plan could be made: ${planned.why}`);
       files.text(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
     } else {
@@ -748,11 +810,25 @@ async function workOn(file, deps) {
           log(`${name}: it is a short video, so the clips Claude picked are not cut.`);
           clips = [];
         }
+        // A recording with no picture gets no Reel candidates: none could have a preview or a project.
+        if (episode && !facts.height && clips.length) {
+          log(`${name}: it has no picture, so the clips Claude picked are not Reel candidates.`);
+          clips = [];
+        }
         changes = (plan.changes || []).length;
         log(changes ? `${name}: Claude changed the cut plan in ${changes} place${changes === 1 ? "" : "s"}: it now ${sums(plan)}.` : `${name}: Claude changed nothing in the cut plan.`);
       }
 
-      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: clips.length > 0, watched }));
+      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: clips.length > 0 && !episode, previews: clips.length > 0 && Boolean(episode), watched }));
+      // Why an episode has no Reel candidates, when it has none, and why asking Claude again would not help, when it would not.
+      if (episode && !noReels.none) {
+        if (deps.rulesOnly) noReels = { none: "Claude was not asked", cannotAsk: `the import on ${episode.machine} is set to go by the rules alone`, rulesOnly: true };
+        // The Mac is named: the other Mac, or this one later, may have Claude Code, and whether Claude can be asked is for the
+        // Mac that shows the list to say.
+        else if (!tools.claude) noReels = { none: `Claude was not asked, since Claude Code is not installed on ${episode.machine}`, cannotAsk: "" };
+        else if (!read) noReels = { none: `Claude could not be asked (${asked.why})`, cannotAsk: "" };
+        else if (!clips.length) noReels = { none: "Claude picked no clip that stands alone", cannotAsk: "" };
+      }
       const spans = keptSpans(plan.ranges, roughRate(facts));
       let why = "";
       let note = "";
@@ -790,8 +866,15 @@ async function workOn(file, deps) {
         else atCentre.push("the upright version");
       }
 
-      // The short clips Claude picked, each cut whole from the video. One that cannot be cut does not stop the others.
-      if (clips.length) {
+      // An episode's Reel candidates: Claude's clips, each with its stretches cropped on the speaker by the stills found for
+      // the upright version, and a small upright preview of each. No full-size clip, no Story and no caption file: only a Reel
+      // that is picked gets more (design, section 3). A preview that cannot be made is noted, as a clip that cannot be cut is.
+      if (episode && clips.length) {
+        log(`${name}: making the previews of ${clips.length} Reel candidate${clips.length === 1 ? "" : "s"}.`);
+        candidates = await makePreviews(file, reelCandidates({ clips, plan, facts, stills }), { facts, streams }, deps);
+        cut = candidates.map((c) => ({ clip: clips.find((clip) => clip.n === c.n), files: c.preview ? [join(dirname(file), c.preview)] : [], named: c.preview ? [c.preview] : [], failed: c.failed ? [`the preview of Reel ${c.n} could not be made: ${c.failed}`] : [] }));
+        if (wide(facts) && candidates.some((c) => c.preview)) atCentre.push("the Reel previews");
+      } else if (clips.length) {
         log(`${name}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
         cut = await cutClips(file, clips, { plan, facts, stills, streams }, deps);
         if (wide(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
@@ -841,7 +924,7 @@ async function workOn(file, deps) {
       if (read) said.push(`Claude read this plan and ${changes ? `changed it in ${changes} place${changes === 1 ? "" : "s"}` : "changed nothing in it"}.${files.has(out.notes) ? ` Its notes are in ${basename(out.notes)}.` : ""}`);
       else if (asked) said.push(`Claude could not be asked (${asked.why}), so this plan is the rules' alone.`);
       else if (!deps.rulesOnly) said.push("Claude Code is not installed, so this plan is the rules' alone.");
-      if (centred && atCentre.length) said.push(`${capital(listed(atCentre))} ${atCentre.includes("the short clips") ? "are" : "is"} cropped at the centre of the picture, and not on the speaker: ${centred}.`);
+      if (centred && atCentre.length) said.push(`${capital(listed(atCentre))} ${atCentre.includes("the short clips") || atCentre.includes("the Reel previews") ? "are" : "is"} cropped at the centre of the picture, and not on the speaker: ${centred}.`);
 
       missing.push(...lacks.map((lack) => `the ${lack.what} could not be made: ${lack.why}`), ...uncut);
       files.text(out.planTxt, planText(plan, [...lacks.map((lack) => `The ${lack.what} could not be made: ${lack.why}.${lack.note || ""}`), ...said].join("\n")));
@@ -853,7 +936,7 @@ async function workOn(file, deps) {
       // names of the files that were made of it, so that a person can see what changed. Nothing reads the ideas back yet:
       // they are there for what is made of the plan later. The title Claude recommends comes first, when it gave one: the
       // import of an episode takes it for the episode's title, for a person to approve.
-      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
+      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
       files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
     }
     for (const what of missing) log(`${name}: ${what}.`);
@@ -861,7 +944,16 @@ async function workOn(file, deps) {
     // For a watched folder, the video is filed away with the files the run held for it, the plan last. Its Final Cut file
     // names it in the folder it is filed in: when it cannot be moved there, the file is first written again to name the
     // video where it stays.
-    const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...cut.flatMap((made) => made.files), out.plan];
+    // An episode's Reel candidates go into reels.json, beside its other files, with why there are none when there are none.
+    const reelsAt = join(dirname(file), REELS_FILE);
+    if (episode) {
+      try {
+        files.text(reelsAt, JSON.stringify(reelsFile({ video: name, by: "import", made: localStamp(deps.now ? deps.now() : new Date()), candidates, ...noReels }), null, 2) + "\n");
+      } catch (e) {
+        missing.push(`its list of Reel candidates could not be written: the work stopped (${e.code || e.message})`);
+      }
+    }
+    const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...(episode ? [reelsAt] : []), ...cut.flatMap((made) => made.files), out.plan];
     if (deps.watched) progress.step("Filing");
     const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (episode) {
@@ -870,7 +962,7 @@ async function workOn(file, deps) {
       const stem = basename(name, extname(name));
       let filed = null;
       try {
-        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, cut, work, dropFile: arrived }, deps);
+        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived }, deps);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
         const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
@@ -958,8 +1050,576 @@ function planFault(plan) {
 }
 
 /** A video's facts as they tell one video from another, in plain words, and whether two such are of one video. */
-const described = (facts) => `${facts.duration} seconds, ${facts.width} by ${facts.height}${facts.fps ? ` at ${facts.fps}` : ""}`;
-const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
+export const described = (facts) => `${facts.duration} seconds, ${facts.width} by ${facts.height}${facts.fps ? ` at ${facts.fps}` : ""}`;
+export const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
+
+/** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
+    cannot be read. */
+function startsAlike(a, b, length) {
+  let fa;
+  let fb;
+  try {
+    fa = openSync(a, "r");
+    fb = openSync(b, "r");
+    const size = 1024 * 1024;
+    const ba = Buffer.alloc(size);
+    const bb = Buffer.alloc(size);
+    for (let at = 0; at < length; at += size) {
+      const n = Math.min(size, length - at);
+      if (readSync(fa, ba, 0, n, at) !== n || readSync(fb, bb, 0, n, at) !== n || !ba.subarray(0, n).equals(bb.subarray(0, n))) return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    if (fa !== undefined) closeSync(fa);
+    if (fb !== undefined) closeSync(fb);
+  }
+}
+
+/** Whether the files at `a` and `b` hold the same bytes. */
+function sameBytes(a, b) {
+  const sa = statSync(a, { throwIfNoEntry: false });
+  const sb = statSync(b, { throwIfNoEntry: false });
+  return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
+}
+
+/** Put the files made again of an episode's video into its folder, by the rule: each made whole in the run's folder `work`,
+    the one before deleted, the new one cloned in (replaceIn), never moved. Then the episode's record is written again, with
+    each file's size as it is now, and, at least 15 minutes after the last copy (deps.wait), the late check looks at each
+    again and copies in again one that is not as it put it, but never one someone else changed since (ownLateCheck). Resolves {put,
+    problems, notes}: `put` says the files and the record went in, `problems` what could not be done, each in plain words:
+    none when all was, and `notes` each file someone else changed since, which was left as it is. `change` makes any other change to the
+    record, and `expectRev`, when given, is the rev the work was worked out from.
+    Nothing is put in when the episode cannot be gone on with as it is now: its record cannot be read, a newer brimm-video
+    wrote it, Dropbox undid this Mac's last change to it (episode.js undone), or its rev is not `expectRev`. A change of this
+    Mac's that Dropbox took away is so never written over in silence.
+    Nothing is left half done. Each file it replaces is first copied into the run's folder, and when a file cannot be put in,
+    or the record cannot be written, every file put in so far is put back as it was (one that was not there is taken away
+    again), and no record is written. What was put back has its late check too, after the same wait. One that cannot be put
+    back is kept in BRIMM Video Work, in the episode's folder there, under "put back", and the problem says where. */
+async function intoEpisode(file, madeAt, work, deps, { change = (record) => record, expectRev } = {}) {
+  const { files, log = () => {} } = deps;
+  const home = deps.home || homedir();
+  const folder = dirname(file);
+  const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
+  const wait = deps.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const unchanged = "Nothing was changed in the episode";
+  const rel = (to) => relative(folder, to).split(sep).join("/");
+  // Why the episode cannot be gone on with as it is now, or "".
+  const notAsWas = (found, rev) => {
+    if (!found.record) return `the episode's record cannot be read: ${String(found.why || "it is not there").replace(/\.$/, "")}`;
+    if (found.newer) return "the episode was written by a newer brimm-video. Ask Jason to update this Mac";
+    const gone = undone(found.record, home);
+    if (gone) return gone.replace(/\.$/, "");
+    if (rev !== undefined && found.record.rev > rev) return "this episode changed on the other Mac meanwhile. Say it again";
+    if (rev !== undefined && found.record.rev !== rev) return "the episode changed while this was made. Say it again";
+    return "";
+  };
+  const before = readEpisode(folder);
+  const first = notAsWas(before, expectRev);
+  if (first) return { put: false, problems: [first, unchanged], notes: [], kept: [] };
+  const problems = [];
+  const entries = [];
+  const sizes = {};
+  // What each file put in replaced: a copy of the file that was there, on this Mac's disk, or null when none was.
+  const done = [];
+  // What this run left as it is, and why: a file the other Mac put in since, as the record lists, or one gone that the record
+  // no longer lists.
+  const notes = [];
+  const theirs = (to, how) => notes.push(`${rel(to)} was put in by the other Mac since this Mac put it in, as the record lists, so ${how}`);
+  // The copy that was there before each file this run put in, by where it went.
+  const wasOf = (to) => (done.find((d) => d.to === to) || {}).was || null;
+  /** What a late check or a put-back judges by, read now: `listed`, the files the record in force lists, by their paths,
+      with their sizes, or null with `why` when no record can be trusted to judge (none can be read, as with a conflicted copy
+      in the folder, or a newer one is still coming); and `conflicted`, the files that have a conflicted copy in the folder. */
+  /** The other Mac's claim on the episode now, read past any conflicted copy, and from a conflicted copy of a record too: {held,
+      name}, or null when no record that reads says another Mac has it open. */
+  const claimNow = () => {
+    const machine = deps.settings ? deps.settings.machine : "";
+    const past = readEpisode(folder, { pastCopies: true });
+    const own = past.record ? heldElsewhere(past.record, machine) : null;
+    if (own) return { held: own, name: past.record.name.text, files: past.record.files || {} };
+    // A copy older than the record in force is a race the other Mac lost: its claim does not hold.
+    const floor = past.record ? past.record.rev : 0;
+    for (const copy of conflictedCopies(folder).filter((c) => c.startsWith(`${RECORD_DIR}/`))) {
+      try {
+        const record = JSON.parse(readFileSync(join(folder, copy), "utf8"));
+        if (!Number.isInteger(record.rev) || record.rev < floor) continue;
+        const held = heldElsewhere(record, machine);
+        if (held) return { held, name: record.name && record.name.text ? record.name.text : basename(folder), files: record.files || {} };
+      } catch (e) {
+        // A copy that does not read says nothing of a claim.
+      }
+    }
+    return null;
+  };
+  const judgeNow = () => {
+    const found = readEpisode(folder);
+    const conflicted = new Set(conflictedCopies(folder).map(conflictedOf));
+    // The other Mac has the episode open now (phase 1b's claim): nothing is copied into it again.
+    const claim = claimNow();
+    if (claim) return { listed: null, why: "", conflicted, held: claim.held, name: claim.name, claimFiles: claim.files };
+    if (!found.record) return { listed: null, why: found.code === "CONFLICTED" ? "Dropbox has kept a conflicted copy in this episode" : `the episode's record cannot be read now (${String(found.why).replace(/\.$/, "")})`, conflicted };
+    if (recordNumbers(folder).some((n) => n > found.record.rev)) return { listed: null, why: "A newer record of this episode is still coming", conflicted };
+    return { listed: found.record.files || {}, why: "", conflicted };
+  };
+  /** Whether the file at `to` is a whole record, one that reads and whose rev is its number. */
+  const wholeRecord = (to) => {
+    try {
+      const record = JSON.parse(readFileSync(to, "utf8"));
+      return Number.isInteger(record.rev) && `${String(record.rev).padStart(4, "0")}.json` === basename(to);
+    } catch (e) {
+      return false;
+    }
+  };
+  /** Whose the file at `to` is now, by what `judge` holds (judgeNow), with its words to break the tie. `ours` is the copy this
+      run means to be there, of `bytes` bytes:
+      - "conflicted": it has a conflicted copy in the folder, so which to keep is for a person to say;
+      - "ours": its bytes are `ours`'s;
+      - "missing": it is gone, and the record lists it (or no record can say); "unlisted": it is gone, and the record no
+        longer lists it;
+      - for a record file, which is written once each and never over: "otherRecord", another whole record of its number,
+        which is a conflict for a person and not damage; or "damaged", when it is cut off or does not read;
+      - "unjudged": it is not this run's, and no record can be trusted to say whose it is;
+      - "theirs": the record lists another size for it, as every put of the other Mac's does;
+      - "damaged": the record lists this run's size for it, but it is not this run's: Dropbox put back an older one, or left
+        it part-written.
+      Never by its size alone: an older file may be longer, and a record of this Mac's own may land meanwhile. */
+  const whose = (to, ours, bytes, judge) => {
+    const r = rel(to);
+    if (judge.conflicted.has(r)) return "conflicted";
+    const record = r.startsWith(`${RECORD_DIR}/`);
+    if (!statSync(to, { throwIfNoEntry: false })) return record || !judge.listed || r in judge.listed ? "missing" : "unlisted";
+    if (sameBytes(to, ours)) return "ours";
+    if (record) return wholeRecord(to) ? "otherRecord" : "damaged";
+    if (!judge.listed) return "unjudged";
+    return judge.listed[r] === bytes ? "damaged" : "theirs";
+  };
+  /** Why the file at `to` was left as it is, for each judgement that leaves it and needs a person: "" for none. */
+  const leftWhy = (now, to, judge) => {
+    const r = rel(to);
+    if (now === "conflicted") return `${r} has a conflicted copy in the episode: which to keep is for a person to say, so it was left as it is`;
+    if (now === "unjudged") return judge.held ? `${judge.held.by} has ${judge.name} open now, so ${r} was left as it is` : `${judge.why}, so ${r} was left as it is`;
+    if (now === "otherRecord") {
+      let on = "";
+      try {
+        on = JSON.parse(readFileSync(to, "utf8")).writer.on || "";
+      } catch (e) {
+        on = "";
+      }
+      return `${r} is another record of the same number, written meanwhile${on ? ` on ${on}` : ""}: which to keep is for a person to say, so this Mac's was not copied over it`;
+    }
+    return "";
+  };
+  /** The late check of what this run put in, or put back (`from` is the copy that should be there): a file that is gone or
+      damaged is put in again, by the rule; one the other Mac put in since, or one gone that the record no longer lists, is
+      left as it is, and a note says so; and one with a conflicted copy, another record of this run's number, or a file no
+      record can judge now is left, and the problem says a person must choose. Gives back {problems, checked}: what could not
+      be put in again, or needs a person, and the entries it looked after. */
+  const ownLateCheck = (list) => {
+    const problems = [];
+    const checked = [];
+    // Once the other Mac has the episode, nothing is copied into it again: what is not as this Mac put it is said, for that
+    // Mac to put right, as finish does (phase 1b, T20).
+    // Each file not as this Mac put it is kept, for the record in force lists it: the run's folder goes when it ends.
+    // A file with a conflicted copy is for a person to choose; one the claim's own record lists at its size is the other
+    // Mac's, and only noted.
+    const leave = (rest, judge) => {
+      for (const e of rest) {
+        if (judge.conflicted.has(rel(e.to))) {
+          problems.push(leftWhy("conflicted", e.to, judge));
+          continue;
+        }
+        if (sameBytes(e.to, e.from)) continue;
+        const hers = judge.claimFiles ? judge.claimFiles[rel(e.to)] : undefined;
+        const there = statSync(e.to, { throwIfNoEntry: false });
+        // The file that was there before this run is Dropbox's revert, whatever a claim made from the record before lists.
+        const was = wasOf(e.to);
+        if (there && Number.isInteger(hers) && hers !== e.bytes && there.size === hers && !(was && sameBytes(e.to, was))) {
+          theirs(e.to, "its late check left it as it is");
+          continue;
+        }
+        const kept = keep(e.to, e.from);
+        problems.push(`${rel(e.to)} is not as this Mac put it at the late check, and ${judge.held.by} has ${judge.name} open now, so it was not copied in again${kept ? `. This Mac's copy is kept at ${kept}` : ""}`);
+      }
+      return { problems, checked, held: true };
+    };
+    const first = judgeNow();
+    if (first.held) return leave(list, first);
+    // This run's record files first: the record in force, which judges the rest, may be one Dropbox took away.
+    const isRecord = (e) => rel(e.to).startsWith(`${RECORD_DIR}/`);
+    let judge = { listed: null, why: "", conflicted: first.conflicted };
+    for (const e of [...list.filter(isRecord), null, ...list.filter((x) => !isRecord(x))]) {
+      if (e === null) {
+        judge = judgeNow();
+        if (judge.held) return leave(list.filter((x) => !isRecord(x)), judge);
+        continue;
+      }
+      const now = whose(e.to, e.from, e.bytes, judge);
+      if (now === "ours") {
+        checked.push(e);
+        continue;
+      }
+      if (now === "theirs") {
+        theirs(e.to, "its late check left it as it is");
+        continue;
+      }
+      if (now === "unlisted") {
+        notes.push(`${rel(e.to)} is gone, and the record no longer lists it, so its late check left it out`);
+        continue;
+      }
+      const left = leftWhy(now, e.to, judge);
+      if (left) {
+        problems.push(left);
+        continue;
+      }
+      checked.push(e);
+      log(`${rel(e.to)} is not as this Mac put it at the late check (${now === "missing" ? "it is not there" : "it is another file, though the record lists this Mac's"}), so it is copied in again from its work copy.`);
+      try {
+        mkdirSync(dirname(e.to), { recursive: true });
+        replaceIn(e.from, e.to, opts);
+      } catch (err) {
+        problems.push(String(err.message).replace(/\.$/, ""));
+      }
+    }
+    return { problems, checked };
+  };
+  /** Keep a copy of the file that was at `to`, from `was`, where a person can find it: BRIMM Video Work, in the episode's
+      folder there, under "put back". Gives back where, or "" when it could not be kept. */
+  const keptNow = [];
+  const keep = (to, was) => {
+    try {
+      const kept = join(episodeWork(home, basename(folder)), "put back", rel(to));
+      mkdirSync(dirname(kept), { recursive: true });
+      copyFileSync(was, kept);
+      keptNow.push(kept);
+      return kept;
+    } catch (k) {
+      return "";
+    }
+  };
+  /** Put back what was put in, and make the late check of what was put back, and of what was taken away. The record in force
+      judges, as at the late check: a file is put back when it is this run's, gone, or damaged against the size the record
+      lists; one the other Mac put in since is left; and one that is as it was before already is left so. */
+  const undo = async () => {
+    const back = [];
+    const gone = [];
+    let whole = true;
+    const judge = judgeNow();
+    for (const { to, was } of done.reverse()) {
+      const before = was ? statSync(was).size : undefined;
+      // As it was before already, as when its delete was refused: there is nothing to put back, nor to check.
+      if (was && sameBytes(to, was) && !judge.conflicted.has(rel(to))) continue;
+      const there = existsSync(to);
+      if (!there && !was) continue;
+      if (judge.conflicted.has(rel(to))) {
+        whole = false;
+        problems.push(leftWhy("conflicted", to, judge));
+        continue;
+      }
+      if (there && !sameBytes(to, files.at(to))) {
+        if (!judge.listed) {
+          problems.push(leftWhy("unjudged", to, judge));
+          continue;
+        }
+        if (judge.listed[rel(to)] !== before) {
+          theirs(to, "it was left as it is, not put back");
+          continue;
+        }
+      }
+      try {
+        if (was) {
+          replaceIn(was, to, opts);
+          back.push({ from: was, to, bytes: before });
+        } else {
+          rmSync(to, { force: true });
+          gone.push({ from: files.at(to), to });
+        }
+      } catch (e) {
+        whole = false;
+        const kept = was ? keep(to, was) : "";
+        // When this run's file stays there, a copy of it beside the kept one lets a later run tell it from the other Mac's.
+        if (kept && sameBytes(to, files.at(to))) {
+          try {
+            copyFileSync(files.at(to), `${kept}.unlisted`);
+          } catch (k) {
+            // Without it, the kept one is not named later, which costs only the hint.
+          }
+        }
+        problems.push(`${rel(to)} could not be put back as it was: ${String(e.message).replace(/\.$/, "")}${kept ? `. The one that was there is kept at ${kept}` : ""}`);
+      }
+    }
+    if (back.length || gone.length) {
+      log(`${basename(file)}: what was put back has its late check in ${LATE_CHECK_MS / 60000} minutes.`);
+      if (deps.progress) deps.progress.step("Waiting for the late check");
+      await wait(LATE_CHECK_MS);
+      const late = ownLateCheck(back);
+      problems.push(...late.problems);
+      if (late.held && late.problems.length) whole = false;
+      // A file its late check could not copy in again is kept too: its work copy goes with the run's folder.
+      for (const e of late.checked) {
+        if (sameBytes(e.to, e.from)) continue;
+        whole = false;
+        const kept = keep(e.to, e.from);
+        problems.push(`${rel(e.to)} could not be put back as it was at its late check${kept ? `. The one that was there is kept at ${kept}` : ""}`);
+      }
+      // A file this run took away that Dropbox brought back, still this run's and listed by no record, is taken away again.
+      const now = judgeNow();
+      // Under the other Mac's claim nothing is taken away; a file of this run's that came back is named.
+      if (now.held) {
+        for (const g of gone) {
+          if (!existsSync(g.to) || !sameBytes(g.to, g.from)) continue;
+          whole = false;
+          problems.push(`${rel(g.to)} is this run's, and no record lists it, but ${now.held.by} has ${now.name} open now, so it was left as it is`);
+        }
+      }
+      for (const g of now.held ? [] : gone) {
+        if (!existsSync(g.to) || !sameBytes(g.to, g.from) || !now.listed || rel(g.to) in now.listed || now.conflicted.has(rel(g.to))) continue;
+        log(`${rel(g.to)} came back at the late check, though this Mac took it away, so it is taken away again.`);
+        try {
+          rmSync(g.to, { force: true });
+        } catch (e) {
+          whole = false;
+          problems.push(`${rel(g.to)} could not be taken away again: ${String(e.message).replace(/\.$/, "")}`);
+        }
+      }
+    }
+    problems.push(whole ? unchanged : "Everything else was put back as it was");
+  };
+  for (const to of madeAt) {
+    let was = null;
+    try {
+      mkdirSync(dirname(to), { recursive: true });
+      if (existsSync(to)) {
+        was = join(work, "before", rel(to));
+        mkdirSync(dirname(was), { recursive: true });
+        copyFileSync(to, was);
+      }
+      done.push({ to, was });
+      replaceIn(files.at(to), to, opts);
+      const bytes = statSync(files.at(to)).size;
+      entries.push({ from: files.at(to), to, bytes });
+      sizes[rel(to)] = bytes;
+    } catch (e) {
+      // The rule's own message names the file already; any other is said of it.
+      const said = String(e.message).replace(/\.$/, "");
+      problems.push(said.startsWith(basename(to)) ? said : `${rel(to)} could not be put into the episode: ${said}`);
+      break;
+    }
+  }
+  if (problems.length) {
+    await undo();
+    return { put: false, problems, notes, kept: keptNow };
+  }
+  if (!entries.length) return { put: false, problems, notes, kept: keptNow };
+  // The record is read again, and written only when it is still the one the files were put in by.
+  const found = readEpisode(folder);
+  try {
+    const why = notAsWas(found, before.record.rev);
+    if (why) throw new Error(why);
+    const writer = { commit: deps.commit || (deps.settings ? commitOf(deps.settings.checkout) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" };
+    const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
+    writeEpisode(folder, change({ ...found.record, files: { ...found.record.files, ...sizes } }), { expectRev: before.record.rev, writeText: (to, text) => entries.push(write(to, text)), writer, home });
+  } catch (e) {
+    problems.push(`the episode's record could not be written again: ${String(e.message).replace(/\.$/, "")}`);
+    await undo();
+    return { put: false, problems, notes, kept: keptNow };
+  }
+  log(`${basename(file)}: put into its episode. Its late check is in ${LATE_CHECK_MS / 60000} minutes.`);
+  if (deps.progress) deps.progress.step("Waiting for the late check");
+  await wait(LATE_CHECK_MS);
+  problems.push(...ownLateCheck(entries).problems);
+  return { put: true, problems, notes, kept: keptNow };
+}
+
+/** Ask Claude again for an episode's Reel candidates (edit.js ask, detached): with the import's own request and locked-down
+    call, of the cut plan the import wrote. Only its clips are taken: the rough cut is made, so its decisions are not applied,
+    and its clips are read on the plan as it is. The faces are found again for the crops, and each new candidate gets its
+    preview, as at the import. Every candidate and Reel already there stays as it is, with its number, its stretch and its
+    preview, and the new candidates are numbered on from the highest number ever given (mergeCandidates). When none is new,
+    nothing is written. Then the previews, reels.json and the
+    record go into the episode by the rule, and the late check is made after its wait. When Claude cannot be asked, or picks
+    nothing, nothing is changed. `found` is {folder, record}; `deps` as the import's, with `home`, `settings` and `wait`.
+    Resolves the detached run's result: {ok, made, failed, next}. */
+/** Why the import of the episode whose record is `record` still holds its video, in plain words, with what to do: its
+    status in Episodes/.importing/ under `root` says, at `now`, that it is at work on either Mac (its own late check to come
+    within the run), that it failed, or that its late check found a problem; this Mac, `machine`, has the late check of its
+    import still to make (filing.js readPendings, in `home`, kept under this Mac's name and root, as its import makes them);
+    or its status says it stopped on either Mac before its late check, which that Mac makes when its import next runs, or
+    at once when told to "try it again" (edit.js retry). "" when none holds it. Nothing that puts files into the episode goes
+    on meanwhile: the import's late check would meet files it did not put there, and put its own back over them. */
+export function importHolds({ root, home, machine, record, now = Date.now() }) {
+  const video = record.video.file;
+  const said = (text) => String(text).replace(/\.$/, "");
+  const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
+  const statuses = readStatuses(root, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
+  const state = (want) => statuses.find((s) => importState(s, now) === want);
+  const running = state("running");
+  if (running) return `The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`;
+  const failed = state("failed");
+  if (failed) return `The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`;
+  const problem = state("problem");
+  if (problem) return `The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`;
+  const owed = readPendings(home).find((p) => p.id === record.id && (!machine || p.machine === machine) && resolve(String(p.root)) === resolve(root));
+  if (owed && owed.problem) return `The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`;
+  // No import of the video is at work here (a running status would have said so), so none makes the check unless told to.
+  if (owed && dueAt(owed) > now) return `This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`;
+  if (owed) return `This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`;
+  const stopped = state("stopped");
+  if (stopped) return `The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`;
+  return "";
+}
+
+/** A moment, `ms`, as this Mac's clock shows it: "14:05". */
+export const clockAt = (ms) => {
+  const at = new Date(ms);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+};
+
+/** The copy of the episode's reels.json a put-back of this Mac's kept (intoEpisode), in BRIMM Video Work under `home`, when
+    it is the list the record lists, by its size, and the list in the episode is gone, or is this Mac's own put that its
+    put-back could not take away (kept beside it as reels.json.unlisted): its path, or "". A copy at another size is an older
+    list; and a list there that is not this Mac's own may be the other Mac's newer one, whose record is still coming. */
+export function keptList({ folder, record, home }) {
+  const listed = record.files ? record.files[REELS_FILE] : undefined;
+  const kept = join(episodeWork(home, basename(folder)), "put back", REELS_FILE);
+  const there = statSync(kept, { throwIfNoEntry: false });
+  if (!Number.isInteger(listed) || !there || there.size !== listed) return "";
+  const at = join(folder, REELS_FILE);
+  return !existsSync(at) || sameBytes(at, `${kept}.unlisted`) ? kept : "";
+}
+
+/** Why reels.json cannot be gone on with, in plain words: the episode's record (`record`) lists it, but it is not in the
+    episode's folder `folder`, or it is there at another size than the record lists, as an older one Dropbox put back. A new
+    list would then hold the new candidates and not those in the one the record lists. When this Mac kept a copy of the
+    listed one (keptList), it says where; no other copy is named. "" when it is the one listed, or the record does not list
+    it, as of an episode imported before phase 3. */
+export function listGone({ folder, record, home }) {
+  const listed = record.files ? record.files[REELS_FILE] : undefined;
+  if (listed === undefined) return "";
+  const kept = home ? keptList({ folder, record, home }) : "";
+  const there = statSync(join(folder, REELS_FILE), { throwIfNoEntry: false });
+  const after = kept ? ` The one its record lists is kept at ${kept}: ask Jason to put it back.` : "";
+  if (!there) return `${REELS_FILE} is missing from this episode, though its record lists it, so Claude is not asked: the candidates in it would be lost.${after}`;
+  if (Number.isInteger(listed) && there.size !== listed) return `${REELS_FILE} in this episode is not the one its record lists (it is ${there.size} bytes, and the record lists ${listed}), so Claude is not asked: the candidates in the one it lists would be lost.${after || " Say it again once Dropbox has brought that one."}`;
+  return "";
+}
+
+/** Why Claude cannot be asked again for the Reel candidates of the episode in `folder`, whose record is `record`: {why}, in
+    plain words, with `bring`, the files Dropbox has still to bring over to this Mac, when that is why; {} when it can be
+    asked. The quick part of `ask` and the detached part both look, in this order, for:
+    - a short video, which gets no Reels;
+    - the other Mac having it open (phase 1b's claim, episode.js heldText);
+    - a change of this Mac's that Dropbox undid (episode.js undone);
+    - the import of the video still holding it (importHolds): its late check still to come on this Mac (in `home`) or on
+      either Mac by its status under `root` at `now`, or one that failed or found a problem;
+    - no cut plan, a reels.json the record lists that is gone (listGone), and the video, its cut plan or reels.json not
+      whole on this Mac (`whole`);
+    - a recording with no picture, as its cut plan says, which gets no Reels;
+    - a list of candidates that cannot be read, as one a newer brimm-video wrote, which a new one would be written over;
+    - an import told to go by the rules alone, as the list says (`rulesOnly`). */
+export function askBlocked({ folder, record, root, home, machine, now = Date.now(), whole = isWhole }) {
+  if (record.kind === "short video") return { why: "A short video gets no Reels." };
+  // The other Mac has it open (phase 1b's claim): nothing is put into it from here meanwhile.
+  const open = heldText(record, machine);
+  if (open) return { why: open };
+  const gone = undone(record, home);
+  if (gone) return { why: gone };
+  const held = importHolds({ root, home, machine, record, now });
+  if (held) return { why: held };
+  const name = record.video.file;
+  const plan = `${basename(name, extname(name))}.cut-plan.json`;
+  if (!existsSync(join(folder, plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
+  const lost = listGone({ folder, record, home });
+  if (lost && !existsSync(join(folder, REELS_FILE))) return { why: lost };
+  const listed = existsSync(join(folder, REELS_FILE));
+  const bring = (coming) => ({ why: `Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "ask Claude again for Reels" again when it is done.`, bring: coming });
+  // What the cut plan and the list decide is decided before the video is brought, so it is never brought only to be refused.
+  const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(join(folder, rel)));
+  if (small.length) return bring(small);
+  let facts = null;
+  try {
+    facts = JSON.parse(readFileSync(join(folder, plan), "utf8")).facts || null;
+  } catch (e) {
+    return { why: `The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude cannot be asked.` };
+  }
+  if (!facts || !facts.height) return { why: "A recording with no picture gets no Reels." };
+  if (listed) {
+    const read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    if (read.why) return { why: `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.` };
+    if (read.reels.rulesOnly === true) return { why: `Claude cannot be asked for Reels: ${read.reels.cannotAsk || "its import went by the rules alone"}.` };
+    if (lost) return { why: lost };
+  }
+  return whole(join(folder, name)) ? {} : bring([name]);
+}
+
+export async function askAgain({ folder, record }, deps) {
+  const { log = () => {} } = deps;
+  const as = "The Reel candidates are as they were.";
+  const blocked = askBlocked({ folder, record, root: deps.settings.root, home: deps.home || homedir(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
+  if (blocked.why) return { ok: false, made: [], failed: [blocked.why], next: as };
+  const name = record.video.file;
+  const video = join(folder, name);
+  const stem = basename(name, extname(name));
+  const plan = JSON.parse(readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"));
+  const work = join(runsFolder(deps.home || homedir()), `ask-${process.pid}-${Date.now()}`);
+  mkdirSync(work, { recursive: true });
+  try {
+    // ffprobe is asked which streams the video has, so that each preview takes the picture and the sound a run takes.
+    const probed = join(work, "facts.json");
+    const probe = await deps.run(deps.tools.ffprobe, probeArgs(video, probed));
+    const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
+    if (!printed || !factsOf(printed)) return { ok: false, made: [], failed: [`${name} could not be read (${lastLine(probe.stderr)}).`], next: as };
+    const streams = streamsOf(printed);
+    const asked = await askClaude(name, plan, plan.facts, work, deps);
+    if (!asked.read) return { ok: false, made: [], failed: [`Claude could not be asked (${asked.why}).`], next: as };
+    const picked = clipRanges(plan, asked.read.clips, []);
+    // What was wrong with Claude's reply, and the clips of it that were left out, are said whatever else happens.
+    const said = [...asked.read.problems, ...picked.ignored];
+    if (!picked.clips.length) return { ok: true, made: [], failed: said, next: `Claude picked no clip that stands alone. ${as}` };
+    const seen = await facesIn(video, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
+    if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the new candidates are cropped at the centre of the picture.`);
+    const fresh = reelCandidates({ clips: picked.clips, plan, facts: plan.facts, stills: seen.stills || [] });
+    // The list is read again, as it is now that Claude has answered, and a list that cannot be read now is refused, as at the
+    // start: one a newer brimm-video wrote meanwhile is never written over.
+    const reelsAt = join(folder, REELS_FILE);
+    const listed = existsSync(reelsAt) ? readFileSync(reelsAt, "utf8") : null;
+    const read = listed === null ? null : readReels(listed);
+    if (read && read.why) return { ok: false, made: [], failed: [...said, `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`], next: as };
+    // The record is read again for it: the other Mac's ask may have landed meanwhile, which the rev check then says.
+    const lost = listGone({ folder, record: readEpisode(folder).record || record, home: deps.home || homedir() });
+    if (lost) return { ok: false, made: [], failed: [...said, lost], next: "" };
+    const merged = mergeCandidates({ old: read ? read.reels : null, fresh, record });
+    if (!merged.added.length) return { ok: true, made: [], failed: [...said, ...merged.ignored], next: `Every clip Claude picked has words of a Reel or a candidate already there. ${as}` };
+    const files = filesOf(work, { name, hold: true, log });
+    const made = await makePreviews(video, merged.added, { facts: plan.facts, streams }, { ...deps, files });
+    const candidates = merged.candidates.map((c) => made.find((m) => m.n === c.n) || c);
+    const entries = merged.entries.map((e) => {
+      const m = made.find((c) => c.n === e.n);
+      return m ? { ...e, files: m.preview ? [m.preview] : [] } : e;
+    });
+    files.text(reelsAt, JSON.stringify(reelsFile({ video: name, by: "ask", made: localStamp(deps.now ? new Date(deps.now()) : new Date()), candidates, highest: merged.highest }), null, 2) + "\n");
+    // Nothing goes in when the record or the list changed while Claude was asked: the candidates were worked out from them as
+    // they were.
+    const now = readEpisode(folder);
+    const nowListed = existsSync(reelsAt) ? readFileSync(reelsAt, "utf8") : null;
+    if (!now.record || now.record.rev !== record.rev || nowListed !== listed) return { ok: false, made: [], failed: [...said, "This episode changed while Claude was asked, so nothing was changed. Ask again."], next: as };
+    const madeAt = [...made.filter((c) => c.preview).map((c) => join(folder, c.preview)), reelsAt];
+    const into = await intoEpisode(video, madeAt, work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
+    const failed = [...said, ...merged.ignored, ...made.filter((c) => c.failed).map((c) => `The preview of Reel ${c.n} could not be made: ${c.failed}.`), ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
+    // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.
+    const kept = into.kept.find((k) => basename(k) === REELS_FILE && basename(dirname(k)) === "put back");
+    const oursStays = existsSync(reelsAt) && sameBytes(reelsAt, files.at(reelsAt));
+    const lostList = listed !== null && !existsSync(reelsAt) ? `${REELS_FILE} is not in the episode now.${kept ? ` A copy of it is kept at ${kept}: ask Jason to put it back.` : ""}`
+      : !into.put && oursStays ? `${REELS_FILE} in the episode is this run's new list, which its record does not list.${kept ? ` The one it lists is kept at ${kept}: ask Jason to put it back.` : ""}` : "";
+    if (!into.put) return { ok: false, made: [], failed, next: lostList || as };
+    const next = into.problems.length ? lostList || `Not everything is as this Mac put it: what is not done says which${into.kept.length ? ", and where this Mac's copies are kept" : ""}.` : "Say \"show me the Reels\" to see them.";
+    return { ok: !into.problems.length && !made.some((c) => c.failed), made: merged.added.map((c) => `Reel ${c.n}`), failed, next };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
 
 /** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
     version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
@@ -975,15 +1635,55 @@ const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fp
     Resolves {ok, name, made, message}: `made` names the videos made again, and `message` says what could not be. When there
     is no video, no plan, a plan that cannot be read or one of another video, or the plan's video has no picture or the plan
     keeps nothing, it stops before anything is made, the log says why, and it resolves {ok: false, stopped: true} with
-    `message` saying why. */
+    `message` saying why.
+    A video in an episode's folder (one with a record/) is made again only when the episode can be gone on with: it stops in
+    the same way when the record cannot be read (a conflicted copy, or an import not finished), when this Mac has no settings
+    for episodes, when Dropbox undid this Mac's last change to it, while the import still holds the video (importHolds), and
+    while another command is at work on the episode. The work holds the episode's lock, kept awake, and waits for the late
+    check of what it put in before it ends. */
 export async function videosFromPlan(file, deps) {
-  const { run, tools, log = () => {}, progress = noProgress } = deps;
+  const { log = () => {} } = deps;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
   const stop = (why) => {
     log(`${name}: ${why}. Nothing was made.`);
     return { ok: false, name, made: [], stopped: true, message: why };
   };
+  // Videos written straight into an episode's folder would skip the claim, the lock and the rule: --out anywhere in one, or in
+  // Episodes itself, is refused.
+  if (deps.outDir) {
+    // --out as the disk has it: its nearest folder that is there, with links followed and its own case, then the rest as
+    // given. So a link to Episodes, or Episodes in another case, is seen for what it is.
+    let near = resolve(deps.outDir);
+    let rest = "";
+    while (!existsSync(near) && dirname(near) !== near) {
+      rest = rest ? join(basename(near), rest) : basename(near);
+      near = dirname(near);
+    }
+    const realOf = (p) => {
+      try {
+        return realpathSync.native(p);
+      } catch (e) {
+        return resolve(p);
+      }
+    };
+    const at = rest ? join(realOf(near), rest) : realOf(near);
+    // Only a real episode counts: a folder whose record/, so named, is a folder holding record files.
+    const isEpisode = (d) => {
+      try {
+        return readdirSync(d).includes(RECORD_DIR) && statSync(join(d, RECORD_DIR)).isDirectory() && recordNumbers(d).length > 0;
+      } catch (e) {
+        return false;
+      }
+    };
+    let inEpisode = false;
+    for (let d = at; !inEpisode; d = dirname(d)) {
+      inEpisode = isEpisode(d);
+      if (dirname(d) === d) break;
+    }
+    const episodes = deps.settings ? realOf(episodesFolder(deps.settings.root)) : null;
+    if (inEpisode || (episodes && `${at}${sep}`.toLowerCase().startsWith(`${episodes}${sep}`.toLowerCase()))) return stop("--out is in an episode's folder, or is Episodes itself: an episode's videos are made again without --out, so they go in by the rule");
+  }
   if (!existsSync(file)) return stop(`there is no video at ${file}`);
   if (!existsSync(out.plan)) return stop(`there is no cut plan at ${out.plan}`);
   let plan;
@@ -995,10 +1695,37 @@ export async function videosFromPlan(file, deps) {
   const fault = planFault(plan);
   if (fault) return stop(`the cut plan at ${out.plan} could not be read (${fault})`);
   if (plan.video !== name) return stop(`the cut plan at ${out.plan} is the plan of ${plan.video}, and not of ${name}`);
-  const work = join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
+  // A video in an episode's folder, which has a record/ whatever its record says: what is made of it goes into the folder by
+  // the rule (dropbox.js), never by a move, and only when the episode can be gone on with. The work holds the episode's lock,
+  // as a detached command of edit.js does, so that no other works on the episode meanwhile.
+  const folder = dirname(file);
+  if (deps.outDir || !existsSync(join(folder, RECORD_DIR))) return remakeVideos(file, { out, plan, episode: false, stop }, deps);
+  const read = readEpisode(folder);
+  if (!read.record) return stop(`its episode's record cannot be read: ${read.why}`);
+  if (read.newer) return stop("its episode was written by a newer brimm-video. Ask Jason to update this Mac");
+  if (!deps.settings) return stop("this Mac has no settings for episodes, so nothing can be put into its episode");
+  const home = deps.home || homedir();
+  const held = undone(read.record, home) || heldText(read.record, deps.settings.machine) || importHolds({ root: deps.settings.root, home, machine: deps.settings.machine, record: read.record, now: deps.clock ? deps.clock() : Date.now() });
+  // Its own closing is the run's: "Nothing was made."
+  if (held) return stop(held.replace(/ Nothing was changed\.$/, "").replace(/\.$/, ""));
+  let made = null;
+  const ran = await runDetached({ home, folder: basename(folder), command: "from-plan", ...(deps.keepAwake ? { keepAwake: deps.keepAwake } : {}), ...(deps.alive ? { alive: deps.alive } : {}) }, async () => {
+    made = await remakeVideos(file, { out, plan, episode: true, stop, expectRev: read.record.rev }, deps);
+    return { ok: made.ok, made: made.made, failed: made.message ? [made.message] : [], next: "" };
+  });
+  if (ran.running || ran.taking) return stop(ran.running ? `${ran.running} is running for ${basename(folder)} already` : `another run is taking over the lock of ${basename(folder)}`);
+  return made || { ok: false, name, made: [], message: ran.failed.join(" ") };
+}
+
+/** The work of videosFromPlan, once the plan `plan` (read from `out.plan`) is known to be the video's, and an `episode` it is
+    in can be gone on with, its record at rev `expectRev` when it was looked at. `stop` stops it, as there. */
+async function remakeVideos(file, { out, plan, episode, stop, expectRev }, deps) {
+  const { run, tools, log = () => {}, progress = noProgress } = deps;
+  const name = basename(file);
+  const work = episode ? join(runsFolder(deps.home || homedir()), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
-  // Each video goes through `files`, and is put in place as soon as it is whole.
-  const files = filesOf(work, { name, log, move: deps.move, copy: deps.copy });
+  // Each video goes through `files`, and is put in place as soon as it is whole, or, for an episode, held until all are made.
+  const files = filesOf(work, { name, hold: episode, log, move: deps.move, copy: deps.copy });
   deps = { ...deps, files };
   let finished = false;
   try {
@@ -1019,14 +1746,18 @@ export async function videosFromPlan(file, deps) {
     const clipped = (plan.claude ? plan.claude.clips : []).some((clip) => clip.files.length > 0);
     progress.begin(name);
     progress.length(facts.duration);
-    progress.steps(["Making the rough cut", ...(needsReframe(facts) ? ["Finding the faces", "Making the upright version"] : []), ...(clipped ? ["Cutting the short clips"] : [])]);
+    progress.steps(["Making the rough cut", ...(needsReframe(facts) ? ["Finding the faces", "Making the upright version"] : []), ...(episode ? ["Making the Reel previews"] : clipped ? ["Cutting the short clips"] : [])]);
 
     const made = [];
     const failed = [];
+    // The videos made, where each belongs: for an episode, each is put in after all are made.
+    const madeAt = [];
     /** What became of the video at `to`: `why` it could not be made, which is "" when it was. `what` says it could not. */
     const madeOr = (to, what, why) => {
-      if (!why) made.push(basename(to));
-      else {
+      if (!why) {
+        made.push(basename(to));
+        madeAt.push(to);
+      } else {
         failed.push(`${what}: ${why}`);
         log(`${name}: ${what}: ${why}.${existsSync(to) ? " The one made before is kept." : ""}`);
       }
@@ -1046,11 +1777,22 @@ export async function videosFromPlan(file, deps) {
       stills = up.stills;
       madeOr(out.vertical, "the upright version could not be made again", up.why);
     }
+    // An episode's Reel candidates have previews in place of clips: each made again, as the import makes them, from the
+    // stretches and the crops reels.json holds, so a preview still matches the Reel's project, which is made with the same.
+    if (episode) {
+      const reelsAt = join(dirname(file), REELS_FILE);
+      const read = existsSync(reelsAt) ? readReels(readFileSync(reelsAt, "utf8")) : { why: "there is no reels.json" };
+      if (read.why) log(`${name}: no Reel previews are made again: ${read.why}.`);
+      const again = read.reels ? read.reels.candidates.filter((c) => c.preview) : [];
+      for (const c of again.length ? await makePreviews(file, again.map((c) => ({ ...c, preview: null })), { facts, streams }, deps) : []) {
+        madeOr(join(dirname(file), previewPath(c.n)), `the preview of Reel ${c.n} could not be made again`, c.failed || "");
+      }
+    }
     // Each clip, and each part of its Story, that the run which wrote the plan made. One it could not cut is not cut now:
     // it has no captions, and the notes say it could not be cut.
     const pieces = [];
     let clips = 0;
-    for (const clip of plan.claude ? plan.claude.clips : []) {
+    for (const clip of plan.claude && !episode ? plan.claude.clips : []) {
       const named = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
       const has = (to) => clip.files.includes(basename(to));
       const notCut = (what) => log(`${name}: ${what} was not cut by the run that wrote the plan, so it is not cut now.`);
@@ -1071,6 +1813,13 @@ export async function videosFromPlan(file, deps) {
       progress.step("Cutting the short clips", `Cutting ${piece.what}`);
       const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most, streams }, deps);
       madeOr(piece.to, `${piece.what} could not be cut again`, cut.why || "");
+    }
+    if (episode && madeAt.length) {
+      const into = await intoEpisode(file, madeAt, work, deps, { expectRev });
+      failed.push(...into.problems);
+      for (const note of into.notes) log(`${name}: ${note}.`);
+      // When nothing was put in, nothing was made again in the episode.
+      if (!into.put) made.length = 0;
     }
     if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);
     else log(made.length ? `${name}: made again: ${listed(made)}.` : `${name}: nothing was made again.`);
@@ -1193,6 +1942,10 @@ clips it picked.
   --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
                      cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
                      is made, Claude is not asked, and no other file is touched. Never with --watch
+
+An episode, made of a video in this Mac's drop folder, gets Reel candidates in place of the short clips: reels.json, and a
+small upright preview of each in previews/. --from-plan of an episode's video makes the previews again, and puts every
+file into the episode by the rule. See the README, "Reel candidates".
 
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and

@@ -168,7 +168,7 @@ export function conflictedCopies(folder) {
 }
 
 /** The numbers of the record files in an episode's folder, highest first: [] when there are none, or no folder record/. */
-function recordNumbers(folder) {
+export function recordNumbers(folder) {
   let names;
   try {
     names = readdirSync(join(folder, RECORD_DIR));
@@ -328,6 +328,13 @@ export function filesProblems(folder, record, { stat = statSync } = {}) {
 /** Who is editing an episode, when it is a Mac other than `machine`: the record's `editing`. null when nobody is, or this Mac
     is. */
 export const heldElsewhere = (record, machine) => (record.editing && record.editing.by !== machine ? record.editing : null);
+
+/** Why a command that writes the record, pushes or puts files into the episode must not change it now, because another Mac
+    has it open (spec section 1, "Picking an episode up"), in plain words: "" when nobody does, or `machine` does. */
+export const heldText = (record, machine) => {
+  const held = heldElsewhere(record, machine);
+  return held ? `${held.by} has ${record.name.text} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
+};
 
 /** The record with `machine` editing it since `at`. */
 export const claimed = (record, machine, at) => ({ ...record, editing: { by: machine, since: at } });

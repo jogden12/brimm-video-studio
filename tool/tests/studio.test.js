@@ -47,6 +47,12 @@ describe("her folder's settings", () => {
     assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(EDIT));
     for (const text of Object.values(files)) assert.ok(!text.includes("{{"), text);
   });
+  it("have the skill show the Reels and ask Claude again for them, now that both are ready (phase 3)", () => {
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    assert.ok(skill.includes('| "Show me the Reels" | `reels "<episode>"`'), skill);
+    assert.ok(skill.includes('| "Ask Claude again for Reels" | `ask "<episode>"`'), skill);
+    assert.ok(!/Not ready yet[\s\S]*Showing the Reels/.test(skill), skill);
+  });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     // Every backticked span that starts with a lowercase word is a command line; its first word must be a command. Flags

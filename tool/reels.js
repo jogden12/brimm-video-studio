@@ -190,16 +190,18 @@ const REELS_VERSION = 1;
     `none` says why there are no candidates, and is left out when there are some. `highest` is the highest number ever given
     to a Reel of this episode, kept so that asking Claude again never gives a number twice: a candidate that is let go takes
     its number out of every list. It is at least the highest number among the candidates. `cannotAsk` says why asking Claude
-    again would not work, when it would not: Claude Code not installed on this Mac, or this Mac set to go by the rules alone.
-    It is left out when there are candidates, or when asking again can work. */
-export const reelsFile = ({ video, by, made, candidates, none = "", cannotAsk = "", highest = 0 }) => ({
+    again would not work: the importing Mac set to go by the rules alone, with `rulesOnly`, the field `ask` goes by. Both are
+    left out when there are candidates. Whether Claude can be asked again otherwise is for the Mac that shows the list to
+    say (edit.js reels). */
+export const reelsFile = ({ video, by, made, candidates, none = "", cannotAsk = "", rulesOnly = false, highest = 0 }) => ({
   format: "brimm-video reels", version: REELS_VERSION, video, by, made,
   highest: Math.max(highest, 0, ...candidates.map((c) => c.n)),
-  ...(none && !candidates.length ? { none } : {}), ...(cannotAsk && !candidates.length ? { cannotAsk } : {}), candidates
+  ...(none && !candidates.length ? { none } : {}), ...(cannotAsk && !candidates.length ? { cannotAsk } : {}),
+  ...(rulesOnly && !candidates.length ? { rulesOnly: true } : {}), candidates
 });
 
 /** reels.json as it was read: {reels}, or {why} it cannot be used. Only what the previews, the listing and a Reel's project
-    are made from is looked at: each candidate's number, its stretches and their crops. */
+    are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. */
 export function readReels(text) {
   let reels;
   try {
@@ -214,7 +216,9 @@ export function readReels(text) {
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);
   const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start && isCrop(r.crop);
-  const bad = reels.candidates.findIndex((c) => !c || !Number.isInteger(c.n) || c.n < 1 || !Array.isArray(c.ranges) || !c.ranges.every(isRange));
+  // A preview is opened in QuickTime Player and brought over by Dropbox, so it may be in one place only: its own in previews/.
+  const isPreview = (c) => c.preview === undefined || c.preview === null || c.preview === previewPath(c.n);
+  const bad = reels.candidates.findIndex((c) => !c || !Number.isInteger(c.n) || c.n < 1 || !Array.isArray(c.ranges) || !c.ranges.every(isRange) || !isPreview(c));
   return bad === -1 ? { reels } : { why: `candidate ${bad + 1} in it cannot be read` };
 }
 
@@ -236,11 +240,12 @@ const GUESSED = "No face was found in this stretch, so the picture is placed whe
     Only the cuts that lie wholly inside the Reel have a note, never the cut before its first words or after its last.
     `video` is the raw video's whole path on this Mac, `facts` what ffprobe said of it (as factsOf gives them), and `plan` the
     cut plan. `project` and `event` are the names Final Cut is to give them, and `writer` is what writes the file's text, for
-    a test to give another. The text is checked before it is given back, and one with something wrong in it is not: `why`
-    then says what. */
-export function reelProject({ video, facts, candidate, plan, project, event, writer = fcpxml }) {
+    a test to give another. `more` is what else ffprobe says of the video, for its asset: { audioRate, audioChannels,
+    colorSpace }, as the main timeline is given them (an HDR video's own colour space goes on its format). The text is
+    checked before it is given back, and one with something wrong in it is not: `why` then says what. */
+export function reelProject({ video, facts, candidate, plan, project, event, more = {}, writer = fcpxml }) {
   if (!candidate.ranges.length) return { why: "the Reel has no stretch to show" };
-  const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound };
+  const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound, ...more };
   const joins = joinNotes(plan.ranges.filter((r) => r.start >= candidate.start && r.end <= candidate.end));
   const guesses = candidate.ranges.filter((r) => !r.crop.found).map((r) => ({ at: r.start, text: GUESSED }));
   try {
@@ -258,14 +263,16 @@ const NOW = { candidate: "A candidate", picked: "Picked", dropped: "Dropped", fi
 /** The list of the Reel candidates, to show a person: for each its number, where it is in the raw video, its length, what it
     is now, its words for the screen and why Claude picked it, whether it fits a Reel, its preview or why it has none, and the
     word to check when it starts or ends with no pause. With none, why there are none, and how to ask again only when asking
-    again can work: a short video gets no Reels, and when Claude cannot be asked (`cannotAsk`), the list says why instead.
-    `record` is the episode's record, for its kind and for what each Reel is now: one it does not know of is a candidate. */
-export function reelsText(reels, record) {
+    again can work: a short video gets no Reels, and `whyNot`, why Claude cannot be asked now on the Mac that shows the list
+    (as `ask` would say), is said instead of the offer. After the candidates, the Reels of the record that are none of them,
+    which are the clips the import cut of an episode imported before phase 3. `record` is the episode's record, for its kind
+    and for what each Reel is now: one it does not know of is a candidate. */
+export function reelsText(reels, record, whyNot = "") {
   const name = reels.video;
   if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
   if (!reels.candidates.length) {
     const why = `There are no Reel candidates of ${name}${reels.none ? `: ${reels.none}` : ""}.`;
-    return `${why}\n${reels.cannotAsk ? `Claude cannot be asked for Reels: ${reels.cannotAsk}.` : 'Say "ask Claude again for Reels" to ask again.'}\n`;
+    return `${why}\n${whyNot || 'Say "ask Claude again for Reels" to ask again.'}\n`;
   }
   const status = new Map((record.reels || []).map((r) => [r.n, r.status]));
   const blocks = reels.candidates.map((c) => {
@@ -279,33 +286,43 @@ export function reelsText(reels, record) {
       c.check && `   ${c.check}`
     ].filter(Boolean).join("\n");
   });
-  return [`Reel candidates of ${name}: ${reels.candidates.length}.`, "", ...blocks.flatMap((block) => [block, ""])].join("\n");
+  // The record's Reels that reels.json does not hold: the clips the import cut, of an episode imported before phase 3, and any
+  // other the record lists before Dropbox has brought the list that holds it.
+  const listed = new Set(reels.candidates.map((c) => c.n));
+  const others = (record.reels || []).filter((r) => !listed.has(r.n));
+  const cut = (r) => (Array.isArray(r.files) ? r.files : []).some((f) => /\.reel-\d+\.mp4$/i.test(f));
+  const said = (list) => list.map((r) => `Reel ${r.n}, ${r.status === "candidate" ? "a candidate" : r.status}`).join("; ");
+  const after = [
+    ...(others.some(cut) ? [`Reels the import cut as clips: ${said(others.filter(cut))}.`, ""] : []),
+    ...(others.some((r) => !cut(r)) ? [`Reels the record lists that reels.json does not hold yet: ${said(others.filter((r) => !cut(r)))}.`, ""] : [])
+  ];
+  return [`Reel candidates of ${name}: ${reels.candidates.length}.`, "", ...blocks.flatMap((block) => [block, ""]), ...after].join("\n");
 }
 
-/** The Reels a person has chosen, which asking Claude again never changes. */
-const KEPT = new Set(["picked", "finished"]);
-
 /** The candidates and the record's Reels after Claude is asked again (`ask`): {candidates, entries, added, highest, ignored}.
-    A Reel that is picked or finished keeps its number, its candidate and its record entry as they are, so a project already
-    written of it, or a finished file, still matches. Every other candidate goes, with its entry. The fresh candidates are
-    numbered on from the highest number ever given (reels.json's `highest`, and any number still in either list), in Claude's
-    order, so no number ever names two different stretches.
-    A fresh candidate that has words of a kept Reel is left out, and `ignored` says so: the same words would be two Reels. Two
-    candidates share words when they share a phrase of the plan. Each clip also takes up to a fifth of a second of the pause
-    beside its words, so the Reels of two neighbouring sentences can overlap by a little silence: that is no overlap. A kept
-    Reel known only by its record entry (a Reel picked before reels.json was made, or one reels.json has lost) is known by its
-    times alone, and then the pause it may hold at each end is left out of the comparison.
-    `added` is the fresh candidates kept, with their new numbers: the ones whose previews are to be made. `highest` is what
+    reels.json only ever grows: every candidate already there stays as it is, with its number, its stretches, its crops and
+    its preview, and so does every Reel in the record, whatever it is now (picked, dropped, finished or a candidate). A
+    candidate a project, a push, a person's notes or the other Mac may name is never taken out from under it. The fresh
+    candidates are added, numbered on from the highest number ever given (reels.json's `highest`, and any number in either
+    list), in Claude's order, so no number ever names two different stretches.
+    A fresh candidate that has words of a candidate or a Reel already there is left out, and `ignored` says so: the same words
+    would be offered twice, or as two Reels. Two candidates share words when they share a phrase of the plan. Each clip also
+    takes up to a fifth of a second of the pause beside its words, so two neighbouring sentences can overlap by a little
+    silence: that is no overlap. A Reel known only by its record entry (as the clips of an episode imported before reels.json
+    was made) is known by its times alone, and then the pause it may hold at each end is left out of the comparison.
+    `added` is the fresh candidates kept, with their numbers: the ones whose previews are to be made. `highest` is what
     reels.json is to keep. `old` is the reels.json read before, or null. */
 export function mergeCandidates({ old, fresh, record }) {
   const entries = record.reels || [];
-  const kept = entries.filter((e) => KEPT.has(e.status));
-  const keptCandidates = (old ? old.candidates : []).filter((c) => kept.some((e) => e.n === c.n));
-  let next = Math.max(0, (old && old.highest) || 0, ...entries.map((e) => e.n), ...(old ? old.candidates.map((c) => c.n) : []));
-  // Each kept Reel as what is compared: its phrases when its candidate has them, and otherwise its times without their edges.
-  const known = kept.map((e) => {
-    const c = keptCandidates.find((k) => k.n === e.n);
-    return { n: e.n, status: e.status, phrases: c && c.phrases, start: c ? c.start : e.from, end: c ? c.end : e.to };
+  const there = old ? old.candidates : [];
+  let next = Math.max(0, (old && old.highest) || 0, ...entries.map((e) => e.n), ...there.map((c) => c.n));
+  // Each candidate and Reel already there, as what is compared: its phrases when its candidate has them, and otherwise its
+  // times without their edges.
+  const numbers = [...new Set([...there.map((c) => c.n), ...entries.map((e) => e.n)])];
+  const known = numbers.map((n) => {
+    const c = there.find((k) => k.n === n);
+    const e = entries.find((x) => x.n === n);
+    return { n, status: e ? e.status : "candidate", phrases: c && c.phrases, start: c ? c.start : e && e.from, end: c ? c.end : e && e.to };
   }).filter((k) => k.phrases || (Number.isFinite(k.start) && Number.isFinite(k.end)));
   const inner = (x) => [x.start + KEPT_SIDE, x.end - KEPT_SIDE];
   const shares = (c, k) => {
@@ -316,8 +333,8 @@ export function mergeCandidates({ old, fresh, record }) {
   const ignored = [];
   const added = fresh.filter((c) => {
     const k = known.find((one) => shares(c, one));
-    if (k) ignored.push(`A new clip from ${stamp(c.start)} to ${stamp(c.end)} was left out: it has words of Reel ${k.n}, which is ${k.status}.`);
+    if (k) ignored.push(`A new clip from ${stamp(c.start)} to ${stamp(c.end)} was left out: it has words of Reel ${k.n}, which is ${k.status === "candidate" ? "a candidate" : k.status}.`);
     return !k;
   }).map((c) => ({ ...c, n: (next += 1) }));
-  return { candidates: [...keptCandidates, ...added], entries: [...kept, ...reelEntries(added)], added, highest: next, ignored };
+  return { candidates: [...there, ...added], entries: [...entries, ...reelEntries(added)], added, highest: next, ignored };
 }

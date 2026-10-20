@@ -10,7 +10,7 @@ Put the episode in quotes. Never show Sallie the command, a path or a flag: say 
 
 ## At the start of each session
 
-Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits."
+Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits."
 
 ## What she says, and what to run
 
@@ -21,6 +21,8 @@ Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; a
 | "Call it …" | `name "<episode>" "<name>"` |
 | "Use that title" / "Make the title …" | `title "<episode>" --approve` / `title "<episode>" --words "<words>" --approve` (an approved title changes only with `--change`; say BRIMM Ops may have it already) |
 | "Reel 2's title is …" | `title "<episode>" reel 2 --words "<words>"` |
+| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview opens in QuickTime Player |
+| "Ask Claude again for Reels" | `ask "<episode>"`: it runs in the background, so say so, and that "how far is it?" shows how far it has got |
 | "Finish Reels 1 and 3" / "Drop 2" | `reel pick "<episode>" 1 3` / `reel drop "<episode>" 2` |
 | "Show it in Final Cut" / "Show reel 1 in Final Cut" | `push "<episode>"` / `push "<episode>" reel 1`, with the guard below |
 | "Show me the transcript / Claude's notes / the cut plan" | `show "<episode>" transcript` / `show "<episode>" notes` / `show "<episode>" plan` |
@@ -43,7 +45,6 @@ When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut 
 
 ## Not ready yet: say so, and what to do by hand
 
-- Showing the Reels, asking Claude again for Reels: "That isn't ready yet; ask Jason."
 - A look or style ("make it Bright"), a cut ("keep the Hormozi story"), words on screen, a lower third, a graphic, the logo, captions, a spelling fix, bringing in her hand edits: "That part of brimm-video isn't ready yet. For now, do it by hand in Final Cut." For a picture: "Put it in the Pictures folder in BRIMM Video Studio, then drag it into Final Cut."
 - Archiving, checking the setup, freeing space: "That isn't ready yet; ask Jason." (For space: Final Cut's File > Delete Generated Library Files.)
 

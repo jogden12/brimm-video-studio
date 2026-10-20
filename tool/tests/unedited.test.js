@@ -5,21 +5,25 @@
 import { describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
-import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions } from "../cuts.js";
+import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions, roughRate } from "../cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "../notes.js";
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { writeSettings } from "../settings.js";
-import { readEpisode } from "../episode.js";
+import { readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
+import { writePending } from "../filing.js";
+import { writeStatus } from "../importing.js";
+import { lockOf } from "../detached.js";
+import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -160,6 +164,18 @@ function setup(script = {}) {
         if (script.pauses === "throw") throw new Error("spawn EAGAIN");
         return script.pauses === "fail" ? { code: 1, stderr: "Error while filtering\n" } : { code: 0, stderr: script.pauses === undefined ? PAUSES : script.pauses };
       }
+      // A part of a Reel candidate's preview, or the preview the parts are joined into, is known by the name it is written under
+      // in the run's folder: "reel-1.part-1.mov", "reel-1.mp4". `script.previews` says which preview ffmpeg cannot make, by the
+      // candidate's number: { 2: "fail" }, or "stopped" for one the watchdog stops (see runGuarded below).
+      const preview = /\/reel-(\d+)(?:\.part-\d+\.mov|\.mp4)$/.exec(args[args.length - 1]);
+      if (preview) {
+        if ((script.previews || {})[preview[1]] === "fail") {
+          writeFileSync(args[args.length - 1], "half a preview");
+          return { code: 1, stderr: "Error while filtering: Cannot allocate memory\n" };
+        }
+        writeFileSync(args[args.length - 1], `preview ${preview[1]}`);
+        return { code: 0, stderr: "" };
+      }
       // A short clip, or a part of its Story, is known by the name it is written under. `script.reels` says which of them
       // ffmpeg cannot make, by the clip's number, or by that and the part's: { 2: "fail", "1.2": "throw" }.
       const reel = /\.reel-(\d+)(?:\.story-(\d+))?\.mp4$/.exec(args[args.length - 1]);
@@ -220,13 +236,25 @@ function setup(script = {}) {
     const { stdout = "", ...r } = ran(cmd, args, { out, ...more });
     return { ...r, stderr: r.stderr.slice(-keep), ...(out ? { stdout: stdout.slice(0, out) } : {}) };
   };
+  // What runs under the watchdog (guard.js), as the real runGuarded resolves it: each call is kept with the limits it was given.
+  // A preview `script.previews` says is "stopped" is stopped by the watchdog, as for its memory.
+  const guarded = [];
+  const runGuarded = async (cmd, args, limits) => {
+    // As the watchdog itself does (guard.js): it never runs a program without both a memory cap and a time limit.
+    if (!(limits && limits.most > 0 && limits.limit > 0)) throw new Error("A guarded program needs a memory cap and a time limit.");
+    guarded.push({ cmd, args, limits });
+    const preview = /\/reel-(\d+)(?:\.part-\d+\.mov|\.mp4)$/.exec(args[args.length - 1]);
+    if (preview && (script.previews || {})[preview[1]] === "stopped") return { code: null, signal: "SIGKILL", stderr: "", overMemory: true, outOfTime: false, peak: 2200 * 1024 * 1024, stopped: "it took more than 2 GB of memory, so it was stopped" };
+    const r = await run(cmd, args);
+    return { ...r, overMemory: false, outOfTime: false, peak: 0, stopped: "" };
+  };
   const logs = [];
   const locks = join(dir, "locks");
   mkdirSync(locks);
   // The home folder is not made here: the tool makes what it needs in it.
   const home = join(dir, "home");
   const deps = {
-    run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "SWIFT", claude: script.claude ? "CLAUDE" : "" }, model: "/models/model.bin", tmpDir: work, lockDir: locks, home, today: () => "2026-10-13",
+    run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "SWIFT", claude: script.claude ? "CLAUDE" : "" }, model: "/models/model.bin", tmpDir: work, lockDir: locks, home, today: () => "2026-10-13",
     rulesOnly: !script.claude, wait: async (ms) => { waits.push(ms); }, notify: (text) => notes.push(text), log: (line) => logs.push(line),
     ...(script.sizes ? { sizeOf: () => script.sizes.shift() } : {})
   };
@@ -237,7 +265,7 @@ function setup(script = {}) {
   const names = () => readdirSync(dir).filter((n) => n !== "work" && n !== "locks" && n !== "home").sort();
   const inside = (...folders) => readdirSync(join(dir, ...folders)).sort();
   const read = (...path) => readFileSync(join(dir, ...path), "utf8");
-  return { dir, work, locks, home, logs, calls, notes, waits, asks, deps, video, names, inside, read, done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, work, locks, home, logs, calls, guarded, notes, waits, asks, deps, video, names, inside, read, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** A made-up talk of `count` sentences, for a clip of more than a minute: what ffprobe, the transcriber and ffmpeg would say
@@ -1675,6 +1703,20 @@ describe("Claude's ideas for graphics in the Final Cut file", () => {
 });
 
 describe("the videos of a video, made again from its cut plan (--from-plan)", () => {
+  it("makes a plain video's videos into --out though a folder above it, or a file, is named record in any case (PR 19, G1)", async () => {
+    const t = setup();
+    const file = t.video("talk.mov");
+    const podcast = join(t.dir, "Podcast");
+    const out = join(podcast, "out");
+    mkdirSync(out, { recursive: true });
+    mkdirSync(join(podcast, "Record"));
+    writeFileSync(join(t.dir, "record"), "a file named record");
+    await uneditedFile(file, { ...t.deps, outDir: out });
+    const r = await videosFromPlan(file, { ...t.deps, outDir: out });
+    assert.equal(r.stopped, undefined, r.message);
+    assert.equal(r.ok, true, r.message);
+    t.done();
+  });
   /** The moment every file of the run before is given, so that a test can tell which files a later run wrote. */
   const BEFORE = new Date("2026-10-14T08:00:00Z");
   /** Do a video as a run does it, and then mark what that run made: each video it made holds "made before", and every file
@@ -2715,6 +2757,9 @@ describe("what the tool says of itself", () => {
     assert.ok(first.includes(LEAVES), first);
     assert.ok(first.includes(" --rules-only keeps everything on the Mac."), first);
   });
+  it("says in its help that an episode gets Reel candidates and their previews, in place of the short clips", () => {
+    assert.ok(help.includes(" An episode, made of a video in this Mac's drop folder, gets Reel candidates in place of the short clips: reels.json, and a small upright preview of each in previews/. --from-plan of an episode's video makes the previews again, and puts every file into the episode by the rule. "), help);
+  });
   it("says the same in its help, and names the option that keeps everything on the Mac", () => {
     assert.ok(help.includes(LEAVES), help);
     assert.ok(help.includes(" --rules-only never ask Claude: the plan is the rules' alone, there are no notes and no clips, and nothing leaves this Mac "), help);
@@ -2782,7 +2827,7 @@ describe("an episode imported from this Mac's drop folder", () => {
   const FOLDER = "2026-10-13 Talk (Mac Studio)";
   /** The files an episode's folder holds at its top, of the rules' own: today's files of a video, less the Final Cut file,
       which is in edit/, and with the folders edit/ and record/. */
-  const TOP = [...ALL.filter((ending) => ending !== "fcpxml").map((ending) => `Talk.${ending}`), "edit", "record"].sort();
+  const TOP = [...ALL.filter((ending) => ending !== "fcpxml").map((ending) => `Talk.${ending}`), "edit", "record", "reels.json"].sort();
   it("files the video and everything made of it into a new folder in Episodes, named for the day, the video and this Mac", async () => {
     const t = episodic();
     t.put("Talk.mov");
@@ -2857,21 +2902,24 @@ describe("an episode imported from this Mac's drop folder", () => {
       t.put("Talk.mov");
       await uneditedFolder(t.drop, t.deps);
       const names = t.within(FOLDER);
-      assert.ok(!names.includes("Talk.rough-cut.vertical.mp4") && !names.some((n) => n.includes(".reel-")), names.join(", "));
+      assert.ok(!names.includes("Talk.rough-cut.vertical.mp4") && !names.some((n) => n.includes(".reel-")) && !names.includes("previews"), names.join(", "));
       assert.ok(names.includes("Talk.edit-notes.txt"));
       const { record } = readEpisode(join(t.episodes, FOLDER));
       assert.deepEqual([record.kind, record.reels], ["short video", []]);
+      const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+      assert.deepEqual([reels.candidates, reels.none], [[], "it is a short video"]);
+      assert.equal(t.guarded.length, 0, "no preview is made");
       t.done();
     }
   });
-  it("puts the clips Claude picked into the record as Reel candidates", async () => {
+  it("puts the Reel candidates into the record, each with its preview as its file, from reels.json", async () => {
     const t = episodic({ claude: [answers(REPLY)] });
     t.put("Talk.mov");
     await uneditedFolder(t.drop, t.deps);
     const { record } = readEpisode(join(t.episodes, FOLDER));
-    const plan = JSON.parse(readFileSync(join(t.episodes, FOLDER, "Talk.cut-plan.json"), "utf8"));
-    const clip = plan.claude.clips[0];
-    assert.deepEqual(record.reels, [{ n: 1, status: "candidate", from: clip.start, to: clip.end, title: clip.hook, why: clip.why, files: ["Talk.reel-1.mp4", "Talk.reel-1.srt"], pushed: [] }]);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.deepEqual(record.reels, reelEntries(reels.candidates));
+    assert.deepEqual(record.reels.map((r) => [r.n, r.status, r.files]), [[1, "candidate", ["previews/reel-1.mp4"]]]);
     t.done();
   });
   it("says in the banner what to say to Claude next", async () => {
@@ -2920,6 +2968,725 @@ describe("an episode imported from this Mac's drop folder", () => {
     assert.deepEqual([readdirSync(t.drop), readEpisode(join(t.episodes, FOLDER)).code], [["Talk.mov"], "NONE"]);
     assert.deepEqual(t.notes, ["Talk.mov could not be put into Episodes. It stays in the drop folder; see the log."]);
     assert.ok(!existsSync(join(t.home, "BRIMM Video Work", ".runs")) || readdirSync(join(t.home, "BRIMM Video Work", ".runs")).length === 0);
+    t.done();
+  });
+});
+
+describe("the Reel candidates of an episode, made at the import", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  /** The made-up recording as the import plans it with TWO, cut by Claude as TWO says: the candidates it makes, with the face
+      a quarter of the way across every still, as the face finder's stand-in finds it. */
+  const CANDIDATES = (() => {
+    const { plan, clips } = used(TWO);
+    const facts = { duration: 120, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
+    return reelCandidates({ clips, plan, facts, stills: Array.from({ length: 60 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [face(0.25)] })) });
+  })();
+  /** The calls under the watchdog that made the preview of candidate `n`: its parts, then its join. */
+  const previewCalls = (t, n) => t.guarded.filter((c) => new RegExp(`/reel-${n}(\\.part-\\d+\\.mov|\\.mp4)$`).test(c.args[c.args.length - 1]));
+
+  it("are in reels.json in the episode folder, each with its stretches, crops, title, why, words and preview", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.deepEqual([reels.format, reels.version, reels.video, reels.by, reels.highest], ["brimm-video reels", 1, "Talk.mov", "import", 2]);
+    assert.deepEqual(reels.candidates, CANDIDATES.map((c) => ({ ...c, preview: `previews/reel-${c.n}.mp4` })));
+    assert.deepEqual(t.within(FOLDER, "previews"), ["reel-1.mp4", "reel-2.mp4"]);
+    assert.equal(readFileSync(join(t.episodes, FOLDER, "previews", "reel-2.mp4"), "utf8"), "preview 2");
+    t.done();
+  });
+  it("make each preview in parts by seeking, then join them, every step under the watchdog with a preview's limits", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    for (const candidate of CANDIDATES) {
+      const calls = previewCalls(t, candidate.n);
+      const [parts, join] = [calls.slice(0, -1), calls[calls.length - 1]];
+      assert.ok(parts.length >= 1 && parts.every((c) => c.args.includes("-filter_complex") && c.args.includes("-an") && c.args.includes("-vn")));
+      assert.deepEqual(parts.flatMap((c) => c.args.flatMap((a, i) => (a === "-ss" && c.args[i + 4] === "-an" ? [Number(c.args[i + 1])] : []))), candidate.ranges.map((r) => r.start));
+      assert.deepEqual([join.args[join.args.indexOf("-f") + 1], join.args[join.args.length - 1].endsWith(`/reel-${candidate.n}.mp4`)], ["concat", true]);
+      // The join is as long as the candidate's whole pictures, at 29.97 a second.
+      const pictures = candidate.ranges.reduce((sum, r) => sum + Math.round((r.end - r.start) * 30000 / 1001), 0);
+      assert.deepEqual(join.limits, previewLimits(Math.round((pictures * 1001 / 30000) * 1000000) / 1000000));
+      // Each part has a preview's limits for its own length, and together the parts are as long as the join (PR 19's review,
+      // finding 20).
+      const lengths = parts.map((c) => (c.limits.limit / 1000 - 60) / 5);
+      assert.deepEqual(parts.map((c) => c.limits), lengths.map((seconds) => previewLimits(seconds)));
+      assert.ok(lengths.every((seconds) => seconds > 0) && Math.abs(lengths.reduce((a, b) => a + b, 0) - (join.limits.limit / 1000 - 60) / 5) < 1e-6, lengths.join(", "));
+    }
+    t.done();
+  });
+  it("cut no full-size clip, no caption file and no part of a Story of a candidate", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(reelCalls(t), []);
+    assert.ok(!t.within(FOLDER).some((n) => /\.reel-\d+/.test(n)), t.within(FOLDER).join(", "));
+    t.done();
+  });
+  it("list reels.json and each preview in the record's files, with their sizes", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const folder = join(t.episodes, FOLDER);
+    const { record } = readEpisode(folder);
+    for (const file of ["reels.json", "previews/reel-1.mp4", "previews/reel-2.mp4"]) assert.equal(record.files[file], statSync(join(folder, file)).size, file);
+    t.done();
+  });
+  it("are named in the cut plan's clips by their paths in the episode, as the record names them", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const plan = JSON.parse(readFileSync(join(t.episodes, FOLDER, "Talk.cut-plan.json"), "utf8"));
+    assert.deepEqual(plan.claude.clips.map((c) => c.files), [["previews/reel-1.mp4"], ["previews/reel-2.mp4"]]);
+    t.done();
+  });
+  it("leave no part of a preview, and no list of parts, in the run's folder", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const runs = join(t.home, "BRIMM Video Work", ".runs");
+    const left = spawnSync("find", [runs, "-name", "*.part-*.mov", "-o", "-name", "*.parts.txt"], { encoding: "utf8" }).stdout.trim();
+    assert.equal(left, "");
+    t.done();
+  });
+  it("still make the others when one preview cannot be made, and say why for that one, in reels.json and the notes", async () => {
+    const t = episodic({ claude: [answers(TWO)], previews: { 2: "fail" } });
+    t.put("Talk.mov");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.deepEqual(reels.candidates.map((c) => [c.n, c.preview, c.failed || ""]), [[1, "previews/reel-1.mp4", ""], [2, null, "ffmpeg stopped (Error while filtering: Cannot allocate memory)"]]);
+    assert.deepEqual(t.within(FOLDER, "previews"), ["reel-1.mp4"]);
+    assert.match(readFileSync(join(t.episodes, FOLDER, "Talk.edit-notes.txt"), "utf8"), /The preview of Reel 2 could not be made: ffmpeg stopped \(Error while filtering: Cannot allocate memory\)\./);
+    assert.deepEqual(readEpisode(join(t.episodes, FOLDER)).record.reels.map((e) => [e.n, e.files]), [[1, ["previews/reel-1.mp4"]], [2, []]]);
+    assert.equal(r.ok, false);
+    t.done();
+  });
+  it("say in plain words that a preview the watchdog stopped could not be made", async () => {
+    const t = episodic({ claude: [answers(TWO)], previews: { 1: "stopped" } });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.deepEqual([reels.candidates[0].preview, reels.candidates[0].failed], [null, "ffmpeg was stopped: it took more than 2 GB of memory, so it was stopped"]);
+    assert.equal(reels.candidates[1].preview, "previews/reel-2.mp4");
+    t.done();
+  });
+  it("are none when the import goes by the rules alone, and reels.json says why, and that Claude cannot be asked", async () => {
+    const t = episodic();
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    // It names the Mac, since reels.json is shared and read on both (PR 19's re-review, N17).
+    assert.deepEqual([reels.candidates, reels.none, reels.cannotAsk, reels.rulesOnly], [[], "Claude was not asked", "the import on Mac Studio is set to go by the rules alone", true]);
+    t.done();
+  });
+  it("are none when Claude Code is not on this Mac, and reels.json says so", async () => {
+    const t = episodic();
+    t.deps.rulesOnly = false;
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    // It names the Mac, since the other Mac, or this one later, may have Claude Code: whether Claude can be asked is for the
+    // Mac that shows the list to say (PR 19's review, finding 12).
+    assert.deepEqual([reels.none, reels.cannotAsk, reels.rulesOnly], ["Claude was not asked, since Claude Code is not installed on Mac Studio", undefined, undefined]);
+    t.done();
+  });
+  it("are none of a recording with no picture, and reels.json says why, with no preview tried (PR 19's review, finding 11)", async () => {
+    const t = episodic({ claude: [answers(TWO)], probed: probed({ picture: null, duration: "120.000000" }) });
+    t.put("voice.m4a");
+    await uneditedFolder(t.drop, t.deps);
+    const folder = join(t.episodes, readdirSync(t.episodes).find((n) => n.includes("voice")));
+    const reels = JSON.parse(readFileSync(join(folder, "reels.json"), "utf8"));
+    assert.deepEqual([reels.candidates, reels.none], [[], "it has no picture"]);
+    assert.deepEqual(readEpisode(folder).record.reels, []);
+    assert.equal(t.guarded.length, 0);
+    t.done();
+  });
+  it("are none when Claude could not be asked, and reels.json says why, and leaves asking again open", async () => {
+    const t = episodic({ claude: [{ code: 1, stderr: "Failed to authenticate\n" }] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.match(reels.none, /^Claude could not be asked \(/);
+    assert.equal(reels.cannotAsk, undefined);
+    t.done();
+  });
+  it("are none when Claude picked no clip, and reels.json says so", async () => {
+    const t = episodic({ claude: [answers({ ...REPLY, clips: [] })] });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const reels = JSON.parse(readFileSync(join(t.episodes, FOLDER, "reels.json"), "utf8"));
+    assert.deepEqual([reels.candidates, reels.none], [[], "Claude picked no clip that stands alone"]);
+    t.done();
+  });
+  it("tell the progress panel the step is making the Reel previews", async () => {
+    const t = episodic({ claude: [answers(TWO)] });
+    const told = [];
+    t.deps.progress = { ...noProgress, steps: (list) => told.push(list), step: (name) => told.push(name) };
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    assert.ok(told.some((x) => x === "Making the Reel previews"), JSON.stringify(told.filter((x) => typeof x === "string")));
+    assert.ok(!told.flat().includes("Cutting the short clips"));
+    t.done();
+  });
+});
+
+describe("the videos of an episode's video, made again from its cut plan (--from-plan)", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  /** An episode imported with TWO's two candidates, and the test made ready to make its videos again: what is called, cloned
+      and waited for from here on is what --from-plan does. */
+  const imported = async (script = {}) => {
+    const t = episodic({ claude: [answers(TWO)], ...script });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const folder = join(t.episodes, FOLDER);
+    t.calls.length = 0;
+    t.guarded.length = 0;
+    t.clones.length = 0;
+    t.waits.length = 0;
+    return { t, folder, video: join(folder, "Talk.mov") };
+  };
+
+  it("makes each candidate's preview again from the stretches and crops reels.json holds, in parts under the watchdog, and no clip", async () => {
+    const { t, folder, video } = await imported();
+    const reels = JSON.parse(readFileSync(join(folder, "reels.json"), "utf8"));
+    const r = await videosFromPlan(video, t.deps);
+    assert.deepEqual([r.ok, r.message], [true, ""]);
+    assert.ok(r.made.includes("reel-1.mp4") && r.made.includes("reel-2.mp4"), r.made.join(", "));
+    for (const candidate of reels.candidates) {
+      const starts = t.guarded.filter((c) => new RegExp(`/reel-${candidate.n}\\.part-\\d+\\.mov$`).test(c.args[c.args.length - 1])).flatMap((c) => c.args.flatMap((a, i) => (a === "-ss" && c.args[i + 4] === "-an" ? [Number(c.args[i + 1])] : [])));
+      assert.deepEqual(starts, candidate.ranges.map((x) => x.start));
+    }
+    assert.deepEqual(reelCalls(t), []);
+    t.done();
+  });
+  it("puts each video into the episode by the rule: the one before deleted, the new one cloned in, nothing moved", async () => {
+    const { t, folder, video } = await imported();
+    await videosFromPlan(video, t.deps);
+    const into = t.filed().map(([, to]) => relative(folder, to));
+    for (const file of ["Talk.rough-cut.mp4", "Talk.rough-cut.vertical.mp4", "previews/reel-1.mp4", "previews/reel-2.mp4"]) assert.ok(into.includes(file), `${file} in ${into.join(", ")}`);
+    assert.equal(readFileSync(join(folder, "previews", "reel-2.mp4"), "utf8"), "preview 2");
+    t.done();
+  });
+  it("writes the episode's record again, with the files' sizes as they are now, and checks them again after the late check's wait", async () => {
+    const { t, folder, video } = await imported();
+    await videosFromPlan(video, t.deps);
+    const { record } = readEpisode(folder);
+    assert.equal(record.rev, 2);
+    for (const file of ["Talk.rough-cut.mp4", "previews/reel-1.mp4"]) assert.equal(record.files[file], statSync(join(folder, file)).size, file);
+    assert.ok(t.waits.includes(15 * 60 * 1000), `waited ${t.waits.join(", ")}`);
+    // The record goes in by the rule too: written whole in the run's folder, then cloned in (PR 19's review, finding 8).
+    assert.ok(t.filed().some(([, to]) => to === join(folder, "record", "0002.json")), t.filed().map(([, to]) => to).join(", "));
+    t.done();
+  });
+  it("copies in again, at its late check, each file Dropbox took away during the wait: a video, a preview and the record", async () => {
+    const { t, folder, video } = await imported();
+    const gone = ["Talk.rough-cut.mp4", "previews/reel-1.mp4", "record/0002.json"];
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) for (const f of gone) rmSync(join(folder, f), { force: true });
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    for (const f of gone) assert.ok(existsSync(join(folder, f)), f);
+    assert.equal(readEpisode(folder).record.rev, 2);
+    t.done();
+  });
+  it("makes no preview, and says so, when the episode has no reels.json, as one imported before Reel previews has none", async () => {
+    const { t, folder, video } = await imported();
+    rmSync(join(folder, "reels.json"));
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(t.guarded.length, 0);
+    assert.ok(t.logs.includes("Talk.mov: no Reel previews are made again: there is no reels.json."), t.logs.slice(-5).join("\n"));
+    assert.equal(r.ok, true);
+    t.done();
+  });
+  it("makes the others, and says why, when a preview cannot be made again, and keeps the one made before", async () => {
+    const { t, folder, video } = await imported();
+    t.deps.runGuarded = async (cmd, args) => (/\/reel-2\.part-1\.mov$/.test(args[args.length - 1]) ? { code: 1, signal: null, stderr: "Error while filtering: Cannot allocate memory\n", overMemory: false, outOfTime: false, peak: 0, stopped: "" } : { ...(await t.deps.run(cmd, args)), overMemory: false, outOfTime: false, peak: 0, stopped: "" });
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /the preview of Reel 2 could not be made again: ffmpeg stopped \(Error while filtering: Cannot allocate memory\)/);
+    assert.equal(readFileSync(join(folder, "previews", "reel-2.mp4"), "utf8"), "preview 2", "the one made before is kept");
+    t.done();
+  });
+  // From the review: a folder with a record/ is an episode's whatever its record says, and --from-plan stops before it makes
+  // anything when the episode cannot be gone on with. Nothing is read, made or put in, and the record stays as it was.
+  /** Run --from-plan, and say what it touched. */
+  const stopped = async (t, folder, video) => {
+    const r = await videosFromPlan(video, t.deps);
+    return { stopped: r.stopped === true, message: r.message, calls: t.calls.length + t.guarded.length, clones: t.clones.length, rev: readEpisode(folder).record ? readEpisode(folder).record.rev : null };
+  };
+  it("stops, and makes nothing, when Dropbox has kept a conflicted copy in the episode", async () => {
+    const { t, folder, video } = await imported();
+    writeFileSync(join(folder, "record", "0001 (Jason Ogden's conflicted copy 2026-10-13).json"), "{}");
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
+    assert.match(r.message, /^its episode's record cannot be read: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Jason Ogden's conflicted copy 2026-10-13\)\.json\./);
+    t.done();
+  });
+  it("stops, and makes nothing, when Dropbox took this Mac's last change to the episode away", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    acceptRev(t.deps.home, record.id, 3);
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.match(r.message, /^Dropbox undid this Mac's last change to /);
+    t.done();
+  });
+  it("stops, and makes nothing, while the import is still at work on the video, its late check to come", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writeStatus(t.deps.settings.root, { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", video: "Talk.mov", bytes: record.video.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(t.deps.clock()).toISOString() }, writeFileSync);
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.equal(r.message, 'The import of this episode has not finished on Laptop yet: it is at "Waiting for its late check". Say it again when it has');
+    t.done();
+  });
+  it("stops, and makes nothing, on a Mac with no settings for episodes", async () => {
+    const { t, folder, video } = await imported();
+    t.deps.settings = null;
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.equal(r.message, "this Mac has no settings for episodes, so nothing can be put into its episode");
+    t.done();
+  });
+  it("holds the episode's lock while it works, kept awake, and lets it go after", async () => {
+    const { t, folder, video } = await imported();
+    const lock = lockOf(t.deps.home, basename(folder));
+    const held = [];
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, asked) => {
+      held.push(existsSync(lock) && JSON.parse(readFileSync(lock, "utf8")).command);
+      return run(cmd, args, asked);
+    };
+    const awake = [];
+    t.deps.keepAwake = (pid) => awake.push(pid);
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.ok(held.length > 0 && held.every((c) => c === "from-plan"), held.join(", "));
+    assert.deepEqual(awake, [process.pid]);
+    assert.equal(existsSync(lock), false);
+    t.done();
+  });
+  it("stops, and makes nothing, when a newer brimm-video wrote the episode's record (PR 19's review)", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: 2, rev: 2 }, null, 2) + "\n");
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
+    assert.equal(r.message, "its episode was written by a newer brimm-video. Ask Jason to update this Mac");
+    t.done();
+  });
+  it("stops, and makes nothing, while this Mac has the late check of the episode's import still to make", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writePending(t.deps.home, { version: 1, id: record.id, name: FOLDER, folder, video: "Talk.mov", bytes: record.video.bytes, seconds: 120, drop: "/nowhere/Talk.mov", work: "/nowhere", entries: [], lastCopy: t.deps.clock() - 20 * 60 * 1000, root: t.deps.settings.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt" });
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.equal(r.message, 'This Mac has still to make the late check of this episode\'s import. Say "try it again" for Talk.mov to have it made now, then say this again');
+    t.done();
+  });
+  it("stops, and makes nothing, while an import that stopped on the other Mac has its late check still to make", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writeStatus(t.deps.settings.root, { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", video: "Talk.mov", bytes: record.video.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(t.deps.clock() - 11 * 60 * 1000).toISOString() }, writeFileSync);
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.equal(r.message, 'The import of this episode stopped on Laptop before its late check was made. On Laptop, say "try it again" for Talk.mov, then say this again');
+    t.done();
+  });
+  /** Have every video made from here on differ from the one made before by its words, not its size: the same text in
+      capitals. So a test can tell whether a video was put back, though a late check goes by sizes (PR 19's re-review, #10). */
+  const louder = (t) => {
+    const loud = (args) => {
+      const out = args[args.length - 1];
+      if (typeof out === "string" && existsSync(out) && statSync(out).isFile()) writeFileSync(out, readFileSync(out, "utf8").toUpperCase());
+    };
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, more) => {
+      const r = await run(cmd, args, more);
+      if (cmd === "FFMPEG") loud(args);
+      return r;
+    };
+    const guarded = t.deps.runGuarded;
+    t.deps.runGuarded = async (cmd, args, limits) => {
+      const r = await guarded(cmd, args, limits);
+      loud(args);
+      return r;
+    };
+  };
+  /** The episode's four videos as they are now, by their paths in it. */
+  const four = (folder) => Object.fromEntries(["Talk.rough-cut.mp4", "Talk.rough-cut.vertical.mp4", "previews/reel-1.mp4", "previews/reel-2.mp4"].map((f) => [f, existsSync(join(folder, f)) ? readFileSync(join(folder, f), "utf8") : null]));
+  it("puts every video back as it was, and writes no record, when one cannot be put in", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    const before = four(folder);
+    const clone = t.deps.clone;
+    let failed = false;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("previews/reel-2.mp4") && !failed) {
+        failed = true;
+        throw new Error("No space left on device");
+      }
+      clone(from, to);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /reel-2\.mp4 could not be put into .*: No space left on device\. Nothing was copied; Nothing was changed in the episode$/);
+    assert.deepEqual(four(folder), before);
+    assert.deepEqual([readEpisode(folder).record.rev, r.made], [1, []]);
+    t.done();
+  });
+  it("shows it waits for the late check of what it put back, on the panel, during that wait (PR 19's re-review, N23)", async () => {
+    const { t, video } = await imported();
+    const steps = [];
+    t.deps.progress = { ...noProgress, step: (name) => steps.push(name) };
+    const clone = t.deps.clone;
+    let failed = false;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("previews/reel-2.mp4") && !failed) {
+        failed = true;
+        throw new Error("No space left on device");
+      }
+      clone(from, to);
+    };
+    const wait = t.deps.wait;
+    let shown = "";
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) shown = steps[steps.length - 1];
+      return wait(ms);
+    };
+    await videosFromPlan(video, t.deps);
+    assert.equal(shown, "Waiting for the late check");
+    t.done();
+  });
+  it("copies in again a video Dropbox put back as it was before, though that one was longer (PR 19's check of dfe3aab, D5)", async () => {
+    const { t, folder, video } = await imported();
+    const rough = join(folder, "Talk.rough-cut.mp4");
+    const older = "an older rough cut, longer than the one made now";
+    rmSync(rough);
+    writeFileSync(rough, older);
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        rmSync(rough);
+        writeFileSync(rough, older);
+      }
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(readFileSync(rough, "utf8"), "the rough cut");
+    t.done();
+  });
+  it("copies in again a video Dropbox put back as it was before, though that one is the same size (D13)", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    const rough = join(folder, "Talk.rough-cut.mp4");
+    const older = readFileSync(rough, "utf8");
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        rmSync(rough);
+        writeFileSync(rough, older);
+      }
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(readFileSync(rough, "utf8"), older.toUpperCase());
+    t.done();
+  });
+  it("copies in again a video Dropbox put back that differs from this run's only after its first megabyte (PR 19's check of 0ab7850, E3)", async () => {
+    const { t, folder, video } = await imported();
+    const rough = join(folder, "Talk.rough-cut.mp4");
+    const big = 1536 * 1024;
+    const ours = "A".repeat(big);
+    const older = "A".repeat(big - 1) + "B";
+    rmSync(rough);
+    writeFileSync(rough, older);
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, more) => {
+      const r = await run(cmd, args, more);
+      const out = args[args.length - 1];
+      if (cmd === "FFMPEG" && typeof out === "string" && /\.rough-cut\.mp4$/.test(out) && existsSync(out)) writeFileSync(out, ours);
+      return r;
+    };
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        rmSync(rough);
+        writeFileSync(rough, older);
+      }
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(readFileSync(rough, "utf8"), ours);
+    t.done();
+  });
+  it("leaves the other Mac's shorter rough cut, whose record lists its size, at the late check (E3)", async () => {
+    const { t, folder, video } = await imported();
+    const rough = join(folder, "Talk.rough-cut.mp4");
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        rmSync(rough);
+        writeFileSync(rough, "short");
+        const record = readEpisode(folder).record;
+        writeFileSync(join(folder, "record", `${String(record.rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...record, rev: record.rev + 1, writer: { commit: "c709b57", on: "Laptop" }, files: { ...record.files, "Talk.rough-cut.mp4": 5 } }, null, 2) + "\n");
+      }
+      return wait(ms);
+    };
+    await videosFromPlan(video, t.deps);
+    assert.equal(readFileSync(rough, "utf8"), "short");
+    assert.ok(t.logs.some((l) => l.includes("Talk.rough-cut.mp4 was put in by the other Mac since this Mac put it in, as the record lists")), t.logs.slice(-5).join("\n"));
+    t.done();
+  });
+  it("keeps a copy, and does not say nothing was changed, when this run's video comes back over what was put back and cannot be put back again (E3, E15)", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    const rough = join(folder, "Talk.rough-cut.mp4");
+    const before = readFileSync(rough, "utf8");
+    let ours = "";
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("Talk.rough-cut.mp4") && !ours) ours = readFileSync(from, "utf8");
+      if (to.includes("/record/")) throw new Error("Operation not permitted");
+      clone(from, to);
+    };
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        // Dropbox brings this run's rough cut back over what was put back, and then the folder refuses every delete.
+        rmSync(rough);
+        writeFileSync(rough, ours);
+        chmodSync(folder, 0o555);
+      }
+      return wait(ms);
+    };
+    let r;
+    try {
+      r = await videosFromPlan(video, t.deps);
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+    assert.equal(readFileSync(rough, "utf8"), ours, "the rough cut is still this run's");
+    const kept = join(t.deps.home, "BRIMM Video Work", FOLDER, "put back", "Talk.rough-cut.mp4");
+    assert.ok(r.message.includes(`Talk.rough-cut.mp4 could not be put back as it was at its late check. The one that was there is kept at ${kept}`), r.message);
+    assert.ok(!r.message.endsWith("Nothing was changed in the episode"), r.message);
+    assert.equal(readFileSync(kept, "utf8"), before);
+    t.done();
+  });
+  it("waits for no late check when its first delete is refused and nothing was put in (PR 19's check of 2d4c8af, F5, F10)", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    chmodSync(folder, 0o555);
+    let r;
+    try {
+      r = await videosFromPlan(video, t.deps);
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+    assert.equal(r.ok, false);
+    assert.ok(!t.waits.includes(15 * 60 * 1000), t.waits.join(", "));
+    assert.match(r.message, /Nothing was changed in the episode$/);
+    t.done();
+  });
+  it("puts every video back as it was when the record cannot be written", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    const before = four(folder);
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      if (to.includes("/record/")) throw new Error("Operation not permitted");
+      clone(from, to);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /^the episode's record could not be written again: .*; Nothing was changed in the episode$/);
+    assert.deepEqual(four(folder), before);
+    assert.equal(readEpisode(folder).record.rev, 1);
+    t.done();
+  });
+  it("makes the late check of what it put back, after its wait, and copies in again one Dropbox took away", async () => {
+    const { t, folder, video } = await imported();
+    louder(t);
+    const before = four(folder);
+    const clone = t.deps.clone;
+    let failed = false;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("previews/reel-2.mp4") && !failed) {
+        failed = true;
+        throw new Error("No space left on device");
+      }
+      clone(from, to);
+    };
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) rmSync(join(folder, "Talk.rough-cut.mp4"));
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.ok(t.waits.includes(15 * 60 * 1000), t.waits.join(", "));
+    assert.deepEqual(four(folder), before);
+    t.done();
+  });
+  it("keeps the one that was there, and says so, when a video cannot be put back", async () => {
+    const { t, folder, video } = await imported();
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("previews/reel-2.mp4")) throw new Error("Operation not permitted");
+      clone(from, to);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    const kept = join(t.deps.home, "BRIMM Video Work", FOLDER, "put back", "previews", "reel-2.mp4");
+    assert.ok(r.message.includes(`previews/reel-2.mp4 could not be put back as it was: reel-2.mp4 could not be put into ${join(folder, "previews")}: Operation not permitted. Nothing was copied. The one that was there is kept at ${kept}`), r.message);
+    assert.ok(r.message.endsWith("Everything else was put back as it was"), r.message);
+    assert.equal(readFileSync(kept, "utf8"), "preview 2");
+    t.done();
+  });
+  it("writes nothing over a change of this Mac's that Dropbox undid while the videos were made", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    // This Mac's own change: rev 2.
+    writeEpisode(folder, { ...record, title: { text: "Price like you mean it", from: "person", approved: true } }, { expectRev: 1, writeText: (to, text) => writeFileSync(to, text), writer: { commit: "abc1234", on: "Mac Studio" }, home: t.deps.home });
+    const run = t.deps.run;
+    t.deps.run = async (cmd, args, more) => {
+      // Dropbox takes it away while the rough cut is made.
+      rmSync(join(folder, "record", "0002.json"), { force: true });
+      return run(cmd, args, more);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /Dropbox undid this Mac's last change to /);
+    assert.equal(t.filed().length, 0, t.filed().map(([, to]) => to).join(", "));
+    assert.equal(readEpisode(folder).record.rev, 1);
+    assert.match(undone(readEpisode(folder).record, t.deps.home), /Dropbox undid/);
+    t.done();
+  });
+  it("puts nothing in over a change of this Mac's that Dropbox took away while the videos went in (PR 19's re-review, N6)", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writeEpisode(folder, { ...record, title: { text: "Price like you mean it", from: "person", approved: true } }, { expectRev: 1, writeText: (to, text) => writeFileSync(to, text), writer: { commit: "abc1234", on: "Mac Studio" }, home: t.deps.home });
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      clone(from, to);
+      // Dropbox takes this Mac's rev 2 away just as the last video goes in.
+      if (to.endsWith("previews/reel-2.mp4")) rmSync(join(folder, "record", "0002.json"), { force: true });
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /Dropbox undid this Mac's last change to .*; Nothing was changed in the episode$/);
+    assert.equal(readEpisode(folder).record.rev, 1);
+    assert.match(undone(readEpisode(folder).record, t.deps.home), /Dropbox undid/);
+    t.done();
+  });
+  it("puts nothing in when the other Mac wrote the record while the videos were made (N6, N10)", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    const run = t.deps.run;
+    let written = false;
+    t.deps.run = async (cmd, args, more) => {
+      if (!written) {
+        written = true;
+        writeEpisode(folder, { ...record, title: { text: "Price like you mean it", from: "person", approved: true } }, { expectRev: 1, writeText: (to, text) => writeFileSync(to, text), writer: { commit: "abc1234", on: "Laptop" }, home: join(t.dir, "laptop") });
+      }
+      return run(cmd, args, more);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /^this episode changed on the other Mac meanwhile\. Say it again; Nothing was changed in the episode$/);
+    assert.deepEqual([readEpisode(folder).record.rev, t.filed().length], [2, 0]);
+    t.done();
+  });
+  it("gives each part of a preview the time limit of its own length (N11)", async () => {
+    const { t, folder, video } = await imported();
+    // Reel 1 made of ten stretches, so its preview is made in two parts.
+    const at = join(folder, "reels.json");
+    const reels = JSON.parse(readFileSync(at, "utf8"));
+    const ranges = Array.from({ length: 10 }, (_, i) => ({ start: 10 * i + 1, end: 10 * i + 1.5 + i * 0.37, crop: { x: 438, y: 0, w: 404, h: 720, found: true } }));
+    rmSync(at);
+    writeFileSync(at, JSON.stringify({ ...reels, candidates: reels.candidates.map((c) => (c.n === 1 ? { ...c, ranges } : c)) }, null, 2) + "\n");
+    const plan = JSON.parse(readFileSync(join(folder, "Talk.cut-plan.json"), "utf8"));
+    const want = previewSteps({ video, ranges, out: "/x/reel-1.mp4", fps: roughRate(plan.facts), duration: plan.facts.duration, work: "/x", size: { width: plan.facts.width, height: plan.facts.height } }).parts.map((part) => previewLimits(part.seconds));
+    assert.ok(want.length >= 2 && want[0].limit !== want[1].limit, JSON.stringify(want));
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, true, r.message);
+    const parts = t.guarded.filter((c) => /\/reel-1\.part-\d+\.mov$/.test(c.args[c.args.length - 1]));
+    assert.deepEqual(parts.map((c) => c.limits), want);
+    t.done();
+  });
+  it("stops, and makes nothing, while the other Mac has the episode open (phase 1b's claim)", async () => {
+    const { t, folder, video } = await imported();
+    const { record } = readEpisode(folder);
+    writeFileSync(join(folder, "record", "0001.json"), JSON.stringify({ ...record, editing: { by: "Sallie's laptop", since: "2026-10-13T10:00:00-05:00" } }, null, 2) + "\n");
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    // Its closing is the run's own: "Nothing was made." (claim-items-4).
+    assert.equal(r.message, `Sallie's laptop has ${record.name.text} open. Open it here first (say "take it over" if they are done with it)`);
+    t.done();
+  });
+  it("copies nothing back at its late check once the laptop opened the episode during the wait (fidelity-1)", async () => {
+    const { t, folder, video } = await imported();
+    const gone = ["Talk.rough-cut.mp4", "previews/reel-1.mp4"];
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 15 * 60 * 1000) {
+        const record = readEpisode(folder).record;
+        writeFileSync(join(folder, "record", `${String(record.rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...record, rev: record.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" }, editing: { by: "Sallie's laptop", since: "2026-10-13T10:20:00-05:00" } }, null, 2) + "\n");
+        for (const f of gone) rmSync(join(folder, f));
+      }
+      return wait(ms);
+    };
+    const r = await videosFromPlan(video, t.deps);
+    assert.equal(r.ok, false);
+    for (const f of gone) {
+      assert.ok(!existsSync(join(folder, f)), f);
+      assert.ok(r.message.includes(`${f} is not as this Mac put it at the late check, and Sallie's laptop has ${readEpisode(folder).record.name.text} open now, so it was not copied in again`), r.message);
+    }
+    t.done();
+  });
+  it("refuses --out in an episode's folder, or Episodes itself, which would skip the claim, the lock and the rule (claim-items-1, claim-latecheck-5)", async () => {
+    const { t, folder, video } = await imported();
+    for (const out of [folder, join(folder, "x"), t.episodes]) {
+      const r = await videosFromPlan(video, { ...t.deps, outDir: out });
+      assert.deepEqual([r.stopped, t.calls.length, readEpisode(folder).record.rev], [true, 0, 1], out);
+      assert.equal(r.message, "--out is in an episode's folder, or is Episodes itself: an episode's videos are made again without --out, so they go in by the rule");
+    }
+    t.done();
+  });
+  it("refuses --out that reaches Episodes through a link, or names it in another case (G2)", async () => {
+    const { t, folder, video } = await imported();
+    const link = join(t.dir, "episodes-link");
+    symlinkSync(t.episodes, link);
+    for (const out of [link, join(link, "new"), join(dirname(t.episodes), "episodes")]) {
+      const r = await videosFromPlan(video, { ...t.deps, outDir: out });
+      assert.deepEqual([r.stopped, t.calls.length, readEpisode(folder).record.rev], [true, 0, 1], out);
+      assert.equal(r.message, "--out is in an episode's folder, or is Episodes itself: an episode's videos are made again without --out, so they go in by the rule", out);
+    }
+    t.done();
+  });
+  it("refuses --out in Episodes when the settings name BRIMM Video through a link (H2)", async () => {
+    const { t, folder, video } = await imported();
+    const link = join(t.dir, "root-link");
+    symlinkSync(t.deps.settings.root, link);
+    const r = await videosFromPlan(video, { ...t.deps, settings: { ...t.deps.settings, root: link }, outDir: t.episodes });
+    assert.deepEqual([r.stopped, t.calls.length, readEpisode(folder).record.rev], [true, 0, 1]);
+    assert.equal(r.message, "--out is in an episode's folder, or is Episodes itself: an episode's videos are made again without --out, so they go in by the rule");
+    t.done();
+  });
+  it("stops, and makes nothing, while another command is at work on the episode", async () => {
+    const { t, folder, video } = await imported();
+    mkdirSync(dirname(lockOf(t.deps.home, basename(folder))), { recursive: true });
+    writeFileSync(lockOf(t.deps.home, basename(folder)), JSON.stringify({ pid: 4242, command: "push", nonce: "x" }));
+    t.deps.alive = () => true;
+    const r = await stopped(t, folder, video);
+    assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
+    assert.equal(r.message, `push is running for ${FOLDER} already`);
     t.done();
   });
 });
@@ -3067,6 +3834,18 @@ describe("the late check of an episode's import", () => {
     await uneditedFolder(t.drop, t.deps);
     assert.deepEqual([readFileSync(rough, "utf8"), readdirSync(t.drop)], ["the rough cut", []]);
     assert.ok(t.logs.some((line) => line.startsWith("Talk.rough-cut.mp4 is not whole in ") && line.endsWith("at the late check (it is not there), so it is copied in again from its work copy.")), t.logs.join("\n"));
+    t.done();
+  });
+  it("copies a preview in again when Dropbox has taken it away before the late check (PR 19's review, finding 19)", async () => {
+    const t = timed({ claude: [answers(TWO)] });
+    t.put("Talk.mov");
+    const preview = join(t.episodes, FOLDER, "previews", "reel-1.mp4");
+    t.hooks.push((ms) => {
+      if (ms === 60000 && existsSync(preview)) rmSync(preview);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(readFileSync(preview, "utf8"), "preview 1");
+    assert.ok(t.logs.some((line) => line.startsWith("reel-1.mp4 is not whole in ") && line.endsWith("at the late check (it is not there), so it is copied in again from its work copy.")), t.logs.join("\n"));
     t.done();
   });
   it("keeps the raw video, says so in the status file, the cut plan's first lines and a banner, and never imports it twice, when a file is still wrong", async () => {
@@ -3608,6 +4387,23 @@ describe("a video with a sound this Mac's ffmpeg cannot read beside one it can, 
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual([r.ok, r.message], [false, "its sound is in a form this Mac's ffmpeg cannot read (apple_apac)"]);
     assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE"]);
+    t.done();
+  });
+  it("takes the sound it can read in each Reel preview too, at an episode's import and made again from its plan", async () => {
+    const told = JSON.parse(probed({ duration: "120.000000" }));
+    const [picture, sound] = told.streams;
+    told.streams = [{ ...picture, index: 0 }, { ...sound, index: 1, codec_name: "apple_apac", channels: 4 }, { ...sound, index: 2, codec_name: "aac", channels: 1 }];
+    const t = episodic({ claude: [answers(TWO)], probed: JSON.stringify(told) });
+    t.put("Talk.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const graphs = () => t.guarded.filter((c) => /\.part-\d+\.mov$/.test(c.args[c.args.length - 1])).map((c) => after(c.args, "-filter_complex"));
+    assert.ok(graphs().length > 0, "previews were made");
+    for (const g of graphs()) assert.ok(/\[0:0\]fps=/.test(g) && /\[1:2\]aresample/.test(g) && !/:[av]\]/.test(g), g);
+    t.guarded.length = 0;
+    const r = await videosFromPlan(join(t.episodes, "2026-10-13 Talk (Mac Studio)", "Talk.mov"), t.deps);
+    assert.equal(r.ok, true, r.message);
+    assert.ok(graphs().length > 0, "previews were made again");
+    for (const g of graphs()) assert.ok(/\[0:0\]fps=/.test(g) && /\[1:2\]aresample/.test(g) && !/:[av]\]/.test(g), g);
     t.done();
   });
 });

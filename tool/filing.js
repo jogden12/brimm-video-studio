@@ -7,7 +7,7 @@
 // folder, and the run's folder stays, until the late check.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
@@ -79,15 +79,16 @@ export function commitOf(checkout) {
 /** File a video that has been worked on into its episode, in Episodes under BRIMM Video. `file` is the raw video in the drop
     folder; `made` are the files made of it, each where it belongs, and `at(to)` where its whole copy is in the run's own
     folder `work`; `fcpxml` is which of them is the Final Cut file, which goes into edit/main.v0.fcpxml; `facts` and
-    `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `cut` is
-    the clips as they were cut. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
+    `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
+    are the record's Reels, made of the Reel candidates (reelEntries, in reels.js). A made file goes into the episode folder
+    where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others.
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
     file is cloned in from the run's folder; and the first record is written last, by the rule, its work copy kept. Gives
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
     uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, cut, work, dropFile }, deps) {
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -107,16 +108,16 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   const files = {};
   const put = (from, rel) => {
     const to = join(path, rel);
+    mkdirSync(dirname(to), { recursive: true });
     (found.reused ? replaceIn : cloneIn)(from, to, opts);
     entries.push({ from, to, bytes: statSync(from).size });
     files[rel] = statSync(from).size;
   };
   put(file, video);
-  for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : basename(to));
+  for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : relative(dirname(file), to).split(sep).join("/"));
   const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
   const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
   const title = read && typeof read.title === "string" && read.title.trim() ? { text: read.title.trim(), from: "claude", approved: false } : null;
-  const reels = kind === "episode" ? cut.filter((c) => c.files.length).map((c) => ({ n: c.clip.n, status: "candidate", from: c.clip.start, to: c.clip.end, title: c.clip.hook || "", why: c.clip.why || "", files: c.files.map((f) => basename(f)), pushed: [] })) : [];
   const first = newEpisode({
     id: newId(day, deps.rand),
     machine: episode.machine,

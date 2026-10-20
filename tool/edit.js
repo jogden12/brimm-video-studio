@@ -22,25 +22,27 @@
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, released, conflictedCopies, conflictedOf, recordFile } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, recordFile } from "./episode.js";
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, projectName, timelineFile } from "./names.js";
+import { REELS_FILE, readReels, reelsText } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding, readSeen, seenKey } from "./filing.js";
+import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, expectedWords, letGoClaim } from "./finish.js";
-import { findPrograms } from "./unedited.js";
+import { findPrograms, askAgain, askBlocked, clockAt, keptList } from "./unedited.js";
 import { isMedia } from "./lib.js";
+import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 
 const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -68,6 +70,9 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         show or set the title on screen of a Reel: the words in its picture
   node edit.js reel pick|drop "<episode>" <n>…
                                         pick Reels to finish, or drop them
+  node edit.js reels "<episode>" [--no-play]
+                                        list the Reel candidates, and play their previews in QuickTime Player
+  node edit.js ask "<episode>"          ask Claude again for Reel candidates, detached. Picked Reels stay as they are
   node edit.js push "<episode>" reel <n> [--no-hand-edits | --hand-edits]
                                         show a picked Reel in Final Cut Pro, upright
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--no-hand-edits "<part>"]
@@ -356,8 +361,7 @@ async function online() {
 /** Why a command that writes the record or pushes must not change the episode now, because another Mac has it open (spec
     section 1, "Picking an episode up"): "" when nobody does, or this Mac does. */
 function claimHeld(ctx, record) {
-  const held = heldElsewhere(record, ctx.machine);
-  return held ? `${held.by} has ${record.name.text} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
+  return heldText(record, ctx.machine);
 }
 
 /** The files the other Mac handed over that are not here yet: by the record's `released` list, each the record still lists
@@ -768,9 +772,51 @@ export async function status(ctx, rest) {
   return 0;
 }
 
+/** retry of a video an episode holds already (`held` says which, in episodeHolding's words). It is not imported again. But
+    when its import stopped on this Mac before its late check, that check holds the episode for ask and --from-plan on both
+    Macs (unedited.js importHolds), and is made only at the import's next run: so the launch agent is asked to look, which
+    makes it. When this Mac owes no late check of it, a stopped status of this Mac's own for it can never be cleared by a late
+    check, and is taken away. Otherwise it is refused, as before. */
+function lateCheckOwed(ctx, video, held) {
+  const { say } = ctx;
+  const owed = readPendings(ctx.home).find((p) => p.video === video && p.machine === ctx.machine && resolve(p.root) === resolve(ctx.root));
+  const stopped = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine && importState(s.status, ctx.now()) === "stopped");
+  const name = owed ? owed.name : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
+  if (!owed && !stopped.length) {
+    say(`${video} is ${held}`);
+    return 1;
+  }
+  if (!owed) {
+    for (const { status } of stopped) removeStatus(ctx.root, video, ctx.machine, status.import || "");
+    say(`${video} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
+    return 0;
+  }
+  const problem = owed.problem ? String(owed.problem).replace(/\.$/, "") : "";
+  const due = dueAt(owed);
+  const later = due > ctx.now() ? `when it is due, at ${clockAt(due)}` : "";
+  // A run at work makes a due check within a minute, but makes a check that found a problem only once, at its start.
+  if (ctx.agentRunning()) {
+    if (problem) {
+      say(`${video} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
+      return 1;
+    }
+    say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
+    return 0;
+  }
+  try {
+    ctx.kickstart();
+  } catch (e) {
+    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    return 1;
+  }
+  if (problem) say(`${video} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
+  else say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
+  return 0;
+}
+
 /** `retry "<video>"`: import again a video in this Mac's drop folder whose import failed or stopped. It is found by its
-    file's name or its name without the ending, whatever their case. Refused when an episode holds it already, and while its
-    import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart). */
+    file's name or its name without the ending, whatever their case. Refused when an episode holds it already (but see
+    lateCheckOwed), and while its import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart). */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();
@@ -791,10 +837,7 @@ export async function retry(ctx, rest) {
     return 1;
   }
   const held = episodeHolding({ root: ctx.root, video, bytes: statSync(join(drop, video)).size });
-  if (held) {
-    say(`${video} is ${held}`);
-    return 1;
-  }
+  if (held) return lateCheckOwed(ctx, video, held);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
   const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
@@ -945,14 +988,70 @@ async function markReels(ctx, found, ns, status) {
     if (reel.status === "finished") return refuse(ctx, `Reel ${n} is finished: it is in the hand-off already.`);
     reel.status = status;
   }
-  const said = ns.map((n) => (status === "picked" ? `Reel ${n} is picked. Say "show reel ${n} in Final Cut" to have it pushed.` : `Reel ${n} is dropped.`));
-  return save(ctx, found, { ...record, reels }, said.join(" "));
+  // A Reel picked in an episode with Reel candidates (phase 3) has its upright project written now, as edit/reel-<n>.v0.fcpxml,
+  // by the rule, in the same record as its pick (design, section 3). A candidate with nothing to show is not picked. One whose
+  // project cannot be written yet is picked all the same. A project already written and listed is kept as it is, and one
+  // written now is taken away again when the record cannot be written, so no project is left that no record lists.
+  const files = {};
+  const written = new Set();
+  const fresh = [];
+  const later = [];
+  const listing = existsSync(join(found.folder, REELS_FILE)) ? readReels(readFileSync(join(found.folder, REELS_FILE), "utf8")) : null;
+  // Only a Reel whose project is still to be made from the list needs it: not one whose project is written and listed, nor a
+  // clip the import cut before phase 3.
+  const needList = ns.filter((n) => {
+    const v0 = timelineFile({ part: { reel: n }, v: 0 });
+    const reel = reels.find((r) => r.n === n);
+    const clipped = (Array.isArray(reel.files) ? reel.files : []).some((f) => /\.reel-\d+\.mp4$/i.test(f));
+    return !clipped && !(record.files && v0 in record.files && existsSync(join(found.folder, v0)));
+  });
+  if (status === "picked" && !listing && needList.length && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. ${keptOrWait(ctx, found, record)}`);
+  if (status === "picked" && listing) {
+    for (const n of ns) {
+      const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
+      if (candidate && !candidate.ranges.length) return refuse(ctx, `Reel ${n} has nothing to show: ${String(candidate.failed || "it has no stretch").replace(/\.$/, "")}.`);
+    }
+    // A change Dropbox took away is said before anything is written, as save says it.
+    const gone = undone(found.record, ctx.home);
+    if (gone) {
+      ctx.say(`${gone} Nothing was written.`);
+      acceptRev(ctx.home, found.record.id, found.record.rev);
+      return 1;
+    }
+    const work = join(runsFolder(ctx.home), `pick-${process.pid}-${ctx.now()}`);
+    try {
+      for (const n of ns) {
+        const file = timelineFile({ part: { reel: n }, v: 0 });
+        const at = join(found.folder, file);
+        if (file in record.files && existsSync(at)) {
+          written.add(n);
+          continue;
+        }
+        const made = await reelTimeline(found, reels.find((r) => r.n === n), ctx);
+        if (!made.xml) {
+          later.push(made.coming ? `Reel ${n}'s project is written when it is shown: Dropbox is still bringing ${made.coming} over to this Mac.` : `Reel ${n}'s project could not be written: ${String(made.why).replace(/\.$/, "")}.`);
+          continue;
+        }
+        mkdirSync(join(found.folder, "edit"), { recursive: true });
+        const entry = textWriter({ work, ...ruleOpts(ctx) })(at, made.xml, { replace: existsSync(at) });
+        files[file] = entry.bytes;
+        written.add(n);
+        fresh.push(at);
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+  const said = ns.map((n) => (status === "picked" ? `Reel ${n} is picked.${written.has(n) ? " Its upright Final Cut project is written." : ""} Say "show reel ${n} in Final Cut" to have it pushed.` : `Reel ${n} is dropped.`));
+  const saved = await save(ctx, found, { ...record, reels, files: { ...record.files, ...files } }, [...said, ...later].join(" "));
+  if (saved !== 0) for (const at of fresh) rmSync(at, { force: true });
+  return saved;
 }
 export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked");
 export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
 
-/** Show a picked Reel in Final Cut Pro (spec section 7, phase 2): its timeline (reelTimeline: until phase 3, the clip the
-    import cut, upright, with its captions), through the push every part shares, with its guard. */
+/** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
+    episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
@@ -962,7 +1061,7 @@ export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits =
   const made = await reelTimeline(found, reel, ctx);
   if (made.coming) {
     // As open does: a detached run reads the Reel's own files to their end, so that Dropbox brings them over.
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: (reel.files || []).filter((f) => f in found.record.files) });
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: made.bring || (reel.files || []).filter((f) => f in found.record.files) });
     return refuse(ctx, `Dropbox is bringing ${made.coming} over to this Mac. Say "show reel ${n} in Final Cut" again when it is done.`);
   }
   if (made.why) return refuse(ctx, made.why);
@@ -1307,17 +1406,50 @@ async function behind(ctx) {
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer brimm-video. Is this Mac offline?";
+  // Her folder is looked at whatever git answers: that needs no network.
+  const stale = studioStale(ctx);
+  const folderLine = () => {
+    if (stale) ctx.say(`Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    return 0;
+  };
   const fetched = await git("fetch", "-q", "origin", "main");
   if (fetched.code !== 0 || fetched.outOfTime) {
     ctx.say(could);
-    return 0;
+    return folderLine();
   }
   const counted = await git("rev-list", "--count", "HEAD..origin/main");
   const n = Number(String(counted.stdout || "").trim());
   if (counted.code !== 0 || counted.outOfTime || !/^\d+$/.test(String(counted.stdout || "").trim())) ctx.say(could);
   else if (n === 0) ctx.say("This Mac has the newest brimm-video.");
   else ctx.say(`Jason has a newer brimm-video (${n} change${n === 1 ? "" : "s"}). Ask him to update this Mac when it suits.`);
-  return 0;
+  return folderLine();
+}
+
+/** Whether her folder for Claude (studio.js), when this Mac has one, is not what this checkout would write now, as after a
+    git pull, which never rewrites it: {node}, the node its settings name (or Homebrew's, when they cannot be read), for the
+    command that writes it again; or null when it is as this checkout writes it, or there is none. */
+function studioStale(ctx) {
+  let folder;
+  try {
+    folder = realpathSync.native(studioFolder(ctx.home));
+  } catch (e) {
+    return null;
+  }
+  const read = (name) => {
+    try {
+      return readFileSync(join(folder, name), "utf8");
+    } catch (e) {
+      return null;
+    }
+  };
+  let node = "/opt/homebrew/bin/node";
+  try {
+    node = JSON.parse(read(".claude/settings.json")).hooks.PreToolUse[0].hooks[0].args[1] || node;
+  } catch (e) {
+    // Settings that cannot be read are out of date too, and Homebrew's node is the one the installer finds.
+  }
+  const want = studioFiles({ checkout: ctx.settings.checkout, node, folder });
+  return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node };
 }
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
@@ -1663,8 +1795,97 @@ async function reel(ctx, rest) {
   return (what === "pick" ? pickReels : dropReels)(ctx, { ...got.found, record: got.record }, ns);
 }
 
+/** `reels "<episode>" [--no-play]`: the list of the episode's Reel candidates (reels.json, phase 3), and each preview that is
+    whole on this Mac opened in QuickTime Player, for the person to watch. A preview Dropbox is still bringing over is named
+    and brought, as open brings files. With --no-play the list alone. */
+async function reels(ctx, rest) {
+  const { words, flags } = flagsOf(rest, []);
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = { found: got.found, record: got.record };
+  const at = join(found.folder, REELS_FILE);
+  if (!existsSync(at) && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. ${keptOrWait(ctx, found, record)}`);
+  if (!existsSync(at)) {
+    const ns = (record.reels || []).map((r) => `Reel ${r.n}`);
+    return refuse(ctx, `This episode has no list of Reel candidates (reels.json).${ns.length ? ` Its Reels are the clips the import cut: ${listed(ns)}.` : ""}`);
+  }
+  const read = readReels(readFileSync(at, "utf8"));
+  if (read.why) return refuse(ctx, `Its list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`);
+  // A list at another size than the record lists is not the one it lists: not shown as the candidates.
+  const listedSize = record.files ? record.files[REELS_FILE] : undefined;
+  const thereSize = statSync(at).size;
+  if (Number.isInteger(listedSize) && thereSize !== listedSize) return refuse(ctx, `${REELS_FILE} in this episode is not the one its record lists (it is ${thereSize} bytes, and the record lists ${listedSize}), so its candidates are not shown. ${keptOrWait(ctx, found, record)}`);
+  // Whether Claude can be asked again is said as this Mac finds it now, in the words ask would refuse with (PR 19's review).
+  // While a file is still coming, ask can be asked: it brings it.
+  const blocked = askRefusal(ctx, found, record);
+  // A listing changes nothing, so a refusal's "Nothing was changed." is not said here.
+  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, "")));
+  if (flags["no-play"]) return 0;
+  const previews = read.reels.candidates.filter((c) => c.preview).map((c) => c.preview);
+  const coming = previews.filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+  if (coming.length) {
+    ctx.say(`Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "show me the Reels" again when it is done.`);
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: coming });
+  }
+  for (const rel of previews.filter((p) => !coming.includes(p))) ctx.openApp("QuickTime Player", join(found.folder, rel));
+  return 0;
+}
+
+/** Why `ask` would refuse the episode `found`, whose record is `record`, on this Mac now: {why}, with `bring` when files are
+    still to be brought, or {} when it would start. In this order: a short video, the other Mac having it open (claimHeld), a
+    command at work on the episode, no Claude Code on this Mac, and askBlocked. */
+function askRefusal(ctx, found, record) {
+  if (record.kind === "short video") return { why: "A short video gets no Reels." };
+  if (claimHeld(ctx, record)) return { why: claimHeld(ctx, record) };
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
+  if (running) return { why: `${running} is running for ${found.name} already. Say it again when it has finished.` };
+  if (!(ctx.deps.tools || findPrograms()).claude) return { why: "Claude Code is not installed on this Mac, so Claude cannot be asked." };
+  return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
+}
+
+/** What to do about a reels.json the record lists that is gone: put back the copy this Mac kept of it (keptList), or wait for
+    Dropbox to bring it. */
+const keptOrWait = (ctx, found, record) => {
+  const kept = keptList({ folder: found.folder, record, home: ctx.home });
+  return kept ? `The one its record lists is kept at ${kept}: ask Jason to put it back.` : "Say this again once Dropbox has it back.";
+};
+
+/** `ask "<episode>"`: Claude asked again for the episode's Reel candidates, detached (`ask --now "<episode folder>"`, which
+    askAgain does, in unedited.js), since it can take minutes. It refuses a short video, a Mac without Claude Code, an
+    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says. */
+async function ask(ctx, rest) {
+  if (rest[0] === "--now") {
+    const found = findEpisode(ctx, rest[1] || "");
+    if (!found.read || !found.read.record) {
+      ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      return 1;
+    }
+    const deps = {
+      run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, now: ctx.now,
+      log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
+      ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
+    };
+    const result = await runDetached({ home: ctx.home, folder: found.name, command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
+    if (result.taking || result.running) {
+      ctx.say(result.running ? `${result.running} is running for ${found.name} already.` : `Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+      return 1;
+    }
+    return result.ok ? 0 : 1;
+  }
+  const got = episodeFor(ctx, rest, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = { found: got.found, record: got.record };
+  const blocked = askRefusal(ctx, found, record);
+  if (blocked.bring) startDetached(ctx, { command: "bring", folder: found.name, args: blocked.bring });
+  if (blocked.why) return refuse(ctx, blocked.why);
+  startDetached(ctx, { command: "ask", folder: found.name });
+  ctx.say(`Started: Claude is asked for Reel candidates again. Say "how far is it?" to see how far it has got.`);
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

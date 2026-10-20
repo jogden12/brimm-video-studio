@@ -47,5 +47,6 @@ Write each answer down; tell the design session if one is a surprise.
 ## If something goes wrong
 
 - The import stopped: "try it again" in her Claude folder; the log is `~/Library/Logs/brimm-video.log`.
-- "Jason has a newer brimm-video": in Terminal, `cd ~/"Claude Code/BRIMM video" && git pull` (only when no import is running), and on the Mac Studio too.
+- "Jason has a newer brimm-video": in Terminal, `cd ~/"Claude Code/BRIMM video" && git pull` (only when no import is running), and on the Mac Studio too. A pull never rewrites a folder for Claude (`~/BRIMM Video Studio`), so on each Mac that has one, her laptop's and the Mac Studio's when the installer made one, also run the command `behind` names next (below), then start a new session in that folder.
+- "Her folder for Claude is out of date" (what `behind` says when the checkout would write the folder otherwise): in Terminal, `cd ~/"Claude Code/BRIMM video" && node tool/settings.js studio --node <node>`, with the node `behind` names, which is the one the folder's settings already use (usually `/opt/homebrew/bin/node`; a node that is not there would stop every command in her folder). Then start a new session in her Claude folder.
 - Revoking the key (laptop lost, or no longer needed): GitHub > jogden12/brimm-video > Settings > Deploy keys > Delete.

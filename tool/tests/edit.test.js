@@ -11,6 +11,7 @@ import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.j
 import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
+import { writePending } from "../filing.js";
 
 const NOW = Date.parse("2026-10-14T12:00:00");
 /** The attributes of every tag of one name in a Final Cut file, in the order they come, as the file writes them. */
@@ -589,6 +590,93 @@ describe("what the final review found in edit.js", () => {
   it("says Final Cut Pro could not be opened when open fails, and not that it was shown", () => {
     assert.throws(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 1, stderr: "Unable to find application named 'Final Cut Pro'\n" })), { message: "Final Cut Pro could not be opened (Unable to find application named 'Final Cut Pro')" });
     assert.doesNotThrow(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 0, stderr: "" })));
+  });
+  it("retry has the late check made that this Mac still owes an imported video, whose import stopped (PR 19's re-review, N19)", async () => {
+    const t = setup();
+    const folder = "2026-10-13 Talk (Mac Studio)";
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    const { path, record } = t.episode(folder);
+    writeFileSync(join(drop, "Talk.mov"), "x".repeat(5));
+    mkdirSync(join(t.episodes, ".importing"), { recursive: true });
+    writeFileSync(join(t.episodes, ".importing", "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Waiting for its late check", at: new Date(NOW - 30 * 60000).toISOString() }));
+    writePending(t.home, { version: 1, id: record.id, name: folder, folder: path, video: "Talk.mov", bytes: 5, seconds: 120, drop: join(drop, "Talk.mov"), work: "/nowhere", entries: [], lastCopy: NOW - 30 * 60000, root: t.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt" });
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [0, [`Talk.mov is imported, as ${folder}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it now. The panel shows how far it is.`]]);
+    assert.equal(kicked, 1);
+    t.done();
+  });
+  /** An imported Talk.mov whose late check this Mac owes, kept with `more`, and the times the agent was asked to look. */
+  const owing = (more = {}) => {
+    const t = setup();
+    const folder = "2026-10-13 Talk (Mac Studio)";
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    const { path, record } = t.episode(folder);
+    writeFileSync(join(drop, "Talk.mov"), "x".repeat(5));
+    writePending(t.home, { version: 1, id: record.id, name: folder, folder: path, video: "Talk.mov", bytes: 5, seconds: 120, drop: join(drop, "Talk.mov"), work: "/nowhere", entries: [], lastCopy: NOW - 30 * 60000, root: t.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt", ...more });
+    t.kicked = 0;
+    t.deps.kickstart = () => (t.kicked += 1);
+    return t;
+  };
+  const clock = (ms) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
+  it("retry says plainly, while the import at work has found a problem at the late check, that it does not make it again (PR 19's check of dfe3aab, D7, M2)", async () => {
+    const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
+    t.deps.agentRunning = () => true;
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, t.kicked], [1, ['Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check found a problem: reel-2.mp4 could not be put into the episode. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.'], 0]);
+    t.done();
+  });
+  it("retry has a late check that found a problem made again when no import is at work", async () => {
+    const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check found a problem before (reel-2.mp4 could not be put into the episode): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is."], 1]);
+    t.done();
+  });
+  it("retry says the import at work makes a due late check once it has finished any video it is importing (PR 19's check of 2d4c8af, F7)", async () => {
+    const t = owing();
+    t.deps.agentRunning = () => true;
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the import at work now makes it once it has finished any video it is importing. The panel shows how far it is."], 0]);
+    t.done();
+  });
+  it("retry says when the import at work makes a late check that is not due yet (D8, D12)", async () => {
+    const t = owing({ lastCopy: NOW - 5 * 60000 });
+    t.deps.agentRunning = () => true;
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the import at work now makes it when it is due, at ${clock(NOW + 10 * 60000)}, once it has finished any video it is importing. The panel shows how far it is.`], 0]);
+    t.done();
+  });
+  it("retry says the import it starts makes a late check that is not due yet when it is due (E15)", async () => {
+    const t = owing({ lastCopy: NOW - 5 * 60000 });
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it when it is due, at ${clock(NOW + 10 * 60000)}. The panel shows how far it is.`], 1]);
+    t.done();
+  });
+  it("retry takes away a stopped status of this Mac's own for an imported video when it owes no late check of it", async () => {
+    const t = setup();
+    t.episode("2026-10-13 Talk (Mac Studio)");
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "x".repeat(5));
+    mkdirSync(join(t.episodes, ".importing"), { recursive: true });
+    writeFileSync(join(t.episodes, ".importing", "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Waiting for its late check", at: new Date(NOW - 30 * 60000).toISOString() }));
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away."]]);
+    assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked], [[], 0]);
+    t.done();
+  });
+  it("retry still refuses an imported video whose late check this Mac does not owe", async () => {
+    const t = setup();
+    t.episode("2026-10-13 Talk (Mac Studio)");
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "x".repeat(5));
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", "talk");
+    assert.equal(r.code, 1);
+    assert.match(r.text, /^Talk\.mov is already imported as /);
+    assert.equal(kicked, 0);
+    t.done();
   });
   it("retry asks the launch agent to look again, and starts no run of its own", async () => {
     const t = setup();

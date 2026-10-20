@@ -245,6 +245,11 @@ describe("reels.json", () => {
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1 }] }] })), { why: "candidate 1 in it cannot be read" });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", highest: "three", candidates: [] })), { why: "it is not a list of Reel candidates this tool wrote" });
   });
+  it("is refused when a candidate's preview is anywhere but its own place in previews/, since it is opened and brought", () => {
+    const one = (preview) => readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1, end: 2, crop: { x: 0, y: 0, w: 10, h: 10 } }], preview }] }));
+    for (const preview of ["../../Library/x.mp4", "/Users/x/a.mp4", "previews/reel-2.mp4", "previews/reel-1.mov", 3]) assert.deepEqual(one(preview), { why: "candidate 1 in it cannot be read" }, String(preview));
+    for (const preview of ["previews/reel-1.mp4", null, undefined]) assert.ok(one(preview).reels, String(preview));
+  });
 });
 
 describe("the record's Reels, made of the candidates", () => {
@@ -327,10 +332,26 @@ describe("the list of the Reel candidates", () => {
   it("says a short video gets no Reels, and does not offer to ask again", () => {
     assert.equal(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "it is a short video" }), { kind: "short video", reels: [] }), "talk.mov is a short video, and a short video gets no Reels.\n");
   });
-  it("says why Claude cannot be asked again, in place of offering it, when asking again would not work", () => {
+  it("says why Claude cannot be asked again, in place of offering it, as the Mac it is shown on finds", () => {
+    const reels = reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude was not asked" });
+    assert.equal(reelsText(reels, { kind: "episode", reels: [] }, "Claude Code is not installed on this Mac, so Claude cannot be asked."), "There are no Reel candidates of talk.mov: Claude was not asked.\nClaude Code is not installed on this Mac, so Claude cannot be asked.\n");
+  });
+  it("offers to ask again when the Mac it is shown on can, whatever the importing Mac wrote of its own (PR 19's review)", () => {
     const reels = reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude was not asked", cannotAsk: "Claude Code is not installed on this Mac" });
-    assert.equal(reels.cannotAsk, "Claude Code is not installed on this Mac");
-    assert.equal(reelsText(reels, { kind: "episode", reels: [] }), "There are no Reel candidates of talk.mov: Claude was not asked.\nClaude cannot be asked for Reels: Claude Code is not installed on this Mac.\n");
+    assert.equal(reelsText(reels, { kind: "episode", reels: [] }, ""), "There are no Reel candidates of talk.mov: Claude was not asked.\nSay \"ask Claude again for Reels\" to ask again.\n");
+  });
+  it("does not call a Reel of the record that reels.json does not hold yet a clip the import cut, when it has no clip (PR 19's re-review, N9)", () => {
+    const reels = reelsFile({ video: "talk.mov", by: "import", made, candidates: reelCandidates({ clips: CLIPS, plan: PLAN, facts: FACTS, stills: stillsWith(0.25) }) });
+    const top = Math.max(...reels.candidates.map((c) => c.n));
+    const record = { kind: "episode", reels: [...reels.candidates.map((c) => ({ n: c.n, status: "candidate", files: [c.preview] })), { n: top + 1, status: "candidate", files: [`previews/reel-${top + 1}.mp4`] }] };
+    const text = reelsText(reels, record);
+    assert.ok(!text.includes("cut as clips"), text);
+    assert.match(text, new RegExp(`\\nReels the record lists that reels\\.json does not hold yet: Reel ${top + 1}, a candidate\\.\\n$`));
+  });
+  it("names the Reels the import cut as clips, of an episode imported before phase 3, after its candidates", () => {
+    const reels = reelsFile({ video: "talk.mov", by: "ask", made, candidates: reelCandidates({ clips: CLIPS, plan: PLAN, facts: FACTS, stills: stillsWith(0.25) }).map((c) => ({ ...c, n: c.n + 1 })) });
+    const record = { kind: "episode", reels: [{ n: 1, status: "picked", files: ["talk.reel-1.mp4", "talk.reel-1.srt"] }, ...reels.candidates.map((c) => ({ n: c.n, status: "candidate", files: [] }))] };
+    assert.match(reelsText(reels, record), /\nReels the import cut as clips: Reel 1, picked\.\n$/);
   });
   it("says why there are none, and how to ask again", () => {
     assert.equal(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude could not be asked (it timed out)" }), { reels: [] }), "There are no Reel candidates of talk.mov: Claude could not be asked (it timed out).\nSay \"ask Claude again for Reels\" to ask again.\n");
@@ -342,28 +363,34 @@ describe("new candidates from asking Claude again", () => {
   const old = { candidates: [at(1, 10, 40), at(2, 100, 130), at(3, 200, 230)] };
   const record = { reels: [{ n: 1, status: "picked", pushed: [{ v: 1 }] }, { n: 2, status: "dropped" }, { n: 3, status: "candidate" }] };
 
-  it("keep each picked or finished Reel as it is, and number the new ones on from the highest number used", () => {
+  it("keep every candidate and every Reel as they are, and add the new ones numbered on from the highest number used", () => {
+    // reels.json only ever grows: a candidate a Reel, a project or a person's notes may name is never taken out of it.
     const fresh = [{ ...at(1, 300, 330), preview: null }, { ...at(2, 400, 430), preview: null }];
     const merged = mergeCandidates({ old, fresh, record });
-    assert.deepEqual(merged.candidates.map((c) => [c.n, c.start]), [[1, 10], [4, 300], [5, 400]]);
-    assert.deepEqual(merged.entries.map((e) => [e.n, e.status]), [[1, "picked"], [4, "candidate"], [5, "candidate"]]);
-    assert.deepEqual(merged.entries[0], record.reels[0]);
+    assert.deepEqual(merged.candidates.map((c) => [c.n, c.start]), [[1, 10], [2, 100], [3, 200], [4, 300], [5, 400]]);
+    assert.deepEqual(merged.entries.map((e) => [e.n, e.status]), [[1, "picked"], [2, "dropped"], [3, "candidate"], [4, "candidate"], [5, "candidate"]]);
+    assert.deepEqual(merged.entries.slice(0, 3), record.reels);
     assert.deepEqual(merged.added.map((c) => c.n), [4, 5]);
   });
-  it("keep a finished Reel too, and never reuse the number of one that is gone", () => {
+  it("keep a finished Reel and a dropped one, and never reuse a number", () => {
     const merged = mergeCandidates({ old: { candidates: [at(1, 10, 40), at(6, 100, 130)] }, fresh: [{ ...at(1, 300, 330), preview: null }], record: { reels: [{ n: 1, status: "finished" }, { n: 6, status: "dropped" }] } });
-    assert.deepEqual(merged.candidates.map((c) => c.n), [1, 7]);
+    assert.deepEqual(merged.candidates.map((c) => c.n), [1, 6, 7]);
   });
-  it("leave out a new candidate over a kept Reel's stretch", () => {
+  it("leave out a new clip over any candidate's words, a dropped one or one never picked too, so none is offered twice", () => {
+    const merged = mergeCandidates({ old, fresh: [{ ...at(1, 105, 125), preview: null }, { ...at(2, 205, 225), preview: null }], record });
+    assert.deepEqual(merged.added, []);
+    assert.deepEqual(merged.ignored, ["A new clip from 1:45 to 2:05 was left out: it has words of Reel 2, which is dropped.", "A new clip from 3:25 to 3:45 was left out: it has words of Reel 3, which is a candidate."]);
+  });
+  it("leave out a new candidate over a picked Reel's stretch", () => {
     const merged = mergeCandidates({ old, fresh: [{ ...at(1, 20, 50), preview: null }], record });
-    assert.deepEqual(merged.candidates.map((c) => c.n), [1]);
+    assert.deepEqual([merged.candidates.map((c) => c.n), merged.added], [[1, 2, 3], []]);
   });
-  it("never give a number twice, across two asks in a row, when the first leaves only the picked Reel", () => {
+  it("never give a number twice, across two asks in a row", () => {
     const made = "2026-10-14T09:12:00-05:00";
-    const first = mergeCandidates({ old, fresh: [], record });
+    const first = mergeCandidates({ old, fresh: [{ ...at(1, 300, 330), preview: null }], record });
     const written = reelsFile({ video: "talk.mov", by: "ask", made, candidates: first.candidates, highest: first.highest });
-    const second = mergeCandidates({ old: readReels(JSON.stringify(written)).reels, fresh: [{ ...at(1, 300, 330), preview: null }], record: { reels: first.entries } });
-    assert.deepEqual(second.candidates.map((c) => c.n), [1, 4]);
+    const second = mergeCandidates({ old: readReels(JSON.stringify(written)).reels, fresh: [{ ...at(1, 400, 430), preview: null }], record: { reels: first.entries } });
+    assert.deepEqual(second.candidates.map((c) => c.n), [1, 2, 3, 4, 5]);
   });
   it("keep a new candidate off a picked Reel's words even when reels.json has no candidate for it", () => {
     const merged = mergeCandidates({ old: null, fresh: [{ ...at(1, 105, 125), preview: null }, { ...at(2, 300, 330), preview: null }], record: { reels: [{ n: 2, status: "picked", from: 100, to: 130 }] } });
