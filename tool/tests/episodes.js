@@ -100,14 +100,15 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     said: () => said.join("\n"),
     now: () => clock,
     /** A file Final Cut wrote into From Final Cut, `ms` after the clock's start. An export is a bundle, a folder with its
-        Info.fcpxml in it. */
+        Info.fcpxml in it, both of that time: an export is as new as the later of the two. */
     shared: (name, ms = 0, text = "a finished video") => {
       const at = join(fromFinalCutFolder(home), name);
+      const when = new Date(Date.parse("2026-10-20T14:00:00-05:00") + ms);
       if (name.endsWith(".fcpxmld")) {
         mkdirSync(at, { recursive: true });
         writeFileSync(join(at, "Info.fcpxml"), `<fcpxml version="1.11"><resources><asset id="r1"><media-rep src="file://${encodeURI(join(root, "Episodes", FOLDER, "Pricing talk.mp4"))}"/></asset></resources></fcpxml>\n`);
+        utimesSync(join(at, "Info.fcpxml"), when, when);
       } else writeFileSync(at, text);
-      const when = new Date(Date.parse("2026-10-20T14:00:00-05:00") + ms);
       utimesSync(at, when, when);
       return at;
     },
