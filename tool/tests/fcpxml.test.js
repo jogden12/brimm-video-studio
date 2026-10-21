@@ -462,13 +462,13 @@ describe("our own checks of a file", () => {
     assert.deepEqual(checkFcpxml(changed('<text-style ref="ts1">', '<text-style ref="ts2">'), AT_30), [`The text-style points at "ts2", and the file holds no text-style-def of that name.`]);
   });
   it("find anything else that points at a part of the file that is not there", () => {
-    /** The file with a title at the end of its timeline, or a picture laid over its first clip. This module writes neither, and
-        what kind of thing each should point at is not known here, only that it has to be in the file. */
+    /** The file with a title at the end of its timeline, or a picture laid over its first clip. A title points at a
+        template, an effect, and a picture at its asset (phase 0, B1). */
     const titled = (ref) => changed("</spine>", `<title ref="${ref}" offset="15s" name="Lower third" duration="2s"/></spine>`).replace('duration="15s" tcStart', 'duration="17s" tcStart');
     const laidOver = (ref) => changed("<marker ", `<video ref="${ref}" lane="1" offset="1s" duration="1s"/><marker `);
-    assert.deepEqual(checkFcpxml(titled("r9"), AT_30), [`The title points at "r9", and the file holds nothing of that name.`]);
-    assert.deepEqual(checkFcpxml(laidOver("r9"), AT_30), [`The video points at "r9", and the file holds nothing of that name.`]);
-    assert.deepEqual(checkFcpxml(titled("r1"), AT_30), []);
+    assert.deepEqual(checkFcpxml(titled("r9"), AT_30), [`The title points at "r9", and the file holds no effect of that name.`]);
+    assert.deepEqual(checkFcpxml(laidOver("r9"), AT_30), [`The video points at "r9", and the file holds no asset of that name.`]);
+    assert.deepEqual(checkFcpxml(titled("r1"), AT_30), [`The title points at "r1", and the file holds no effect of that name.`]);
     assert.deepEqual(checkFcpxml(laidOver("r2"), AT_30), []);
   });
   it("find a caption or a note that lies outside its clip", () => {

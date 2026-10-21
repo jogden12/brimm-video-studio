@@ -1,8 +1,8 @@
 // Writes a Final Cut Pro project file (FCPXML) from a video and the list of the pieces of it to keep. Final Cut Pro opens the file
 // as a project with those cuts already made on its timeline, the captions in place, and a marker wherever there is a note.
-// What the file holds: the cuts, the captions, the notes for the editor and, when it is told one, the library the project goes
-// into. What it cannot do: it cannot make Final Cut export a video, and a title or a graphic in such a file is only the name of
-// a template on that Mac, so none is written here.
+// What the file holds: the cuts, the captions, the notes for the editor, Final Cut's own built-in titles (each naming its font
+// and size, which a title given words only does not keep: phase 0, B1), pictures laid over the picture, a look, and, when it
+// is told one, the library the project goes into. What it cannot do: make Final Cut export a video.
 // Nothing here touches a disk or runs a program. It takes plain data and gives back text.
 import { basename, extname } from "node:path";
 
@@ -65,6 +65,12 @@ const escaped = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").repl
 /** Text as the value of an attribute: on one line, and with the characters that would end it or start a tag written out. Every
     attribute in the file is written this way, and code that changes a name in a file this module wrote uses it too. */
 export const attribute = (text) => escaped(oneLine(text)).replace(/"/g, "&quot;");
+
+/** Final Cut's own titles, by the names its exports give them (phase 0, B1): the Basic Title, and the Basic Lower Third. A
+    title given words only comes back Helvetica 6 (B1), so every title written here names its font and its size. */
+export const TITLE_UID = ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti";
+export const LOWER_THIRD_UID = ".../Titles.localized/Lower Thirds.localized/Basic Lower Third.localized/Basic Lower Third.moti";
+const TEMPLATES = { title: { name: "Basic Title", uid: TITLE_UID }, "lower-third": { name: "Basic Lower Third", uid: LOWER_THIRD_UID } };
 
 /** How a caption looks, as Final Cut writes it for a caption of its own: white letters on black. */
 const STYLE = { font: ".AppleSystemUIFont", fontSize: 13, fontFace: "Regular", fontColor: "1 1 1 1", backgroundColor: "0 0 0 1" };
@@ -140,7 +146,7 @@ export function colorSpaceOf(colour) {
     frame and moved onto the face by its `crop`, {x, y, w, h} in pixels of the picture as it is shown, and the project has a
     format of its own. Given none, the project is the video's own shape. It throws when the frame is not whole pixels, and
     when a piece of an upright project has no crop. */
-export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], project, event, library, src, frame }) {
+export function fcpxml({ video, facts, ranges = [], captions = [], markers = [], titles = [], stills = [], look = null, project, event, library, src, frame }) {
   if (frame && !(Number.isInteger(frame.width) && frame.width > 0 && Number.isInteger(frame.height) && frame.height > 0)) throw new Error(`The frame of the project must be given in whole pixels: ${frame.width} by ${frame.height}.`);
   const rate = rateOf(facts.frameRate);
   const time = (count) => timeOf(count, rate);
@@ -166,10 +172,10 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
   for (const [i, range] of ranges.entries()) {
     const from = Math.max(0, frames(range.start, `start of piece ${i + 1}`));
     const to = Math.min(total, frames(range.end, `end of piece ${i + 1}`));
-    if (frame && !range.crop) throw new Error(`Piece ${i + 1} of an upright project has no crop to move it onto the face by.`);
+    if (frame && !range.crop && !range.position) throw new Error(`Piece ${i + 1} of an upright project has no crop to move it onto the face by.`);
     if (to <= from) continue;
     if (pieces.length && from < pieces[pieces.length - 1].to) throw new Error(`The pieces to keep must follow one another in the video: piece ${i + 1} starts before the one before it ends.`);
-    pieces.push({ from, to, name: range.name || name, crop: range.crop, captions: [], notes: new Map() });
+    pieces.push({ from, to, name: range.name || name, crop: range.crop, position: range.position, captions: [], titles: [], stills: [], notes: new Map() });
   }
 
   // A caption goes on the first kept piece it shows over, and shows no longer than that piece runs. So one that starts in a piece
@@ -193,8 +199,37 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
     piece.notes.set(frame, [...(piece.notes.get(frame) || []), oneLine(marker.text)]);
   }
 
+  // A title or a still goes on each kept piece it shows over, for as long as it shows there: one that runs over a join is
+  // written once on each side of it, so nothing hangs off the end of its clip. One wholly in what was cut out goes nowhere.
+  const over = (item, what, i) => {
+    const from = frames(item.start, `start of ${what} ${i + 1}`);
+    const to = frames(item.end, `end of ${what} ${i + 1}`);
+    return to > from ? pieces.filter((p) => p.to > from && p.from < to).map((p) => [p, Math.max(from, p.from), Math.min(to, p.to)]) : [];
+  };
+  for (const [i, title] of titles.entries()) {
+    // Final Cut gives a title with no font or size Helvetica 6 (phase 0, B1): one is refused, never written so.
+    if (!title.lines.length || title.lines.some((line) => !String(line.font || "").trim() || !(Number(line.fontSize) > 0))) throw new Error(`Title ${i + 1} must name a font and a size for every line.`);
+    for (const [piece, from, to] of over(title, "title", i)) piece.titles.push({ ...title, from, to });
+  }
+  // Each picture shown is one asset, however often it shows. Final Cut writes a still's format with no frame rate, and its
+  // asset with no length (phase 0, B1).
+  const pictures = new Map();
+  for (const [i, still] of stills.entries()) {
+    for (const [piece, from, to] of over(still, "picture", i)) {
+      if (!pictures.has(still.src)) pictures.set(still.src, { src: still.src, width: still.width, height: still.height, name: basename(decodeURIComponent(still.src), extname(decodeURIComponent(still.src))) });
+      piece.stills.push({ ...still, from, to });
+    }
+  }
+
   // On the timeline each piece begins where the one before it ends. What sits on a piece is placed by the video's own time, since
   // a clip keeps the clock of the video it shows. Final Cut's definition of the format has the captions before the markers.
+  // The ids of what only some files hold come after the three every file may: each template used, then each picture's format
+  // and asset.
+  let ids = 3;
+  const used = [...new Set(pieces.flatMap((p) => p.titles.map((t) => t.template || "title")))].sort();
+  const effects = new Map(used.map((kind) => [kind, `r${++ids}`]));
+  for (const picture of pictures.values()) Object.assign(picture, { format: `r${++ids}`, id: `r${++ids}` });
+  const lookId = look && pieces.length ? `r${++ids}` : "";
   let length = 0;
   let styles = 0;
   const clips = pieces.map((piece) => {
@@ -207,11 +242,39 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
         tag("text-style-def", { id: style }, [tag("text-style", STYLE)])
       ]);
     });
+    // A title names its font and size on every line (phase 0, B1), and its place, when it is not the middle, by a move in
+    // hundredths of the frame's height (phase 0, B1 and B2: that is how Final Cut 12.4 took a still's).
+    const written = piece.titles.map((title) => {
+      // A Basic Lower Third has two text objects, and one given no words keeps the template's own: a name with no role
+      // gets an empty second line (the lead's review, L9; by-hand check 1 shows it).
+      const given = title.template === "lower-third" && title.lines.length === 1 ? [...title.lines, { ...title.lines[0], text: "" }] : title.lines;
+      const lines = given.map((line) => ({ ...line, style: `ts${++styles}` }));
+      const runs = lines.map((line, i) => tag("text-style", { ref: line.style }, wordsOf(line.text) + (title.template === "lower-third" || i === lines.length - 1 ? "" : "\n")));
+      const texts = title.template === "lower-third" ? runs.map((run) => tag("text", {}, [run])) : [tag("text", {}, runs)];
+      const defs = lines.map((line) => tag("text-style-def", { id: line.style }, [tag("text-style", {
+        font: line.font, fontSize: line.fontSize, fontFace: line.fontFace || "Regular", fontColor: line.fontColor || "1 1 1 1",
+        ...(line.shadow ? { shadowColor: line.shadow.color, shadowOffset: "0 0", shadowBlurRadius: line.shadow.blur } : {}),
+        ...(line.kerning ? { kerning: line.kerning } : {}), alignment: line.alignment
+      })]));
+      const moved = title.position && title.position !== "0 0" ? [tag("adjust-transform", { position: title.position })] : [];
+      return tag("title", { ref: effects.get(title.template || "title"), lane: title.lane, offset: time(title.from), name: title.name, duration: time(title.to - title.from), role: title.role }, [...texts, ...defs, ...moved]);
+    });
+    const shownPictures = piece.stills.map((still) => {
+      const fit = still.fill ? [tag("adjust-conform", { type: "fill" })] : [];
+      const moved = (still.position && still.position !== "0 0") || (still.scale && still.scale !== 1) ? [tag("adjust-transform", { position: still.position || "0 0", scale: `${still.scale || 1} ${still.scale || 1}` })] : [];
+      return tag("video", { ref: pictures.get(still.src).id, lane: still.lane, offset: time(still.from), name: still.name, duration: time(still.to - still.from), role: still.role }, fit.length || moved.length ? [...fit, ...moved] : undefined);
+    });
     const noted = [...piece.notes].sort(([a], [b]) => a - b).map(([frame, texts]) => tag("marker", { start: time(frame), duration: time(1), value: texts.filter(Boolean).join(" / ") }));
     // In an upright project each clip is first filled into the frame and moved onto the face. Final Cut's definition of the
     // format has these before what sits on the clip.
-    const moved = frame ? [tag("adjust-conform", { type: "fill" }), tag("adjust-transform", { position: reelPosition(facts, piece.crop, frame) })] : [];
-    const inside = [...moved, ...shown, ...noted];
+    // A piece may carry its move as it was written before, in place of its crop: a Reel built again on the project written
+    // when it was picked keeps that project's moves.
+    const moved = frame ? [tag("adjust-conform", { type: "fill" }), tag("adjust-transform", { position: piece.position || reelPosition(facts, piece.crop, frame) })] : [];
+    // The look, a built-in colour preset of Final Cut's, on every clip, with its plug-in's data and its params as Final Cut
+    // writes them (by-hand check 2 of phase 4 read them off an export): Final Cut's definition of the format has a clip's
+    // filters after its notes, and a filter's data before its params.
+    const graded = lookId ? [tag("filter-video", { ref: lookId, name: look.name }, [...(look.data ?? []).map((d) => tag("data", { key: d.key }, d.value)), ...look.params.map((p) => tag("param", { name: p.name, key: p.key, value: p.value }))])] : [];
+    const inside = [...moved, ...shown, ...written, ...shownPictures, ...noted, ...graded];
     // In an upright project each clip names the video's own format. Phase 0, Final Cut 12.4: a clip that does not takes the
     // timeline's, Final Cut takes the wide video for an upright one, warns of "an unexpected value", and does not fill.
     return tag("asset-clip", { ref: "r2", format: frame ? "r1" : undefined, offset: time(offset), name: piece.name, start: time(piece.from), duration: time(piece.to - piece.from) }, inside.length ? inside : undefined);
@@ -231,7 +294,13 @@ export function fcpxml({ video, facts, ranges = [], captions = [], markers = [],
       ...(frame ? [tag("format", { id: "r3", frameDuration: time(1), width: frame.width, height: frame.height, colorSpace: "1-1-1 (Rec. 709)" })] : []),
       // An HDR video's format keeps its own colour space, and the timeline gets a Rec. 709 format of its own, the video's size
       // and rate, as Final Cut writes the project of an iPhone's HLG clip (phase 0, B3): never an HDR timeline.
-      ...(!frame && hdr ? [tag("format", { id: "r3", frameDuration: time(1), width: facts.width, height: facts.height, colorSpace: REC_709 })] : [])
+      ...(!frame && hdr ? [tag("format", { id: "r3", frameDuration: time(1), width: facts.width, height: facts.height, colorSpace: REC_709 })] : []),
+      ...[...effects].map(([kind, id]) => tag("effect", { id, name: TEMPLATES[kind].name, uid: TEMPLATES[kind].uid })),
+      ...(lookId ? [tag("effect", { id: lookId, name: look.name, uid: look.uid })] : []),
+      ...[...pictures.values()].flatMap((p) => [
+        tag("format", { id: p.format, name: "FFVideoFormatRateUndefined", width: p.width, height: p.height }),
+        tag("asset", { id: p.id, name: p.name, start: "0s", duration: "0s", hasVideo: 1, format: p.format, videoSources: 1 }, [tag("media-rep", { kind: "original-media", src: p.src })])
+      ])
     ]),
     tag("event", { name: event || "Rough cuts" }, [
       tag("project", { name: project || `${name} rough cut` }, [
@@ -271,7 +340,7 @@ function framesOf(time, rate) {
 }
 
 /** The kind of thing a tag's ref has to name. A ref on any other tag has only to name something that is in the file. */
-const POINTS_AT = { "asset-clip": "asset", "text-style": "text-style-def" };
+const POINTS_AT = { "asset-clip": "asset", "text-style": "text-style-def", title: "effect", video: "asset" };
 
 /** Our own checks of a project file, for what Final Cut's definition of the format cannot see: that every time is a whole number
     of frames, that the clips follow one another with no gap and no overlap, that no clip runs outside the video, that a caption
@@ -312,8 +381,9 @@ export function checkFcpxml(text, facts, { frame } = {}) {
   // Each format's frames are the video's, and the video's own format is the video's size.
   const one = timeOf(1, rate);
   const formats = new Map(all.filter((el) => el.name === "format").map((el) => [el.attrs.id, el]));
+  // A still's format has no frames of its own (phase 0, B1), and is not held to the video's.
   for (const format of formats.values()) {
-    if (format.attrs.frameDuration !== one) problems.push(`The format ${format.attrs.id} has frames of ${format.attrs.frameDuration}, and the video's are ${one}.`);
+    if ("frameDuration" in format.attrs && format.attrs.frameDuration !== one) problems.push(`The format ${format.attrs.id} has frames of ${format.attrs.frameDuration}, and the video's are ${one}.`);
   }
   // The video's size is the one `facts` gives, and when they give none, the one its own format says.
   const asset = all.find((el) => el.name === "asset");
@@ -361,9 +431,9 @@ export function checkFcpxml(text, facts, { frame } = {}) {
       if (end !== null && offset > end) problems.push(said(`There is a gap of ${count(offset - end)} before clip ${n}.`));
       if (end !== null && offset < end) problems.push(said(`Clip ${n} overlaps what comes before it by ${count(end - offset)}.`));
       if (start < 0 || start + length > total) problems.push(said(`Clip ${n} runs outside the video.`));
-      for (const el of all.filter((e) => e.parent === clip && (e.name === "caption" || e.name === "marker"))) {
-        const at = read(el, el.name === "caption" ? "offset" : "start");
-        const long = el.name === "caption" ? read(el, "duration") : 1;
+      for (const el of all.filter((e) => e.parent === clip && ["caption", "title", "video", "marker"].includes(e.name))) {
+        const at = read(el, el.name === "marker" ? "start" : "offset");
+        const long = el.name === "marker" ? 1 : read(el, "duration");
         if (at !== null && long !== null && (at < start || at + long > start + length)) problems.push(said(`A ${el.name} on clip ${n} lies outside the clip.`));
       }
       end = offset + length;

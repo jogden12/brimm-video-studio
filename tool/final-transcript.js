@@ -12,10 +12,10 @@ import { lastLine } from "./run.js";
 const reasonOf = (ended) => (ended.signal ? `it was killed by ${ended.signal}` : lastLine(ended.stderr));
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** A text with the show's names spelled the way they are spelled, and then the episode's own: each [wrong, right] pair is a
-    whole word, matched as it is written. A pair whose wrong word is not a word of letters and figures is passed over. */
-export function spelled(text, spellings = []) {
-  let out = spellNames(text);
+/** A text with the episode's own spellings: each [wrong, right] pair is a whole word, matched as it is written. A pair whose
+    wrong word is not a word of letters and figures is passed over. */
+export function spelledPairs(text, spellings = []) {
+  let out = String(text);
   for (const [wrong, right] of spellings) {
     if (!/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u.test(String(wrong || ""))) continue;
     out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped(wrong)}(?![\\p{L}\\p{N}])`, "gu"), right);
@@ -23,14 +23,18 @@ export function spelled(text, spellings = []) {
   return out;
 }
 
+/** A text with the show's names spelled the way they are spelled, and then the episode's own (spelledPairs). */
+export const spelled = (text, spellings = []) => spelledPairs(spellNames(text), spellings);
+
 /** Captions with the spellings applied to their words alone: never to a caption's number or its times, so a spelling of a
-    figure ("10" as "ten") leaves "00:00:10,000" and caption 10 as they are. */
-function spelledCaptions(srt, spellings) {
+    figure ("10" as "ten") leaves "00:00:10,000" and caption 10 as they are. `spell` is how a line is spelled: the show's names
+    and the episode's (spelled), or the episode's pairs alone (spelledPairs). */
+export function spelledCaptions(srt, spellings, spell = spelled) {
   let words = false;
   return String(srt).split("\n").map((line) => {
     if (!line.trim()) words = false;
     else if (line.includes("-->")) words = true;
-    else if (words) return spelled(line, spellings);
+    else if (words) return spell(line, spellings);
     return line;
   }).join("\n");
 }

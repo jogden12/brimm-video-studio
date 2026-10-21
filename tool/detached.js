@@ -147,9 +147,10 @@ function releaseEpisodeLock(lock, text) {
 
 /** Run `work` as the detached run of `command` for the episode `folder`: it takes the episode's lock (one left by a run that
     died is taken over), keeps the Mac awake while this process runs (`keepAwake`), awaits `work()`, which resolves
-    { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. Resolves the result, or
-    { running } naming the command whose run holds the lock, when another run is at work on the episode: then nothing is
-    done. `alive` and `now` are the Mac's own unless a test gives others. */
+    { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. The bring of a take-over
+    that brought every file also resolves `takeOver`, { by, since, next }: the claim it was for, and what to say next while
+    that claim stands, which the result keeps. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
+    work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. */
 export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now }, work) {
   const lock = lockOf(home, folder);
   mkdirSync(episodeWork(home, folder), { recursive: true });
@@ -165,6 +166,7 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
   const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: done.made || [], failed: done.failed || [], next: done.next || "" };
+  if (done.takeOver) result.takeOver = done.takeOver;
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");
   } finally {

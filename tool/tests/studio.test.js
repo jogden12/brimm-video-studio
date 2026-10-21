@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,91 @@ const tool = (tool_name) => guardDecision({ tool_name, tool_input: {} }, { check
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), "..", "studio", "guard.sh");
 const THIS_CHECKOUT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const hook = (input, node = process.execPath, folder = "/Users/sallie/BRIMM Video Studio") => spawnSync("/bin/sh", [GUARD, node, folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
+
+/** zsh and bash, either of which may run her session's commands, each without this Mac's own start-up files. */
+const SHELLS = [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]];
+/** Runs `check` once for each shell, as a step of its own. A Mac has both shells, but the Linux that runs these tests on
+    GitHub has no /bin/zsh: there the zsh step is skipped, saying why, and the bash step still runs. Each shell is a step of
+    its own because a test that calls t.skip is counted as skipped even when it then fails, so a skip of the zsh half inside
+    one test would hide a failure of the bash half. */
+const inEachShell = async (t, check) => {
+  for (const shell of SHELLS) {
+    const missing = !existsSync(shell[0]) && `${shell[0]} is not on this computer (the Linux that runs the tests on GitHub has no zsh)`;
+    await t.test(`in ${shell[0]}`, { skip: missing }, () => check(shell));
+  }
+};
+/** What follows edit.js in `command`. */
+const tailOf = (command) => command.slice(command.indexOf('/tool/edit.js"') + '/tool/edit.js"'.length);
+/** The words `shell` would give edit.js for `command`, with printf standing in for node and edit.js: the rest of the command
+    is run as it is, and printf gives back each word it is given on a line of its own. */
+const shellWords = ([shell, flags], command) => {
+  const r = spawnSync(shell, [...flags, `printf '%s\\n'${tailOf(command)}`], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+  return r.stdout.split("\n").slice(0, -1);
+};
+/** The words the guard's grammar reads after edit.js in a command it lets through: a space, then a word, again and again; a
+    word in quotes runs to the next quote of its kind, and is read without its quotes, and a plain word runs to the next space. */
+const grammarWords = (command) => {
+  const tail = tailOf(command);
+  const words = [];
+  for (let at = 1; at <= tail.length; ) {
+    const quote = tail[at] === '"' || tail[at] === "'" ? tail[at] : "";
+    const end = quote ? tail.indexOf(quote, at + 1) + 1 : tail.indexOf(" ", at) === -1 ? tail.length : tail.indexOf(" ", at);
+    words.push(quote ? tail.slice(at + 1, end - 1) : tail.slice(at, end));
+    at = end + 1;
+  }
+  return words;
+};
+/** The words `shell` gives edit.js for each of `commands`, all in one run of the shell, each command run as Claude Code's
+    Bash tool runs it (eval of the command in single quotes, its input from /dev/null), with printf standing in for node
+    and edit.js. The shell runs in `dir`, an empty folder that is also its PATH, so a command let through by mistake finds no
+    program to run, and a file it makes is seen there. */
+const shellWordsOfAll = ([shell, flags], commands, dir) => {
+  const END = "\u0001"; // A line that ends each command's words: no word made by randomCommand holds this letter.
+  const quoted = (text) => `'${text.replaceAll("'", `'"'"'`)}'`;
+  const script = commands.map((c) => `eval ${quoted(`printf '%s\\n'${tailOf(c)}`)} < /dev/null; printf '%s\\n' '${END}'`).join("\n");
+  const r = spawnSync(shell, [...flags, script], { cwd: dir, encoding: "utf8", env: { PATH: dir } });
+  return r.stdout.split(`${END}\n`).slice(0, -1).map((words) => words.split("\n").slice(0, -1));
+};
+/** A source of numbers from 0 up to 1, the same ones on every run from the same seed (mulberry32), so a failure can be
+    seen again. */
+const numbersFrom = (seed) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let n = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  n = (n + Math.imul(n ^ (n >>> 7), 61 | n)) ^ n;
+  return ((n ^ (n >>> 14)) >>> 0) / 4294967296;
+};
+/** A command of node, edit.js and one to four words of random letters, plain, in double quotes or in single quotes, most of
+    them a space apart. Most letters are ones a plain word may hold; about one in seven is one the shells read in a way of
+    their own, or a quote; and now and then words are joined by nothing, or by ; | & # or a line break. */
+const randomCommand = (next) => {
+  const pick = (list) => list[Math.floor(next() * list.length)];
+  const ODD = ["'", '"', "$", "`", "\\", ";", "&", "|", "(", ")", "<", ">", "{", "}", "[", "]", "*", "?", "~", "=", "#", "!", "^", "\t", "\n", "\r",
+    "\u2028", "$(", "${", "$'", "''", "'\\''", "\\\""];
+  const letters = (count, plain) => Array.from({ length: count }, () => next() < 0.15 ? pick(ODD) : pick(plain ? "abXY09_.,:+=@%/-" : "abXY09_.,:+=@%/- ")).join("");
+  const word = () => {
+    const form = pick(["plain", "double", "single"]);
+    const count = Math.floor(next() * 6);
+    return form === "plain" ? letters(count + 1, true) : form === "double" ? `"${letters(count, false)}"` : `'${letters(count, false)}'`;
+  };
+  let command = EDIT;
+  for (let words = 1 + Math.floor(next() * 4); words > 0; words--) command += (next() < 0.9 ? " " : pick(["", ";", "|", "&", "#", "\n"])) + word();
+  return command;
+};
+/** Commands the guard lets through, each with the words edit.js must be given, in zsh and in bash. */
+const ALLOWED = [
+  [`${EDIT} episodes`, ["episodes"]],
+  [`${EDIT} open "Pricing talk"`, ["open", "Pricing talk"]],
+  [`node "${CHECKOUT}/tool/edit.js" open "Talk (Sallie's laptop)"`, ["open", "Talk (Sallie's laptop)"]],
+  [`${EDIT} title "Pricing talk" --words "Price it right" --approve`, ["title", "Pricing talk", "--words", "Price it right", "--approve"]],
+  [`${EDIT} finish "Pricing talk" --take "main=this Mac"`, ["finish", "Pricing talk", "--take", "main=this Mac"]],
+  // Every letter a plain word may hold.
+  [`${EDIT} open a_b.c,d:e+f=g@h%i/j-k9`, ["open", "a_b.c,d:e+f=g@h%i/j-k9"]],
+  // Words in single quotes, with what would run something outside them: inside, each is only a letter.
+  [`${EDIT} title "Pricing talk" --words 'Charge $99 \`now\` \\ok'`, ["title", "Pricing talk", "--words", "Charge $99 `now` \\ok"]],
+  [`${EDIT} name "Pricing talk" '"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}'`, ["name", "Pricing talk", `"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}`]],
+  [`${EDIT} name "Pricing talk" ''`, ["name", "Pricing talk", ""]]
+];
 
 describe("her folder's settings", () => {
   it("allow only edit.js, deny the editing and web tools, and lock the mode, with no read block", () => {
@@ -63,12 +148,70 @@ describe("her folder's settings", () => {
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
     assert.ok(skill.split("\n").length < 160, "the skill is short");
   });
+  it("have the skill ask her once about a take-over, and take it over again unasked only in the conversation she said yes in", () => {
+    // A take-over on the Mac without the files brings them first and says to say "take it over" again; so does a take-over
+    // Dropbox undid. Asked a second time, she would be asked the same question twice (the review of the follow-ups plan, P8).
+    // But it is taken over again unasked only for the take-over she said yes to, and for a bring only once it has ended well:
+    // "how far is it?" says to take it over again only while that claim stands and she has not been asked again since (the
+    // fold's check of P8, and review #24-1).
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const row = skill.split("\n").find((line) => line.startsWith('| "Open the Pricing episode" |'));
+    assert.match(row, /If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over`\./);
+    assert.match(row, /If that take-over says Dropbox undid the claim and to say "take it over" again, run `open "<episode>" --take-over` again without asking her again\./);
+    assert.match(row, /If it is bringing files over first, wait until "how far is it\?" says the bring has ended; if it then says to say "take it over" again, run `open "<episode>" --take-over` again without asking her again;/);
+    // A bring that failed says why, and to open it: she is told, and nothing is run again until she says so (review #24-2).
+    assert.match(row, /; if it says some files are not here, tell her why, in plain words, and try again only when she says to\./);
+    // Her yes is for that conversation only: in a later one she may have changed her mind, so she is asked again (review #24-1).
+    assert.match(row, /Take it over again unasked only in the conversation in which she said yes, and only if she has not said not to since; in a later one, run `open "<episode>"` and ask her as above\. Never take an episode over unasked otherwise\./);
+    // A no she gives later in that same conversation stops it too (the fold's check of #24-1).
+    assert.doesNotMatch(row, /When it, or "how far is it\?", says/);
+    assert.doesNotMatch(row, /says so only while/);
+  });
+  it("have the skill say which quotes a word with a $, a backtick, a backslash or a straight double quote goes in, and what to do when none will do", () => {
+    // A straight double quote can be passed only in single quotes: the guard refuses it inside double quotes, escaped or not.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    for (const line of ["Words with a `$`, a backtick, a backslash or a straight double quote go in single quotes instead of double.", "Words with an apostrophe stay in double quotes.",
+      `Words with both cannot be passed: ask her to say them another way (for example "99 dollars").`]) assert.ok(skill.includes(line), line);
+  });
 });
 
 describe("the guard", () => {
-  it("lets edit.js run with plain or double-quoted words", () => {
-    for (const c of [`${EDIT} episodes`, `${EDIT} open "Pricing talk"`, `node "${CHECKOUT}/tool/edit.js" open "Talk (Sallie's laptop)"`, `${EDIT} title "Pricing talk" --words "Price it right" --approve`, `${EDIT} finish "Pricing talk" --take "main=this Mac"`])
-      assert.equal(bash(c), "allow", c);
+  it("lets edit.js run with plain or quoted words, which zsh and bash give it letter for letter", async (t) => {
+    // Every command the guard lets through is run in each shell, so the guard's words and the shells' cannot drift apart.
+    for (const [c] of ALLOWED) assert.equal(bash(c), "allow", c);
+    await inEachShell(t, (shell) => { for (const [c, words] of ALLOWED) assert.deepEqual(shellWords(shell, c), words, `${shell[0]}: ${c}`); });
+  });
+  it("lets single-quoted words through, and they reach edit.js letter for letter in zsh and bash", async (t) => {
+    const words = ["title", "Pricing talk", "--words", "Charge $99 `now` \\ok"];
+    const command = `${EDIT} title "Pricing talk" --words 'Charge $99 \`now\` \\ok'`;
+    assert.equal(bash(command), "allow");
+    await inEachShell(t, (shell) => assert.deepEqual(shellWords(shell, command), words, shell[0]));
+  });
+  it("lets random words of every form through only when zsh and bash give edit.js the words it read", async (t) => {
+    // ALLOWED checks its own rows only; random commands check the grammar as a whole (the build review of the single-quote
+    // fix). Of these 3000 the guard lets about 1350 through, and for each of those each shell must give back the words the
+    // guard read, and make nothing.
+    const next = numbersFrom(20261015);
+    const allowed = Array.from({ length: 3000 }, () => randomCommand(next)).filter((c) => bash(c) === "allow");
+    assert.ok(allowed.length >= 500, `only ${allowed.length} random commands were let through`);
+    for (const form of [/ [^ "']/, / "/, / '/]) assert.ok(allowed.some((c) => form.test(tailOf(c))), `none let through has a word like ${form}`);
+    const dir = mkdtempSync(join(tmpdir(), "guard-words-"));
+    try {
+      await inEachShell(t, (shell) => {
+        const given = shellWordsOfAll(shell, allowed, dir);
+        allowed.forEach((c, i) => assert.deepEqual(given[i], grammarWords(c), `${shell[0]}: ${JSON.stringify(c)}`));
+        assert.equal(given.length, allowed.length, `${shell[0]} gave words for more commands than it was given`);
+        assert.deepEqual(readdirSync(dir), [], `${shell[0]} made a file`);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("still refuses a single quote that is not a whole word", () => {
+    for (const c of [`${EDIT} open 'a'b`, `${EDIT} open 'a`, `${EDIT} open 'a''b'`, `${EDIT} open 'a\nb'`, `${EDIT} open 'a\rb'`, `${EDIT} open 'x' ; date`,
+      `${EDIT} open b'a'`, `${EDIT} open "a"'b'`, `${EDIT} open 'a'"b"`, `${EDIT} open 'a'\\''b'`, `${EDIT} open $'a'`, `${EDIT} open $'\\x27; date'`, `${EDIT} open $"x"`,
+      `${EDIT} open 'a' 'b`])
+      assert.equal(bash(c), "deny", JSON.stringify(c));
   });
   it("refuses anything else, and edit.js with anything that could run more", () => {
     for (const c of ["date", "cat /etc/hosts", `ls "${CHECKOUT}"`, `${NODE} -e "1"`, `${NODE} "${CHECKOUT}/tool/unedited.js" --from-plan x`,
@@ -76,6 +219,9 @@ describe("the guard", () => {
       `${EDIT} open x; cat /etc/hosts`, `${EDIT} open x && date`, `${EDIT} open x | sh`, `${EDIT} open x &`,
       `${EDIT} open $(date)`, `${EDIT} open "$(cat ~/.ssh/id_ed25519)"`, `${EDIT} open "\`date\`"`, `${EDIT} open '"' ; date ; '"'`, `${EDIT} open "a\\" ; date ; \\""`, `${EDIT} open "a\\b"`, `${EDIT} open "x\\" "; date; " "y"`,
       `${EDIT} open x > /tmp/y`, `${EDIT} open < /etc/hosts`,
+      // A quote of a word's own kind, with nothing else in it, that would end the word early and let what follows run (the
+      // review of the single-quote fix).
+      `${EDIT} open "a" ; date ; "b"`, `${EDIT} open 'a' ; date ; 'b'`,
       // The same, glued to a word (the review of PR 21, finding 15).
       `${EDIT} episodes|sh`, `${EDIT} episodes||date`, `${EDIT} episodes&&date`, `${EDIT} episodes&`, `${EDIT} open x>/tmp/y`, `${EDIT} open x<y`,
       `${EDIT} open x$(date)`, `${EDIT} open x\`date\``, `${EDIT} open x(y)`, `${EDIT} open x{a,b}`, `${EDIT} open x*`, `${EDIT} open x?`, `${EDIT} open =date`, `${EDIT} open x;date`, `${EDIT} open ~/x`, `${EDIT} open *`, `${EDIT} open "a\nb"`, `${EDIT} open x\ndate`, ` ${EDIT} episodes`, `${EDIT}  episodes`, `${EDIT} episodes `, ""])

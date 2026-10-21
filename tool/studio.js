@@ -111,9 +111,20 @@ const SKILL = "brimm-edit";
 /** A text as a regular expression matches it, letter for letter. */
 const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** One word after edit.js: a plain word of letters, digits and _ . , : + = @ % / - (not starting with =), or a word in double
-    quotes holding no double quote, $, backtick, backslash or line break. Nothing in either can run anything else. */
-const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*")`;
+/** One word after edit.js: a plain word of letters, digits and _ . , : + = @ % / - (not starting with =); a word in double
+    quotes holding no double quote, $, backtick, backslash or line break; or a word in single quotes holding no single quote
+    or line break, for words with a $, a backtick, a backslash or a straight double quote. Nothing in any of them can run
+    anything else. Inside single quotes zsh and bash take every letter as it is, a $, a backtick and a backslash among them;
+    and a single quote cannot be put inside them, so the word ends at the next single quote, which must end the command or
+    come before a space. One thing changes a quoted word on its way: after this guard has answered, Claude Code itself turns
+    nul into /dev/null, a habit from Windows. It does so wherever nul, in any case, comes after one or more > (with an
+    optional digit or & before them, as in 2>nul, >>nul and &>nul) and any spaces or tabs, and comes before any white space
+    (a tab, a no-break space and U+3000 among them) or one of | & ; ). A nul just before the word's closing quote is left
+    as it is, and so is the whole command when it holds a <, a $ or a backtick. The rule in Claude Code 2.1.296 and the
+    app's 2.1.295 is /(\d?&?>+[ \t]*)nul(?=\s|$|[|&;)\n])/ with nul in any case. So the title Profit > nul margin, in
+    either kind of quotes, reaches edit.js as Profit > /dev/null margin, still one word inside its quotes, and nothing else
+    runs. The guard is given the command as written, before the rewrite. */
+const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
 
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run with node (the word node, or the node the installer found)

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { conflictedCopies, readEpisode, recordFile, recordText } from "../episode.js";
-import { setup, episodeFor, reread, otherMac, FOLDER } from "./episodes.js";
+import { setup, episodeFor, reread, otherMac, listAll, EDITED, FOLDER } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -25,6 +25,12 @@ async function keep(deps, side) {
   return on(deps, "resolve", FOLDER, "--keep", side);
 }
 const history = (found) => (existsSync(join(found.folder, "history")) ? readdirSync(join(found.folder, "history")).sort() : []);
+/** Text as a regular expression takes it, letter for letter. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** What a command but resolve says, first and whole, of the episode with the record's conflicted copy: episodeFor's refusal. */
+const CONFLICT_REFUSAL = new RegExp(`^${literally(FOLDER)}: Dropbox has kept a conflicted copy in this episode: ${literally(RECORD_COPY)}\\. .*Say "sort out the conflict"\\.$`, "s");
+/** Every file in an episode's folder, at any depth, with what it holds: a command that refuses leaves them all as they were. */
+const filesOf = (found) => Object.fromEntries(listAll(found.folder).map((rel) => [rel, readFileSync(join(found.folder, rel), "utf8")]));
 
 /** Both Macs wrote record 2 of the episode: this Mac named it "Test A", hers "Test B" and dropped Reel 1, and Dropbox kept hers
     as a conflicted copy. */
@@ -254,6 +260,72 @@ describe("resolve", () => {
     assert.match(r.text, /Say "sort out the conflict"\.$/);
     t.done();
   });
+  it("finds an episode with a conflicted copy by its own name, and shows the conflict", async () => {
+    const t = setup();
+    // The episode was named "Know your costs", which never renames its folder (Pricing talk), and the Mac Studio, editing it,
+    // pushed its Reels; then both Macs wrote record 2.
+    const found = episodeFor(t, { record: { ...EDITED, name: { text: "Know your costs", placeholder: false }, editing: { by: "Mac Studio", since: "2026-10-20T13:00:00-05:00" } } });
+    const first = readEpisode(found.folder).record;
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, title: { text: "Studio title", from: "person", approved: true }, writer: { commit: "c709b57", on: "Mac Studio" } }));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText({ ...first, rev: 2, editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    for (const said of ["know your costs", "3fa9c1"]) {
+      const shown = await on(t.ctx.deps, "resolve", said);
+      assert.equal(shown.code, 0, `${said}\n---\n${shown.text}`);
+      for (const line of ["Dropbox kept two versions of record/0002.json in Know your costs:", "A: the record in force (record 2, written on Mac Studio)", "B: the copy written on Sallie's laptop"]) assert.ok(shown.text.includes(line), `${said}: ${line}\n---\n${shown.text}`);
+    }
+    // Every other command finds it too, and refuses it at once, as episodeFor does, naming the conflict: not later, when it
+    // comes to write, and with nothing written into the episode before then.
+    const before = filesOf(found);
+    for (const argv of [["open", "know your costs"], ["push", "know your costs", "reel", "1", "--no-hand-edits"]]) {
+      const r = await on(t.ctx.deps, ...argv);
+      assert.equal(r.code, 1, argv.join(" "));
+      assert.match(r.text, CONFLICT_REFUSAL, argv.join(" "));
+      assert.deepEqual(filesOf(found), before, argv.join(" "));
+    }
+    t.done();
+  });
+  it("finds it by the name given on the Mac whose rename became the copy, as the guide's conflict step makes one", async () => {
+    const t = setup();
+    // The Mac Studio called it "Test A", and that record is in force; her laptop called it "Test B", and hers is the copy.
+    const found = recordConflict(t);
+    // Both Macs find it by either name: the copy is the same on both once Dropbox has brought it across.
+    const macs = [["Mac Studio", t.ctx.deps], ["Sallie's laptop", otherMac(t).deps]];
+    for (const [mac, deps] of macs) {
+      for (const said of ["test b", "Test A"]) {
+        const shown = await on(deps, "resolve", said);
+        assert.equal(shown.code, 0, `${mac}, ${said}\n---\n${shown.text}`);
+        for (const line of ["Dropbox kept two versions of record/0002.json in Test A:", '  Name: A: "Test A"; B: "Test B"']) assert.ok(shown.text.includes(line), `${mac}, ${said}: ${line}\n---\n${shown.text}`);
+      }
+    }
+    // Found by the copy's name, it is still refused by every other command, at once, and nothing is written.
+    const before = filesOf(found);
+    for (const [mac, deps] of macs) {
+      const opened = await on(deps, "open", "test b");
+      assert.equal(opened.code, 1, mac);
+      assert.match(opened.text, CONFLICT_REFUSAL, mac);
+      assert.deepEqual(filesOf(found), before, mac);
+    }
+    t.done();
+  });
+  it("names a copy's Mac by episode.js's one list of Dropbox's forms, and spells none of them itself (the review of the plan, P11 and P19)", () => {
+    const text = readFileSync(new URL("../edit.js", import.meta.url), "utf8");
+    assert.match(text, /^import \{[^}]*\bconflictedBy\b[^}]*\} from "\.\/episode\.js";$/m);
+    // No regular expression in edit.js spells Dropbox's words, so what the guide's conflict step learns goes into
+    // CONFLICT_FORMS alone, and resolve still names the Mac.
+    assert.deepEqual(text.split("\n").filter((line) => /conflicted copy[^"`\n]*\/[dgimsuvy]*[.;,)]/.test(line)), []);
+  });
+  it("names the Mac of a copy whose name has a curly apostrophe, as the File Provider may write it (the review's #27-1)", async () => {
+    const t = setup();
+    const found = timelineConflict(t);
+    const curly = "edit/main.v2.mac-studio (Sallie’s laptop’s conflicted copy 2026-10-20).fcpxml";
+    writeFileSync(join(found.folder, curly), readFileSync(join(found.folder, TIMELINE_COPY)));
+    rmSync(join(found.folder, TIMELINE_COPY));
+    const shown = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.equal(shown.code, 0, shown.text);
+    assert.match(shown.text, new RegExp(`A: ${literally(TIMELINE)}, 19 bytes, written .*, the version Dropbox kept under the file's own name\\n`));
+    assert.match(shown.text, /\nB: the copy from Sallie’s laptop, 27 bytes, /);
+    t.done();
+  });
 });
 
 describe("resolve, when keeping a side here could lose a change", () => {
@@ -360,12 +432,77 @@ describe("resolve, as the P2 check found it", () => {
     assert.ok(r.text.includes(`  File ${TIMELINE}: A: 19 bytes; B: 27 bytes`), r.text);
     t.done();
   });
+  it("shows two sides of a record that differ only in the session's layers, and does not call them the same", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    // This Mac gave a spelling, and hers a look: neither changes what the rows for a person to read compare.
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, version: 2, rev: 2, spellings: [["Hormozy", "Hormozi"]], writer: { commit: "c709b57", on: "Mac Studio" } }));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText({ ...first, version: 2, rev: 2, main: { ...first.main, preset: { job: "full-episode", captions: "plain", look: "warm" } }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}Spellings: A: .*Hormozi.*; B: none\n/);
+    assert.match(r.text, /\n {2}The main video's preset: A: none; B: .*warm.*\n/);
+    t.done();
+  });
+  it("never calls two sides the same when they differ only where no row looks", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    // The same Mac claimed it on each side, a minute apart: who has it open reads the same on both.
+    const claimed = (since) => ({ ...first, rev: 2, editing: { by: "Mac Studio", since }, writer: { commit: "c709b57", on: "Mac Studio" } });
+    writeFileSync(recordFile(found.folder, 2), recordText(claimed("2026-10-20T14:00:00-05:00")));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText(claimed("2026-10-20T14:01:00-05:00")));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}The rest of the record: A: as A holds it; B: as B holds it\n/);
+    t.done();
+  });
+  it("shows two sides that each hold one cut, in different places, and does not call them the same", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    const cut = (from, to) => ({ ...first.main, cuts: [{ id: "c1", keep: false, from, to }] });
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, version: 2, rev: 2, main: cut(6.07, 9.638), writer: { commit: "c709b57", on: "Mac Studio" } }));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText({ ...first, version: 2, rev: 2, main: cut(13.583, 16.33), writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}The main video's cuts: A: .*6\.07.*; B: .*13\.583.*\n/);
+    t.done();
+  });
   it("writes a record on every keep, so that two Macs keeping opposite sides at once meet as a conflict of the record", async () => {
     const t = setup();
     const found = timelineConflict(t);
     assert.equal((await keep(t.ctx.deps, "A")).code, 0);
     assert.equal(readEpisode(found.folder).record.rev, 3);
     t.done();
+  });
+  it("writes a record when A of a record's copy is kept too, though A is the record in force", async () => {
+    const t = setup();
+    const found = recordConflict(t);
+    const r = await keep(t.ctx.deps, "A");
+    assert.equal(r.code, 0, r.text);
+    const now = readEpisode(found.folder).record;
+    assert.deepEqual([now.rev, now.name.text, now.writer.on], [3, "Test A", "Mac Studio"]);
+    t.done();
+  });
+  it("writes no record when the copy already holds what the record in force holds, as when an earlier keep wrote it and its copy could not be deleted", async () => {
+    for (const side of ["A", "B"]) {
+      const t = setup();
+      const found = recordConflict(t);
+      // An earlier keep of B wrote record 3 with the copy's content, and the copy was not deleted then.
+      const b = JSON.parse(readFileSync(join(found.folder, RECORD_COPY), "utf8"));
+      writeFileSync(recordFile(found.folder, 3), recordText({ ...b, rev: 3, writer: { commit: "c709b57", on: "Mac Studio" } }));
+      const shown = await on(t.ctx.deps, "resolve", FOLDER);
+      assert.ok(shown.text.includes("B is in force already: a keep wrote it, and its copy was not deleted then."), shown.text);
+      const r = await on(t.ctx.deps, "resolve", FOLDER, "--keep", side);
+      assert.equal(r.code, 0, `${side}: ${r.text}`);
+      const now = readEpisode(found.folder).record;
+      assert.deepEqual([now.rev, now.name.text], [3, "Test B"], side);
+      assert.deepEqual(conflictedCopies(found.folder), [], side);
+      t.done();
+    }
   });
   it("keeps nothing when the version shown was sorted out on the other Mac meanwhile, and says so", async () => {
     const t = setup();

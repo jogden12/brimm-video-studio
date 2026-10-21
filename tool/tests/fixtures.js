@@ -78,3 +78,27 @@ export const PAUSES = `[Parsed_silencedetect_1 @ 0x7969040900] silence_start: 0
 [Parsed_silencedetect_1 @ 0x7969040900] silence_start: 21.096688
 [Parsed_silencedetect_1 @ 0x7969040900] silence_end: 23.423 | silence_duration: 2.326313
 `;
+
+/** A phone's JPEG: an EXIF part saying its orientation, as an iPhone writes it (big-endian), then `padding` bytes of XMP
+    parts, then its frame. */
+export const jpegOf = (width, height, { orientation = 1, padding = 0, little = false } = {}) => {
+  const tiff = Buffer.alloc(26);
+  tiff.write(little ? "II" : "MM", 0, "ascii");
+  const u16 = (v, at) => (little ? tiff.writeUInt16LE(v, at) : tiff.writeUInt16BE(v, at));
+  const u32 = (v, at) => (little ? tiff.writeUInt32LE(v, at) : tiff.writeUInt32BE(v, at));
+  u16(42, 2);
+  u32(8, 4);
+  u16(1, 8);
+  u16(0x0112, 10);
+  u16(3, 12);
+  u32(1, 14);
+  u16(orientation, 18);
+  const exif = Buffer.concat([Buffer.from("Exif\0\0", "ascii"), tiff]);
+  const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, (exif.length + 2) >> 8, (exif.length + 2) & 255]), exif]);
+  const xmp = [];
+  for (let left = padding; left > 0; left -= 60000) {
+    const body = Buffer.alloc(Math.min(left, 60000));
+    xmp.push(Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 255]), body);
+  }
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app1, ...xmp, Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03]), Buffer.alloc(9)]);
+};

@@ -114,6 +114,26 @@ describe("finding the episode a person names", () => {
     assert.deepEqual(findEpisode(ctx, "budget"), { why: 'No episode fits "budget". The episodes are: 2026-10-13 Talk (Mac Studio).' });
     t.done();
   });
+  it("prints the words of the setup guide's lock-down check as they came, in the line the guide quotes, and writes nothing", async () => {
+    // Step 9 of the setup guide asks her folder's Claude to open an episode called Charge $99 `now` \ok. Claude's answer may put
+    // that in its own words, or show the backticks as formatting, so Jason reads the command Claude ran and what edit.js printed
+    // under it. The guide quotes both, and they must be what edit.js is given and what it prints. No episode fits, so nothing is
+    // claimed, brought over or written.
+    const t = setup();
+    const { path } = t.episode("2026-10-13 Talk (Mac Studio)");
+    const words = "Charge $99 `now` \\ok";
+    const line = `No episode fits "${words}".`;
+    const r = await t.run("open", words);
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.said, [`${line} The episodes are: 2026-10-13 Talk (Mac Studio).`]);
+    assert.deepEqual(readdirSync(join(path, "record")), ["0001.json"]);
+    assert.deepEqual([t.started, t.opened, t.clones], [[], [], []]);
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const step = guide.split("\n").find((l) => l.startsWith("9. **Check that her Claude folder only runs BRIMM Video:**"));
+    assert.ok(step, "the guide's lock-down check, step 9");
+    for (const quoted of [`\`\`open '${words}'\`\``, `\`\`${line}\`\``]) assert.ok(step.includes(quoted), `${quoted}\n---\n${step}`);
+    t.done();
+  });
   it("finds an episode with a conflicted copy by its folder, and gives back why it cannot be read", async () => {
     const t = setup();
     const { path } = t.episode("2026-10-13 Talk (Mac Studio)");
@@ -280,7 +300,7 @@ describe("node edit.js open", () => {
   it("does not open a record of a newer layout, since opening writes the claim, and says this Mac needs updating", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
     assert.equal(r.code, 1);
     assert.deepEqual(r.said, ["2026-10-13 Talk (Mac Studio) was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac."]);
@@ -333,7 +353,9 @@ describe("node edit.js push", () => {
     await t.run("push", "talk");
     const r = record(t);
     assert.equal(r.rev, 2);
-    assert.deepEqual(r.main.pushed.map(({ at, ...p }) => p), [{ v: 1, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project: "Talk main v1 000001" }]);
+    assert.deepEqual(r.main.pushed.map(({ at, asked, ...p }) => p), [{ v: 1, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project: "Talk main v1 000001" }]);
+    // And what the session had asked for, as a digest a finish compares (phase 4).
+    assert.match(r.main.pushed[0].asked, /^[0-9a-f]{12}$/);
     assert.equal(r.files["edit/main.v1.mac-studio.fcpxml"], statSync(join(path, "edit", "main.v1.mac-studio.fcpxml")).size);
     assert.deepEqual(r.libraries, { "Mac Studio": "2026-10-13 Talk (Mac Studio).fcpbundle" });
     t.done();
@@ -733,7 +755,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
   it("5. lists an episode written by a newer brimm-video by its folder, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
     assert.ok(r.text.includes(`  ${FOLDER}\n    Written by a newer brimm-video: Jason updates this Mac before it is changed here.`), r.text);
@@ -801,7 +823,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
   it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 2, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
     assert.equal((await t.run("push", "talk")).code, 1);
     t.done();
   });

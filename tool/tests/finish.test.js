@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { finishEpisode } from "../edit.js";
-import { finishNow } from "../finish.js";
+import { finishNow, expectedWords } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { recordFile, recordText } from "../episode.js";
 import { clearRuns } from "../filing.js";
@@ -40,6 +40,19 @@ async function asked(t, record = EDITED) {
 }
 /** The transcriber's calls, by the part whose sound they read. */
 const heardOf = (t) => t.calls.filter((c) => c.cmd === "WHISPER").map((c) => partOf(c.args[c.args.indexOf("-f") + 1]));
+
+describe("the words a part is expected to start with", () => {
+  const plan = { phrases: [
+    { id: "p1", start: 1, end: 3, keep: true, text: "Welcome to the show." },
+    { id: "p2", start: 3.5, end: 6, keep: true, text: "So the first thing is costs." },
+    { id: "p3", start: 6.5, end: 8, keep: true, text: "And prices." }
+  ] };
+  it("are the first phrase the record's own cuts leave, on the main video and on a Reel", () => {
+    const record = { main: { cuts: [{ id: "c1", keep: false, from: 1, to: 3 }] }, reels: [{ n: 2, from: 3.5, to: 8, cuts: [{ id: "c1", keep: false, from: 3.5, to: 6 }] }] };
+    assert.equal(expectedWords({ key: "main" }, record, plan), "So the first thing is costs.");
+    assert.equal(expectedWords({ key: "reel 2", reel: 2 }, record, plan), "And prices.");
+  });
+});
 
 describe("finish, the detached part", () => {
   it("finishes the episode: final/ holds each video, its transcripts, the Story parts, the exports and the hand-off", async () => {

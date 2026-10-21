@@ -27,11 +27,11 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, recordFile } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
-import { cloneIn, isWhole, readThrough, replaceIn, textWriter } from "./dropbox.js";
+import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText } from "./reels.js";
@@ -39,7 +39,16 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, lastRevision } from "./finish.js";
+import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
+import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
+import { pictureNameFault, pictureSize } from "./pictures.js";
+import { spellingFault, withSpelling, respelledPart, respelledHandoff } from "./spelling.js";
+import { handoffText, handoffFault } from "./handoff.js";
+import { presetOf } from "./layers.js";
+import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
+import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
+import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList } from "./unedited.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
@@ -90,7 +99,30 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         hand the episode over to the other Mac: copy this Mac's Shares and exports of it
                                         into its folder, and let it go. When this Mac pushed a part last, it asks first
                                         whether it was changed in Final Cut since: --no-hand-edits says it was not,
-                                        --hand-edits-stay that the changes stay in this Mac's library`;
+                                        --hand-edits-stay that the changes stay in this Mac's library
+  node edit.js captions "<episode>" reel <n> on|off
+                                        a Reel's running captions, in its caption style; its title on screen stays
+  node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]
+                                        the episode's spellings, which every timeline's captions take; after a finish,
+                                        the final transcripts too, and the hand-off is made again
+  node edit.js logo "<episode>" on|off [--picture "<name>"]
+                                        the logo on the main video, top right; its picture is named once, from the
+                                        Pictures folder
+  node edit.js text "<episode>" add lower-third [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>]
+                     --line "<name>" [--line "<role>"] [--no-hand-edits]
+                                        a name over a role, at a time on the timeline or the words said there; "drop
+                                        <id>" takes one off, and with neither, the list
+  node edit.js graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>")
+                     [--for <seconds>] [--place full|corner|lower] [--no-hand-edits]
+                                        a picture from the Pictures folder over the timeline; "drop <id>" takes one off,
+                                        "ideas" lists Claude's, and with neither, the list
+  node edit.js preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]
+                                        the timeline's job, caption style and look; with none, what it has and what
+                                        there is
+  node edit.js cut "<episode>" remove [main | reel <n>] (--words "<words>" | --at <time> --to <time>) [--no-hand-edits]
+  node edit.js cut "<episode>" keep [main | reel <n>] (--words "<words>" | --at <time>) [--no-hand-edits]
+                                        take whole phrases out, at a pause, as read on the timeline; or keep what was
+                                        cut, by its words or at the join nearest a time on the timeline`;
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -137,14 +169,26 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
-    fits or more than one does. An episode with a conflicted copy, whose record cannot be read, is found by its folder. */
+    fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
+    renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
+    whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
+    every command but `resolve` refuses it. */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
   const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
+  // The records a name or an id is matched against, and only that: for a conflicted episode, the one resolve would read and
+  // the records' conflicted copies, as they are, which may not be whole.
+  const copiesOf = (e) => conflictedCopies(e.folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(e.folder, c)));
+  const records = new Map(all.map((e) => {
+    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [readEpisode(e.folder, { pastCopies: true }).record, ...copiesOf(e)] : [];
+    return [e, read.filter((r) => r !== null && typeof r === "object" && !Array.isArray(r))];
+  }));
+  const known = (e) => records.get(e);
+  const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
-  const byId = all.filter((e) => e.read.record && (e.read.record.id === said || e.read.record.id.slice(-6) === said));
-  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || (e.read.record && plainly(e.read.record.name && e.read.record.name.text).includes(w))));
+  const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
+  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
   if (fits.length === 1) return fits[0];
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => e.name))}. Say which.` };
@@ -345,6 +389,40 @@ function offlineStep(ctx, found) {
   }
 }
 
+/** Her yes to taking an episode over from another Mac, kept in this Mac's folder for the episode: the claim she said it of,
+    { by, since }. A take-over keeps it; a plain open that refuses, which has her asked again, lets it go, since she may say no
+    this time. "How far is it?" says to take it over again only while it is kept (nextOf). */
+const yesFile = (home, folder) => join(episodeWork(home, folder), "take-over.yes.json");
+
+/** Keep her yes to taking over the claim `held`. When it cannot be kept, "how far is it?" says to open the episode, and she is
+    asked again, which is the safe way to go wrong. */
+function keepYes(ctx, folder, held) {
+  try {
+    mkdirSync(episodeWork(ctx.home, folder), { recursive: true });
+    writeFileSync(yesFile(ctx.home, folder), JSON.stringify({ by: held.by, since: held.since }) + "\n");
+  } catch (e) {
+    // She is asked again instead.
+  }
+}
+
+/** Let her yes go: she is being asked again. */
+function forgetYes(ctx, folder) {
+  try {
+    rmSync(yesFile(ctx.home, folder), { force: true });
+  } catch (e) {
+    // It stays, then. The skill still asks her again in any later conversation.
+  }
+}
+
+/** Her yes, { by, since }, or null when none is kept or it cannot be read. */
+function yesOf(ctx, folder) {
+  try {
+    return JSON.parse(readFileSync(yesFile(ctx.home, folder), "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
 const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(join(found.folder, rel)));
 
@@ -399,12 +477,18 @@ function withoutOwnAnswers(record, machine) {
 /** `open "<episode>" [--take-over]`: check its files against its record, and that each is whole on this Mac, claim it for this
     Mac, and show what is decided for it. In order:
     - a change Dropbox undid is said, and the record as it is now taken as this Mac's;
+    - another Mac's claim refuses it at once, unless it is taken over (`--take-over`): nothing is looked at or brought over
+      first, since on the Mac that is not editing an episode its files are online-only, and bringing them, raw video and all,
+      would be for nothing until it is taken over. The refusal lets go of any yes she gave before to taking it over, since she
+      is asked again; a take-over keeps her yes (keepYes);
     - files the other Mac handed over that are still on their way: a detached run brings them over (`bring`), and nothing is
-      claimed until they are here;
-    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over, as above;
-    - the claim: another Mac's refuses it, unless it is taken over (`--take-over`). Otherwise the record is written with
-      this Mac editing it, and after CLAIM_WAIT_MS it is read again: when the other Mac claimed it meanwhile, or both Macs
-      wrote the same record and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
+      claimed until they are here (not on a take-over, which goes by the record's own list);
+    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over, as above, and on a
+      take-over what it says next is to take it over again, so that she is asked only once; so does the bring's result, but
+      only when every file came, and only while the claim she said to take over stands and her yes is kept (nextOf);
+    - the claim: the record is written with this Mac editing it, and after CLAIM_WAIT_MS it is read again: when Dropbox took
+      the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
+      and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim.
     At the first open on this Mac it says how to keep the episode on this Mac. */
 export async function open(ctx, rest) {
@@ -420,9 +504,19 @@ export async function open(ctx, rest) {
     acceptRev(ctx.home, record.id, record.rev);
   }
   const name = record.name.text;
+  // Who has it is said before any file is looked at: the files of an episode another Mac has are not whole here, and a Mac
+  // that handed it over and opened it again still has its `released` list in the record, which is not still arriving.
+  const held = heldElsewhere(record, ctx.machine);
+  if (held && !flags["take-over"]) {
+    // She is asked again whether to take it over, and may say no this time: a yes she gave before counts no more.
+    forgetYes(ctx, found.name);
+    say(`${held.by} has ${name} open, since ${shownAt(held.since)}. Say "take it over" to open it here; anything not handed over stays on ${held.by}.`);
+    return 1;
+  }
+  if (held) keepYes(ctx, found.name, held);
   // The files the other Mac handed over are in the record's list too, so they are waited for before the list is checked. A
-  // take-over does not wait: it goes by the record's own list.
-  const arriving = flags["take-over"] ? [] : stillArriving(ctx, found, record);
+  // take-over does not wait: it goes by the record's own list. A take-over of a record nobody else has open is a plain open.
+  const arriving = held ? [] : stillArriving(ctx, found, record);
   if (arriving.length) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: arriving });
     say(`Still arriving from ${record.released.by}: ${arriving.length} file${arriving.length === 1 ? "" : "s"}. Dropbox is bringing them over; say "open ${name}" again when it is done.`);
@@ -435,18 +529,16 @@ export async function open(ctx, rest) {
     say(`It is not opened. Say "what's waiting?" to see the episodes.`);
     return 1;
   }
+  // Past the refusal, another Mac's claim means this is a take-over. What is said next is then to take it over again, by this
+  // open and by the bring it starts: a plain open would refuse, and she would be asked a second time.
+  const sayNext = held ? `Say "take it over" again` : `Say "open ${name}" again`;
   const coming = notHere(ctx, found, record);
   if (coming.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name });
-    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. Say "open ${name}" again when it is done; "how far is it?" shows how far it has got.`);
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: held ? ["--take-over"] : [] });
+    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. ${sayNext} when it is done; "how far is it?" shows how far it has got.`);
     return 0;
   }
   if (!record.editing || record.editing.by !== ctx.machine) {
-    const held = heldElsewhere(record, ctx.machine);
-    if (held && !flags["take-over"]) {
-      say(`${held.by} has ${name} open, since ${shownAt(held.since)}. Say "take it over" to open it here; anything not handed over stays on ${held.by}.`);
-      return 1;
-    }
     const took = held ? `Taken over from ${held.by}, who had it since ${shownAt(held.since)}.` : "";
     if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now())), { takeOver: Boolean(held) }), took)) !== 0) return 1;
     await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
@@ -455,9 +547,21 @@ export async function open(ctx, rest) {
       say(`${found.name}: ${again.why}.`);
       return 1;
     }
-    if (!again.record.editing || again.record.editing.by !== ctx.machine) {
-      const theirs = again.record.editing ? again.record.editing.by : "The other Mac";
-      say(`${theirs} opened ${name} at the same time, and it is theirs. Say "take it over" if they are done with it.`);
+    // The record read again is older than the claim this Mac wrote, or has nobody editing it: Dropbox took the claim away.
+    // That is said, not that the other Mac opened it: a claim of theirs in a record older than this Mac's is the one this Mac
+    // took over, not a new one. The record as it is now is taken as this Mac's, so the next open goes through. What is said
+    // next goes by that record: to take it over again only while it still has the claim she said to take over, and otherwise
+    // to open it, which waits for anything handed over meanwhile, or refuses a new claim, and she is asked.
+    const undid = undone(again.record, ctx.home);
+    if (undid || !again.record.editing) {
+      const still = heldElsewhere(again.record, ctx.machine);
+      const same = held && still && still.by === held.by && still.since === held.since;
+      say(`Dropbox undid this Mac's claim on ${name}. ${same ? `Say "take it over" again` : `Say "open ${name}" again`}.`);
+      if (undid) acceptRev(ctx.home, again.record.id, again.record.rev);
+      return 1;
+    }
+    if (again.record.editing.by !== ctx.machine) {
+      say(`${again.record.editing.by} opened ${name} at the same time, and it is theirs. Say "take it over" if they are done with it.`);
       return 1;
     }
     record = again.record;
@@ -538,7 +642,7 @@ const ruleOpts = (ctx) => ({ ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}
       written on this Mac's own disk, with this Mac's paths, its library for the episode, copy assets 0 and suppress warnings
       1, and handed to Final Cut.
     Resolves 0 when Final Cut was asked to open it, and 1 when it refused, having said why. */
-export async function pushPart(ctx, found, { part, xml, noHandEdits = false, handEdits = false, withoutOther = false }) {
+export async function pushPart(ctx, found, { part, xml, told = [], noHandEdits = false, handEdits = false, withoutOther = false }) {
   const { say } = ctx;
   const { record } = found;
   const held = claimHeld(ctx, record);
@@ -562,41 +666,10 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     for (const problem of problems) say(`  ${problem}`);
     return 1;
   }
+  const guard = guardOf(ctx, found, part, { noHandEdits, handEdits, withoutOther });
+  if (guard.why) return refuse(ctx, guard.why);
+  const { last, answer } = guard;
   const pushed = Array.isArray(target.pushed) ? target.pushed : [];
-  // The version is one more than any the record lists and any this Mac has handed Final Cut, whose copies are kept in
-  // pushed/: a push whose record Dropbox took away has used up its version, and its project's name is never handed over twice.
-  const kind = part === "main" ? "main" : `reel-${part.reel}`;
-  let handed = [];
-  try {
-    handed = readdirSync(pushedFolder(ctx.home, found.name)).map((n) => new RegExp(`^${kind}\\.v(\\d+)\\.`).exec(n)).filter(Boolean).map((m) => Number(m[1]));
-  } catch (e) {
-    // Nothing has been handed to Final Cut on this Mac yet.
-  }
-  const last = Math.max(0, ...pushed.map((p) => p.v), ...handed);
-  // The newest push, when another Mac made it: what was done to it there is in that Mac's library, and only that Mac's answer,
-  // carried in the record when it handed the episode over, says whether it was changed (spec section 4).
-  const top = pushed.reduce((best, p) => (!best || p.v > best.v ? p : best), null);
-  const other = top && top.v === last && top.on !== ctx.machine ? top.on : "";
-  let answer = last ? `no hand edits since v${last}` : null;
-  // A yes to the guard always stops the push, whatever else is said with it.
-  if (last && handEdits) {
-    say(`Your changes stay in v${last} in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v${last}.`);
-    return 1;
-  }
-  if (other) {
-    const key = part === "main" ? "main" : `reel ${part.reel}`;
-    const named = part === "main" ? "the main video" : `reel ${part.reel}`;
-    const carried = record.released && record.released.answers && record.released.answers[key];
-    const said = carried && carried.v === last ? carried.said : "";
-    // Her own "no changes" is about her own Final Cut, and never lifts this.
-    if (said === "no changes") answer = `${other} said no changes since v${last}`;
-    else if (withoutOther) answer = `without ${other}'s changes since v${last}`;
-    else if (said) return refuse(ctx, `The changes to v${last} of ${named} stay on ${other}, in its Final Cut library: ${other} said so when it handed this over. Finish that part on ${other}, or start again from v${last} without them (say "go ahead without ${other}'s changes").`);
-    else return refuse(ctx, `v${last} of ${named} was shown on ${other}, and ${other} has not said whether it was changed there. Ask whoever used it on ${other}. If it was not changed, or to start again from v${last} without those changes, say "go ahead without ${other}'s changes".`);
-  } else if (last && !noHandEdits) {
-    say(`Did you change v${last} of ${record.name.text} in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.`);
-    return 1;
-  }
   const v = last + 1;
   const project = projectName({ name: record.name.text, part, v, id: record.id });
   const file = timelineFile({ part, v, machine: ctx.machine });
@@ -621,7 +694,8 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     // A timeline of this Mac's of this version that the record does not list was left by a push whose record was never
     // written: it is no one's, and a new one is put in its place. One the record lists is never written over.
     const entry = textWriter({ work, ...opts })(kept, stored, { replace: !(file in record.files) && existsSync(kept) });
-    const push = { v, at: localStamp(new Date(ctx.now())), on: ctx.machine, file, project, ...(answer ? { answer } : {}) };
+    // What the session had asked for, so that a finish can tell when more was asked for since this version (askedOf).
+    const push = { v, at: localStamp(new Date(ctx.now())), on: ctx.machine, file, project, asked: askedOf(record, part), ...(answer ? { answer } : {}) };
     const next = part === "main"
       ? { ...record, main: { ...record.main, pushed: [...pushed, push] } }
       : { ...record, reels: record.reels.map((reel) => (reel === target ? { ...reel, pushed: [...pushed, push] } : reel)) };
@@ -638,6 +712,8 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
     writeFileSync(copy, withImportOptions(local.xml, { library: libraryFor(ctx.home, found.name) }));
     ctx.openApp("Final Cut Pro", copy);
     say(`Shown in Final Cut as "${project}", in the library ${found.name}.fcpbundle in BRIMM Video Work.`);
+    // How the timeline was built, said once it is shown (phase 4): what stood in, and what a rule changed.
+    for (const line of told) say(line);
     offlineStep(ctx, found);
     return 0;
   } catch (e) {
@@ -646,6 +722,47 @@ export async function pushPart(ctx, found, { part, xml, noHandEdits = false, han
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** The guard, for a part shown in Final Cut before (spec section 4, "the guard"): asked before it is shown again, and before
+    a command reads a time or quoted words on it (phase 4). { last, answer }: the version it was last shown as on either
+    Mac (0 when never), and what goes in the record of a push; or { why } it cannot go on. A yes to the guard (`handEdits`)
+    always stops it. When the other Mac showed it last, only that Mac's answer, carried in the record when it handed the
+    episode over, says whether it was changed there; `withoutOther` goes on from that version as brimm-video made it.
+    `doing` is what "no changes" lets happen, in the question asked. */
+function guardOf(ctx, found, part, { noHandEdits = false, handEdits = false, withoutOther = false } = {}, doing = "to show it again") {
+  const { record } = found;
+  const target = part === "main" ? record.main : record.reels.find((reel) => reel.n === part.reel);
+  const pushed = Array.isArray(target.pushed) ? target.pushed : [];
+  // The version is one more than any the record lists and any this Mac has handed Final Cut, whose copies are kept in
+  // pushed/: a push whose record Dropbox took away has used up its version, and its project's name is never handed over twice.
+  const kind = part === "main" ? "main" : `reel-${part.reel}`;
+  let handed = [];
+  try {
+    handed = readdirSync(pushedFolder(ctx.home, found.name)).map((n) => new RegExp(`^${kind}\\.v(\\d+)\\.`).exec(n)).filter(Boolean).map((m) => Number(m[1]));
+  } catch (e) {
+    // Nothing has been handed to Final Cut on this Mac yet.
+  }
+  const last = Math.max(0, ...pushed.map((p) => p.v), ...handed);
+  // The newest push, when another Mac made it: what was done to it there is in that Mac's library, and only that Mac's answer,
+  // carried in the record when it handed the episode over, says whether it was changed (spec section 4).
+  const top = pushed.reduce((best, p) => (!best || p.v > best.v ? p : best), null);
+  const other = top && top.v === last && top.on !== ctx.machine ? top.on : "";
+  // A yes to the guard always stops it, whatever else is said with it.
+  if (last && handEdits) return { why: `Your changes stay in v${last} in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v${last}.` };
+  if (other) {
+    const key = part === "main" ? "main" : `reel ${part.reel}`;
+    const named = part === "main" ? "the main video" : `reel ${part.reel}`;
+    const carried = record.released && record.released.answers && record.released.answers[key];
+    const said = carried && carried.v === last ? carried.said : "";
+    // Her own "no changes" is about her own Final Cut, and never lifts this.
+    if (said === "no changes") return { last, answer: `${other} said no changes since v${last}` };
+    if (withoutOther) return { last, answer: `without ${other}'s changes since v${last}` };
+    if (said) return { why: `The changes to v${last} of ${named} stay on ${other}, in its Final Cut library: ${other} said so when it handed this over. Finish that part on ${other}, or start again from v${last} without them (say "go ahead without ${other}'s changes").` };
+    return { why: `v${last} of ${named} was shown on ${other}, and ${other} has not said whether it was changed there. Ask whoever used it on ${other}. If it was not changed, or to start again from v${last} without those changes, say "go ahead without ${other}'s changes".` };
+  }
+  if (last && !noHandEdits) return { why: `Did you change v${last} of ${record.name.text} in Final Cut since it was shown? Say "no changes" ${doing}. If you did change it, say so.` };
+  return { last, answer: last ? `no hand edits since v${last}` : null };
 }
 
 /** `push "<episode>" [main | reel <n>] [--no-hand-edits | --hand-edits]`: show the main timeline in Final Cut Pro as a new
@@ -666,19 +783,26 @@ export async function push(ctx, rest) {
   if (!got.found) return got.code;
   const { found, record } = got;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
-  const source = join(found.folder, timelineFile({ part: "main", v: 0 }));
-  if (!ctx.isWhole(source)) {
-    ctx.say(`Dropbox is still bringing edit/main.v0.fcpxml over to this Mac. Say "open ${record.name.text}" first.`);
-    return 1;
+  // The timeline as the session leaves it: the import's own until something is laid over it (phase 4).
+  const made = await timelineFor({ ...found, record }, "main", ctx);
+  if (made.coming) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: made.bring });
+    return refuse(ctx, `Dropbox is still bringing ${made.coming} over to this Mac. Say "open ${record.name.text}" first.`);
   }
-  return pushPart(ctx, { ...found, record }, { part: "main", xml: readFileSync(source, "utf8"), noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") });
+  if (made.why) return refuse(ctx, made.why);
+  return pushPart(ctx, { ...found, record }, { part: "main", xml: made.xml, told: made.told, noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") });
 }
 
-/** `bring --now "<episode folder>"`, the detached run `open` starts: each file of the episode that is not whole on this Mac
-    is read to its end, so that Dropbox brings it over, and the result says which are whole now. */
+/** `bring --now "<episode folder>" [--take-over]`, the detached run `open` starts: each file of the episode that is not whole
+    on this Mac is read to its end, so that Dropbox brings it over, and the result says which are whole now, and what to say
+    next: to open it, or, when a file did not come, why, and to open it to try again. The bring of a take-over (`--take-over`)
+    that brought every file also keeps whose claim it was for, and that what to say next, while that claim stands and her yes
+    to it is kept, is to take it over again: `status` says so only then (see nextOf). */
 export async function bring(ctx, rest) {
   // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
-  const [now, folder, ...only] = rest;
+  const [now, folder, ...after] = rest;
+  const takeOver = after.includes("--take-over");
+  const only = after.filter((word) => word !== "--take-over");
   if (now !== "--now" || !folder) {
     ctx.say(HELP);
     return 2;
@@ -690,6 +814,8 @@ export async function bring(ctx, rest) {
   }
   const { record } = found.read;
   const name = record.name.text;
+  // The claim she said to take over, as the record has it when the bring starts: none when nobody else has it by then.
+  const taking = takeOver ? heldElsewhere(record, ctx.machine) : null;
   const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
     const coming = wanted();
@@ -705,7 +831,12 @@ export async function bring(ctx, rest) {
     const still = wanted();
     const made = coming.filter((rel) => !still.includes(rel));
     for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
-    return { ok: !failed.length, made, failed, next: failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".` };
+    const next = failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".`;
+    // A bring that failed says why, and to open it, take-over or not: it would most likely fail again the same way (a full
+    // disk, Dropbox paused, the Mac offline), and a take-over is run again without asking her only to finish what she said
+    // yes to, never to try again what failed.
+    if (!taking || failed.length) return { ok: !failed.length, made, failed, next };
+    return { ok: true, made, failed, next, takeOver: { by: taking.by, since: taking.since, next: `Every file of ${name} is here. Say "take it over" again.` } };
   });
   if (result.taking) {
     ctx.say(`Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
@@ -718,9 +849,23 @@ export async function bring(ctx, rest) {
   return result.ok ? 0 : 1;
 }
 
+/** What a detached run's result `r`, for the episode in `folder`, says to say next. The bring of a take-over says to take it
+    over again only while the claim she said to take over is still the record's, the same Mac since the same time, and her
+    yes to it is still kept (yesOf): the skill then takes it over without asking her again. Once this Mac has it, or that Mac
+    has let it go or opened it again since, or she has been asked again since, it says to open it, as any bring does: an open
+    goes through, or, when another Mac has it, refuses, and she is asked. A record that cannot be read says to open it too. */
+function nextOf(ctx, folder, r) {
+  if (!r.takeOver) return r.next;
+  const { record } = readEpisode(join(ctx.episodes, folder));
+  const held = record && heldElsewhere(record, ctx.machine);
+  const yes = yesOf(ctx, folder);
+  const same = (claim) => Boolean(claim) && claim.by === r.takeOver.by && claim.since === r.takeOver.since;
+  return same(held) && same(yes) ? r.takeOver.next : r.next;
+}
+
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
-    Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left. With words,
-    only what they fit. */
+    Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
+    say next (nextOf). With words, only what they fit. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -765,7 +910,8 @@ export async function status(ctx, rest) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
       if (!r || r.command === command) continue;
       const done = r.failed.length ? ` Not done: ${r.failed.join(" ").replace(/([^.])$/, "$1.")}` : "";
-      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${r.next ? ` ${r.next}` : ""}`);
+      const next = nextOf(ctx, folder, r);
+      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${next ? ` ${next}` : ""}`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -1058,14 +1204,14 @@ export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits =
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
-  const made = await reelTimeline(found, reel, ctx);
+  const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
     // As open does: a detached run reads the Reel's own files to their end, so that Dropbox brings them over.
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: made.bring || (reel.files || []).filter((f) => f in found.record.files) });
     return refuse(ctx, `Dropbox is bringing ${made.coming} over to this Mac. Say "show reel ${n} in Final Cut" again when it is done.`);
   }
   if (made.why) return refuse(ctx, made.why);
-  return pushPart(ctx, found, { part: { reel: n }, xml: made.xml, noHandEdits, handEdits, withoutOther });
+  return pushPart(ctx, found, { part: { reel: n }, xml: made.xml, told: made.told, noHandEdits, handEdits, withoutOther });
 }
 
 /** The files of one folder, each {name, bytes, mtimeMs}: none when the folder is not there. An export bundle is a folder,
@@ -1116,6 +1262,14 @@ export async function finishEpisode(ctx, found, answers = {}) {
       return null;
     }
   })();
+  // A part whose Share is of a version shown before the session asked for more would finish without it: it is shown again
+  // first. A version pushed before pushes kept what was asked for cannot be told, and is taken as it is.
+  for (const part of looked.parts.filter((p) => p.video)) {
+    const timeline = part.reel ? { reel: part.reel } : "main";
+    const target = part.reel ? (record.reels || []).find((r) => r.n === part.reel) : record.main;
+    const shown = ((target && target.pushed) || []).find((p) => p.project === part.video.name.replace(/\.[^.]*$/, ""));
+    if (shown && shown.asked && shown.asked !== askedOf(record, timeline)) looked.asks.push(`${capital(part.label)} has changes asked for since v${shown.v} was shown in Final Cut: say "show it in Final Cut", Share it again, and then finish.`);
+  }
   for (const part of looked.parts.filter((p) => p.reel)) {
     const reel = (record.reels || []).find((r) => r.n === part.reel);
     if (reel && String(reel.title || "").trim()) continue;
@@ -1251,10 +1405,12 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
       with an answer: `answer` is "no changes" or "changes stay";
     - finish's rule, here: each such part's newest whole Share in this Mac's From Final Cut must have an export no older
       than it (or none, when nothing changed), since on the other Mac every copied export looks newer than its Share;
-    - each Share whole (the same size across a few seconds) and each export of the episode's projects is copied into
-      edit/from-final-cut/ by the rule, the Shares first; a Share still being written is left out and named;
+    - each Share whole (the same size across a few seconds) and the newest export of each of those parts' projects is
+      copied into edit/from-final-cut/ by the rule, the Shares first; a Share still being written is left out and named.
+      Nothing of a part the other Mac pushed last is copied: it is not this Mac's to check, nor to hand over;
     - the record is let go, with the files it lists now (its own and the copies) and the answers, each earlier answer
-      carried on while its version is still the part's newest.
+      carried on while its version is still the part's newest. A copy made here at an earlier hand-over that Dropbox has
+      taken away, and that this release has not made again, is listed no more, and named.
     Resolves 0 when it was handed over, and 1 when it refused, having said why. */
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
@@ -1267,23 +1423,18 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
-  // The other Mac waits for the files the record lists: one missing here would be waited for there for ever. A copy of
-  // this Mac's own Shares and exports, which this release makes again from From Final Cut, is left out of that check
-  // (the P1 check, T2).
-  const remade = new Set(listing(fromFinalCutFolder(ctx.home)).filter((f) => kindOf(f.name)).flatMap((f) => {
-    const from = join(fromFinalCutFolder(ctx.home), f.name);
-    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => `edit/from-final-cut/${f.name}/${rel}`) : [`edit/from-final-cut/${f.name}`];
-  }));
-  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel))) });
-  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
-  if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
-  // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes.
+  // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes, of the
+  // parts this Mac pushed last alone: those are the ones checked below. A part the other Mac pushed last is not this Mac's to
+  // hand over, and an older Share and export of it copied from here would look newer there than that Mac's own.
   const here = fromFinalCutFolder(ctx.home);
   const projects = new Map(newest.flatMap((p) => {
     const part = p.key === "main" ? record.main : (record.reels || []).find((r) => `reel ${r.n}` === p.key);
     return (part.pushed || []).filter((q) => q.project).map((q) => [q.project.normalize("NFC"), { key: p.key, v: q.v }]);
   }));
-  const ours = listing(here).filter((f) => kindOf(f.name) && projects.has(projectOf(f.name)));
+  // This Mac's Shares and exports of the episode, of every part: a copy of one in edit/from-final-cut/ was made here.
+  const own = listing(here).filter((f) => kindOf(f.name) && projects.has(projectOf(f.name)));
+  const mineKeys = new Set(mine.map((p) => p.key));
+  const ours = own.filter((f) => mineKeys.has(projects.get(projectOf(f.name)).key));
   const videos = ours.filter((f) => kindOf(f.name) === "video");
   // Of one project's exports, the newest alone is checked and copied: an older one copied too would look newest on the other
   // Mac, where a bundle's folder is made new.
@@ -1292,6 +1443,25 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (!was || f.mtimeMs > was.mtimeMs) best.set(projectOf(f.name), f);
     return best;
   }, new Map()).values()];
+  // The other Mac waits for the files the record lists: one missing here would be waited for there for ever. A copy of
+  // this Mac's own Shares and newest exports, which this release makes again from From Final Cut, is left out of that check
+  // (the P1 check, T2). So is a copy made here at an earlier hand-over that Dropbox has taken away: one this release does
+  // not make again, of a part the other Mac pushed last, of an older export, or of a Share still being written, is listed no
+  // more when it is handed over. Kept in the list, it would be waited for on the other Mac for ever, and every check of the
+  // files on either Mac would stop at it (the review of the plan, P1 and P7; PR 21's W15). Any other copy is checked as any
+  // other file.
+  const remade = new Set([...videos, ...exports].flatMap((f) => {
+    const from = join(here, f.name);
+    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => `edit/from-final-cut/${f.name}/${rel}`) : [`edit/from-final-cut/${f.name}`];
+  }));
+  const at = (rel) => join(found.folder, rel);
+  const ownNames = new Set(own.map((f) => f.name));
+  /** The name in From Final Cut that a copy in edit/from-final-cut/ was made from: its Share's, or its export bundle's. */
+  const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
+  const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
+  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
+  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
+  if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
   let notYet = [];
   if (videos.length) {
@@ -1326,7 +1496,6 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     const from = join(here, f.name);
     return statSync(from).isDirectory() ? filesUnder(from).map((rel) => ({ name: f.name, from: join(from, rel), rel: `edit/from-final-cut/${f.name}/${rel}` })) : [{ name: f.name, from, rel: `edit/from-final-cut/${f.name}` }];
   });
-  const at = (rel) => join(found.folder, rel);
   const kept = (c) => {
     const there = ctx.stat(at(c.rel));
     const source = statSync(c.from);
@@ -1363,9 +1532,12 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (part && part.last && a && part.last.v === a.v) answers[key] = a;
   }
   for (const part of mine) answers[part.key] = { v: part.last.v, said: answer === "no changes" ? "no changes" : `changes stay on ${ctx.machine}` };
-  const files = { ...record.files, ...copies };
+  // The copies made here that are still gone, now that this release has made its own, are listed no more (see above).
+  const unlisted = Object.keys(record.files).filter(goneCopy);
+  const files = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
   const later = notYet.length ? ` Not copied yet, still being written: ${listed(notYet)}.` : "";
-  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
+  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
 }
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */
@@ -1459,7 +1631,6 @@ function recordDifferences(a, b) {
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
   const shownIn = (pushed) => (Array.isArray(pushed) && pushed.length ? `shown ${pushed.map((p) => `v${p.v} on ${p.on}`).join(", ")}` : "not shown");
-  const count = (list) => String(Array.isArray(list) ? list.length : 0);
   const reel = (r, n) => {
     const it = (r.reels || []).find((x) => x.n === n);
     return it ? `${it.status}, ${shownIn(it.pushed)}` : "not there";
@@ -1469,19 +1640,30 @@ function recordDifferences(a, b) {
   const sizes = (what, x, y) => [...new Set([...Object.keys(x || {}), ...Object.keys(y || {})])].sort()
     .map((key) => [`${what} ${key}`, key in (x || {}) ? `${x[key]} bytes` : "not listed", key in (y || {}) ? `${y[key]} bytes` : "not listed"]);
   const handed = (r) => (r.released ? `by ${r.released.by || "a Mac it does not name"}` : "not handed over");
-  return [
+  // Every other field, as it is, by where it is in the record: the main video's and each Reel's own (their layers, phase
+  // 4's, among them) and the record's others. A field added later is compared too, so no change of one side's is hidden.
+  const as = (v) => (v === undefined || v === null || (Array.isArray(v) && !v.length) ? "none" : JSON.stringify(v));
+  const fields = (x, y, skip) => [...new Set([...Object.keys(x || {}), ...Object.keys(y || {})])].filter((k) => !skip.includes(k)).sort();
+  const reelOf = (r, n) => (r.reels || []).find((x) => x.n === n);
+  const others = [
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(a[k]), as(b[k])]),
+    ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
+    ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
+  ];
+  const rows = [
     ["Who has it open", who(a), who(b)],
     ["Name", `"${a.name && a.name.text}"`, `"${b.name && b.name.text}"`],
     ["Title", title(a), title(b)],
     ...ns.map((n) => [`Reel ${n}`, reel(a, n), reel(b, n)]),
-    ["Cuts", count(a.main && a.main.cuts), count(b.main && b.main.cuts)],
-    ["Texts", count(a.main && a.main.texts), count(b.main && b.main.texts)],
     ["The main video", shownIn(a.main && a.main.pushed), shownIn(b.main && b.main.pushed)],
     ["Finished", finished(a), finished(b)],
     ["Handed over", handed(a), handed(b)],
+    ...others,
     ...sizes("File", a.files, b.files),
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
+  // Two sides are never said to hold the same unless they do, but for their rev and who wrote them.
+  return rows.length || sameRecord(a, b) ? rows : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
 /** A record file read as it is, or null when it is not there or cannot be read. */
@@ -1495,12 +1677,6 @@ function recordAt(path) {
 
 /** Whether two records hold the same, but for their rev and who wrote them: a record a keep wrote holds its side so. */
 const sameRecord = (a, b) => Boolean(a && b) && JSON.stringify({ ...a, rev: 0, writer: null }) === JSON.stringify({ ...b, rev: 0, writer: null });
-
-/** The Mac a conflicted copy came from, by Dropbox's words in its name ("Sallie's laptop's conflicted copy …"), or "". */
-const macOfCopy = (copy) => {
-  const m = /\(([^()]*(?:\([^()]*\)[^()]*)*)'s conflicted copy/i.exec(basename(copy));
-  return m ? m[1] : "";
-};
 
 /** `resolve "<episode>" [--keep A|B]`: sort out the conflicted copies Dropbox kept in an episode, one at
     a time, the records' first. A is what the episode holds (for a record, the record in force), and B the copy. Without
@@ -1524,7 +1700,8 @@ async function resolveConflict(ctx, rest) {
     ctx.say(HELP);
     return 2;
   }
-  // An episode with a conflicted copy is found by its folder: its record cannot be read until the copy is sorted out.
+  // findEpisode, not episodeFor, which refuses an episode with a conflicted copy: findEpisode finds it by its folder, or by its
+  // own name or id as the newest whole record past the copies gives them, or as a record's conflicted copy gives them.
   const found = findEpisode(ctx, words.join(" "));
   if (found.why) return refuse(ctx, found.why);
   try {
@@ -1567,7 +1744,8 @@ async function resolveIn(ctx, found, keep) {
   let of = conflictedOf(copy);
   // A Case Conflict's copy names its file in another case: the record's own name for it is the one kept.
   if (!isRecord && !(of in record.files)) of = Object.keys(record.files).find((key) => key.toLowerCase() === of.toLowerCase()) || of;
-  const fromMac = macOfCopy(copy);
+  // The Mac the copy came from, by Dropbox's words in its name, or "" when they name none.
+  const fromMac = conflictedBy(copy);
   const here = (rel) => ctx.stat(at(rel));
   // Why neither side can be kept now: "" when one can.
   let blocked = "";
@@ -1884,8 +2062,500 @@ async function ask(ctx, rest) {
   return 0;
 }
 
+/** The timeline a command names after the episode: "main", the default, or "reel <n>", in any case; and the words left. */
+function partFrom(words) {
+  const at = words.findIndex((w, i) => String(w).toLowerCase() === "reel" && /^\d+$/.test(words[i + 1] || ""));
+  if (at !== -1) return { part: { reel: Number(words[at + 1]) }, words: [...words.slice(0, at), ...words.slice(at + 2)] };
+  return { part: "main", words: words.filter((w) => String(w).toLowerCase() !== "main") };
+}
+const partLabel = (part) => (part === "main" ? "the main video" : `Reel ${part.reel}`);
+/** The record with one part's own entry changed. */
+const withPart = (record, part, change) => (part === "main" ? { ...record, main: change(record.main) } : { ...record, reels: record.reels.map((r) => (r.n === part.reel ? change(r) : r)) });
+/** The next id of a layer: its letter and one more than the highest of the part's. */
+const nextId = (items, letter) => `${letter}${1 + Math.max(0, ...(items || []).map((x) => Number(String(x.id).slice(1)) || 0))}`;
+/** Seconds as a person reads a length: "4 seconds", "1.5 seconds". */
+const lengthText = (seconds) => `${Math.round(seconds * 10) / 10} second${seconds === 1 ? "" : "s"}`;
+const SHOW_IT = 'Say "show it in Final Cut" to see it.';
+
+/** What every command on a timeline's layers does first (phase 4): the episode, from its first word, and the timeline it
+    names, a Reel picked. One that `writes` is refused while another Mac has the episode, while a detached run is at work on
+    it (a finish's late check would put its own copies back), on a timeline changed by hand and taken in (phase 5), and on a
+    Reel the import cut as a clip, before Reels had projects of their own, which nothing is laid over. Gives
+    { found, part, target, words } or { code }. */
+function layerStart(ctx, words, { writes = true } = {}) {
+  const [said, ...rest] = words;
+  const got = episodeFor(ctx, said === undefined ? [] : [said], { newerEnds: 1 });
+  if (!got.found) return { code: got.code };
+  const found = { ...got.found, record: got.record };
+  const { part, words: left } = partFrom(rest);
+  // Each command takes its own words first: what is left is not understood, and is never taken for the main video.
+  if (left.length) return { code: refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`) };
+  const target = part === "main" ? got.record.main : (got.record.reels || []).find((r) => r.n === part.reel);
+  if (!target) return { code: refuse(ctx, `There is no Reel ${part.reel}.`) };
+  if (part !== "main" && target.status !== "picked" && target.status !== "finished") return { code: refuse(ctx, `Reel ${part.reel} is not picked. Pick it first.`) };
+  if (!writes) return { found, part, target, words: left };
+  if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running && running !== "bring") return { code: refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`) };
+  if (target.base) return { code: refuse(ctx, "This timeline was changed by hand in Final Cut and taken in. brimm-video does not change a hand-edited timeline yet: make this change by hand in Final Cut.") };
+  if (part !== "main" && piecesOf(found, part, ctx).old) return { code: refuse(ctx, `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so brimm-video cannot change it: make this change by hand in Final Cut.`) };
+  return { found, part, target, words: left };
+}
+
+/** The moment a command is given on a timeline, in seconds of the raw video: { at, for, on } or { code }. With `--at` a time,
+    or `--at-words` quoted words, read on the newest version shown (clock.js), after the guard: a timeline shown before is
+    read only when she says it was not changed in Final Cut since (`--no-hand-edits`). */
+function momentFrom(ctx, found, part, flags, { needed = true } = {}) {
+  const time = flags.at && flags.at[flags.at.length - 1];
+  const quoted = flags["at-words"] && flags["at-words"][flags["at-words"].length - 1];
+  if (!time && !quoted) return needed ? { code: refuse(ctx, "Say when: a time on the timeline (--at 0:03), or the words said there (--at-words \"three numbers\").") } : { none: true };
+  const got = timelineRead(ctx, found, part, flags);
+  if (got.code !== undefined) return got;
+  const { read } = got;
+  const moment = momentOf({ ...(quoted ? { quoted } : { time }), on: read.on, clock: read.clock, ranges: read.pieces, words: read.words });
+  if (moment.why) return { code: refuse(ctx, moment.why) };
+  return { ...moment, on: read.on, clock: read.clock, read };
+}
+
+/** The timeline she names, as she watched it, read for a time or words she gives: { read } (clockFor) or { code }. After the
+    guard: a timeline shown before is read only when she says it was not changed in Final Cut since. */
+function timelineRead(ctx, found, part, flags) {
+  const guard = guardOf(ctx, found, part, { noHandEdits: Boolean(flags["no-hand-edits"]), handEdits: Boolean(flags["hand-edits"]), withoutOther: Boolean(flags["without-other-macs-changes"]) }, "to go on");
+  if (guard.why) return { code: refuse(ctx, guard.why) };
+  const read = clockFor(found, part, ctx);
+  if (read.coming) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: read.bring });
+    return { code: refuse(ctx, `Dropbox is still bringing ${read.coming} over to this Mac. Say it again when it is done.`) };
+  }
+  if (read.why) return { code: refuse(ctx, read.why) };
+  return { read };
+}
+
+/** How long a layer shows: `--for` seconds, else the quoted words' length, else `fallback`. { seconds } or { code }. */
+function lengthFrom(ctx, flags, moment, fallback) {
+  if (!flags.for) return { seconds: moment.for ? Math.max(moment.for, 1) : fallback };
+  const seconds = Number(flags.for[flags.for.length - 1]);
+  if (!(seconds > 0 && seconds <= 600)) return { code: refuse(ctx, "Say how long it shows in seconds, from 1 to 600 (--for 6).") };
+  return { seconds };
+}
+
+/** A picture from her Pictures folder, by its name only, copied into the episode's media/ by the rule (spec section 4):
+    { picture: "media/<name>", size, bytes, copied } or { code }. A link is refused: only a file of her own in the folder
+    is taken. One already in media/ of that name is used when it is the same picture, byte for byte, and refused when it is
+    another: nothing in Dropbox is written over. `copied` says this call put it there, so a command whose record cannot be
+    written takes it out again. */
+function pictureFrom(ctx, found, name) {
+  const fault = pictureNameFault(name);
+  if (fault) return { code: refuse(ctx, fault) };
+  const from = join(studioFolder(ctx.home), "Pictures", name);
+  let seen;
+  try {
+    seen = lstatSync(from);
+  } catch (e) {
+    return { code: refuse(ctx, `There is no picture called "${name}" in the Pictures folder (BRIMM Video Studio, Pictures). Put it there first.`) };
+  }
+  if (!seen.isFile()) return { code: refuse(ctx, `"${name}" in the Pictures folder is not a picture file of its own. Put the picture itself there.`) };
+  const size = pictureSize(readFileSync(from));
+  if (!size) return { code: refuse(ctx, `"${name}" cannot be read as a PNG or a JPEG picture.`) };
+  const picture = `media/${name}`;
+  const to = join(found.folder, picture);
+  if (existsSync(to)) {
+    if (!ctx.isWhole(to)) return { code: refuse(ctx, `Dropbox is still bringing ${picture} over to this Mac. Say it again when it is done.`) };
+    if (!readFileSync(to).equals(readFileSync(from))) return { code: refuse(ctx, `Another picture called "${name}" is in this episode already. Give yours another name in the Pictures folder.`) };
+    return { picture, size, bytes: seen.size, copied: false };
+  }
+  try {
+    mkdirSync(join(found.folder, "media"), { recursive: true });
+    cloneIn(from, to, ruleOpts(ctx));
+  } catch (e) {
+    return { code: refuse(ctx, `"${name}" could not be copied into the episode: ${String(e.message).replace(/\.$/, "")}.`) };
+  }
+  return { picture, size, bytes: seen.size, copied: true };
+}
+
+/** Save the record, and take a picture this command copied into media/ out again when the record cannot be written: the
+    record never leaves a picture in the episode that it does not list. */
+async function saveWithPicture(ctx, found, record, done, got) {
+  const code = await save(ctx, found, record, done);
+  if (code !== 0 && got && got.copied) rmSync(join(found.folder, got.picture), { force: true });
+  return code;
+}
+
+/** How long past a finish's late check final/ is still taken as its: the check itself takes a while, and two Macs' clocks
+    may differ a little. */
+const LATE_MARGIN_MS = 2 * 60 * 1000;
+/** A moment `ms` after a stamp of the record's, as the clock of the Mac that wrote it reads it, to the minute: "2026-10-20
+    15:17". */
+function shownAfter(stamp, ms) {
+  const m = /([+-])(\d{2}):(\d{2})$/.exec(String(stamp));
+  const offset = m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60000 : 0;
+  return new Date(Date.parse(stamp) + ms + offset).toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** The record with its spellings, `spellings`; and after a finish (spec section 4, "spell applies to every timeline and to
+    the final transcripts") the final transcripts with each spelling they do not hold yet, and the hand-off made again as its
+    next revision, each file put in by the rule, and only when its words change. Each finished part's transcripts hold the
+    spellings that changed them: its `spellings`, or, for a part no spelling has reached since a finish made it, the record's
+    own. Only the others are applied to it, so none is applied twice, and a spelling taken back or changed leaves the part as
+    it is, which is said: a finish again makes a part's transcripts again only once it is Shared again. Before reading them
+    it checks they are here, whole (her folder may be online-only after a hand-off): if not, it starts bringing them over and
+    stops. (`spell` has refused already while a finish runs, whose late check would put its own copies back.) When the record
+    cannot be written, each final file is put back as it was, each on its own; one that cannot be is named, and she is told
+    the episode needs Jason. Resolves the save's code. */
+async function saveSpellings(ctx, found, spellings, done) {
+  const record = { ...found.record, spellings };
+  const finished = record.finished;
+  if (!finished) return save(ctx, found, record, done);
+  const meantOf = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
+  const parts = Object.entries(finished.parts || {}).map(([key, part]) => {
+    const held = part.spellings || found.record.spellings || [];
+    return { key, part, held, stem: `final/${basename(part.file, extname(part.file))}`, toApply: spellings.filter(([h]) => meantOf(held, h) === undefined) };
+  });
+  // Every part's own list is kept from now on, so a part a finish reuses keeps it, and one it makes again starts afresh.
+  const withHeld = (held) => ({ ...finished, parts: Object.fromEntries(parts.map((p) => [p.key, { ...p.part, spellings: held[p.key] || p.held }])) });
+  const kept = [...new Set(parts.flatMap((p) => p.held.filter(([h, m]) => meantOf(spellings, h) !== m).map(([h, m]) => `"${h}" as "${m}"`)))];
+  const keptNote = kept.length ? ` The final transcripts keep ${listed(kept)} until each part is shown in Final Cut, Shared and finished again.` : "";
+  if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${keptNote}`);
+  const finals = [...parts.flatMap((p) => [`${p.stem}.srt`, `${p.stem}.transcript.txt`, ...(p.part.words ? [p.part.words] : [])]), finished.handoff];
+  const gone = finals.find((rel) => !existsSync(join(found.folder, rel)));
+  if (gone) return refuse(ctx, `${gone} is not in the episode's folder, so the final transcripts cannot be spelled again. Nothing was changed. Say finish again.`);
+  const coming = finals.filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+  if (coming.length) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: coming });
+    return refuse(ctx, "Dropbox is bringing the final transcripts over to this Mac. Say it again when it is done. Nothing was changed.");
+  }
+  const work = join(runsFolder(ctx.home), `spell-${process.pid}-${ctx.now()}`);
+  mkdirSync(work, { recursive: true });
+  const put = textWriter({ work, ...ruleOpts(ctx) });
+  const before = [];
+  /** Each final file put back as it was, each on its own: the ones that could not be. */
+  const putBack = () => before.filter(([rel, text]) => {
+    try {
+      put(join(found.folder, rel), text, { replace: true });
+      return false;
+    } catch (e) {
+      return true;
+    }
+  }).map(([rel]) => rel);
+  try {
+    const srts = {};
+    const writes = [];
+    const held = {};
+    for (const p of parts) {
+      const was = { srt: readFileSync(join(found.folder, `${p.stem}.srt`), "utf8"), words: p.part.words ? readFileSync(join(found.folder, p.part.words), "utf8") : null };
+      const sameWords = (made) => !made.words || JSON.stringify(JSON.parse(made.words).words) === JSON.stringify(JSON.parse(was.words).words);
+      // A spelling is held by a part only once it has changed it: one whose word the part does not have is not.
+      const changing = p.toApply.filter((pair) => {
+        const made = respelledPart(was, [pair]);
+        return made.srt !== was.srt || !sameWords(made);
+      });
+      held[p.key] = [...p.held, ...changing];
+      const made = respelledPart(was, changing);
+      srts[p.key] = made.srt;
+      if (made.srt !== was.srt) writes.push([`${p.stem}.srt`, made.srt], [`${p.stem}.transcript.txt`, made.txt]);
+      if (!sameWords(made)) writes.push([p.part.words, made.words]);
+    }
+    const toApply = [...new Map(parts.flatMap((p) => p.toApply).map(([h, m]) => [h, [h, m]])).values()];
+    if (!writes.length) return save(ctx, found, { ...record, finished: withHeld(held) }, `${done} The final transcripts do not have ${listed(toApply.map(([h]) => `"${h}"`))}, so they are as they were.${keptNote}`);
+    // A revision is never used twice, even one a finish left in final/ without writing its record (finish.js lastRevision).
+    const revision = Math.max(finished.revision, lastRevision(join(found.folder, "final"), record.id)) + 1;
+    const at = localStamp(new Date(ctx.now()));
+    const handoff = respelledHandoff(JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8")), { record, srts, revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit });
+    const fault = handoffFault(handoff);
+    if (fault) return refuse(ctx, `The hand-off could not be made again (${fault.replace(/\.$/, "")}). Nothing was changed.`);
+    writes.push([finished.handoff, handoffText(handoff)]);
+    // Nothing is put into final/ that the record could not then take: a change Dropbox took away is said first, as save says
+    // it, and a finish on the other Mac whose late check of final/ is still to come would put its own copies back over these.
+    const gone = undone(found.record, ctx.home);
+    if (gone) {
+      ctx.say(`${gone} Nothing was written.`);
+      acceptRev(ctx.home, found.record.id, found.record.rev);
+      return 1;
+    }
+    const checked = finished.on !== ctx.machine ? Date.parse(finished.at) + LATE_CHECK_MS + LATE_MARGIN_MS : 0;
+    if (checked > ctx.now()) return refuse(ctx, `The finish on ${finished.on} is still checking its copies in final/, until ${shownAfter(finished.at, LATE_CHECK_MS + LATE_MARGIN_MS)}. Say it again after that. Nothing was changed.`);
+    const files = {};
+    for (const [rel, text] of writes) {
+      before.push([rel, readFileSync(join(found.folder, rel), "utf8")]);
+      files[rel] = put(join(found.folder, rel), text, { replace: true }).bytes;
+    }
+    // A finished part may have captions drawn into its picture (whether it has is not known here), which keep the old spelling
+    // until it is finished again: a full episode's main video has none.
+    const drawn = parts.filter((p) => p.key !== "main" || presetOf(record, "main").job !== "full-episode").map((p) => (p.key === "main" ? "the main video" : capital(p.key)));
+    const still = drawn.length ? ` If ${listed(drawn)} ${drawn.length === 1 ? "shows" : "show"} captions on screen, they keep the old spelling until ${drawn.length === 1 ? "it is" : "each is"} shown in Final Cut, Shared and finished again.` : "";
+    const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}`);
+    if (code !== 0) {
+      const lost = putBack();
+      if (lost.length) ctx.say(`${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`);
+    }
+    return code;
+  } catch (e) {
+    const lost = putBack();
+    return refuse(ctx, `The final transcripts could not be spelled again (${e.code || "a file could not be read or put in"}). ${lost.length ? `${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.` : "Nothing was changed."}`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** `spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]`: the episode's own spellings, which every
+    timeline's captions and the final transcripts take. */
+async function spell(ctx, rest) {
+  const [said, verb, heard, meant] = rest;
+  const got = episodeFor(ctx, said === undefined ? [] : [said], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const found = { ...got.found, record: got.record };
+  const spellings = got.record.spellings || [];
+  if (verb === undefined) {
+    ctx.say(spellings.length ? `The spellings: ${spellings.map(([h, m]) => `"${h}" as "${m}"`).join(", ")}.` : "There are no spellings for this episode yet.");
+    return 0;
+  }
+  if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
+  // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here.
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running && running !== "bring") return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  if (verb === "drop") {
+    if (!spellings.some(([h]) => h === heard)) return refuse(ctx, `There is no spelling of "${heard}".`);
+    return saveSpellings(ctx, found, spellings.filter(([h]) => h !== heard), `"${heard}" is as the transcriber writes it again. ${SHOW_IT}`);
+  }
+  if (verb !== "add") {
+    ctx.say(HELP);
+    return 2;
+  }
+  const fault = spellingFault(heard, meant);
+  if (fault) return refuse(ctx, fault);
+  return saveSpellings(ctx, found, withSpelling(spellings, heard.trim(), meant.trim()), `"${heard.trim()}" is spelled "${meant.trim()}" now, in every timeline's captions. ${SHOW_IT}`);
+}
+
+/** `logo "<episode>" on|off [--picture "<name>"]`: the logo on the main video, top right (spec section 4). Its picture is
+    named once, from the Pictures folder, and the episode keeps it. A Reel's logo comes with the brand templates (spec
+    section 3). */
+async function logo(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["picture"]);
+  const [said, verb, ...more] = words;
+  if (partFrom(more).part !== "main") return refuse(ctx, "A Reel's logo comes with the brand templates, later. The logo is on the main video.");
+  const start = layerStart(ctx, [said, ...more]);
+  if (start.code !== undefined) return start.code;
+  const { found, part } = start;
+  if (verb !== "on" && verb !== "off") {
+    ctx.say(HELP);
+    return 2;
+  }
+  let record = found.record;
+  let picked = null;
+  if (verb === "on") {
+    const named = flags.picture && flags.picture[flags.picture.length - 1];
+    if (named) {
+      const got = pictureFrom(ctx, found, named);
+      if (got.code !== undefined) return got.code;
+      picked = got;
+      record = { ...record, brand: { ...(record.brand || {}), logo: got.picture }, files: { ...record.files, [got.picture]: got.bytes } };
+    } else if (!(record.brand && record.brand.logo)) return refuse(ctx, 'Say which picture in the Pictures folder is the logo (--picture "<name>").');
+  }
+  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, logo: verb === "on" })), `The logo is ${verb} on ${partLabel(part)}. ${SHOW_IT}`, picked);
+}
+
+/** `captions "<episode>" reel <n> on|off`: a Reel's running captions, drawn in its preset's caption style. The main video's
+    follow its preset alone. */
+async function captions(ctx, rest) {
+  const [said, ...more] = rest;
+  const verb = more[more.length - 1];
+  const start = layerStart(ctx, [said, ...more.slice(0, -1)]);
+  if (start.code !== undefined) return start.code;
+  const { found, part } = start;
+  if (verb !== "on" && verb !== "off") {
+    ctx.say(HELP);
+    return 2;
+  }
+  if (part === "main") return refuse(ctx, "The main video's captions follow its caption style: say which (preset --captions).");
+  return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, captions: verb === "on" })), `Captions are ${verb} on Reel ${part.reel}. ${SHOW_IT}`);
+}
+
+/** `text "<episode>" add lower-third [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>] --line "<name>"
+    [--line "<role>"]`, `text "<episode>" drop <id> [main | reel <n>]`, and with neither, the list: a name over a role on a
+    timeline, from the moment given, for the seconds given (4 unless said). */
+async function text(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "line"]);
+  const [said, verb, kindOrId, ...more] = words;
+  const start = layerStart(ctx, [said, ...(verb === "add" || verb === "drop" ? more : [verb, kindOrId, ...more].filter((w) => w !== undefined))], { writes: verb === "add" || verb === "drop" });
+  if (start.code !== undefined) return start.code;
+  const { found, part, target } = start;
+  const texts = target.texts || [];
+  if (verb === undefined || (verb !== "add" && verb !== "drop")) {
+    ctx.say(texts.length ? texts.map((t) => `${t.id}: "${t.lines.join('", "')}" at ${t.at} s of the recording, for ${lengthText(t.for)}`).join("\n") : `There are no texts on ${partLabel(part)}.`);
+    return 0;
+  }
+  if (verb === "drop") {
+    if (!texts.some((t) => t.id === kindOrId)) return refuse(ctx, `There is no text ${kindOrId} on ${partLabel(part)}.`);
+    return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: texts.filter((x) => x.id !== kindOrId) })), `Text ${kindOrId} is taken off ${partLabel(part)}. ${SHOW_IT}`);
+  }
+  if (kindOrId !== "lower-third") return refuse(ctx, "The kind of text there is so far is a lower third: a name over a role (add lower-third).");
+  const lines = (flags.line || []).map((l) => oneLine(l)).filter(Boolean);
+  if (!lines.length || lines.length > 2) return refuse(ctx, 'Say the name, and the role under it if there is one (--line "Sallie Ogden" --line "Founder, The BRIMM").');
+  const moment = momentFrom(ctx, found, part, flags);
+  if (moment.code !== undefined) return moment.code;
+  const length = lengthFrom(ctx, flags, {}, 4);
+  if (length.code !== undefined) return length.code;
+  const id = nextId(texts, "t");
+  const layer = { id, kind: "lower-third", at: moment.at, for: length.seconds, lines };
+  return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: [...texts, layer] })), `Name title ${id} on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}: "${lines.join('", "')}". ${SHOW_IT}`);
+}
+
+/** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>]
+    [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
+    [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). */
+async function graphic(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place"]);
+  const [said, verb, nameOrId, ...more] = words;
+  const takes = verb === "add" || verb === "drop";
+  const start = layerStart(ctx, [said, ...(takes ? more : [verb === "ideas" ? undefined : verb, nameOrId, ...more].filter((w) => w !== undefined))], { writes: takes });
+  if (start.code !== undefined) return start.code;
+  const { found, part, target } = start;
+  const graphics = target.graphics || [];
+  if (verb === "ideas") {
+    const read = clockFor(found, part, ctx);
+    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    const ideas = ((read.plan.claude && read.plan.claude.graphics) || []).map((idea) => ({ idea: idea.idea, phrase: read.plan.phrases.find((p) => p.id === idea.id) }))
+      .filter(({ phrase }) => phrase && read.pieces.some((r) => phrase.end > r.start && phrase.start < r.end));
+    ctx.say(ideas.length ? ideas.map(({ idea, phrase }) => `${idea}: at ${clockText(timelineAt(read.clock, Math.max(phrase.start, read.pieces.find((r) => phrase.end > r.start && phrase.start < r.end).start)) ?? 0)} on ${read.on}, "${phrase.text}"`).join("\n") : `Claude gave no ideas for graphics on what ${partLabel(part)} keeps.`);
+    return 0;
+  }
+  if (!takes) {
+    ctx.say(graphics.length ? graphics.map((g) => `${g.id}: ${g.picture.replace(/^media\//, "")}, ${g.place}, at ${g.at} s of the recording, for ${lengthText(g.for)}`).join("\n") : `There are no graphics on ${partLabel(part)}.`);
+    return 0;
+  }
+  if (verb === "drop") {
+    if (!graphics.some((g) => g.id === nameOrId)) return refuse(ctx, `There is no graphic ${nameOrId} on ${partLabel(part)}.`);
+    return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, graphics: graphics.filter((g) => g.id !== nameOrId) })), `Graphic ${nameOrId} is taken off ${partLabel(part)}. ${SHOW_IT}`);
+  }
+  const place = flags.place ? flags.place[flags.place.length - 1] : "full";
+  if (!["full", "corner", "lower"].includes(place)) return refuse(ctx, `"${place}" is not a place. Say full, corner or lower.`);
+  const moment = momentFrom(ctx, found, part, flags);
+  if (moment.code !== undefined) return moment.code;
+  const length = lengthFrom(ctx, flags, moment, 4);
+  if (length.code !== undefined) return length.code;
+  const got = pictureFrom(ctx, found, nameOrId);
+  if (got.code !== undefined) return got.code;
+  const id = nextId(graphics, "g");
+  const layer = { id, picture: got.picture, at: moment.at, for: length.seconds, place };
+  // A picture shown full in another shape than the frame loses its edges: how much of it shows is said.
+  const frame = part === "main" ? { width: moment.read.plan.facts.width, height: moment.read.plan.facts.height } : REEL_FRAME;
+  const shown = Math.min(got.size.width / got.size.height / (frame.width / frame.height), (frame.width / frame.height) / (got.size.width / got.size.height));
+  const cropped = place === "full" && shown < 0.67 ? ` The picture is another shape than the frame, so only about ${Math.round(shown * 100)}% of it shows: say --place lower to show it whole.` : "";
+  const record = { ...found.record, files: { ...found.record.files, [got.picture]: got.bytes } };
+  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, graphics: [...graphics, layer] })), `Graphic ${id}, ${nameOrId}, ${place}, on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}.${cropped} ${SHOW_IT}`, got);
+}
+
+/** `preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]`: the timeline's job,
+    caption style and look, each from its list (styles.js); with none of them, what it has and what there is. */
+async function preset(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["job", "captions", "look"]);
+  const start = layerStart(ctx, words, { writes: ["job", "captions", "look"].some((k) => flags[k]) });
+  if (start.code !== undefined) return start.code;
+  const { found, part, target } = start;
+  const now = target.preset || defaultPreset(found.record.kind, part);
+  // The record keeps each by its id ("full-episode"), as the spec's record does; a person names it either way.
+  const given = Object.fromEntries(["job", "captions", "look"].filter((k) => flags[k]).map((k) => [k, idOf(flags[k][flags[k].length - 1])]));
+  const describe = (p) => `${partLabel(part)[0].toUpperCase()}${partLabel(part).slice(1)} is a ${nameOf(p.job)}, with ${nameOf(p.captions)} captions and the ${nameOf(p.look)} look.`;
+  if (!Object.keys(given).length) {
+    ctx.say(`${describe(now)}${target.preset ? "" : " (Its default.)"}`);
+    ctx.say(`Jobs: ${Object.keys(JOBS).map(nameOf).join(", ")}. Caption styles: ${Object.keys(CAPTION_STYLES).map(nameOf).join(", ")}. Looks: ${Object.keys(LOOKS).join(", ")}.`);
+    return 0;
+  }
+  // A new job brings its own caption style and look, unless they are given too.
+  const next = given.job && given.job !== now.job ? { job: given.job, captions: (JOBS[given.job] || {}).captions, look: (JOBS[given.job] || {}).look, ...given } : { ...now, ...given };
+  const fault = presetFault(next);
+  if (fault) return refuse(ctx, fault);
+  return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, preset: next })), `${describe(next)} ${SHOW_IT}`);
+}
+
+/** `cut "<episode>" remove [main | reel <n>] (--words "<words>" | --at <time> --to <time>)` and `cut "<episode>" keep
+    [main | reel <n>] (--words "<words>" | --at <time>)`: whole phrases taken out of a timeline, or kept that were cut, always
+    at a pause (recut.js). A time is read on the timeline she names, as she watched it (spec section 4, "Times a person
+    gives"): what is taken out runs from --at to --to on it, and what is kept is what was cut at the join nearest --at
+    ("keep the Hormozi story at 12:30"). Words to keep are found in what is cut. A cut that would keep nothing is refused. A
+    cut on the main video does not reach a Reel over the same words, and is said so. */
+async function cut(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["words", "at", "to"]);
+  const [said, verb, ...more] = words;
+  const start = layerStart(ctx, [said, ...more]);
+  if (start.code !== undefined) return start.code;
+  const { found, part, target } = start;
+  if (verb !== "keep" && verb !== "remove") {
+    ctx.say(HELP);
+    return 2;
+  }
+  const last = (k) => (flags[k] ? flags[k][flags[k].length - 1] : undefined);
+  let from;
+  let to;
+  let read;
+  const cuts = target.cuts || [];
+  if (verb === "remove") {
+    if (!flags.words && !flags.at) return refuse(ctx, 'Say what to take out: the words (--words "know your costs"), or where it starts and ends on the timeline (--at 0:04 --to 0:09).');
+    if (!flags.words && !last("to")) return refuse(ctx, "Say where the cut ends too (--to 0:12).");
+    const first = momentFrom(ctx, found, part, { ...flags, ...(flags.words ? { "at-words": flags.words } : {}) });
+    if (first.code !== undefined) return first.code;
+    read = first.read;
+    from = first.at;
+    to = first.to ?? first.at;
+    if (!flags.words) {
+      const end = momentOf({ time: last("to"), on: first.on, clock: first.clock, ranges: read.pieces, words: read.words, end: true });
+      if (end.why) return refuse(ctx, end.why);
+      if (!(end.at > from)) return refuse(ctx, `A cut ends after it starts: ${last("to")} is not after ${last("at")} on ${first.on}.`);
+      to = end.at;
+    }
+  } else if (flags.words) {
+    read = clockFor(found, part, ctx);
+    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    let places = wordsAt(read.words, [{ start: 0, end: read.plan.facts.duration }], last("words")).filter((p) => !read.pieces.some((r) => p.start < r.end && p.end > r.start));
+    // On a Reel, only what is cut within its stretch counts: the same words said elsewhere in the recording are not meant.
+    if (read.span) {
+      const within = places.filter((p) => p.start >= read.span.from && p.end <= read.span.to);
+      if (!within.length && places.length) return refuse(ctx, `That is outside Reel ${part.reel}'s stretch of the recording, ${clockText(read.span.from)} to ${clockText(read.span.to)}.`);
+      places = within;
+    }
+    if (places.length !== 1) return refuse(ctx, places.length ? `"${last("words")}" is said ${places.length} times in what is cut. Say the time on ${read.on} where it was cut instead (--at 0:07).` : `"${last("words")}" is not in what is cut from ${partLabel(part)}.`);
+    [from, to] = [places[0].start, places[0].end];
+  } else {
+    if (!flags.at) return refuse(ctx, 'Say what to keep: the words that were cut (--words "very important"), or the time on the timeline where they were cut (--at 12:30).');
+    const got = timelineRead(ctx, found, part, flags);
+    if (got.code !== undefined) return got.code;
+    read = got.read;
+    const t = secondsOf(last("at"));
+    const raw = t === null || t > lengthOf(read.clock) + 1 ? null : rawAt(read.clock, Math.min(t, lengthOf(read.clock)));
+    // A pushed file's clip starts on a frame, a little before its kept piece: a time on that frame is on the piece.
+    if (raw !== null && !read.pieces.some((r) => raw >= r.start - FRAME_SLACK && raw <= r.end + 0.0005)) {
+      // A time on what was kept when she watched it, and is cut now: the cut she asked for that took it out, the newest. A cut
+      // takes the breath kept beside its phrases with it, so it is the one without which that time would be kept again.
+      const tookOut = (c) => keptRanges({ plan: read.plan, cuts: cuts.filter((x) => x !== c), span: read.span }).some((r) => raw >= r.start - FRAME_SLACK && raw <= r.end + 0.0005);
+      const since = [...cuts].reverse().find((c) => !c.keep && ((raw >= c.from && raw <= c.to) || tookOut(c)));
+      if (!since) return refuse(ctx, momentOf({ time: last("at"), on: read.on, clock: read.clock, ranges: read.pieces, words: read.words }).why);
+      [from, to] = [since.from, since.to];
+    } else {
+      // Otherwise the cut nearest it, by what is said there now: words cut, or kept again since.
+      const now = cutPhrases(read.plan.phrases, cuts);
+      const said = (c) => {
+        const there = now.filter((p) => (p.start + p.end) / 2 > c.from && (p.start + p.end) / 2 < c.to);
+        return { cut: there.filter((p) => !p.keep).map((p) => p.text).join(" "), kept: there.filter((p) => p.keep).map((p) => p.text).join(" ") };
+      };
+      const near = cutNear({ time: last("at"), on: read.on, clock: read.clock, edges: part === "main" ? { from: 0, to: read.plan.facts.duration } : read.span, said });
+      if (near.why) return refuse(ctx, near.why);
+      [from, to] = [near.cut.from, near.cut.to];
+    }
+  }
+  if (read.span && (from < read.span.from || to > read.span.to)) return refuse(ctx, `That is outside Reel ${part.reel}'s stretch of the recording, ${clockText(read.span.from)} to ${clockText(read.span.to)}.`);
+  const whole = cutSpan(read.plan.phrases, from, to);
+  if (whole.why) return refuse(ctx, whole.why);
+  const what = read.plan.phrases.filter((p) => whole.phrases.includes(p.id)).map((p) => p.text).join(" ");
+  if (verb === "keep" && cutPhrases(read.plan.phrases, cuts).filter((p) => whole.phrases.includes(p.id)).every((p) => p.keep)) return refuse(ctx, `"${what}" is kept on ${partLabel(part)} already.`);
+  const next = [...cuts, { id: nextId(cuts, "c"), keep: verb === "keep", from: whole.from, to: whole.to }];
+  // A timeline that keeps nothing cannot be shown, and every time on it would be refused after: such a cut is refused.
+  if (!keptRanges({ plan: read.plan, cuts: next, span: read.span }).length) return refuse(ctx, `That would take out all of ${partLabel(part)}. Say a shorter stretch.`);
+  const reach = part === "main" ? " A cut on the main video does not reach a Reel over the same words." : "";
+  return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, cuts: next })), `${verb === "keep" ? "Kept in" : "Taken out of"} ${partLabel(part)}: "${what}" (${clockText(whole.from)} to ${clockText(whole.to)} of the recording, whole phrases, at a pause).${reach} ${SHOW_IT}`);
+}
+
 /** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

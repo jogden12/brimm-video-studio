@@ -9,8 +9,8 @@
 // at least 15 minutes after the last copy, which copies a file in again when Dropbox has taken it away or left it short.
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
-import { spawnSync } from "node:child_process";
-import { createReadStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { lastLine } from "./run.js";
 
@@ -141,29 +141,61 @@ export const READ_QUIET_MS = 2 * 60 * 1000;
 /** A stretch of time as a person reads it: "50 ms", "2 minutes". */
 const spoken = (ms) => (ms < 60000 ? `${ms} ms` : `${ms / 60000} minute${ms === 60000 ? "" : "s"}`);
 
+/** What python3 runs to read a file through: it reads the file to its end, a mebibyte at a time, and after each read says on
+    its standard output how much of it it has read. Each program on a Mac has a setting for whether its reads of a file that is
+    not here yet have the file brought down, and one the launch agent starts has it off, as have the programs it starts: such
+    a read is refused at once, with "Resource deadlock avoided" (EDEADLK; Apple's TN3150 and the getiopolicy_np manual). Node
+    cannot change the setting, so python3 turns it on first, for itself alone, with setiopolicy_np:
+    IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES (3), IOPOL_SCOPE_PROCESS (0), IOPOL_MATERIALIZE_DATALESS_FILES_ON (2). When the
+    file cannot be read, python3 says why in plain words, on its standard error. python3 comes with Xcode's command line
+    tools, which each Mac has. brimm-operations' transcript tool brings a placeholder down the same way. */
+const READ_THROUGH = [
+  "import ctypes, sys",
+  "if ctypes.CDLL(None).setiopolicy_np(3, 0, 2) != 0:",
+  "    sys.exit('reads that bring a file down could not be turned on')",
+  "try:",
+  "    with open(sys.argv[1], 'rb', buffering=0) as f:",
+  "        n = 0",
+  "        while True:",
+  "            got = f.read(1048576)",
+  "            if not got:",
+  "                break",
+  "            n += len(got)",
+  "            sys.stdout.write('%d\\n' % n)",
+  "            sys.stdout.flush()",
+  "except OSError as e:",
+  "    sys.exit(e.strerror or str(e))"
+].join("\n");
+
 /** Read a file to its end and let what is read go: Dropbox then brings all of it down to this Mac, as it does for a file that
-    is there only as a placeholder. Resolves when it is read. Rejects when it cannot be read, and, in plain words, when no
-    bytes come for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run. `open` is how the file
-    is opened for reading, for a test to give another. */
-export const readThrough = (path, { open = createReadStream, quietMs = READ_QUIET_MS } = {}) => new Promise((done, fail) => {
-  const stream = open(path);
+    is there only as a placeholder. python3 reads it (READ_THROUGH), the file named to it as an argument of its own. Resolves
+    when it is read. Rejects when it cannot be read, saying why in python3's words, and, in plain words, when no bytes come
+    for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run: python3 is then stopped. `spawn` is
+    how python3 is started, for a test to give another. */
+export const readThrough = (path, { spawn: start = spawn, quietMs = READ_QUIET_MS } = {}) => new Promise((done, fail) => {
+  const python = start("/usr/bin/python3", ["-I", "-c", READ_THROUGH, path], { stdio: ["ignore", "pipe", "pipe"] });
+  let why = "";
   let timer = null;
   const quiet = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      stream.destroy();
+      python.kill("SIGKILL");
       fail(new Error(`Dropbox sent nothing of it for ${spoken(quietMs)}, so it was given up`));
     }, quietMs);
   };
   quiet();
-  stream.on("data", quiet);
-  stream.on("end", () => {
-    clearTimeout(timer);
-    done();
+  python.stdout.on("data", quiet);
+  python.stderr.on("data", (d) => {
+    why = (why + d).slice(-4000);
   });
-  stream.on("error", (e) => {
+  python.on("error", (e) => {
     clearTimeout(timer);
     fail(e);
+  });
+  python.on("close", (code) => {
+    clearTimeout(timer);
+    if (code === 0) done();
+    else fail(new Error(lastLine(why)));
   });
 });
 

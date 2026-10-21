@@ -36,6 +36,7 @@
 // While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
 // progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
+import { mainProject } from "./projects.js";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -595,30 +596,18 @@ export function soundOf(printed) {
     the moment that phrase starts, worded so that nobody takes it for more than an idea. An idea whose phrase is cut, or is
     not in the plan, gets none: the Final Cut writer would put it on the join after it, as if it belonged there. The notes
     for the editor say what became of such an idea. */
-function ideaNotes(plan, graphics) {
+export function ideaNotes(plan, graphics) {
   const phrases = new Map(plan.phrases.map((p) => [p.id, p]));
   return graphics.map((idea) => ({ on: phrases.get(idea.id), idea: idea.idea })).filter(({ on }) => on && on.keep).map(({ on, idea }) => ({ at: on.start, text: `Graphic idea: ${idea}` }));
 }
 
-/** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none. The kept ranges are its pieces, the
-    captions are those of the whole recording on its own timing, and there is a note at each join. `ideas` are more notes,
-    Claude's ideas for graphics, each at a moment that is kept. The captions keep the timing of the sound, so when the sound
-    starts after the picture they are moved on as the words are. `library` is where Final Cut Pro is to keep the project,
-    and `writer` is what writes the file's text. The text is checked before it is given back, and one with something wrong
-    in it is not: `why` then says what. */
+/** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none: the main video's project
+    (projects.js mainProject), with what ffprobe printed of the video for its asset's sound and colour. `library` is where
+    Final Cut Pro is to keep the project, and `writer` is what writes the file's text. */
 function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { library, src, writer = fcpxml }) {
   if (!facts.height) return { why: "there is no picture in the file" };
   if (!spans.length) return { why: "the plan keeps nothing" };
-  const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound, ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) };
-  const shift = Math.max(0, facts.soundStart);
-  try {
-    const captions = captionsOf(srt).map((caption) => ({ ...caption, start: caption.start + shift, end: caption.end + shift }));
-    const text = writer({ video, facts: said, ranges: plan.ranges.filter((range) => range.keep), captions, markers: [...joinNotes(plan.ranges), ...ideas], library: library || undefined, ...(src ? { src } : {}) });
-    const wrong = checkFcpxml(text, said);
-    return wrong.length ? { why: `it did not pass its own check (${wrong.join(" ").replace(/\.$/, "")})` } : { text };
-  } catch (e) {
-    return { why: `the writer refused it (${String(e.message).replace(/\.$/, "")})` };
-  }
+  return mainProject({ video, facts, more: { ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) }, plan, srt, ideas, library, src, writer });
 }
 
 async function workOn(file, deps) {
@@ -1918,6 +1907,7 @@ export function parseArgs(argv) {
     else if (v === "--rules-only") a.rulesOnly = true;
     else if (v === "--from-plan") a.fromPlan = true;
     else if (v === "--check-claude") a.checkClaude = true;
+    else if (v === "--until") a.until = Number(argv[++i]);
     else if (!a.file) a.file = v;
   }
   a.folders = a.folders.filter(Boolean);
@@ -1939,6 +1929,8 @@ clips it picked.
                      this Mac
   --check-claude     ask Claude once, as the import does, and say whether it answered: the installer runs this from a
                      launch agent of its own, to see that the background job can reach Claude
+  --until <time>     with --check-claude: ask Claude nothing once this time, in seconds since 1970, has passed. The
+                     installer gives it, so that a check a cut-short setup left behind asks nothing at the next login
   --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
                      cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
                      is made, Claude is not asked, and no other file is touched. Never with --watch
@@ -2008,8 +2000,24 @@ const CHECK_MS = 2 * 60 * 1000;
 /** Ask Claude once, as the import asks it (CLAUDE_ARGS, the model named above, from a new empty folder), to reply with one
     word, and say whether it answered: "Claude answered from here." or why it could not be asked. The installer runs this
     from a launch agent of its own, once, so that a sign-in the background job cannot see shows at setup and not at the first
-    import. Resolves 0 when Claude answered, and 1 when it did not. */
-export async function checkClaude({ run, tools, say, tmpDir = tmpdir() }) {
+    import. Resolves 0 when Claude answered, and 1 when it did not.
+    `until` is the time, in seconds since 1970, that the installer gives its launch agent. That agent is taken away once the
+    check is over, but a kill -9 or a power cut during the setup can leave it, and launchd then runs it at every login. Past
+    that time, or when it cannot be read, Claude is not asked, and this resolves 0. `job` is the launchd label this runs under
+    (XPC_SERVICE_NAME): an agent of that label with no time given was left by a setup from before the time was given, and
+    asks Claude nothing either, so that it cannot use the account at every login. Run by hand, it asks. `now` is the time in
+    milliseconds. */
+export async function checkClaude({ run, tools, say, tmpDir = tmpdir(), until, job, now = Date.now() }) {
+  if (until === undefined && job === "com.thebrimm.claude-check") {
+    say("This check of Claude was run by the launch agent an older setup left behind, com.thebrimm.claude-check, so Claude was not asked. To take that one agent away alone, in Terminal: launchctl bootout gui/$(id -u)/com.thebrimm.claude-check; rm ~/Library/LaunchAgents/com.thebrimm.claude-check.plist. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.");
+    return 0;
+  }
+  if (until !== undefined && !(now <= until * 1000)) {
+    // The way out it gives is the setup guide's: that one agent taken away alone. install.sh --remove would also stop the
+    // import's own agent, and her drop folder would then not be watched until the next setup.
+    say("This check of Claude was for a setup that is over, so Claude was not asked. That setup was cut short and left its launch agent, com.thebrimm.claude-check, behind. To take that one agent away alone, in Terminal: launchctl bootout gui/$(id -u)/com.thebrimm.claude-check; rm ~/Library/LaunchAgents/com.thebrimm.claude-check.plist. Not install.sh --remove, which also stops the import's own agent, com.thebrimm.unedited.");
+    return 0;
+  }
   const no = (why) => {
     say(`Claude could not be asked from here: ${why}.`);
     return 1;
@@ -2041,7 +2049,7 @@ export async function main(argv) {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`) });
+  if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`), until: args.until, job: process.env.XPC_SERVICE_NAME });
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const found = findPrograms();
   if (found.missing.length) {

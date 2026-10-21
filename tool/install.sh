@@ -166,6 +166,8 @@ EOF
 
 # The one-shot launch agent of the check of Claude: unedited.js --check-claude, run once when it is loaded, with the main
 # agent's PATH, into a log of its own. $1 is the node it is run with. It watches nothing, and is taken away once it has run.
+# $2 is the time, in seconds since 1970, after which it asks Claude nothing (--until). launchd runs one that a kill -9 or a
+# power cut left behind at every login, and past that time it only says in its log that Claude was not asked.
 check_agent() {
   cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -178,6 +180,8 @@ check_agent() {
     <string>$(xml "$1")</string>
     <string>$(xml "$HERE/unedited.js")</string>
     <string>--check-claude</string>
+    <string>--until</string>
+    <string>$(xml "$2")</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
@@ -187,6 +191,12 @@ check_agent() {
 </dict>
 </plist>
 EOF
+}
+# Takes the check's launch agent away: stops it, if it is loaded, and deletes its file. The check does this once Claude has
+# answered or the wait is over, a trap does it however else the setup ends, and --remove does it too.
+drop_check() {
+  launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true
+  rm -f "$CHECK_FILE"
 }
 
 # The folders that a launch agent on this Mac watches already, one to a line. None when there is no such agent, or its file
@@ -204,12 +214,19 @@ if [[ "$mode" == "remove" ]]; then
   if [[ "$print" == "yes" ]]; then
     say "This is what would be stopped:"
     say "  $LABEL, and its file $AGENT_FILE"
+    if [[ -e "$CHECK_FILE" ]]; then
+      say "  $CHECK_LABEL, and its file $CHECK_FILE, which a setup left behind"
+    else
+      say "  $CHECK_LABEL, if a setup left it behind"
+    fi
     say ""
     say "Nothing was changed."
     exit 0
   fi
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   rm -f "$AGENT_FILE"
+  # The setup's one-shot check of Claude, in case a setup that was cut short left it behind: launchd would run it at every login.
+  drop_check
   say "Stopped watching for unedited video. The folders, the model, the programs and the transcript tool's own launch agent are still here."
   exit 0
 fi
@@ -302,7 +319,8 @@ say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && 
 autoload -Uz is-at-least
 # Why her folder for Claude is not written, when it is not: "" when it is.
 studio_why=""
-# Whether the setup ends with the check of Claude from a launch agent's context: when Claude Code is here.
+# Whether the setup ends with the check of Claude from a launch agent's context: when Claude Code is here, and never with
+# --rules-only, which asks Claude nothing.
 check_line=""
 if [[ -n "$machine" ]]; then
   say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
@@ -345,7 +363,7 @@ if [[ -n "$machine" ]]; then
       false) say "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again." ;;
       *) say "  Claude Code, signed in:  could not be checked (claude auth status said nothing that could be read)" ;;
     esac
-    check_line="yes"
+    [[ -n "$rules_only" ]] || check_line="yes"
     printed="$("$claude" --version 2>/dev/null || true)"
     claude_version="${printed%%[[:space:]]*}"
     if [[ ! "$claude_version" =~ '^[0-9]+(\.[0-9]+)+$' ]]; then
@@ -362,8 +380,8 @@ if [[ -n "$machine" ]]; then
     say "  Claude Code's version:  not here, so the install does not write her folder for Claude until it is."
   fi
   say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)"
-  say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so step 9 of the setup guide, in the Code tab, is what proves her folder is locked down there"
-  [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job, to prove its sign-in is seen there"
+  say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there"
+  [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove its sign-in is seen there"
   say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
 fi
 # Claude reads each cut plan, through Claude Code. Nothing here installs that or signs in to it. When Claude is going to be
@@ -380,6 +398,9 @@ fi
 say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
 say "  Model:  $([[ -f "$MODEL" ]] && echo "here already" || echo "to download, about 1.6 GB, to $MODEL")"
 say "  Log:  $LOG"
+# A check of Claude that an earlier setup left behind, cut short before it could take it away: by an installer from before
+# the traps below, or by a kill -9. launchd runs it at every login. Every setup that goes ahead takes it away first.
+[[ ! -e "$CHECK_FILE" ]] || say "  Left behind by an earlier setup:  its check of Claude, $CHECK_LABEL, at $CHECK_FILE. launchd runs it at every login, so this setup takes it away first"
 
 if [[ "$print" == "yes" ]]; then
   say ""
@@ -401,6 +422,10 @@ if [[ "$yes" != "yes" ]]; then
   read -q "go?Go ahead? [y/N] " || { say ""; say "Nothing was changed."; exit 0; }
   say ""
 fi
+
+# A check of Claude an earlier setup left behind is taken away before anything else, whatever this setup goes on to do: with
+# --rules-only, or with no Claude Code here, it makes no check of its own, and it may stop before it reaches the check.
+drop_check
 
 if [[ ${#need[@]} -gt 0 ]]; then "$brew" install "${need[@]}"; fi
 ffmpeg="$(find_program ffmpeg)"
@@ -440,22 +465,32 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
 
 # The check of Claude from the background job: one real call, made by a launch agent of its own, which runs as the import's
-# does, so that a sign-in it cannot see shows now and not at the first import. It is taken away within 90 seconds, whatever
-# happened. Only a real setup makes it: never --print, and never a test.
-if [[ -n "$machine" ]] && claude="$(find_claude)"; then
+# does, so that a sign-in it cannot see shows now and not at the first import. It is taken away when Claude answers or after
+# 90 seconds. That agent runs whenever it is loaded, at every login too, so it must never be left behind: until the check
+# has taken it away itself, traps take it away however else the setup ends. A failure ends the setup as it would anyway. A
+# Ctrl-C or a kill ends it there too, with 130 or 143 as a shell does: zsh would otherwise go back to the wait once its trap
+# had run, wait out the 90 seconds, blame Claude and say "Done". A kill -9 or a power cut runs no trap, and leaves the agent's
+# file, which launchd then runs at every login. So the agent is given a time three minutes on, well after it has run here,
+# and past it the agent asks Claude nothing. The next setup, which names it first, or --remove takes it away. Only a real
+# setup makes the agent: never --print, and never a test. With --rules-only nothing is asked of Claude, so there is no check.
+if [[ -n "$machine" && -z "$rules_only" ]] && claude="$(find_claude)"; then
   rm -f "$CHECK_LOG"
-  check_agent "$node" > "$CHECK_FILE"
+  trap drop_check EXIT
+  trap 'drop_check; exit 130' INT
+  trap 'drop_check; exit 143' TERM
+  check_agent "$node" "$(( $(date +%s) + 180 ))" > "$CHECK_FILE"
   plutil -lint "$CHECK_FILE" >/dev/null
   launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$CHECK_FILE"
+  say "Asking Claude once from the background job (up to 90 seconds)…"
   answered=""
   for (( waited = 0; waited < 90; waited++ )); do
     answered="$(grep -h -m 1 -e '^Claude answered from here' -e '^Claude could not be asked from here' "$CHECK_LOG" 2>/dev/null || true)"
     [[ -z "$answered" ]] || break
     sleep 1
   done
-  launchctl bootout "gui/$(id -u)/$CHECK_LABEL" 2>/dev/null || true
-  rm -f "$CHECK_FILE"
+  drop_check
+  trap - EXIT INT TERM
   say "From the background job: ${answered:-Claude did not answer within 90 seconds. What it said is in $CHECK_LOG.}"
 fi
 
