@@ -231,7 +231,7 @@ export const reelEntries = (candidates) => candidates.map((c) => ({ n: c.n, stat
 export const REEL_FRAME = { width: 1080, height: 1920 };
 
 /** The words of a marker on a stretch whose crop is a guess. */
-const GUESSED = "No face was found in this stretch, so the picture is placed where the face is in the rest of the video, or in the middle. Check it.";
+export const GUESSED = "No face was found in this stretch, so the picture is placed where the face is in the rest of the video, or in the middle. Check it.";
 
 /** The upright Final Cut project of a Reel candidate: {text}, or {why} there is none. Its stretches are clips one after
     another on a timeline of 1080 by 1920, each filled into the frame and moved onto the face by its crop (reelPosition, in
@@ -243,13 +243,13 @@ const GUESSED = "No face was found in this stretch, so the picture is placed whe
     a test to give another. `more` is what else ffprobe says of the video, for its asset: { audioRate, audioChannels,
     colorSpace }, as the main timeline is given them (an HDR video's own colour space goes on its format). The text is
     checked before it is given back, and one with something wrong in it is not: `why` then says what. */
-export function reelProject({ video, facts, candidate, plan, project, event, more = {}, writer = fcpxml }) {
+export function reelProject({ video, facts, candidate, plan, planRanges = plan.ranges, titles = [], stills = [], look = null, project, event, more = {}, writer = fcpxml }) {
   if (!candidate.ranges.length) return { why: "the Reel has no stretch to show" };
   const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound, ...more };
-  const joins = joinNotes(plan.ranges.filter((r) => r.start >= candidate.start && r.end <= candidate.end));
-  const guesses = candidate.ranges.filter((r) => !r.crop.found).map((r) => ({ at: r.start, text: GUESSED }));
+  const joins = joinNotes(planRanges.filter((r) => r.start >= candidate.start && r.end <= candidate.end));
+  const guesses = candidate.ranges.filter((r) => (r.crop ? !r.crop.found : r.guessed)).map((r) => ({ at: r.start, text: GUESSED }));
   try {
-    const text = writer({ video, facts: said, ranges: candidate.ranges, markers: [...guesses, ...joins], frame: REEL_FRAME, project, event });
+    const text = writer({ video, facts: said, ranges: candidate.ranges, markers: [...guesses, ...joins], titles, stills, look, frame: REEL_FRAME, project, event });
     const wrong = checkFcpxml(text, said, { frame: REEL_FRAME });
     return wrong.length ? { why: `it did not pass its own check (${wrong.join(" ").replace(/\.$/, "")})` } : { text };
   } catch (e) {

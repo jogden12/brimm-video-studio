@@ -110,7 +110,7 @@ describe("a moment in the record", () => {
 
 describe("reading an episode's record", () => {
   it("keeps each record in record/, numbered with four digits", () => {
-    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 1, "/E/x/record/0007.json"]);
+    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 2, "/E/x/record/0007.json"]);
   });
   it("gives back the record with the highest number, whole, with any field this version does not know kept as it was", () => {
     const t = setup();
@@ -140,7 +140,7 @@ describe("reading an episode's record", () => {
   });
   it("reads a record of a newer layout, and says so, without checking the fields it does not know", () => {
     const t = setup();
-    const newer = { version: 2, id: RECORD.id, rev: 1, somethingNew: true };
+    const newer = { version: 3, id: RECORD.id, rev: 1, somethingNew: true };
     t.store(newer);
     assert.deepEqual(readEpisode(t.folder), { record: newer, file: recordFile(t.folder, 1), newer: true });
     t.done();
@@ -249,7 +249,7 @@ describe("writing an episode's record", () => {
   });
   it("never writes a record of a newer layout, and says this Mac needs updating", () => {
     const t = setup();
-    const newer = { version: 2, id: RECORD.id, rev: 1 };
+    const newer = { version: 3, id: RECORD.id, rev: 1 };
     t.store(newer);
     assert.throws(() => writeEpisode(t.folder, newer, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "Jason has a newer brimm-video. Ask him to update this Mac.", code: "NEWER" });
     assert.deepEqual(t.written, []);

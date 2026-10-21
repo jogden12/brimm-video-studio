@@ -12,6 +12,7 @@ import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled } from "./lib.js";
 import { firstWordsMatch } from "./parts.js";
 import { finalTranscript } from "./final-transcript.js";
+import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere } from "./episode.js";
@@ -103,10 +104,12 @@ function shapeFault(part, name, facts, raw) {
   return shape === want ? "" : `${name} is ${shape}, and the main video has the raw video's shape: ${want}.`;
 }
 
-/** The words a part is expected to start with: the cut plan's first kept phrase, for a Reel the first from where it starts. */
+/** The words a part is expected to start with: the first phrase kept, as the cut plan and the part's own cuts leave it (phase
+    4), for a Reel the first from where it starts. */
 export function expectedWords(part, record, plan) {
-  const phrases = plan && Array.isArray(plan.phrases) ? plan.phrases.filter((p) => p.keep) : [];
   const reel = part.reel ? (record.reels || []).find((r) => r.n === part.reel) : null;
+  const cuts = (reel ? reel.cuts : record.main && record.main.cuts) || [];
+  const phrases = plan && Array.isArray(plan.phrases) ? cutPhrases(plan.phrases, cuts).filter((p) => p.keep) : [];
   const first = reel ? phrases.find((p) => p.start >= reel.from - 0.25) : phrases[0];
   return first ? String(first.text).trim() : "";
 }
@@ -149,7 +152,7 @@ function versionOf(record, part, name) {
 }
 /** The highest revision of a hand-off of this episode already in final/: a revision is never used twice, even when the
     record of the last finish was never written. */
-function lastRevision(finalDir, id) {
+export function lastRevision(finalDir, id) {
   let most = 0;
   let names = [];
   try {

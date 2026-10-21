@@ -432,6 +432,45 @@ describe("resolve, as the P2 check found it", () => {
     assert.ok(r.text.includes(`  File ${TIMELINE}: A: 19 bytes; B: 27 bytes`), r.text);
     t.done();
   });
+  it("shows two sides of a record that differ only in the session's layers, and does not call them the same", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    // This Mac gave a spelling, and hers a look: neither changes what the rows for a person to read compare.
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, version: 2, rev: 2, spellings: [["Hormozy", "Hormozi"]], writer: { commit: "c709b57", on: "Mac Studio" } }));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText({ ...first, version: 2, rev: 2, main: { ...first.main, preset: { job: "full-episode", captions: "plain", look: "warm" } }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}Spellings: A: .*Hormozi.*; B: none\n/);
+    assert.match(r.text, /\n {2}The main video's preset: A: none; B: .*warm.*\n/);
+    t.done();
+  });
+  it("never calls two sides the same when they differ only where no row looks", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    // The same Mac claimed it on each side, a minute apart: who has it open reads the same on both.
+    const claimed = (since) => ({ ...first, rev: 2, editing: { by: "Mac Studio", since }, writer: { commit: "c709b57", on: "Mac Studio" } });
+    writeFileSync(recordFile(found.folder, 2), recordText(claimed("2026-10-20T14:00:00-05:00")));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText(claimed("2026-10-20T14:01:00-05:00")));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}The rest of the record: A: as A holds it; B: as B holds it\n/);
+    t.done();
+  });
+  it("shows two sides that each hold one cut, in different places, and does not call them the same", async () => {
+    const t = setup();
+    const found = episodeFor(t);
+    const first = readEpisode(found.folder).record;
+    const cut = (from, to) => ({ ...first.main, cuts: [{ id: "c1", keep: false, from, to }] });
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, version: 2, rev: 2, main: cut(6.07, 9.638), writer: { commit: "c709b57", on: "Mac Studio" } }));
+    writeFileSync(join(found.folder, RECORD_COPY), recordText({ ...first, version: 2, rev: 2, main: cut(13.583, 16.33), writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.doesNotMatch(r.text, /They hold the same/);
+    assert.match(r.text, /\n {2}The main video's cuts: A: .*6\.07.*; B: .*13\.583.*\n/);
+    t.done();
+  });
   it("writes a record on every keep, so that two Macs keeping opposite sides at once meet as a conflict of the record", async () => {
     const t = setup();
     const found = timelineConflict(t);

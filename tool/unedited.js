@@ -36,6 +36,7 @@
 // While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
 // progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
+import { mainProject } from "./projects.js";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -595,30 +596,18 @@ export function soundOf(printed) {
     the moment that phrase starts, worded so that nobody takes it for more than an idea. An idea whose phrase is cut, or is
     not in the plan, gets none: the Final Cut writer would put it on the join after it, as if it belonged there. The notes
     for the editor say what became of such an idea. */
-function ideaNotes(plan, graphics) {
+export function ideaNotes(plan, graphics) {
   const phrases = new Map(plan.phrases.map((p) => [p.id, p]));
   return graphics.map((idea) => ({ on: phrases.get(idea.id), idea: idea.idea })).filter(({ on }) => on && on.keep).map(({ on, idea }) => ({ at: on.start, text: `Graphic idea: ${idea}` }));
 }
 
-/** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none. The kept ranges are its pieces, the
-    captions are those of the whole recording on its own timing, and there is a note at each join. `ideas` are more notes,
-    Claude's ideas for graphics, each at a moment that is kept. The captions keep the timing of the sound, so when the sound
-    starts after the picture they are moved on as the words are. `library` is where Final Cut Pro is to keep the project,
-    and `writer` is what writes the file's text. The text is checked before it is given back, and one with something wrong
-    in it is not: `why` then says what. */
+/** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none: the main video's project
+    (projects.js mainProject), with what ffprobe printed of the video for its asset's sound and colour. `library` is where
+    Final Cut Pro is to keep the project, and `writer` is what writes the file's text. */
 function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { library, src, writer = fcpxml }) {
   if (!facts.height) return { why: "there is no picture in the file" };
   if (!spans.length) return { why: "the plan keeps nothing" };
-  const said = { duration: facts.duration, frameRate: roughRate(facts), width: facts.width, height: facts.height, hasAudio: facts.sound, ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) };
-  const shift = Math.max(0, facts.soundStart);
-  try {
-    const captions = captionsOf(srt).map((caption) => ({ ...caption, start: caption.start + shift, end: caption.end + shift }));
-    const text = writer({ video, facts: said, ranges: plan.ranges.filter((range) => range.keep), captions, markers: [...joinNotes(plan.ranges), ...ideas], library: library || undefined, ...(src ? { src } : {}) });
-    const wrong = checkFcpxml(text, said);
-    return wrong.length ? { why: `it did not pass its own check (${wrong.join(" ").replace(/\.$/, "")})` } : { text };
-  } catch (e) {
-    return { why: `the writer refused it (${String(e.message).replace(/\.$/, "")})` };
-  }
+  return mainProject({ video, facts, more: { ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) }, plan, srt, ideas, library, src, writer });
 }
 
 async function workOn(file, deps) {

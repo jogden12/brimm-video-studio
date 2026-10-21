@@ -64,7 +64,7 @@ describe("what every record command does first", () => {
   it("ends with 1 on a record of a newer layout", async () => {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, version: 2, rev: 2 }));
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, version: 3, rev: 2 }));
     assert.equal(await editMain(["name", FOLDER, "Pricing"], t.ctx.deps), 1);
     assert.equal(await editMain(["title", FOLDER, "--words", "Hello"], t.ctx.deps), 1);
     assert.equal(await editMain(["reel", "pick", FOLDER, "1"], t.ctx.deps), 1);

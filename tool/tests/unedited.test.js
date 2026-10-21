@@ -3273,7 +3273,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
   it("stops, and makes nothing, when a newer brimm-video wrote the episode's record (PR 19's review)", async () => {
     const { t, folder, video } = await imported();
     const { record } = readEpisode(folder);
-    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: 2, rev: 2 }, null, 2) + "\n");
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: 3, rev: 2 }, null, 2) + "\n");
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
     assert.equal(r.message, "its episode was written by a newer brimm-video. Ask Jason to update this Mac");
