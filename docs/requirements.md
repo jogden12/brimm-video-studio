@@ -42,6 +42,7 @@ What brimm-video must do, as Jason decided it on 2026-10-22. The design says how
 
 Jason's answers to the design's questions, the same evening:
 
+- **brimm-video renders its own versions:** no to driving Final Cut's screen; yes to the render test first (R0).
 - **Fine edits by chat are a must:** "if sallie can't do fine edits via chat, then she won't use this." Nobody finishes her raw videos in Final Cut.
 - **Sending:** "option b is not sending. sending is ok when needed." Posting and publishing stay forbidden. Jason tests OpusClip with an existing clip's YouTube link.
 - **A session first handed off as another kind:** the page redacts the earlier words in place.
