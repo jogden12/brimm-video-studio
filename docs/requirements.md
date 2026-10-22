@@ -40,6 +40,15 @@ What brimm-video must do, as Jason decided it on 2026-10-22. The design says how
 - **The hand-off, version 2,** shared with BRIMM Ops: kinds for a finished video and a session, no episode title (titles live only on the page), a session's approved principles. A Reel's words on the picture still travel in it.
 - **Kept:** the tool drafts and never posts, sends or publishes; no video or sound leaves the Mac.
 
+Jason's answers to the design's questions, the same evening:
+
+- **Fine edits by chat are a must:** "if sallie can't do fine edits via chat, then she won't use this." Nobody finishes her raw videos in Final Cut.
+- **Sending:** "option b is not sending. sending is ok when needed." Posting and publishing stay forbidden. Jason tests OpusClip with an existing clip's YouTube link.
+- **A session first handed off as another kind:** the page redacts the earlier words in place.
+- **Reels of a finished video** are made both in brimm-video and in OpusClip. Graphics Claude makes are text cards. Jason adds the logos to the Assets folder himself.
+- **The question card** asks a second question ("a private session with a client or a group?") for every video; a finished video's hand-off is written once the spellings are answered; a caption track goes in the final video, and an iPhone clip gets captions drawn on it only when she asks.
+- **Jason's MacBook** gets a drop folder of its own once `BRIMM VIDEO Transfer` retires.
+
 ## The items moved from brimm-operations
 
 Moved on 2026-10-14. They were written in brimm-operations, where the tool was in `transcribe/`. The paths in them are this repo's, where it is in `tool/`. The README and the research they name are this repo's too.
@@ -94,4 +103,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-14: first version of this page, in the new repo brimm-video, on Jason's decision that video editing is a project of its own, separate from BRIMM Operations and run through Claude Code or Claude chat. Recorded his direction word for word, Sallie's laptop, and the open decision on her editor. Moved in L1, L5 and L6 from brimm-operations at commit 84a2f61, with their change lines. The tool moved from `transcribe/` there to `tool/` here. L5 now says that the Short video format, the post text the BRIMM Ops page writes, stays in BRIMM Ops.
 - 2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone. A video dropped in `BRIMM Video/Unedited Video/Mac Studio/` is imported into its own folder in `BRIMM Video/Episodes/`, every file put into Dropbox as a clone and checked again 15 minutes later, and `tool/edit.js` lists, opens and shows episodes in Final Cut Pro. Described in the README, under "Episodes".
 - 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.
-- 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed.
+- 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed. The same evening, Jason's answers to the design's questions, recorded under that section.
