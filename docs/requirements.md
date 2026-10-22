@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-10-15.
+- **Last updated:** 2026-10-22.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -20,6 +20,25 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
 ## Decisions
 
 - **Which editor Sallie's laptop gets: Final Cut Pro, as on the Mac Studio.** Jason decided it on 2026-10-14 ("Let's stick with final cut pro for now.") and installs it on her laptop, so both Macs use Final Cut Pro. The design's "What this rests on" records the decision; setting her laptop up is `docs/setup/sallies-laptop.md`.
+- **The workflows of 2026-10-22.** After his MacBook test stopped at step 2.5 of the test guide, Jason walked through every kind of video with the BRIMM Ops session "Write up the video workflows, user steps marked", and decided the shape below (BRIMM Ops memory, `video-workflow-redesign-2026-10-22`). The design is `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`, which supersedes the design of 2026-10-14 where they differ. Nothing of it is built.
+
+## The workflows (2026-10-22)
+
+What brimm-video must do, as Jason decided it on 2026-10-22. The design says how.
+
+- **One drop, a light import.** Each Mac has one drop folder, for every kind of video. On a drop brimm-video makes the transcript, the words with their times, the `.srt`, the cut plan (whose `.txt` is the cut log) and the rough cut's transcript, matches the video against open episodes (a new version of one is a later revision of it), and says "Ready". It asks Claude nothing and renders nothing on a drop: no rough-cut video, no Final Cut file, no Reel previews.
+- **The kind is asked before Claude reads anything.** In her Claude chat, Sallie answers one clickable question: finished by her editor, raw with retakes, an iPhone clip, or a client or group session. The guess comes first; a session is always offered and never guessed. Her answer picks what Claude is asked. A wrong answer is corrected by asking again with the right kind.
+- **Finished videos** (most of them; her editor keeps long-form): Claude suggests Reels, with times and why, and spellings. No title, no Reels question. The hand-off is written at once, with no Final Cut.
+- **Raw videos with retakes** (mainly mid-length ones she does not send to the editor): Claude's cut decisions and Reel suggestions, a rendered rough cut she can watch outside Final Cut, and editing by talking to Claude. Sallie never opens Final Cut; names, titles, the logo and graphics on the main video are easy to add by chat. Nothing is printed on the main video: no running captions.
+- **Client and group sessions:** the transcript, and, when she asks for its teachings, BRIMM business principles with no client names, and Reel ideas where Sallie alone speaks, either to film again ("reels to film") or cut from the session with the client's agreement noted. A session is never sent to OpusClip, and no transcript of it goes in a hand-off. Its words go to Claude only when she asks for its teachings, on a Claude account whose training setting is off. She may clear a session mark herself, after a confirming question, and the clearing is logged.
+- **iPhone clips** are rare here (they stay path A); one dropped in gets short-video handling.
+- **Reels only on request.** "Show me the Reel suggestions" reads a text file; a Reel is made, with its faces and preview, only when she asks. A Reel's words and captions are on its picture.
+- **Times in the chat** are on the rough cut's timeline, then on the newest version's. "Show me the transcript" shows the rough cut's transcript with its times.
+- **Assets:** a `BRIMM Video/Assets` folder with the brand's logos (never the "with Sallie Holder" marks) and graphics made as needed, by Sallie in Canva or elsewhere, or by Claude in the chat.
+- **Zoom:** recordings from Zoom are taken by the same drop, through phase T; `BRIMM VIDEO Transfer` retires after two weeks of both running side by side.
+- **Her folder's lock** is an allowlist that can be changed as her work changes, and can admit a connector later. OpusClip's posting tools stay denied. brimm-video never uploads video: OpusClip takes an episode's YouTube link. Option b (her folder sending that link to OpusClip) comes after a test in the Code tab.
+- **The hand-off, version 2,** shared with BRIMM Ops: kinds for a finished video and a session, no episode title (titles live only on the page), a session's approved principles. A Reel's words on the picture still travel in it.
+- **Kept:** the tool drafts and never posts, sends or publishes; no video or sound leaves the Mac.
 
 ## The items moved from brimm-operations
 
@@ -75,3 +94,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-14: first version of this page, in the new repo brimm-video, on Jason's decision that video editing is a project of its own, separate from BRIMM Operations and run through Claude Code or Claude chat. Recorded his direction word for word, Sallie's laptop, and the open decision on her editor. Moved in L1, L5 and L6 from brimm-operations at commit 84a2f61, with their change lines. The tool moved from `transcribe/` there to `tool/` here. L5 now says that the Short video format, the post text the BRIMM Ops page writes, stays in BRIMM Ops.
 - 2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone. A video dropped in `BRIMM Video/Unedited Video/Mac Studio/` is imported into its own folder in `BRIMM Video/Episodes/`, every file put into Dropbox as a clone and checked again 15 minutes later, and `tool/edit.js` lists, opens and shows episodes in Final Cut Pro. Described in the README, under "Episodes".
 - 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.
+- 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed.

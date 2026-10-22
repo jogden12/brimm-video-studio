@@ -4,7 +4,7 @@ Video editing for The BRIMM, run through Claude Code or Claude chat. Since 2026-
 
 Since phase 1a of the design, a video for the Mac Studio is dropped in `The BRIMM DB/BRIMM Video/Unedited Video/Mac Studio/` in Dropbox, once the installer has been run there with `--machine`, and is imported into an episode of its own in `The BRIMM DB/BRIMM Video/Episodes/`. See "Episodes" below. Until then the Mac Studio watches `Unedited Video Transfer`, as it always has.
 
-What the project must do is in `docs/requirements.md`. Both Macs use Final Cut Pro (Jason, 2026-10-14). The design of the next version is `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md`, and setting Sallie's laptop up is `docs/setup/sallies-laptop.md`.
+What the project must do is in `docs/requirements.md`. Both Macs use Final Cut Pro (Jason, 2026-10-14). The design of the next version is `docs/superpowers/specs/2026-10-14-brimm-video-next-version-design.md`, revised by `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md` (a light import, then a question in her chat; not built yet), and setting Sallie's laptop up is `docs/setup/sallies-laptop.md`. This README describes the tool as it is built.
 
 ## What is where
 
