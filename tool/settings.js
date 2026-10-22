@@ -91,8 +91,8 @@ export function settingsFault(s) {
   if (s.readings !== undefined && typeof s.readings !== "boolean") return "readings must be true or false";
   if (s.handoffVersion !== undefined && s.handoffVersion !== 1 && s.handoffVersion !== 2) return "the version of the hand-off must be 1 or 2";
   if (s.drop !== undefined && s.drop !== "Unedited Video" && s.drop !== "Drop") return 'the drop folder must be "Unedited Video" or "Drop"';
-  if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && !teachingsWhole(s.sessionTeachings)) {
-    return "the setting for teachings from sessions is neither null nor what node settings.js sessions --teachings on writes";
+  if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && s.sessionTeachings !== false && !teachingsWhole(s.sessionTeachings)) {
+    return "the setting for teachings from sessions is neither off (null or false) nor what node settings.js sessions --teachings on writes";
   }
   return "";
 }
@@ -102,11 +102,14 @@ export function settingsFault(s) {
 export const lightImport = (s) => s?.import === "light";
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on
-    and it is less than 90 days since. `now` is a time in milliseconds, or a Date. Settings that do not say so, or say so in a
-    way that is not whole, are off. */
+    and it is less than 90 days since. `now` is a time in milliseconds, or a Date. Settings that do not say so (absent, null or
+    false), or say so in a way that is not whole, are off. So are settings that were turned on later than now: the clock has
+    been set back, or the file is not what Jason wrote, and the 90 days cannot be told. */
 export function teachingsOn(s, now = Date.now()) {
   const t = s?.sessionTeachings;
-  return teachingsWhole(t) && Number(now) - Date.parse(t.at) < TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
+  if (!teachingsWhole(t)) return false;
+  const age = Number(now) - Date.parse(t.at);
+  return age >= 0 && age < TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
 }
 
 /** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words. Any field a later version of
@@ -124,15 +127,28 @@ export function readSettings(home) {
   return fault ? { why: `This Mac's settings could not be read (${file}: ${fault}).` } : { settings: s };
 }
 
-/** Write this Mac's settings: the ones there are, with the fields given put over them, so that a write keeps every field it
-    does not write, those a later version of brimm-video adds as well. A field given as undefined is not given. The settings
-    that are there are used only when they can be (readSettings); otherwise they are written over, and the Mac, the path and
-    the checkout must all be given. They are written under another name first, then under their own: they are on this Mac's
-    own disk, not in Dropbox, so the rename is safe. Gives back the file's path. A value that will not do throws, in plain
-    words, and nothing is written. */
+/** What the settings file holds, as the object it is: {} when there is no file, or what is in it is not JSON, or is JSON that is
+    not an object, so that there is nothing in it to keep. Any other trouble with the file is thrown. */
+function heldIn(file) {
+  try {
+    const held = JSON.parse(readFileSync(file, "utf8"));
+    return held && typeof held === "object" && !Array.isArray(held) ? held : {};
+  } catch (e) {
+    if (e.code === "ENOENT" || e instanceof SyntaxError) return {};
+    throw e;
+  }
+}
+
+/** Write this Mac's settings: the ones the file holds, with the fields given put over them, so that a write keeps every field it
+    does not write, those a later version of brimm-video adds as well. A field given as undefined is not given. Only a file
+    that is not there, or is not JSON, starts from the fields given alone, and then the Mac, the path and the checkout must all
+    be given. Settings in the file that will not do, and are not mended by what is given, are not written over: that would lose
+    the switch's settings with them. It throws, in plain words, and the file is left as it is. They are written under another
+    name first, then under their own: they are on this Mac's own disk, not in Dropbox, so the rename is safe. Gives back the
+    file's path. A value that will not do throws, in plain words, and nothing is written. */
 export function writeSettings(home, fields) {
   const given = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
-  const merged = { ...(readSettings(home).settings || {}), ...given };
+  const merged = { ...heldIn(settingsFile(home)), ...given };
   // The first four in their place, whatever order they were given in; everything else after them.
   const s = { version: 1, machine: merged.machine, root: merged.root, checkout: merged.checkout, ...merged };
   const fault = settingsFault(s);

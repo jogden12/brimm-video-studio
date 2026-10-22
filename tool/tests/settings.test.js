@@ -156,14 +156,43 @@ describe("the switch's settings", () => {
     assert.ok(readSettings(t.home).why.startsWith("This Mac has no settings for episodes"));
     t.done();
   });
-  it("are written over, as they always were, when the file there cannot be used", () => {
+  it("start from the settings given when the file there is not JSON, or holds no object", () => {
     const t = setup();
     mkdirSync(dirname(settingsFile(t.home)), { recursive: true });
-    for (const text of ["{", JSON.stringify({ ...BASE, import: "heavy", later: 1 }), JSON.stringify({ ...BASE, version: 2 })]) {
+    for (const text of ["", "{", "not json", "[]", "null", '"settings"', "7"]) {
       writeFileSync(settingsFile(t.home), text);
       writeSettings(t.home, t.given);
       assert.deepEqual(readSettings(t.home), { settings: BASE }, text);
     }
+    t.done();
+  });
+  it("are not written over, and say why, when the file there holds settings that will not do: the switch's fields are not lost", () => {
+    const t = setup();
+    mkdirSync(dirname(settingsFile(t.home)), { recursive: true });
+    const cases = [
+      [{ ...BASE, import: "ligth", sessionTeachings: TEACHINGS, later: 1 }, /import/],
+      [{ ...BASE, handoffVersion: 3, import: "light" }, /hand-off/],
+      [{ ...BASE, sessionTeachings: { ...TEACHINGS, accounts: {} } }, /teachings from sessions/],
+      [{ ...BASE, version: 2, import: "light" }, /version 1/]
+    ];
+    for (const [held, why] of cases) {
+      const text = JSON.stringify(held);
+      writeFileSync(settingsFile(t.home), text);
+      assert.throws(() => writeSettings(t.home, t.given), { message: why }, text);
+      assert.equal(readFileSync(settingsFile(t.home), "utf8"), text, text);
+      assert.deepEqual(readdirSync(dirname(settingsFile(t.home))), ["settings.json"], text);
+    }
+    t.done();
+  });
+  it("are mended by a write that gives what the file there had wrong or lacked, and keep the rest", () => {
+    const t = setup();
+    mkdirSync(dirname(settingsFile(t.home)), { recursive: true });
+    writeFileSync(settingsFile(t.home), JSON.stringify({ ...BASE, import: "ligth", handoffVersion: 2, later: 1 }));
+    writeSettings(t.home, { import: "light" });
+    assert.deepEqual(readSettings(t.home), { settings: { ...BASE, import: "light", handoffVersion: 2, later: 1 } });
+    writeFileSync(settingsFile(t.home), JSON.stringify({ version: 1, machine: "Mac Studio", sessionTeachings: TEACHINGS }));
+    writeSettings(t.home, { root: ROOT, checkout: CHECKOUT });
+    assert.deepEqual(readSettings(t.home), { settings: { ...BASE, sessionTeachings: TEACHINGS } });
     t.done();
   });
   it("are not written, and the file is left as it was, when a field of the switch will not do", () => {
@@ -188,10 +217,11 @@ describe("the switch's settings", () => {
     assert.equal(settingsFault({ ...BASE, import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video" }), "");
     assert.equal(settingsFault(BASE), "");
   });
-  it("have a sessionTeachings that is null, or whole: on, when it was turned on, and the two accounts", () => {
+  it("have a sessionTeachings that is off (absent, null or false), or whole: on, when it was turned on, and the two accounts", () => {
     assert.equal(settingsFault({ ...BASE, sessionTeachings: null }), "");
+    assert.equal(settingsFault({ ...BASE, sessionTeachings: false }), "");
     assert.equal(settingsFault({ ...BASE, sessionTeachings: TEACHINGS }), "");
-    const bad = [false, true, "on", [], {}, { ...TEACHINGS, on: false }, { ...TEACHINGS, on: "yes" }, { ...TEACHINGS, at: undefined }, { ...TEACHINGS, at: "yesterday" },
+    const bad = [true, "on", [], {}, { ...TEACHINGS, on: false }, { ...TEACHINGS, on: "yes" }, { ...TEACHINGS, at: undefined }, { ...TEACHINGS, at: "yesterday" },
       { ...TEACHINGS, at: 1 }, { ...TEACHINGS, accounts: undefined }, { ...TEACHINGS, accounts: { cli: "a@b.c" } }, { ...TEACHINGS, accounts: { cli: "a@b.c", app: "" } },
       { ...TEACHINGS, accounts: { cli: " ", app: "a@b.c" } }, { ...TEACHINGS, accounts: { cli: 1, app: "a@b.c" } }];
     for (const sessionTeachings of bad) assert.match(settingsFault({ ...BASE, sessionTeachings }), /teachings from sessions/, JSON.stringify(sessionTeachings));
@@ -216,6 +246,14 @@ describe("the switch's settings", () => {
     assert.equal(teachingsOn(s, end - 1), true);
     assert.equal(teachingsOn(s, end), false);
     assert.equal(teachingsOn(s, new Date(end - 1)), true);
+  });
+  it("have teachings from sessions off when the time they were turned on is later than now: a clock set back is not trusted", () => {
+    const s = { ...BASE, sessionTeachings: TEACHINGS };
+    const at = Date.parse(TEACHINGS.at);
+    assert.equal(teachingsOn(s, at), true);
+    assert.equal(teachingsOn(s, at - 1), false);
+    assert.equal(teachingsOn(s, at - 24 * 60 * 60 * 1000), false);
+    assert.equal(teachingsOn(s, new Date(at - 1)), false);
   });
   it("have teachings from sessions off unless they are there, on, and whole", () => {
     const now = Date.parse("2026-10-23T09:00:00-04:00");
@@ -485,6 +523,33 @@ describe("node settings.js set and sessions", () => {
     assert.deepEqual(t.said, ["Teachings from sessions are off.", `Written: ${settingsFile(t.home)}`]);
     assert.equal(readSettings(t.home).settings.sessionTeachings, null);
     assert.equal(teachingsOn(readSettings(t.home).settings, AT.getTime()), false);
+    t.done();
+  });
+  it("sessions says teachings were off already, and changes nothing, when the file has them as false", () => {
+    const t = mac();
+    writeSettings(t.home, { sessionTeachings: false });
+    assert.equal(t.run("sessions", "--teachings", "off"), 0);
+    assert.deepEqual(t.said, ["Teachings from sessions were off already."]);
+    assert.equal(readSettings(t.home).settings.sessionTeachings, false);
+    t.said.length = 0;
+    assert.equal(t.run("show"), 0);
+    assert.ok(t.said.every((line) => !line.includes("Teachings")));
+    t.said.length = 0;
+    assert.equal(t.run("sessions", "--teachings", "on", "--cli-account", "a@b.c", "--app-account", "a@b.c"), 0);
+    assert.equal(teachingsOn(readSettings(t.home).settings, AT.getTime()), true);
+    t.done();
+  });
+  it("write stops, says why, and leaves the file alone when the settings there will not do, as install.sh needs", () => {
+    const t = mac();
+    t.run("set", "--import", "light");
+    t.run("sessions", "--teachings", "on", "--cli-account", "a@b.c", "--app-account", "a@b.c");
+    const file = settingsFile(t.home);
+    const text = readFileSync(file, "utf8").replace('"light"', '"ligth"');
+    writeFileSync(file, text);
+    t.said.length = 0;
+    assert.equal(t.run("write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT), 1);
+    assert.deepEqual(t.said, ['This Mac\'s settings could not be written (the import must be "full" or "light").']);
+    assert.equal(readFileSync(file, "utf8"), text);
     t.done();
   });
   it("sessions refuses a blank account, turns nothing on, and ends with 1", () => {
