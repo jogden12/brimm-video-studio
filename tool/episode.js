@@ -105,10 +105,23 @@ const isId = (v) => typeof v === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(v);
 const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
   && (a.match === undefined || a.match === null || isId(a.match))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
+/** The keys of each list of a session's items that she may change by her command (sessions.js EDITS), by the list. */
+const SESSION_EDITS = { principles: ["name", "category", "description", "example_application"], recurringPrinciples: ["text"], reelIdeas: ["idea", "words", "why"] };
+/** An item's number, as a key of an object: a whole number from 1, as she says it. */
+const isItemKey = (k) => /^[1-9]\d*$/.test(k);
+/** For each list of a session's items, something kept by the item's number: each list's object of numbers, each number's
+    `each`. */
+const byItem = (v, each) => isObject(v) && Object.entries(v).every(([list, items]) => Object.hasOwn(SESSION_EDITS, list) && isObject(items) && Object.entries(items).every(([n, x]) => isItemKey(n) && each(x, list)));
+/** Her decision of an item, and her change of one: the keys she may change, each to words. */
+const isDecision = (d) => d === "kept" || d === "dropped";
+const isEdit = (e, list) => isObject(e) && Object.entries(e).every(([key, text]) => SESSION_EDITS[list].includes(key) && isText(text));
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
-    when it was cleared, if it was: confirmed by her click on a dialog. */
+    when it was cleared, if it was: confirmed by her click on a dialog. Once her teachings are asked for, when (`asked`); and
+    what she decided of each item Claude read (`decided`, "kept" or "dropped", by list and number) and what she changed of one
+    (`edits`), which only her command writes (spec 2026-10-22, section 8). */
 const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
-  && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"));
+  && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))
+  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
     ended. */
 const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome);

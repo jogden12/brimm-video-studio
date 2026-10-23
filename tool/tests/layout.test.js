@@ -140,6 +140,19 @@ describe("the record's layout 3", () => {
       assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
     }
     assert.match(episodeFault({ ...made(), session: "yes" }), /session/);
+    // A session's teachings asked for, when, and her decisions and changes of what Claude read, item by item (F7).
+    const decided = { principles: { 1: "kept", 3: "dropped" }, recurringPrinciples: { 2: "kept" }, reelIdeas: { 4: "dropped" } };
+    const edits = { principles: { 1: { name: "Price the outcome", example_application: "A florist names her price." } }, recurringPrinciples: { 2: { text: "Decide once." } }, reelIdeas: { 4: { idea: "One number", words: "Every Monday.", why: "Short." } } };
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided, edits } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided: {}, edits: {} } }), "");
+    for (const bad of [
+      { asked: "later" }, { asked: 4 },
+      { decided: "all" }, { decided: { principles: { 1: "yes" } } }, { decided: { principles: { 0: "kept" } } }, { decided: { principles: { one: "kept" } } }, { decided: { ideas: { 1: "kept" } } }, { decided: { principles: [] } },
+      { edits: [] }, { edits: { principles: { 1: { steps: "x" } } } }, { edits: { principles: { 1: { name: "" } } } }, { edits: { recurringPrinciples: { 1: { name: "x" } } } },
+      { edits: { reelIdeas: { 1: { principle: "2" } } } }, { edits: { principles: { 1: "x" } } }, { edits: { principles: { x: { name: "a" } } } }, { edits: { other: { 1: { text: "a" } } } }
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
+    }
     for (const bad of [{ kind: "" }, { model: 1 }, { at: "later" }, { on: "" }, { account: null }, { outcome: "" }]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, ...bad } }), /reading/, JSON.stringify(bad));
     }

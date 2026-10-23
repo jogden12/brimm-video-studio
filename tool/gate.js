@@ -24,7 +24,9 @@ const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
 export const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
-const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
+export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
+/** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */
+export const TEACHINGS_LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -79,23 +81,29 @@ function reelWords(command, record, words, said) {
   return false;
 }
 
+/** Whether the words of `teachings` are her answer "the transcript only", which sends nothing to Claude: `--transcript-only`. */
+const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
+
 /** Why `command`, with `words`, may not run for the episode with this `record`: the plain words of why, or "" when it may.
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
       UNANSWERED. Any other is refused in the words of a video waiting for its answer, or, for one she left alone, in words that
       say so: it is not waiting for an answer.
-    - A session whose mark is not cleared, only those of SESSION, and, once the training gate is on (`teachingsOn`), those of
-      SESSION_TAUGHT. Of those, `reel` and `render` run only with the words of a Reel she has agreed on (reelWords).
+    - A session whose mark is not cleared, only those of SESSION, and `teachings … --transcript-only`, her answer that nothing of
+      it goes to Claude; and, once the training gate is on (`teachingsOn`), those of SESSION_TAUGHT, refused until then in the
+      words of the gate being off, or, when Jason's check of it has lapsed (`lapsed`), in words that say so. Of those, `reel` and
+      `render` run only with the words of a Reel she has agreed on (reelWords).
     - An answered record that is not a session, and a session whose mark is cleared, every command.
     A command named in none of the lists is refused for a record that is gated at all. */
-export function gateFor(command, record, { teachingsOn = false, said } = {}, words = []) {
+export function gateFor(command, record, { teachingsOn = false, lapsed = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
   if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;
-  if (!teachingsOn) return TEACHINGS_OFF;
+  if (command === "teachings" && transcriptOnly(words)) return "";
+  if (!teachingsOn) return lapsed ? TEACHINGS_LAPSED : TEACHINGS_OFF;
   if ((command === "reel" || command === "render") && !reelWords(command, record, words, said)) return REEL_NOT_AGREED;
   return "";
 }

@@ -1953,6 +1953,27 @@ describe("the highest number ever given to a suggestion or a Reel of a video", (
     assert.deepEqual(all(), [11, 11, 11]);
     t.done();
   });
+  it("counts a session's items too: those of its hand-offs, and those of its teachings, in its folder and set aside in history/", () => {
+    const t = setup();
+    const old = original(t);
+    const next = later(t, SECOND, ID);
+    const all = () => [old, next].map((found) => highestNumberOf(t.root, found.record));
+    /** A session's teachings as its reading writes them, its lists numbered so. */
+    const teachings = (principles, recurring, ideas) => ({ format: "brimm-video teachings", version: 1, principles: principles.map((n) => ({ n, name: "A principle" })), recurringPrinciples: recurring.map((n) => ({ n, text: "A point." })), reelIdeas: ideas.map((n) => ({ n, idea: "An idea", words: "Words.", refilm: true, principle: null })), dropped: [] });
+    lay(old.folder, "Session, 2026-10-22.principles.json", teachings([1, 2], [3], [4]));
+    assert.deepEqual(all(), [4, 4]);
+    lay(next.folder, "history/2026-10-22T10-00-00-05-00 Session, 2026-10-22.principles.json", teachings([5], [], []));
+    assert.deepEqual(all(), [5, 5]);
+    // A session's hand-off for the id: its principles, recurring principles and Reels to film.
+    const session = { ...V2.session, video: { ...V2.session.video, id: ID }, session: { principles: [{ ...V2.session.session.principles[0], n: 6 }], recurringPrinciples: [{ n: 8, text: "A point." }], reelsToFilm: [{ n: 7, idea: "An idea", words: "Words.", why: "", principle: null }] } };
+    lay(old.folder, "final/Session, 2026-10-22.brimm-ops.json", session);
+    assert.deepEqual(all(), [8, 8]);
+    // What is not a session's teachings is passed over.
+    lay(old.folder, "Other.principles.json", { format: "something else", principles: [{ n: 90 }] });
+    lay(old.folder, "Broken.principles.json", "{ not json");
+    assert.deepEqual(all(), [8, 8]);
+    t.done();
+  });
   it("takes nothing from another video, and passes over what cannot be read", () => {
     const t = setup();
     const old = original(t, { reels: [reelOf(2)] });

@@ -9,7 +9,11 @@
 //   today's ffmpeg, as version 0 of the main video, from the timeline kept as edit/main.v0.fcpxml, and opened in QuickTime
 //   Player. It replaces files the import's late check looks at, so it waits first while that check still holds the video.
 // - An iPhone clip: the spellings as offers, and one line on what the clip is.
-// - A session is read only for its teachings, which come in a later step: this run refuses it.
+// - A client or group session, once she has asked for its teachings (`teachings`, edit.js) and while this Mac's training gate is
+//   on: every speaker of the meeting's own transcript but her is replaced before the call, the reply is read for principles,
+//   recurring principles and Reel ideas, every field that holds a name brimm-video can see is taken out (sessions.js), and what
+//   is left is written under the session's name, for her to decide in her chat. Asked for again, the earlier teachings are set
+//   aside into history/ first.
 // The suggestions are Reel candidates with no crops yet (reels.json version 2), numbered on from the highest number ever given to
 // the video, so that no number is given twice under one id. The record keeps what the call did (`reading`). Before anything is
 // asked, and again just before the call, the record must still be the answer the run was started for. The log and the result
@@ -34,6 +38,8 @@ import { noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { lastLine } from "./run.js";
 import { stamp } from "./shared/text.js";
+import { checkNames } from "./sessions.js";
+import { TEACHINGS_FORMAT, accountWhy, teachingsWhy, teachingsFiles, earlierTeachings, sessionSeen, seenFrom, planOf, teachingsText, ideasText } from "./teachings.js";
 
 /** How often a raw reading looks again while the import's late check holds its video, and how long it waits in all before it
     gives up and says why: the check comes at most LATE_CHECK_MS after the import filed the video, and a little more is allowed. */
@@ -48,9 +54,12 @@ export const READ_KINDS = ["finished", "raw", "short video", "session"];
 const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
 
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
+/** What a reading of another kind says of a session, which is read only for its teachings, through `teachings`. */
 const SESSION_LATER = "A session is read only for its teachings, which come in a later step.";
 /** What to say next when nothing was read, and Claude may be asked again. */
 const AGAIN = "Nothing was changed. Say what it is again, with --again, to have Claude read it.";
+/** The same, for a session, whose teachings are asked for again. */
+const AGAIN_TEACHINGS = "Nothing was changed. Ask for its teachings again to have Claude read it.";
 /** The notice a reading posts on this Mac once what it read is in the episode, and what to say next. */
 const noticeOf = (name) => `Claude has read ${name}: say "what did Claude find?"`;
 const FOUND = 'Say "what did Claude find?"';
@@ -61,22 +70,36 @@ const isText = (v) => typeof v === "string" && v.trim() !== "";
 const ms = (t) => Math.round(t * 1000) / 1000;
 /** "1 thing", "2 things". */
 const counted = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Text with its first letter in capitals. */
+const capital = (text) => text[0].toUpperCase() + text.slice(1);
 /** A part of a sentence, made a sentence: with its full stop. */
 const sentence = (part) => `${String(part).replace(/\.$/, "")}.`;
 
 /** Why the run cannot go on with the episode's `record` as the answer it was started for (`kind`, `rev`), in plain words, or "":
-    a session, which is read only for its teachings; one whose kind is not the kind any more (or that has none, as a video not
-    answered); one whose session mark is not cleared (the gate's own predicate); one read already for this answer (one reading
-    for each answer: its `reading.at` is not before `answer.at`, or either cannot be read; `kind … --again` sets an old reading
-    aside); one whose answer Dropbox undid (its rev is below the answer's); one another Mac has open (its claim); and one whose
-    last change on this Mac Dropbox took away. Each names the video as edit.js does (shownName). */
+    for any kind but a session, a session, which is read only for its teachings; one whose kind is not the kind any more (or that
+    has none, as a video not answered); for any kind but a session, one whose session mark is not cleared (the gate's own
+    predicate), and one read already for this answer (one reading for each answer: its `reading.at` is not before `answer.at`,
+    or either cannot be read; `kind … --again` sets an old reading aside); for a session, one whose teachings were not asked for
+    (`session.teachings` "asked", at `session.asked`), and one read already since they were (one reading for each ask: its
+    `reading.at` is not before `session.asked`, or either cannot be read; asking again is what reads it again); one whose answer
+    Dropbox undid (its rev is below the answer's); one another Mac has open (its claim); and one whose last change on this Mac
+    Dropbox took away. Each names the video as edit.js does (shownName). */
 function notAsAnswered(record, { kind, rev, machine, home }) {
   const name = shownName(record);
-  if (kindOf(record) === "session") return SESSION_LATER;
-  if (kindOf(record) !== kind) return `${name} is no longer answered as ${KIND_SAID[kind]}, so Claude did not read it. Nothing was changed.`;
-  if (gated(record)) return `${name} is marked a client or group session, so Claude did not read it. Nothing was changed.`;
-  const answeredAt = isObject(record.answer) ? Date.parse(record.answer.at) : NaN;
-  if (record.reading !== undefined && record.reading !== null && !(isObject(record.reading) && Date.parse(record.reading.at) < answeredAt)) return `${name} was read already for this answer. Nothing was asked of Claude.`;
+  const read = record.reading !== undefined && record.reading !== null;
+  if (kind === "session") {
+    if (kindOf(record) !== "session") return `${name} is no longer answered as ${KIND_SAID[kind]}, so Claude did not read it. Nothing was changed.`;
+    const mark = isObject(record.session) ? record.session : {};
+    const asked = mark.teachings === "asked" ? Date.parse(mark.asked) : NaN;
+    if (!Number.isFinite(asked)) return `${name}'s teachings were not asked for, so Claude did not read it. Nothing was changed.`;
+    if (read && !(isObject(record.reading) && Date.parse(record.reading.at) < asked)) return `${name} was read already since its teachings were asked for. Nothing was asked of Claude.`;
+  } else {
+    if (kindOf(record) === "session") return SESSION_LATER;
+    if (kindOf(record) !== kind) return `${name} is no longer answered as ${KIND_SAID[kind]}, so Claude did not read it. Nothing was changed.`;
+    if (gated(record)) return `${name} is marked a client or group session, so Claude did not read it. Nothing was changed.`;
+    const answeredAt = isObject(record.answer) ? Date.parse(record.answer.at) : NaN;
+    if (read && !(isObject(record.reading) && Date.parse(record.reading.at) < answeredAt)) return `${name} was read already for this answer. Nothing was asked of Claude.`;
+  }
   if (record.rev < rev) return `Dropbox undid the answer for ${name}, so Claude did not read it. Say what it is again.`;
   const held = heldElsewhere(record, machine);
   if (held) return `${held.by} has ${name} open, so Claude did not read it. Nothing was changed.`;
@@ -87,7 +110,7 @@ function notAsAnswered(record, { kind, rev, machine, home }) {
     alone, or "" when it cannot be read. It is run as the call is, through `run`, in a new empty folder `folder` of the run's own,
     and with the call's one option that applies to it, reading no settings file (--setting-sources ""). It is kept in the
     record, and never printed. */
-async function accountOf({ run, tools }, folder) {
+export async function accountOf({ run, tools }, folder) {
   try {
     mkdirSync(folder, { recursive: true });
     const ended = await run(tools.claude, ["--setting-sources", "", "auth", "status", "--json"], { cwd: folder, limit: ACCOUNT_MS, out: 100000 });
@@ -192,10 +215,13 @@ const claudesClip = (line) => String(line).replace(/^Clip (\d+) was left out: /,
     programs, Claude Code among them), `wait`, `now`, `log`, `notify` (the import's notice), `readAll` (how a file is brought over),
     `early` (runDetached's, for the result once what it read is in), and the rule's options, as askAgain is given them. Nothing
     is asked of Claude, and nothing written, when:
-    - this Mac's readings are off, at the start or after a wait for the import (its settings are read again then), or it is a
-      session (read only for its teachings, in a later step);
-    - the record is not the answer it was started for (notAsAnswered: read already for this answer among them), at the start,
-      after each look while it waits, and right before each try of the call; or a newer record is still coming over;
+    - this Mac's readings are off, at the start or after a wait for the import (its settings are read again then);
+    - the record is not the answer it was started for (notAsAnswered: read already for this answer among them, or for a session,
+      for this ask of its teachings), at the start, after each look while it waits, and right before each try of the call; or a
+      newer record is still coming over;
+    - for a session, right before each try of the call, by this Mac's settings read again: its training gate is off or lapsed,
+      the claude command is signed in to another account than the one Jason checked, or its readings are off (the gate and
+      `teachings` checked them before; this is the backstop);
     - Claude Code is not on this Mac; the import still holds the video (importHold), for a raw reading, and for a finished one
       that would replace a file the import put in (reels.json, its suggestions), and that does not clear within READ_HOLD_MS,
       or clears only by a person's hand; or a file it reads is not on this Mac and cannot be brought over.
@@ -212,7 +238,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   /** Whether this Mac's readings are off, as its settings say now: read again from its disk, or as the run was given them. */
   const readingsOff = () => (readSettings(home).settings || ctx.settings).readings === false;
   if (ctx.settings.readings === false) return stop(READINGS_OFF);
-  if (kind === "session") return stop(SESSION_LATER);
+  const session = kind === "session";
   const asWas = { kind, rev, machine: ctx.machine, home };
   let record = found.record;
   const first = notAsAnswered(record, asWas);
@@ -253,13 +279,17 @@ export async function readEpisodeNow(ctx, found, deps) {
     if (readingsOff()) return stop(READINGS_OFF);
   }
 
-  // The files it reads: the plan, and for a raw video the video, its captions, its words and its cut log, which the rough cut,
-  // its timeline and what is set aside are made of. One Dropbox has not brought over yet is read through, so that it does.
+  // The files it reads: the plan, for a raw video the video, its captions, its words and its cut log, which the rough cut, its
+  // timeline and what is set aside are made of, and for a session the meeting's own transcript, when there is one, and the
+  // teachings an earlier reading wrote, which it sets aside. One Dropbox has not brought over yet is read through, so that it
+  // does. A session's files are said by what they are, never by name.
   const planRel = `${stem}.cut-plan.json`;
   const there = (rel) => existsSync(join(found.folder, rel));
-  const need = [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...[`${stem}.words.json`, `${stem}.cut-plan.txt`].filter(there)] : [])];
+  const earlier = session ? earlierTeachings(record) : [];
+  const need = session ? [...seenFrom(record), ...earlier.filter(there)] : [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...[`${stem}.words.json`, `${stem}.cut-plan.txt`].filter(there)] : [])];
+  const said = (rel) => (!session ? rel : rel === planOf(record) ? "its cut plan" : earlier.includes(rel) ? "its earlier teachings" : "the meeting's own transcript");
   const gone = need.find((rel) => !there(rel));
-  if (gone) return stop(`${gone} is not in the episode's folder, so Claude did not read ${name}.`);
+  if (gone) return stop(session ? `${capital(said(gone))} is not in the episode's folder, so Claude did not read ${name}.` : `${gone} is not in the episode's folder, so Claude did not read ${name}.`);
   const bring = deps.readAll || readThrough;
   for (const rel of need.filter((r) => !whole(join(found.folder, r)))) {
     try {
@@ -269,17 +299,33 @@ export async function readEpisodeNow(ctx, found, deps) {
     }
   }
   const coming = need.filter((rel) => !whole(join(found.folder, rel)));
-  if (coming.length) return stop(`Dropbox is still bringing ${coming.join(", ")} over to this Mac, so Claude did not read ${name}.`, AGAIN);
+  if (coming.length) return stop(`Dropbox is still bringing ${coming.map(said).join(", ")} over to this Mac, so Claude did not read ${name}.`, session ? AGAIN_TEACHINGS : AGAIN);
   let plan;
-  try {
-    plan = JSON.parse(readFileSync(join(found.folder, planRel), "utf8"));
-    if (!isObject(plan) || !Array.isArray(plan.phrases) || !Array.isArray(plan.ranges)) throw new Error("it is not a cut plan this tool wrote");
-  } catch (e) {
-    return stop(`The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude did not read it.`);
+  // What a session's names are checked against, and the meeting's speakers, its own replaced (teachings.js sessionSeen).
+  let seen = null;
+  if (session) {
+    seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+    if (seen.why) return stop(`${capital(seen.why)}, so Claude did not read ${name}.`);
+    plan = seen.plan;
+  } else {
+    try {
+      plan = JSON.parse(readFileSync(join(found.folder, planRel), "utf8"));
+      if (!isObject(plan) || !Array.isArray(plan.phrases) || !Array.isArray(plan.ranges)) throw new Error("it is not a cut plan this tool wrote");
+    } catch (e) {
+      return stop(`The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude did not read it.`);
+    }
   }
   const facts = isObject(plan.facts) ? plan.facts : {};
-  const about = { video, duration: Number.isFinite(facts.duration) ? facts.duration : record.video.seconds };
+  const duration = Number.isFinite(facts.duration) ? facts.duration : record.video.seconds;
+  // A session is shown no file name, and the meeting's speakers only when one but her was replaced: the same `about` reads it.
+  const about = session ? { duration, ...(seen.speakers ? { speakers: seen.speakers } : {}) } : { video, duration };
   const request = requestFor(kind, plan, about);
+  /** For a session, why it may not be read now, by this Mac's settings read again and the account it is signed in to, or "". */
+  const sessionWhy = (account) => {
+    if (!session) return "";
+    const settings = readSettings(home).settings || ctx.settings;
+    return teachingsWhy(settings, now()) || accountWhy(account, settings) || (settings.readings === false ? READINGS_OFF : "");
+  };
   const work = join(runsFolder(home), `read-${process.pid}-${now()}`);
   mkdirSync(work, { recursive: true });
   try {
@@ -290,6 +336,8 @@ export async function readEpisodeNow(ctx, found, deps) {
     let why = "";
     for (let n = 1; n <= CLAUDE_TRIES && !read; n++) {
       if (n > 1) await wait(AGAIN_MS);
+      const gate = sessionWhy(account);
+      if (gate) return stop(gate);
       const still = again();
       if (still.why) return stop(still.why);
       record = still.record;
@@ -300,9 +348,10 @@ export async function readEpisodeNow(ctx, found, deps) {
         log(`${named}: Claude could not be asked (${why})${n < CLAUDE_TRIES ? ". It is asked once more." : "."}`);
       }
     }
-    if (!read) return stop(`Claude could not read it: ${sentence(why)}`, AGAIN);
+    if (!read) return stop(`Claude could not read it: ${sentence(why)}`, session ? AGAIN_TEACHINGS : AGAIN);
     const at = localStamp(new Date(now()));
     log(`${named}: Claude has read it.`);
+    if (session) return await writtenSession(ctx, found, deps, { record, read, at, account, work, named, name, log, now, seen });
     return await written(ctx, found, deps, { kind, record, plan, facts, read, at, account, work, named, name, stem, log, now });
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -463,6 +512,78 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   }
   log(`${named}: read.`);
   return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: FOUND };
+}
+
+/** What a session's reading writes of what Claude read (`read`), by the rule, and the result it ends with (see readEpisodeNow):
+    - every list's numbers (the place in Claude's list) offset together, each Reel idea's principle with them, to number on from
+      the highest number ever given to the video (highestNumberOf), so that no number is given twice under its id;
+    - every field that holds a name brimm-video can see taken out (sessions.js checkNames, with `seen.names`), and only what is
+      left kept: the teachings file `<name>.principles.json` (teachings.js TEACHINGS_FORMAT), which holds her items, what was taken
+      out (by field and why, never the name) and what of the reply could not be used, and the copies she reads beside it,
+      `<name>.principles.txt` and `<name>.reel-ideas.txt`, all named by the session's name (teachingsFiles), never by its file's;
+    - the teachings an earlier reading wrote, set aside into history/ whole first, by the rule, in the same put;
+    - the record: its reading, which names the teachings file, and no decision of hers any more, since those were of the items
+      set aside. No reels.json, no Reel suggestions and no spellings: a session has none.
+    The result counts what it kept, says each field taken out as "<field>: <why>." and the line that the capitalised words were
+    not checked (namesSkipped), and counts what could not be used: nothing of the reply. */
+async function writtenSession(ctx, found, deps, { record, read, at, account, work, named, name, log, now, seen }) {
+  const folder = found.folder;
+  const files = filesOf(work, { name: named, hold: true, log });
+  const madeAt = [];
+  const text = (rel, body) => {
+    const to = join(folder, rel);
+    files.text(to, body);
+    madeAt.push(to);
+  };
+  // Numbers are never given twice under one video's id: every list numbers on from the highest ever given (finish.js), and a
+  // Reel idea names the principle it shows by that principle's number.
+  const base = highestNumberOf(ctx.root, record, folder);
+  const on = (n) => n + base;
+  const numbered = {
+    principles: read.principles.map((p) => ({ ...p, n: on(p.n) })),
+    recurringPrinciples: read.recurringPrinciples.map((r) => ({ ...r, n: on(r.n) })),
+    reelIdeas: read.reelIdeas.map((r) => ({ ...r, n: on(r.n), principle: Number.isInteger(r.principle) ? on(r.principle) : null }))
+  };
+  const { kept, dropped } = checkNames(numbered, seen.names);
+  const names = teachingsFiles(record);
+  // The teachings an earlier reading of it wrote are set aside in history/ by the rule, whole (the reading brought them over
+  // first), put in before they are replaced.
+  const aside = localStamp(new Date(now())).replace(/:/g, "-");
+  for (const rel of earlierTeachings(record)) {
+    const was = join(folder, rel);
+    if (existsSync(was)) text(`history/${aside} ${rel}`, readFileSync(was, "utf8"));
+  }
+  const teachings = { format: TEACHINGS_FORMAT, version: 1, made: at, principles: kept.principles, recurringPrinciples: kept.recurringPrinciples, reelIdeas: kept.reelIdeas, dropped, skipped: seen.skipped, problems: read.problems };
+  text(names.json, JSON.stringify(teachings, null, 2) + "\n");
+  text(names.txt, teachingsText(name, at.slice(0, 10), teachings));
+  text(names.ideas, ideasText(name, at.slice(0, 10), teachings));
+  const made = [counted(kept.principles.length, "principle"), counted(kept.recurringPrinciples.length, "recurring principle"), counted(kept.reelIdeas.length, "Reel idea")];
+  const failed = [
+    ...dropped.map((d) => `${d.field}: ${d.why}.`),
+    ...(seen.skipped ? [seen.skipped] : []),
+    ...(read.problems.length ? [`${counted(read.problems.length, "part")} of Claude's reply could not be used: ${names.txt} says which.`] : [])
+  ];
+  // Her decisions were of the items it replaces: they are let go with them.
+  const change = (r) => {
+    const { decided, edits, ...mark } = isObject(r.session) ? r.session : {};
+    return { ...r, session: mark, reading: { kind: "session", model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", principles: names.json } };
+  };
+  const onPut = () => {
+    try {
+      (deps.notify || (() => {}))(noticeOf(name));
+    } catch (e) {
+      // A notice is a courtesy: the result says the same.
+    }
+    if (deps.early) deps.early({ ok: true, made, failed: [...failed], next: FOUND });
+  };
+  // The rule's own lines name the video's file first: the reading names the session by its name and id.
+  const file = record.video.file;
+  const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
+  const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home: ctx.home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
+  const problems = [...into.problems, ...into.notes].map(sentence);
+  if (!into.put) return { ok: false, made: [], failed: [...problems], next: AGAIN_TEACHINGS };
+  log(`${named}: read.`);
+  return { ok: !into.problems.length, made, failed: [...failed, ...problems], next: FOUND };
 }
 
 /** Render a raw video's rough cut on this Mac, as version 0 of its main video: today's ffmpeg rough cut (unedited.js roughCut,

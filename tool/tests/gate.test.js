@@ -99,6 +99,21 @@ describe("gateFor, a client or group session whose mark is not cleared", () => {
       assert.equal(gateFor(name, session(), ON), "", name);
     }
   });
+  it("says, when this Mac's gate was turned on 90 days ago or more, that it lapsed, in words of its own", () => {
+    const LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
+    for (const name of ["teachings", "principles", "ideas", "finish", "read"]) {
+      assert.equal(gateFor(name, session(), { teachingsOn: false, lapsed: true }), LAPSED, name);
+      assert.equal(gateFor(name, session(), { teachingsOn: true, lapsed: true }), "", name);
+    }
+    assert.equal(gateFor("reel", session(), { teachingsOn: false, lapsed: true }, ["Session, 2026-10-22", "make", "1"]), LAPSED);
+    assert.equal(gateFor("open", session(), { teachingsOn: false, lapsed: true }), NOT_FOR_SESSION);
+  });
+  it("lets teachings --transcript-only through with the gate off, since nothing of it goes to Claude, and teachings alone not", () => {
+    for (const on of [OFF, {}, { teachingsOn: false, lapsed: true }, ON]) assert.equal(gateFor("teachings", session(), on, ["Session, 2026-10-22", "--transcript-only"]), "", JSON.stringify(on));
+    assert.equal(gateFor("teachings", session(), OFF, ["Session, 2026-10-22"]), TEACHINGS_OFF);
+    assert.equal(gateFor("principles", session(), OFF, ["Session, 2026-10-22", "--transcript-only"]), TEACHINGS_OFF);
+    assert.equal(gateFor("teachings", unanswered, ON, ["Video of 22 Oct, 10:00 (Mac Studio)", "--transcript-only"]), WAITING);
+  });
   it("refuses reel and render, with teachings off, in the words of the gate not being on", () => {
     assert.equal(gateFor("reel", session(), OFF, ["Session, 2026-10-22", "make", "1"]), TEACHINGS_OFF);
     assert.equal(gateFor("render", session(), OFF, ["Session, 2026-10-22", "reel", "1"]), TEACHINGS_OFF);
