@@ -1629,8 +1629,9 @@ export function listGone({ folder, record, home }) {
 /** Why Claude cannot be asked again for the Reel candidates of the episode in `folder`, whose record is `record`: {why}, in
     plain words, with `bring`, the files Dropbox has still to bring over to this Mac, when that is why; {} when it can be
     asked. The quick part of `ask` and the detached part both look, in this order, for:
-    - a video waiting for its answer, and a client or group session whose mark is not cleared (spec 2026-10-22, section 2):
-      nothing of the first goes to Claude until she says what it is, and a session's words go only to its own reading;
+    - a video waiting for its answer, and a client or group session, by its kind or its mark, whose mark is not cleared or
+      that has none (spec 2026-10-22, section 2): nothing of the first goes to Claude until she says what it is, and a
+      session's words go only to its own reading;
     - a short video, which gets no Reels;
     - the other Mac having it open (phase 1b's claim, episode.js heldText);
     - a change of this Mac's that Dropbox undid (episode.js undone);
@@ -1643,7 +1644,9 @@ export function listGone({ folder, record, home }) {
     - an import told to go by the rules alone, as the list says (`rulesOnly`). */
 export function askBlocked({ folder, record, root, home, machine, now = Date.now(), whole = isWhole }) {
   if (kindOf(record) === null) return { why: "This video is waiting for its answer: say what it is first." };
-  if (record.session && !record.session.cleared) return { why: "This is a client or group session: Claude reads it only for its teachings." };
+  // A session is known by its kind or by its mark, and only a mark that is cleared lets Claude read it: a record of kind
+  // "session" with no mark at all is refused too.
+  if ((kindOf(record) === "session" || record.session) && !(record.session && record.session.cleared)) return { why: "This is a client or group session: Claude reads it only for its teachings." };
   if (record.kind === "short video") return { why: "A short video gets no Reels." };
   // The other Mac has it open (phase 1b's claim): nothing is put into it from here meanwhile.
   const open = heldText(record, machine);

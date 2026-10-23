@@ -2000,4 +2000,32 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
     assert.deepEqual(r.failed, [why]);
     p.t.done();
   });
+  it("refuses a session that has no mark at all, as one whose mark is not cleared, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20" });
+    const r = await askedBoth(p);
+    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  // An answered video, and a session whose mark is cleared, are not refused for what they are: the checks after those come to
+  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse.
+  it("lets an answered video, and a session whose mark is cleared, on to the checks that come after", async () => {
+    for (const [what, more] of [
+      ["an answered video", { kind: "finished", answer: ANSWERED }],
+      ["a session whose mark is cleared", { kind: "finished", answer: ANSWERED, label: "Session, 2026-10-20", session: { ...SESSION, cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } } }]
+    ]) {
+      const p = askable();
+      relayout(p.found, more);
+      rmSync(join(p.found.folder, "Pricing talk.cut-plan.json"));
+      const r = await askedBoth(p);
+      const why = "Pricing talk.mp4 has no cut plan here, so Claude cannot be asked.";
+      assert.deepEqual([r.quick, r.started, r.now, r.claude, r.rev], [1, 0, 1, 0, 1], what);
+      assert.ok(p.t.said().includes(why), `${what}: ${p.t.said()}`);
+      assert.deepEqual(r.failed, [why], what);
+      p.t.done();
+    }
+  });
 });
