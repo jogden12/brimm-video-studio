@@ -3,12 +3,13 @@
 // stand-ins for every program, is in unedited.test.js. Each test has a temp folder of its own; nothing touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns, clearCrashes, heldBy } from "../filing.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
+import { readStatuses, writeStatus } from "../importing.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const SETTINGS = { version: 1, machine: "Mac Studio", root: ROOT, checkout: "/Users/jasonogden/Claude Code/BRIMM video" };
@@ -145,5 +146,119 @@ describe("what the lead's review of PR 11 found in the runs' own folders", () =>
     clearRuns(home, (pid) => pid === process.pid);
     assert.deepEqual(readdirSync(runs).sort(), [`${process.pid}-3`, "99999998-2", "notes"].sort());
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("Zoom's files in a light drop folder, held until phase Z", () => {
+  const HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  /** A recording and the separate sound and picture of a meeting, as Zoom names them. */
+  const ZOOM = ["GMT20261013-142933_Recording_gvo_1280x720.mp4", "audio1449382767.m4a", "video1449382767.mp4"];
+  const bytesOf = (name) => Buffer.byteLength(`the bytes of ${name}`);
+  /** A test's own BRIMM Video, with this Mac's drop folder holding `names`, and one run of the import of it: `run()`. The
+      import "imports" each video it takes by noting its name in `imported`, and leaves it where it is. `light` is what the run
+      is told (`deps.light`): true, false, or null for nothing. */
+  function drop(names, { light = true } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    const home = join(dir, "home");
+    const root = join(dir, "BRIMM Video");
+    const folder = join(root, "Unedited Video", "Mac Studio");
+    mkdirSync(folder, { recursive: true });
+    for (const name of names) writeFileSync(join(folder, name), `the bytes of ${name}`);
+    const logs = [];
+    const imported = [];
+    const deps = { episode: { root, machine: "Mac Studio", home }, ...(light === null ? {} : { light }), clock: () => Date.parse("2026-10-23T10:00:00"), wait: async () => {}, keepAwake: () => {}, log: (line) => logs.push(line), clone: (from, to) => copyFileSync(from, to), sameDisk: () => true };
+    const run = () => importEpisodes(folder, deps, async (name) => {
+      imported.push(name);
+      return { ok: true, name };
+    });
+    const statuses = () => readStatuses(root).map((s) => s.status);
+    return { dir, home, root, folder, logs, imported, deps, run, statuses, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  it("are not imported: each stays where it is, its status says why, and the log says so once however often the folder is looked at", async () => {
+    const t = drop([...ZOOM, "Talk.mov"]);
+    const results = await t.run();
+    assert.deepEqual(t.imported, ["Talk.mov"]);
+    assert.deepEqual(results.filter((r) => r.held).map((r) => [r.ok, r.name, r.held]).sort(), ZOOM.map((name) => [true, name, HELD]).sort());
+    assert.deepEqual(readdirSync(t.folder).sort(), [...ZOOM, "Talk.mov"].sort());
+    const held = t.statuses().filter((s) => ZOOM.includes(s.video)).sort((a, b) => a.video.localeCompare(b.video));
+    assert.equal(held.length, 3);
+    for (const { at, ...status } of held) {
+      assert.deepEqual(status, { version: 1, machine: "Mac Studio", pid: process.pid, video: status.video, bytes: bytesOf(status.video), seconds: null, step: "Held", held: HELD });
+      assert.ok(Number.isFinite(Date.parse(at)), at);
+    }
+    for (const name of ZOOM) assert.equal(t.logs.filter((line) => line === `${name}: ${HELD}`).length, 1, t.logs.join("\n"));
+    t.done();
+  });
+  it("are held by the status for the next run too, which says so again", async () => {
+    const t = drop([ZOOM[0]]);
+    await t.run();
+    t.logs.length = 0;
+    await t.run();
+    assert.deepEqual(t.imported, []);
+    assert.deepEqual(t.logs.filter((line) => line.startsWith(`${ZOOM[0]}:`)), [`${ZOOM[0]}: ${HELD}`]);
+    assert.equal(t.statuses().length, 1);
+    t.done();
+  });
+  it("are the only files held: any other name is imported, even one that holds a Zoom name", async () => {
+    const names = ["Talk.mov", "My GMT20261013-142933_Recording.mp4", "audio12.m4a", "video1449382767.mov"];
+    const t = drop(names);
+    await t.run();
+    assert.deepEqual(t.imported.sort(), [...names].sort());
+    assert.deepEqual(t.statuses(), []);
+    t.done();
+  });
+  it("are imported as any video is when the setting is off or absent, and nothing is written about them", async () => {
+    for (const light of [false, null]) {
+      const t = drop(ZOOM, { light });
+      const results = await t.run();
+      assert.deepEqual(t.imported.sort(), [...ZOOM].sort(), String(light));
+      assert.deepEqual([results.filter((r) => r.held), t.statuses(), existsSync(join(t.root, "Episodes", ".importing"))], [[], [], false], String(light));
+      t.done();
+    }
+  });
+  it("lose their status when the file leaves the folder or is another file, or when the setting is turned off", async () => {
+    const t = drop([ZOOM[0]]);
+    await t.run();
+    assert.equal(t.statuses().length, 1);
+    // The file is put in BRIMM VIDEO Transfer: nothing says it is held any more.
+    rmSync(join(t.folder, ZOOM[0]));
+    await t.run();
+    assert.deepEqual(t.statuses(), []);
+    // A recording of that name put in the folder is held, by its own status.
+    writeFileSync(join(t.folder, ZOOM[0]), "another recording");
+    await t.run();
+    assert.deepEqual(t.statuses().map((s) => s.bytes), [17]);
+    // Another file of that name, of another size, is held by its own status and not by the old one.
+    writeFileSync(join(t.folder, ZOOM[0]), "a third recording, a longer one");
+    t.logs.length = 0;
+    await t.run();
+    assert.deepEqual(t.statuses().map((s) => s.bytes), [31]);
+    assert.ok(t.logs.includes(`${ZOOM[0]}: ${HELD}`), t.logs.join("\n"));
+    // Taken lightly no more, it is imported as before, and the status that held it is gone.
+    t.deps.light = false;
+    await t.run();
+    assert.deepEqual([t.statuses(), t.imported], [[], [ZOOM[0]]]);
+    t.done();
+  });
+  it("keep their status through the next run of this Mac, which is no crash's to take away", async () => {
+    const t = drop([ZOOM[0]]);
+    await t.run();
+    // The run that wrote it is gone, and the status is old: a crash's status goes then, but not a hold's.
+    const cleared = clearCrashes({ root: t.root, machine: "Mac Studio", now: Date.parse("2026-10-23T12:00:00"), alive: () => false, pid: 1 });
+    assert.deepEqual([cleared, t.statuses().map((s) => s.held)], [[], [HELD]]);
+    t.done();
+  });
+  it("are said to be held, by the status, to whoever asks why the video is not imported, whichever Mac wrote it", async () => {
+    const t = drop([ZOOM[0]]);
+    await t.run();
+    assert.equal(heldBy({ root: t.root, video: ZOOM[0], bytes: bytesOf(ZOOM[0]) }), HELD);
+    // Another recording of that name, of another size, is not held by it, and nor is another video.
+    assert.equal(heldBy({ root: t.root, video: ZOOM[0], bytes: 1 }), "");
+    assert.equal(heldBy({ root: t.root, video: "Talk.mov", bytes: bytesOf(ZOOM[0]) }), "");
+    // The other Mac's status is there for this Mac to read, as it is for the person asking on either.
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, video: ZOOM[1], bytes: 7, seconds: null, step: "Held", at: "2026-10-23T10:00:00-04:00", held: HELD }, (to, text) => writeFileSync(to, text));
+    assert.equal(heldBy({ root: t.root, video: ZOOM[1], bytes: 7 }), HELD);
+    t.done();
   });
 });

@@ -7,13 +7,13 @@ import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions, roughRate } from "../cuts.js";
-import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "../notes.js";
+import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "../notes.js";
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
@@ -24,8 +24,9 @@ import { writePending } from "../filing.js";
 import { writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
+import { fingerprintOf } from "../versions.js";
 
-const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
+const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } };
 /** Where ffmpeg heard silence in the made-up recording. */
 const HEARD = pausesOf(PAUSES);
 /** What the rules make of the made-up recording. The rules have tests of their own: here it is what the files must hold. */
@@ -321,11 +322,56 @@ describe("one unedited video", () => {
     assert.deepEqual([file.words[0], file.words[47]], [{ w: "Welcome", start: 0, end: 1.4 }, { w: "Sallie.", start: 20.36, end: 20.94 }]);
     t.done();
   });
+  it("keeps the pauses ffmpeg heard in the cut plan, as the rules were given them, for a reading made later", async () => {
+    const t = setup();
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.deepEqual(plan.pauses, [[0, 1.111], [2.788, 3.695], [4.843, 6.07], [9.638, 12.459], [13.06, 13.583], [16.33, 17.246], [19.022, 19.414], [21.097, 23.423]]);
+    assert.deepEqual(pausesOfPlan(plan), HEARD);
+    // The plan is the rules' plan, whichever way it is changed after.
+    assert.deepEqual(Object.keys(plan).filter((key) => !["pauses", "by"].includes(key)), ["version", "video", "facts", "phrases", "ranges", "kept", "cut"]);
+    t.done();
+  });
+  it("keeps no pause for a recording ffmpeg heard none in", async () => {
+    const t = setup({ pauses: "" });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")).pauses, []);
+    t.done();
+  });
+  it("ends a pause that never ends where the video ends, since a time with no end cannot be written in the plan's JSON", async () => {
+    const t = setup({
+      probed: probed({ duration: "110.000000" }),
+      srt: "1\n00:01:45,000 --> 00:01:46,740\n Hey, Charlie, how are you?\n\n",
+      told: told([[105000, 106740, [[" Hey", 10530], [",", 10540], [" Charlie", 10580], [",", 10585], [" how", 10610], [" are", 10630], [" you", 10660], ["?", 10670]]]]),
+      pauses: "[silencedetect @ 0x1] silence_start: 0\n[silencedetect @ 0x1] silence_end: 104.9 | silence_duration: 104.9\n[silencedetect @ 0x1] silence_start: 106.7\n"
+    });
+    await uneditedFile(t.video("call.mp4"), t.deps);
+    const plan = JSON.parse(t.read("call.cut-plan.json"));
+    assert.deepEqual(plan.pauses, [[0, 104.9], [106.7, 110]]);
+    // The plan's ranges are what the end of that pause is: the silence after the last words, to the end of the video.
+    assert.deepEqual(plan.ranges.map((x) => [x.start, x.end, x.keep]), [[0, 104.7, false], [104.7, 106.9, true], [106.9, 110, false]]);
+    t.done();
+  });
+  it("gives a reading made later, on the plan as it is read back from its file, the pauses the import used: Claude keeping what the rules cut gets the same ranges", async () => {
+    const t = setup();
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const back = JSON.parse(t.read("talk.cut-plan.json"));
+    // Claude keeps every phrase the rules cut: the silence beside each is then kept or cut by where ffmpeg heard it.
+    const decisions = PLAN.phrases.filter((p) => !p.keep).map((p) => ({ id: p.id, keep: true, why: "She means it." }));
+    const at = applyDecisions(PLAN, decisions, HEARD);
+    const later = applyDecisions(back, decisions, pausesOfPlan(back));
+    assert.deepEqual(later.plan.ranges, at.plan.ranges);
+    assert.deepEqual(later.plan.changes, at.plan.changes);
+    assert.deepEqual([later.plan.kept, later.plan.cut], [at.plan.kept, at.plan.cut]);
+    // With none given, whole silences are kept beside the phrases Claude keeps.
+    assert.notDeepEqual(applyDecisions(back, decisions, []).plan.ranges, at.plan.ranges);
+    t.done();
+  });
   it("gets the cut plan twice: to work from, and to read", async () => {
     const t = setup();
     await uneditedFile(t.video("talk.mov"), t.deps);
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules" });
-    assert.deepEqual(Object.keys(JSON.parse(t.read("talk.cut-plan.json"))), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "by"]);
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules" });
+    assert.deepEqual(Object.keys(JSON.parse(t.read("talk.cut-plan.json"))), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "pauses", "by"]);
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN));
     assert.deepEqual(t.read("talk.cut-plan.txt").split("\n").slice(0, 2), ["Kept 0:12 of 0:23. Cut 0:11.", "0:00 to 0:03  CUT  retake: said again at 0:06, the later one is kept  |  Welcome to the show. Today we are..."]);
     t.done();
@@ -1124,7 +1170,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const made = used(reply);
     const plan = JSON.parse(t.read("talk.cut-plan.json"));
     assert.deepEqual(plan, {
-      version: 1, video: "talk.mov", facts: FACTS, phrases: made.plan.phrases, ranges: made.plan.ranges, kept: 9.198, cut: 14.225, by: "rules and Claude",
+      version: 1, video: "talk.mov", facts: FACTS, phrases: made.plan.phrases, ranges: made.plan.ranges, kept: 9.198, cut: 14.225, pauses: HEARD, by: "rules and Claude",
       changes: [{ ids: ["p8"], was: "keep", now: "cut", why: "It adds nothing to the line before it." }],
       claude: {
         decisions: reply.decisions,
@@ -1133,7 +1179,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
         clips: [{ ...made.clips[0], files: ["talk.reel-1.mp4", "talk.reel-1.srt"] }]
       }
     });
-    assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "by", "changes", "claude"]);
+    assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "pauses", "by", "changes", "claude"]);
     assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphics", "ignored", "clips"]);
     assert.deepEqual([plan.claude.clips[0].n, plan.claude.clips[0].ranges], [1, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]]);
     t.done();
@@ -1218,7 +1264,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(r, { ok: true, name: "talk.mov", captions: 5, kept: 11.882, cut: 11.541, folder: "", message: "" });
     assert.deepEqual(t.names(), WITH_NOTES.map((ending) => "talk." + ending));
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN, "Claude read this plan and changed nothing in it. Its notes are in talk.edit-notes.txt."));
     assert.equal(t.read("talk.edit-notes.txt").split("\n").slice(2).join("\n"), "Its notes\nA short talk about pricing. Nothing to change.\n");
     assert.deepEqual(t.logs.slice(4, 7), ["talk.mov: asking Claude to read the cut plan.", "talk.mov: Claude changed nothing in the cut plan.", "talk.mov: making the rough cut."]);
@@ -1270,7 +1316,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
 
 describe("a video Claude could not be asked about", () => {
   /** What the video's files hold when the plan is the rules' alone, as it is today. */
-  const RULES = { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules" };
+  const RULES = { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules" };
   const EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed";
   /** Each way the asking can fail: what Claude Code ends with, and the reason the tool gives. */
   const FAILS = [
@@ -1889,6 +1935,20 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
     assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`there is no cut plan at ${at(t)}`));
     assert.deepEqual(t.logs, [`talk.mov: there is no video at ${gone}. Nothing was made.`, `talk.mov: there is no cut plan at ${at(t)}. Nothing was made.`]);
     assert.deepEqual([t.calls, t.names(), readdirSync(t.work)], [[], ["talk.mov"], []]);
+    t.done();
+  });
+  it("makes the videos from a plan that holds the pauses ffmpeg heard, and from a plan written before they were kept in it", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.deepEqual(plan.pauses, HEARD);
+    const { pauses, ...old } = plan;
+    for (const [text, what] of [[JSON.stringify(plan), "with the pauses"], [JSON.stringify(old), "without them"]]) {
+      rewrite(t, text);
+      t.logs.length = 0;
+      assert.deepEqual(await videosFromPlan(file, t.deps), { ok: true, name: "talk.mov", made: ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", "talk.reel-1.mp4"], message: "" }, what);
+      assert.deepEqual(t.logs.filter((line) => /could not be read|Nothing was made/.test(line)), [], what);
+    }
     t.done();
   });
   it("stops with a plain line, and changes nothing, when the plan cannot be read or is not one this tool wrote", async () => {
@@ -4550,5 +4610,318 @@ describe("the check that Claude can be asked from here (--check-claude)", () => 
     assert.match(text, /\n {2}if \(args\.checkClaude\) return checkClaude\(\{ [^\n]*until: args\.until, job: process\.env\.XPC_SERVICE_NAME[^\n]*\}\);\n/);
     const help = /\nconst HELP = `([\s\S]*?)`;/.exec(text)[1].replace(/\s+/g, " ");
     assert.ok(help.includes(" --until <time> with --check-claude: ask Claude nothing once this time, in seconds since 1970, has passed. "), help);
+  });
+});
+
+/** Every file in a folder and the folders in it, each by its path from the folder, with "/", sorted. */
+const listAll = (folder, under = "") => readdirSync(join(folder, under), { withFileTypes: true })
+  .flatMap((entry) => (entry.isDirectory() ? listAll(folder, join(under, entry.name)) : [join(under, entry.name)])).sort();
+
+/** A test of the light import (spec 2026-10-22, section 1): the episode import's test (episodic), with this Mac's settings saying
+    `import: "light"` when `light` is true, as depsFor makes `deps.light` of them, `import: "full"` when it is false, and
+    nothing about it when it is null. Claude Code is on the Mac and would answer, so that a test sees it is not asked. The
+    clock says 15:00 on 20 Oct,
+    the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop folder of `machine`. */
+function episodeImport({ light = true, video = "Talk.mov", machine = "Mac Studio", ...script } = {}) {
+  const t = episodic({ claude: [answers(REPLY)], ...script });
+  const drop = join(t.root, "Unedited Video", machine);
+  mkdirSync(drop, { recursive: true });
+  t.deps.settings = { ...t.deps.settings, machine, ...(light === null ? {} : { import: light ? "light" : "full" }) };
+  if (light !== null) t.deps.light = light;
+  t.deps.now = () => new Date("2026-10-20T15:00:00");
+  t.deps.today = () => "2026-10-20";
+  const told = [];
+  t.deps.progress = {
+    begin: (name) => told.push(["begin", name]),
+    length: (seconds) => told.push(["length", seconds]),
+    steps: (names) => told.push(["steps", names]),
+    step: (name, shown = name) => told.push(["step", shown]),
+    fraction: () => {},
+    encoding: () => ({ args: [], stop: () => {} }),
+    end: (finished) => told.push(["end", finished])
+  };
+  const put = (name, bytes = "video") => {
+    writeFileSync(join(drop, name), bytes);
+    return join(drop, name);
+  };
+  put(video);
+  const folderOf = (name) => join(t.episodes, `2026-10-20 ${basename(name, extname(name))} (${machine})`);
+  return { ...t, drop, put, told, folderOf, episodeFolder: () => folderOf(video), record: (name = video) => readEpisode(folderOf(name)).record };
+}
+
+describe("the light import", () => {
+  /** What a light import files of Talk.mov: the video, its transcript, words, cut plan and cut log, the rough cut's captions,
+      and the record. */
+  const LIGHT = ["Talk.cut-plan.json", "Talk.cut-plan.txt", "Talk.mov", "Talk.rough-cut.srt", "Talk.rough-cut.transcript.txt", "Talk.srt", "Talk.transcript.txt", "Talk.words.json", "record/0001.json"];
+  const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
+  const READY = `Ready on the Mac Studio: ${LABEL}. In Claude, say "what's waiting?"`;
+  const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
+  /** The record of an episode written again as she would have answered it: a finished video. */
+  const answered = (t, name) => {
+    const { record } = readEpisode(t.folderOf(name));
+    writeEpisode(t.folderOf(name), { ...record, kind: "finished", answer: { ...record.answer, state: "answered", by: "Sallie", on: "Mac Studio", at: "2026-10-20T15:30:00-04:00" } }, { expectRev: record.rev, writeText: (to, text) => writeFileSync(to, text), writer: record.writer, home: t.deps.home });
+  };
+
+  it("asks Claude nothing, renders nothing, and writes no Final Cut file, reels.json, notes or previews", async () => {
+    const t = episodeImport();
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, "2026-10-20 Talk (Mac Studio)"]);
+    assert.deepEqual(t.calls.filter((c) => c.cmd === "CLAUDE" || c.cmd === "SWIFT"), []);
+    assert.deepEqual([roughCalls(t), uprightCall(t), t.guarded], [[], undefined, []]);
+    // ffmpeg is asked for the sound, where the long silences are, and the pauses, and for nothing else.
+    assert.equal(t.calls.filter((c) => c.cmd === "FFMPEG").length, 3);
+    assert.deepEqual(listAll(t.episodeFolder()), LIGHT);
+    t.done();
+  });
+  it("files the record as needing her answer, with the guess, what was seen, how it came, its label and its fingerprint", async () => {
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record();
+    assert.deepEqual([r.version, r.kind, r.answer, r.label], [3, null, { state: "needs your answer", guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera" }, LABEL]);
+    const { words } = JSON.parse(readFileSync(join(t.episodeFolder(), "Talk.words.json"), "utf8"));
+    assert.ok(r.fingerprint.length > 0);
+    assert.equal(r.fingerprint, fingerprintOf(words));
+    assert.equal(r.versionOf ?? null, null);
+    assert.deepEqual([r.title, r.reels, r.video.file], [null, [], "Talk.mov"]);
+    assert.deepEqual(r.files, Object.fromEntries(LIGHT.filter((n) => !n.startsWith("record/")).map((n) => [n, statSync(join(t.episodeFolder(), n)).size])));
+    t.done();
+  });
+  it("names the video by its label in the notice and on the progress panel, never by its file", async () => {
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.notes, [READY]);
+    assert.deepEqual(t.told.filter(([what]) => what === "begin"), [["begin", LABEL]]);
+    assert.ok(!JSON.stringify([t.notes, t.told]).includes("Jane"), JSON.stringify(t.told));
+    assert.equal(t.record().label, LABEL);
+    t.done();
+  });
+  it("says \"Sallie's laptop\", and not \"the Sallie's laptop\", in the notice of her laptop", async () => {
+    const t = episodeImport({ machine: "Sallie's laptop" });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.notes, [`Ready on Sallie's laptop: Video of 20 Oct, 15:00 (Sallie's laptop). In Claude, say "what's waiting?"`]);
+    t.done();
+  });
+  it("tells the progress panel the light import's four steps, and no others", async () => {
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.told.filter(([what]) => what === "steps").map(([, names]) => names), [LIGHT_STEPS, LIGHT_STEPS]);
+    assert.deepEqual(t.told.filter(([what]) => what === "step").map(([, name]) => name), LIGHT_STEPS);
+    assert.deepEqual(t.told[t.told.length - 1], ["end", true]);
+    t.done();
+  });
+  it("writes the cut log with its times said to be the recording's, the plan with its pauses and no Claude, and the rough cut's captions by arithmetic", async () => {
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    const plan = JSON.parse(readFileSync(join(t.episodeFolder(), "Talk.cut-plan.json"), "utf8"));
+    assert.deepEqual([plan.by, plan.claude, plan.pauses], ["rules", undefined, HEARD.map(([start, end]) => [start, Math.min(end, 120)])]);
+    const log = readFileSync(join(t.episodeFolder(), "Talk.cut-plan.txt"), "utf8");
+    assert.equal(log, planText(plan, "The times here are the recording's own, from its start.\nThis plan is the rules' alone: Claude has not read it."));
+    const captions = roughCaptions(plan.phrases, keptSpans(plan.ranges, roughRate(plan.facts)));
+    assert.equal(readFileSync(join(t.episodeFolder(), "Talk.rough-cut.srt"), "utf8"), captions);
+    assert.equal(readFileSync(join(t.episodeFolder(), "Talk.rough-cut.transcript.txt"), "utf8"), stampedText(captions));
+    t.done();
+  });
+  it("files a new drop of an answered video's words as a new version of it, and one of a video not yet answered as a video of its own", async () => {
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    t.put("Talk again.mov");
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(t.record("Talk again.mov").versionOf ?? null, null);
+    answered(t, "Talk.mov");
+    t.put("Talk v2.mov");
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record("Talk v2.mov");
+    assert.deepEqual([r.versionOf, r.kind, r.answer.state], [t.record().id, null, "needs your answer"]);
+    // Nothing is written into the old episode's folder.
+    assert.equal(t.record().rev, 2);
+    t.done();
+  });
+  it("compares no episode whose words are not whole on this Mac, or cannot be read, and says so in the log", async () => {
+    for (const how of ["not whole", "unreadable"]) {
+      const t = episodeImport();
+      await uneditedFolder(t.drop, t.deps);
+      answered(t, "Talk.mov");
+      const words = join(t.episodeFolder(), "Talk.words.json");
+      if (how === "not whole") t.deps.isWhole = (path) => path !== words;
+      else writeFileSync(words, "{");
+      t.put("Talk v2.mov");
+      await uneditedFolder(t.drop, t.deps);
+      assert.equal(t.record("Talk v2.mov").versionOf ?? null, null, how);
+      const said = how === "not whole" ? `${LABEL}: its words are not on this Mac, so it was not compared.` : `${LABEL}: its words could not be read, so it was not compared.`;
+      assert.ok(t.logs.includes(said), t.logs.join("\n"));
+      t.done();
+    }
+  });
+  it("files a video whose words could not be timed as needing her answer, with no fingerprint and no rough cut's captions", async () => {
+    const t = episodeImport({ timing: "killed" });
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record();
+    assert.deepEqual([r.kind, r.answer.state, r.label, r.fingerprint], [null, "needs your answer", LABEL, undefined]);
+    // The rules made no plan, so they counted no retakes: there is no guess, and the line of what was seen says no count.
+    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera" });
+    assert.deepEqual(listAll(t.episodeFolder()), ["Talk.cut-plan.txt", "Talk.mov", "Talk.srt", "Talk.transcript.txt", "record/0001.json"]);
+    assert.deepEqual(t.notes, [READY]);
+    t.done();
+  });
+  it("says nothing of how a video came or what was seen when ffprobe could not read it, and makes no guess", async () => {
+    const t = episodeImport({ probe: "fail" });
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record();
+    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null }, LABEL]);
+    assert.deepEqual(t.notes, [READY]);
+    t.done();
+  });
+  it("names the video by its label in the notices of an import that fails, or cannot be filed", async () => {
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov", whisper: "fail" });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.notes, [`No transcript could be made from ${LABEL}. It stays in the drop folder; see the log.`]);
+    t.done();
+    const u = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    u.deps.clone = (from, to) => {
+      if (to.endsWith(".rough-cut.srt")) throw new Error("cloning is not possible there");
+      copyFileSync(from, to);
+    };
+    await uneditedFolder(u.drop, u.deps);
+    assert.deepEqual(u.notes, [`${LABEL} could not be put into Episodes. It stays in the drop folder; see the log.`]);
+    u.done();
+  });
+  it("names the video by its label in the banner of a late check that found a file still wrong", async () => {
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    const srt = join(t.episodeFolder(), "Coaching call Jane Doe.rough-cut.srt");
+    let filed = false;
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => (filed && to === srt ? writeFileSync(to, "1\n") : clone(from, to));
+    const wait = t.deps.wait;
+    t.deps.wait = async (ms) => {
+      if (ms === 60000 && !filed) {
+        filed = true;
+        writeFileSync(srt, "1\n");
+      }
+      return wait(ms);
+    };
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(t.notes, [READY, `Dropbox lost a file of ${LABEL}. The video stays in the drop folder; see the log.`]);
+    t.done();
+  });
+  /** A recording as Zoom names it, and what the import says of it, until phase Z teaches it Zoom's downloads. */
+  const ZOOM = "GMT20261013-142933_Recording_gvo_1280x720.mp4";
+  const ZOOM_HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  it("holds a Zoom download in the drop folder until phase Z: not imported, where it is, its status and the log say why, and the other videos are imported", async () => {
+    const t = episodeImport({ video: ZOOM });
+    t.put("audio1449382767.m4a");
+    t.put("Talk.mov");
+    const results = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(results.filter((r) => r.held).map((r) => [r.ok, r.name, r.held]).sort(), [[true, ZOOM, ZOOM_HELD], [true, "audio1449382767.m4a", ZOOM_HELD]]);
+    // Talk.mov is imported lightly, and its raw video taken out of the drop folder by its late check; the held ones stay.
+    assert.deepEqual(readdirSync(t.episodes).filter((n) => n !== ".importing"), ["2026-10-20 Talk (Mac Studio)"]);
+    assert.deepEqual(listAll(t.drop), [ZOOM, "audio1449382767.m4a"]);
+    assert.equal(t.calls.filter((c) => c.cmd === "FFPROBE").length, 1);
+    const importing = join(t.episodes, ".importing");
+    const statuses = readdirSync(importing).map((n) => JSON.parse(readFileSync(join(importing, n), "utf8")));
+    assert.deepEqual(statuses.map((s) => [s.video, s.machine, s.held]).sort(), [[ZOOM, "Mac Studio", ZOOM_HELD], ["audio1449382767.m4a", "Mac Studio", ZOOM_HELD]]);
+    // The Mac looked in the folder each minute of the late check's wait, and said it once.
+    assert.ok(t.waits.length > 3, t.waits.join(", "));
+    for (const name of [ZOOM, "audio1449382767.m4a"]) assert.equal(t.logs.filter((line) => line === `${name}: ${ZOOM_HELD}`).length, 1, t.logs.join("\n"));
+    assert.deepEqual(t.notes, [READY]);
+    t.done();
+  });
+  it("imports a Zoom download as any video when the setting is off or absent", async () => {
+    for (const light of [false, null]) {
+      const t = episodeImport({ light, video: ZOOM });
+      const [r] = await uneditedFolder(t.drop, t.deps);
+      assert.deepEqual([r.ok, r.held, r.folder], [true, undefined, `2026-10-20 ${basename(ZOOM, ".mp4")} (Mac Studio)`], String(light));
+      assert.equal(t.calls.filter((c) => c.cmd === "CLAUDE").length, 1, String(light));
+      assert.ok(!t.logs.some((line) => line.includes(ZOOM_HELD)), String(light));
+      t.done();
+    }
+  });
+  it("keeps the full run for a Zoom download given alone, or in a folder that is not this Mac's drop folder, whatever the setting", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    t.deps.light = true;
+    t.deps.settings = { version: 1, machine: "Mac Studio", root: join(t.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
+    const one = await uneditedFile(t.video(ZOOM), t.deps);
+    t.video("audio1449382767.m4a");
+    const [folder] = await uneditedFolder(t.dir, t.deps);
+    assert.deepEqual([one.ok, folder.ok, folder.held, folder.folder], [true, true, undefined, "2026-10-13"]);
+    assert.equal(t.asks.length, 2);
+    assert.ok(t.names().includes(`${basename(ZOOM, ".mp4")}.fcpxml`) && t.inside("2026-10-13").includes("audio1449382767.fcpxml"), t.names().join(", "));
+    assert.ok(!existsSync(join(t.dir, "BRIMM Video")), "no status was written");
+    assert.ok(!t.logs.some((line) => line.includes(ZOOM_HELD)));
+    t.done();
+  });
+  it("refuses --from-plan of a light episode, answered or not, before it reads or writes anything, and exits as it does on any refusal", async () => {
+    const MESSAGE = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
+    for (const answer of [false, true]) {
+      const t = episodeImport();
+      await uneditedFolder(t.drop, t.deps);
+      if (answer) answered(t, "Talk.mov");
+      const folder = t.episodeFolder();
+      const video = join(folder, "Talk.mov");
+      // Not even its cut plan is read: with it gone, the refusal is the same.
+      rmSync(join(folder, "Talk.cut-plan.json"));
+      const before = [listAll(folder), t.record().rev];
+      t.calls.length = 0;
+      t.clones.length = 0;
+      t.logs.length = 0;
+      const r = await videosFromPlan(video, t.deps);
+      assert.deepEqual(r, { ok: false, name: "Talk.mov", made: [], stopped: true, message: MESSAGE }, String(answer));
+      assert.deepEqual(t.logs, [`Talk.mov: ${MESSAGE} Nothing was made.`], String(answer));
+      assert.deepEqual([t.calls, t.guarded, t.clones.length, listAll(folder), t.record().rev], [[], [], 0, ...before], String(answer));
+      // With --out it is the same, and nothing is made there.
+      const out = join(t.dir, "out");
+      assert.equal((await videosFromPlan(video, { ...t.deps, outDir: out })).message, MESSAGE);
+      assert.equal(existsSync(out), false);
+      // The run ends as it does when any other refusal stops it.
+      assert.equal(await doAsked({ file: video, folders: [], out: "", fromPlan: true }, t.deps), 2);
+      assert.deepEqual([t.calls, t.guarded], [[], []]);
+      t.done();
+    }
+  });
+  it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
+    const t = episodeImport({ light: false });
+    await uneditedFolder(t.drop, t.deps);
+    t.deps.light = true;
+    t.deps.settings = { ...t.deps.settings, import: "light" };
+    const r = await videosFromPlan(join(t.episodeFolder(), "Talk.mov"), t.deps);
+    assert.deepEqual([r.ok, r.stopped, r.message], [true, undefined, ""]);
+    assert.ok(r.made.includes("Talk.rough-cut.mp4"), r.made.join(", "));
+    t.done();
+  });
+  it("is today's import with the setting off or absent: Claude asked, the rough cut, the Final Cut file, reels.json and today's notice", async () => {
+    for (const light of [false, null]) {
+      const t = episodeImport({ light });
+      const [r] = await uneditedFolder(t.drop, t.deps);
+      assert.equal(r.ok, true, String(light));
+      assert.equal(t.calls.filter((c) => c.cmd === "CLAUDE").length, 1);
+      assert.equal(roughCalls(t).length, 1);
+      const files = listAll(t.episodeFolder());
+      for (const made of ["edit/main.v0.fcpxml", "reels.json", "Talk.edit-notes.txt", "Talk.rough-cut.mp4", "Talk.rough-cut.vertical.mp4", "previews/reel-1.mp4"]) assert.ok(files.includes(made), `${made}: ${files.join(", ")}`);
+      const record = t.record();
+      assert.deepEqual([record.kind, record.answer, record.label, record.fingerprint], ["episode", undefined, undefined, undefined]);
+      assert.deepEqual(t.notes, ['Ready: Talk. In Claude, say "open Talk".']);
+      assert.deepEqual(t.told.filter(([what]) => what === "begin"), [["begin", "Talk.mov"]]);
+      t.done();
+    }
+  });
+  it("is never the import of one file, or of a folder that is not this Mac's drop folder, whatever the setting", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    t.deps.light = true;
+    t.deps.settings = { version: 1, machine: "Mac Studio", root: join(t.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
+    const one = await uneditedFile(t.video("talk.mov"), t.deps);
+    t.video("a.mov");
+    const [folder] = await uneditedFolder(t.dir, t.deps);
+    assert.deepEqual([one.ok, folder.ok, folder.folder], [true, true, "2026-10-13"]);
+    assert.equal(t.asks.length, 2);
+    assert.ok(t.names().includes("talk.fcpxml") && t.inside("2026-10-13").includes("a.fcpxml"), t.names().join(", "));
+    t.done();
+  });
+  it("is what a run from the command line is given when this Mac's settings say import light, and nothing new otherwise", () => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-home-"));
+    const programs = { ffmpeg: "/f", ffprobe: "/p", whisper: "/w", swift: "", claude: "", model: "/m", missing: [] };
+    writeSettings(home, { machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout", import: "light" });
+    assert.equal(depsFor(programs, () => {}, { HOME: home }).light, true);
+    writeSettings(home, { import: "full" });
+    assert.ok(!("light" in depsFor(programs, () => {}, { HOME: home })));
+    rmSync(home, { recursive: true, force: true });
   });
 });

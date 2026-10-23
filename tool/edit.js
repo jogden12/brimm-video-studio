@@ -243,9 +243,10 @@ function folderSize(folder) {
 }
 
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
-    late check. Only those whose video `fits`, when it is given. */
+    late check. Only those whose video `fits`, when it is given. A video that is held in the drop folder, not imported, is no
+    import: the list of the videos waiting says why it waits. */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video)).map(({ status }) => {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
     if (state === "failed") return `  ${status.video}: its import failed on ${status.machine}: ${status.failed}`;
     if (state === "problem") return `  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`;
@@ -982,11 +983,19 @@ export async function retry(ctx, rest) {
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
     return 1;
   }
-  const held = episodeHolding({ root: ctx.root, video, bytes: statSync(join(drop, video)).size });
+  const bytes = statSync(join(drop, video)).size;
+  const held = episodeHolding({ root: ctx.root, video, bytes });
   if (held) return lateCheckOwed(ctx, video, held);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
   const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  // A video the import holds in the folder on purpose, a Zoom download, is held again however often it is tried: its status
+  // says why, and what to do. The status of a held video that is another file now is of no use, and is taken away below.
+  const left = mine.find((s) => importState(s.status, ctx.now()) === "held" && s.status.bytes === bytes);
+  if (left) {
+    say(`${video} is held: ${left.status.held}`);
+    return 1;
+  }
   const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
   const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
   if (!again.length && running) {
@@ -998,6 +1007,7 @@ export async function retry(ctx, rest) {
     const state = importState(status, ctx.now());
     if (state === "failed") return `which failed: ${String(status.failed).replace(/\.$/, "")}`;
     if (state === "problem") return "whose late check found a problem";
+    if (state === "held") return "which was held, as another file";
     return `which stopped at ${status.step}`;
   };
   const items = again.map(({ status }) => `${status.import || "one with no id"}, ${how(status)}`);

@@ -25,7 +25,8 @@ export function framesASecond(fps) {
 }
 
 /** The facts the cut plan needs, from what ffprobe wrote: the file's length in seconds, the size of the picture as it is shown,
-    its frame rate as a fraction, whether there is sound, and how many seconds after the first picture the sound starts.
+    its frame rate as a fraction, whether there is sound, how many seconds after the first picture the sound starts, and the
+    `device` that made it, as { make, model } from the tags an iPhone writes, each "" when the file has none.
     The sound is the one the tool takes (soundStream), so that its start is that of the sound the words are heard in.
     A file with no picture has no size and no frame rate. Null when ffprobe wrote nothing that can be read, or no length. */
 export function factsOf(printed) {
@@ -49,7 +50,10 @@ export function factsOf(printed) {
   // The file's own rate is the finest its times can be told apart at, which for some recordings is thousands a second.
   const shown = (fps) => framesASecond(fps) >= 1 && framesASecond(fps) <= 120;
   const fps = picture ? [picture.r_frame_rate, picture.avg_frame_rate].find(shown) || "" : "";
-  return { duration: ms(duration), width, height, fps, sound: Boolean(sound), soundStart: picture && sound ? ms(num(sound.start_time) - num(picture.start_time)) : 0 };
+  const tags = (told.format && told.format.tags) || {};
+  const tag = (key) => (typeof tags[key] === "string" ? tags[key] : "");
+  const device = { make: tag("com.apple.quicktime.make"), model: tag("com.apple.quicktime.model") };
+  return { duration: ms(duration), width, height, fps, sound: Boolean(sound), soundStart: picture && sound ? ms(num(sound.start_time) - num(picture.start_time)) : 0, device };
 }
 
 /** Sound codecs this Mac's ffmpeg has no decoder for: Apple's APAC, which an iPhone writes beside its AAC (phase 0, B3). */

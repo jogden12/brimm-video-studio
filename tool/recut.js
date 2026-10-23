@@ -55,10 +55,10 @@ export function cutPhrases(phrases, cuts = []) {
 
 /** The ranges of the whole recording, as the cuts asked for leave them, kept and cut alike, each with its reason, as a plan's
     are (the joins' notes are made from them). With no cut asked for, they are the plan's own, untouched: the plan made them
-    from the pauses ffmpeg heard, which it does not keep, so a sound with no words to it (a lead-in, a cough, a tail) is kept
-    where it was. With cuts, only the stretch around each phrase a cut changed is made again, by the import's own rangesOf on
-    the pauses the phrases show: from the start of the phrase before it to the end of the phrase after it. Everything else is
-    the plan's own. */
+    from the pauses ffmpeg heard, so a sound with no words to it (a lead-in, a cough, a tail) is kept where it was. With cuts,
+    only the stretch around each phrase a cut changed is made again, by the import's own rangesOf on the pauses the phrases
+    show (not on the plan's `pauses`, which a plan made before they were kept in it lacks): from the start of the phrase
+    before it to the end of the phrase after it. Everything else is the plan's own. */
 export function rangesWith({ plan, cuts = [] }) {
   if (!cuts.length) return plan.ranges;
   const duration = plan.facts.duration;

@@ -6,7 +6,9 @@
 // step and at least once a minute, so a status not written for 10 minutes is an import that stopped, as when the Mac slept
 // or the run was killed. They are taken away once the import's files have passed the late check. One that says why the
 // import failed, or what the late check found wrong, is left for a person: only `edit.js retry` takes it away. While a
-// status holds its video, the video is not imported again.
+// status holds its video, the video is not imported again. One that says why a video is held, not imported and left in the
+// drop folder on purpose (a Zoom download, until the import takes them), is left until the video leaves the folder: the
+// import takes it away then, or when it no longer holds that kind of video.
 // Nothing here runs a program. A status file is written only through the rule's text writer, which the caller gives.
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -62,8 +64,9 @@ function namesIn(root) {
 
 /** What is wrong with a status, in plain words: "" when it is whole. Its fields are { version: 1, machine, pid, video, bytes,
     seconds, step, at }, where `pid` is the run that wrote it, on its Mac, `video` is the file's name, `seconds` is null until
-    ffprobe has read the length, and `at` is when it was written (localStamp). `failed`, why the import failed, and
-    `problem`, what the late check found wrong, are there only when they apply. */
+    ffprobe has read the length, and `at` is when it was written (localStamp). `failed`, why the import failed,
+    `problem`, what the late check found wrong, and `held`, why the video is left in the drop folder and not imported, are
+    there only when they apply. */
 export function statusFault(s) {
   if (s === null || typeof s !== "object" || Array.isArray(s)) return "it is not an import's status";
   if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this brimm-video reads version 1`;
@@ -77,7 +80,8 @@ export function statusFault(s) {
     [typeof s.step === "string" && s.step !== "", "it names no step"],
     [typeof s.at === "string" && Number.isFinite(Date.parse(s.at)), "when it was written cannot be read"],
     [s.failed === undefined || (typeof s.failed === "string" && s.failed !== ""), "why the import failed cannot be read"],
-    [s.problem === undefined || (typeof s.problem === "string" && s.problem !== ""), "the problem it found cannot be read"]
+    [s.problem === undefined || (typeof s.problem === "string" && s.problem !== ""), "the problem it found cannot be read"],
+    [s.held === undefined || (typeof s.held === "string" && s.held !== ""), "why the video is held cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";
@@ -140,18 +144,20 @@ export function removeStatus(root, video, machine, id) {
 }
 
 /** Where an import has got to, by its whole status at `now`, in milliseconds: "failed" when it says why it failed; "problem"
-    when its files were copied in but the late check found something wrong; otherwise "running" while it was written in the
-    last 10 minutes, and "stopped" after that. A failed import and one with a problem stay as they are, however old: only a
-    person takes them on. */
+    when its files were copied in but the late check found something wrong; "held" when the video is left in the drop folder
+    on purpose, which is no import at all; otherwise "running" while it was written in the last 10 minutes, and "stopped"
+    after that. A failed import, one with a problem and a held video stay as they are, however old: a person takes on the
+    first two, and the import takes away the last when the video leaves the folder. */
 export function importState(status, now) {
   if (status.failed) return "failed";
   if (status.problem) return "problem";
+  if (status.held) return "held";
   return isStale(status, now) ? "stopped" : "running";
 }
 
-/** Whether a status holds its video, so that the import does not take it again: while its import runs, after it failed, and
-    after its late check found a problem. A stopped import does not hold it, and nor does a status that could not be read
-    (null). */
+/** Whether a status holds its video, so that the import does not take it again: while its import runs, after it failed,
+    after its late check found a problem, and while the video is held. A stopped import does not hold it, and nor does a
+    status that could not be read (null). */
 export const holdsVideo = (status, now) => status !== null && importState(status, now) !== "stopped";
 
 /** Whether a status was left behind by a crash on this Mac, `machine`, so that this Mac's next run takes it away and imports

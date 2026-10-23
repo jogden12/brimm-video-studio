@@ -95,6 +95,11 @@ describe("a new episode's record", () => {
     const some = newEpisode({ ...IMPORTED, kind: null, answer });
     for (const key of ["label", "fingerprint", "versionOf"]) assert.equal(key in some, false, key);
   });
+  it("reads an answer that knows nothing of how the video came or what was seen, as when ffprobe could not read it", () => {
+    const answer = { state: "needs your answer", guess: null, seen: "", came: null };
+    assert.equal(episodeFault({ ...newEpisode({ ...IMPORTED, kind: null, answer }), rev: 1 }), "");
+    assert.equal(episodeFault({ ...newEpisode({ ...IMPORTED, kind: null, answer: { ...answer, came: "fax" } }), rev: 1 }), "its answer cannot be read");
+  });
   it("is sound once written, as an episode with Reel candidates or a short video with none", () => {
     assert.equal(episodeFault(RECORD), "");
     assert.equal(episodeFault({ ...newEpisode({ ...IMPORTED, kind: "short video", reels: [] }), rev: 1 }), "");
