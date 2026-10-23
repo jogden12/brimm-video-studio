@@ -85,7 +85,9 @@ const UNITS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** Words as they are matched: lower case, without punctuation, numbers in figures. A word of two parts ("well-known") is two
     words, each with the word's times. A number said as tens and units ("twenty-five", "twenty five") is one figure, as the
     transcriber writes it in figures, from the first word's start to the last's end. What has no letter or figure in it is
-    left out. */
+    left out.
+    The fingerprints records keep (versions.js fingerprintOf) are made of words as this gives them: a change here makes every
+    fingerprint already stored match nothing. */
 export function normalWords(words) {
   const out = [];
   // May the next token join the one before it into one figure? Only across a space or a hyphen: "twenty five",

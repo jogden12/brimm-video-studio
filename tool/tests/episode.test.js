@@ -161,7 +161,7 @@ describe("reading an episode's record", () => {
     assert.deepEqual(readEpisode(t.folder), { record: newer, file: recordFile(t.folder, 1), newer: true });
     t.done();
   });
-  it("refuses a record of a layout this Mac does not know, by name, and does not give it an older record in its place", () => {
+  it("reads a record of a layout this Mac does not know as newer, and does not give an older record in its place", () => {
     // A Mac on layout 2 stands in through `known`. Its folder holds a layout-1 record, then the layout-3 record another Mac wrote.
     const t = setup();
     const unanswered = { ...RECORD, rev: 2, version: 3, kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10, 2 retakes", came: "camera" }, label: "Video of 22 Oct, 10:40 (Mac Studio)" };

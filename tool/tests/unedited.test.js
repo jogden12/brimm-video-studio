@@ -4620,8 +4620,8 @@ const listAll = (folder, under = "") => readdirSync(join(folder, under), { withF
 /** A test of the light import (spec 2026-10-22, section 1): the episode import's test (episodic), with this Mac's settings saying
     `import: "light"` when `light` is true, as depsFor makes `deps.light` of them, `import: "full"` when it is false, and
     nothing about it when it is null. Claude Code is on the Mac and would answer, so that a test sees it is not asked. The
-    clock says 15:00 on 20 Oct,
-    the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop folder of `machine`. */
+    clock says 15:00 on 20 Oct, the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop
+    folder of `machine`. */
 function episodeImport({ light = true, video = "Talk.mov", machine = "Mac Studio", ...script } = {}) {
   const t = episodic({ claude: [answers(REPLY)], start: "2026-10-20T15:00:00", ...script });
   const drop = join(t.root, "Unedited Video", machine);

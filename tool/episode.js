@@ -146,15 +146,16 @@ export function localStamp(d = new Date()) {
 /** A moment from the record as a person reads it, to the minute: "2026-10-14 09:12". */
 export const shown = (at) => String(at || "").slice(0, 16).replace("T", " ");
 
-/** The record of a video the import has just made an episode of, with every field of version 1, from what the import knows:
-    the new `id`, this Mac's name as `machine`, the moment `at` (localStamp), the `video` as { file, bytes, seconds, created },
-    where `created` is the creation time ffprobe read from the file, or null; the `kind`, which is null for a video not yet
-    answered; the `writer`, { commit, on }; the `files` it copied in, each path from the episode's folder to its size; the
-    `title` Claude recommended, or null; and the Reel `reels` candidates Claude picked.
+/** The record of a video the import has just made an episode of, with every field of layout 1 and those of layout 3 it is
+    given (below), from what the import knows: the new `id`, this Mac's name as `machine`, the moment `at` (localStamp), the
+    `video` as { file, bytes, seconds, created }, where `created` is the creation time ffprobe read from the file, or null;
+    the `kind`, which is null for a video not yet answered; the `writer`, { commit, on }; the `files` it copied in, each path
+    from the episode's folder to its size; the `title` Claude recommended, or null; and the Reel `reels` candidates Claude
+    picked.
     The fields of layout 3 are in the record only when they are given: the `answer` (the card's question, with the guess, what
     the import saw, and the episode whose words it matched), the `label` that names the video until it is answered, the
     `fingerprint` of its words, and `versionOf`, the id of the episode it is a new version of, which the import never gives:
-    her answer sets it. A record made without them is the record of version 1.
+    her answer sets it. A record made without them is a record of layout 1.
     The video was recorded on the day its file says, when it says one, and otherwise on the day of the import. Its name is
     the video's own, without its ending, until a person gives it one. Its rev is 0 until writeEpisode first writes it. */
 export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null }) {
