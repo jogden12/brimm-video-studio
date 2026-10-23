@@ -4,9 +4,11 @@
 // and Bypass modes off, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook
 // answers in every mode, which a mode alone does not: a mode picked in the Code tab overrides the folder's default. So the
 // folder's mode is "default", not dontAsk: dontAsk denies AskUserQuestion, the card she answers what a video is on (spec
-// 2026-10-22, section 7), and the guard refuses everything else in any mode. Claude Code's own read block
-// (blockReadsOutsideWorkingDirectories) is not used: it takes edit.js's path, outside the folder, for a read, and stops
-// every brimm-video command (the review of PR 21, finding 1).
+// 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
+// settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
+// off; a .claude/settings.local.json in her folder, or her user settings, that turn hooks off are for behind to find
+// (edit.js), not for this file. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
+// edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -21,7 +23,7 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
 
 /** The folder's settings for Claude Code. The hook runs in exec form, with no shell, so each path is one argument as it is,
     and a hook that cannot run blocks the call (onFailure, Claude Code 2.1.295 or later) rather than letting it through. It
-    is given her folder, which reads must stay in. */
+    is given her folder, which reads must stay in. Hooks are said to be on (disableAllHooks false): the mode rests on it. */
 function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
@@ -31,6 +33,7 @@ function settingsOf({ checkout, node, folder }) {
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
     },
+    disableAllHooks: false,
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
     }
