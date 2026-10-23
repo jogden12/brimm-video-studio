@@ -2354,7 +2354,10 @@ async function reels(ctx, rest) {
   // While a file is still coming, ask can be asked: it brings it.
   const blocked = askRefusal(ctx, found, record);
   // A listing changes nothing, so a refusal's "Nothing was changed." is not said here.
-  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, "")));
+  // A video of the switch (layout 3) is listed with its times on the clock she is reading, or on the recording's own when that cannot
+  // be read now. Nothing is brought from here: a listing changes nothing.
+  const now = layoutOf(record) === 3 ? clockFor({ ...found, record }, "main", ctx) : null;
+  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, ""), now && now.clock ? now : null));
   if (flags["no-play"]) return 0;
   const previews = read.reels.candidates.filter((c) => c.preview).map((c) => c.preview);
   const coming = previews.filter((rel) => !ctx.isWhole(join(found.folder, rel)));

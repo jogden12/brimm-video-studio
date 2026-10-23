@@ -551,3 +551,71 @@ describe("newestIsRender", () => {
     assert.deepEqual([{ reel: 1 }, { reel: 2 }, { reel: 3 }].map((part) => newestIsRender(r, part)), [false, true, false]);
   });
 });
+
+describe("reels, the list of a raw video's suggestions, through the command", () => {
+  /** The made-up episode with its Reels as a reading suggests them (reels.json version 2): no crop, no preview, no title, and the
+      words each opens and closes with. */
+  const suggested = () => {
+    const list = JSON.parse(EPISODE.files["reels.json"]);
+    const candidates = list.candidates.map((c) => ({ ...c, ranges: c.ranges.map(({ start, end }) => ({ start, end })), title: "", preview: null, point: "A point.", first: "Welcome to the show", last: "talk about pricing" }));
+    return { ...EPISODE, files: { ...EPISODE.files, "reels.json": JSON.stringify({ ...list, version: 2, by: "read", candidates }, null, 2) + "\n" } };
+  };
+  const rough = { v: 0, how: "render", at: AT, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: AT };
+  const raw = (pushed) => ({ ...LAYOUT_3.raw, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed, base: null } });
+  it("gives each suggestion's times on the rough cut she is watching, not the raw video's, and opens nothing", async () => {
+    const { t } = episode(raw([rough]), {}, suggested());
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.equal(r.code, 0, r.text);
+    // The rough cut leaves out what comes before 0:05.9 and the retakes and the pauses between its pieces: the first suggestion, at
+    // 0:05 to 0:09 of the raw video, is at 0:00 to 0:03 of it, and the second, at 0:13 to 0:21, is at 0:04 to 0:08.
+    assert.equal(r.text, [
+      "Reel suggestions of Pricing: what to charge?: 2, with times on main v0.",
+      "",
+      "1. 0:00 to 0:03, 3 seconds. A candidate.",
+      "   Opens with: Welcome to the show.",
+      "   Closes with: talk about pricing.",
+      "   Why: It says what the talk is about.",
+      "   It does not fit a Reel. It is 3.971 seconds long, and a Reel clip is at least 15 seconds.",
+      "",
+      "2. 0:04 to 0:08, 5 seconds. Picked.",
+      "   Opens with: So the first thing",
+      "   Closes with: so much, Sallie.",
+      "   Why: It makes one point and stands alone.",
+      "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
+      ""
+    ].join("\n"));
+    assert.deepEqual(t.opened, []);
+    t.done();
+  });
+  it("gives the recording's own times while the rough cut's file is not whole on this Mac, and starts no bringing", async () => {
+    const { t } = episode(raw([rough]), {}, suggested());
+    t.ctx.deps.isWhole = (path) => !path.endsWith("main.v0.fcpxml");
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the recording's own clock\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
+    assert.match(r.text, /\n2\. 0:13 to 0:21, 5 seconds\. Picked\.\n/);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
+  it("gives the recording's own times for a raw video no version of which has been shown yet", async () => {
+    const { t } = episode(raw([]), {}, suggested());
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the main video as it is now\.\n\n1\. 0:00 to 0:03, 3 seconds\. A candidate\.\n/);
+    t.done();
+  });
+  it("gives a finished video's times on the video's own clock", async () => {
+    const { t } = episode({ ...LAYOUT_3.finished }, {}, suggested());
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the video\.\n\n1\. 0:06 to 0:09, 3 seconds\. A candidate\.\n/);
+    assert.match(r.text, /\n2\. 0:13 to 0:20, 7 seconds\. Picked\.\n/);
+    t.done();
+  });
+  it("lists a video from before the switch as it always did", async () => {
+    const { t } = episode({}, {}, EPISODE);
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.match(r.text, /^Reel candidates of Pricing talk\.mp4: 2\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
+    assert.match(r.text, /\n   Preview: previews\/reel-2\.mp4\n/);
+    t.done();
+  });
+});
