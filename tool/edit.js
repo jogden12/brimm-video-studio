@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords, linksOf, handedOff } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2937,6 +2937,9 @@ const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a 
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
+/** Why a video that is not a session cannot be a version of a video one of whose versions is (the whole set of versions, not only
+    the one named): `name` is the video being answered. */
+const sessionSet = (name) => `${name} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
 const ASK_FOR_TEACHINGS = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
 const ONLINE_ONLY = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
 const OFFLINE = "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.";
@@ -2969,19 +2972,6 @@ function recordsHere(ctx) {
   return folders(ctx).map((name) => ({ name, record: episodeAt(ctx, name).inForce })).filter((e) => e.record && recordShaped(e.record));
 }
 
-/** Whether the episode in `folder` has been handed off to the BRIMM Ops page: its record says it was finished, or a hand-off
-    (a .brimm-ops.json) is in its final/ or in its history/, where a hand-off set aside is kept. */
-function handedOff(folder, record) {
-  if (record.finished) return true;
-  return ["final", "history"].some((dir) => {
-    try {
-      return readdirSync(join(folder, dir), { recursive: true }).some((n) => String(n).endsWith(".brimm-ops.json"));
-    } catch (e) {
-      return false;
-    }
-  });
-}
-
 /** When the import's late check will have been made of the episode with this `record`, in milliseconds, or null when nothing is
     holding it. This Mac owes the check (a pending one in its own folder, which has not found a problem): it is due at its time,
     or now when that has passed, since the import makes a check that is due within a minute. Or an import of the video is at
@@ -3006,8 +2996,14 @@ function lateCheckAt(ctx, record) {
       facts the import could not read, until she has answered it;
     - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
       videos have is not taken for either); a session not cleared is a version of only by a session;
+    - and, read from Episodes each time it is asked (finish.js linksOf), for that target: it is not already a version of this video,
+      directly or through others ("cannot be a version of"); and for an answer that is not a session, none of the versions of the
+      video it starts from, earlier, later or beside it, is a session not cleared (the gate's predicate, as finish.js reads one);
     - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
       since, which a new answer that is not one cannot be a version of;
+    - and a video that is not itself handed off, but that the chain of one handed off passes through, is given no other version
+      (--version-of naming another video, or --again with none, which clears the one it has): that would move the id the handed-off
+      video went to the page under;
     - the other Mac's claim, and a detached run at work on the episode. */
 function answerWhy(ctx, found, record, plan) {
   const name = shownName(record);
@@ -3030,6 +3026,14 @@ function answerWhy(ctx, found, record, plan) {
     if (stored !== "session" && gated(picked.record)) return SESSION_TARGET;
     plan.target = picked;
   }
+  // What links the target to this video, and to a session, as Episodes holds it now: one reading, each time this is asked.
+  const links = linksOf(ctx.root);
+  if (plan.target) {
+    const target = (links.find(plan.target.record.id) || plan.target).record;
+    const targetName = shownName(target);
+    if (links.chainOf(target).some((link) => link.record.id === record.id)) return `${name} cannot be a version of ${targetName}: ${targetName} is already a version of it.`;
+    if (stored !== "session" && links.setOf(links.firstOf(target)).members.some((one) => recordKind(one.record) !== null && gated(one.record))) return sessionSet(name);
+  }
   // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8).
   if (handedOff(found.folder, record)) {
     if (plan.target && plan.target.record.id !== (record.versionOf || null)) {
@@ -3041,6 +3045,11 @@ function answerWhy(ctx, found, record, plan) {
       const kept = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
       if (kept && gated(kept.record)) return SESSION_TARGET;
     }
+  } else if ((plan.target ? plan.target.record.id : null) !== (record.versionOf || null)) {
+    // So does every video that the chain of a handed-off video passes through, though it is not handed off itself: another version
+    // for it, or none, moves the id that later video went to the page under. Only a link that changes is refused.
+    const through = links.handedOffThrough(record.id).find((one) => one.record.id !== record.id);
+    if (through) return `${name} has already gone to the BRIMM Ops page as a version of ${shownName(through.record)}: ask Jason.`;
   }
   const held = heldElsewhere(record, ctx.machine);
   if (held) return beingAnswered(name, held.by);
@@ -3054,8 +3063,10 @@ function answerWhy(ctx, found, record, plan) {
     else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it, and in
     order (answerWhy says why not):
     - the checks of answerWhy, which read the record and the Macs, and refuse an answered video, a session not cleared, a video
-      that may be a session, a --version-of that names no video it can, a video already handed off that would be given another
-      version, the other Mac's claim, and a run at work;
+      that may be a session, a --version-of that names no video it can or a video that is already a version of this one, or
+      one whose versions hold a session not cleared (unless this is one), a video already handed off that would be given
+      another version, and one that the chain of a handed-off video passes through (the same), the other Mac's claim, and a
+      run at work;
     - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
       so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
       the checks are made again on it, right before the answer is written;

@@ -4,14 +4,16 @@
 // (episodes.js), with stand-ins for ffprobe, ffmpeg, the transcriber and open.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, writesV2For } from "../finish.js";
+import { finishNow, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { recordFile, recordText } from "../episode.js";
 import { clearRuns } from "../filing.js";
+import { noProgress } from "../progress.js";
 import { runsFolder, writeSettings } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { fromFinalCutFolder } from "../settings.js";
@@ -912,6 +914,184 @@ describe("reading the chain", () => {
   });
 });
 
+// One small, read-only helper over the walk and the set (finish.js linksOf), which edit.js reads a video's links through when
+// she answers "what is this video?": the chain of a record, the id its chain starts from, the set of every record whose walk ends
+// at an id, and the handed-off records whose chain passes through an id. It reads Episodes once, for all of them.
+describe("linksOf: a video's links, from one reading of Episodes", () => {
+  /** The ids of some records, or of some { folder, record } pairs, sorted. */
+  const idsOf = (list) => list.map((one) => (one.record || one).id).sort();
+  /** A hand-off for the id in the folder's final/ (or in its history/ when `where` says so). */
+  const handOff = (found, id, where = "final") => lay(found.folder, `${where}/${id}.brimm-ops.json`, handoffOf(2, id, 1));
+  /** The video ID answered, SECOND a new version of it, THIRD a new version of that, beside a video that is not one of them. */
+  function versions(t) {
+    const old = original(t);
+    const middle = later(t, SECOND, ID);
+    const newest = later(t, THIRD, SECOND);
+    const apart = episodeAs(t, { id: "e-20261001-aaaaaa", name: "2026-10-01 Another talk (Mac Studio)", record: { kind: "finished" } });
+    return { old, middle, newest, apart };
+  }
+  it("gives the chain of a record as chainOf gives it, the folder found by the id when it is not given, and the first id as handoffIdOf does", () => {
+    const t = setup();
+    const { old, middle, newest, apart } = versions(t);
+    const links = linksOf(t.root);
+    for (const one of [old, middle, newest, apart]) {
+      assert.deepEqual(links.chainOf(one.record), chainOf(t.root, one.record), one.record.id);
+      assert.deepEqual(links.chainOf(one.record, one.folder), chainOf(t.root, one.record, one.folder), one.record.id);
+      assert.equal(links.firstOf(one.record), handoffIdOf(t.root, one.record), one.record.id);
+    }
+    assert.deepEqual(links.chainOf(newest.record).map((link) => link.record.id), [THIRD, SECOND, ID]);
+    assert.equal(links.firstOf(newest.record), ID);
+    assert.deepEqual(links.find(SECOND), { folder: middle.folder, record: middle.record });
+    assert.equal(links.find("e-20269999-ffffff"), undefined);
+    t.done();
+  });
+  it("gives the set of an id: every record whose walk ends at it, the first's own included, and the folders whose hand-offs are read for it", () => {
+    const t = setup();
+    const { old, middle, newest, apart } = versions(t);
+    // A folder with no whole record yet (Dropbox is still bringing it over) may be a version of it.
+    const coming = join(t.root, "Episodes", "2026-10-21 Pricing talk, coming (Mac Studio)");
+    mkdirSync(coming, { recursive: true });
+    const set = linksOf(t.root).setOf(ID);
+    assert.deepEqual(idsOf(set.members), [ID, SECOND, THIRD].sort());
+    assert.deepEqual([...set.folders].sort(), [old.folder, middle.folder, newest.folder, coming].sort());
+    assert.ok(!set.folders.has(apart.folder));
+    // It is the set the hand-off writers read, for the same id.
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    assert.equal(nextRevision(t.root, middle), 4);
+    assert.deepEqual(idsOf(linksOf(t.root).setOf(apart.record.id).members), [apart.record.id]);
+    assert.deepEqual(linksOf(t.root).setOf("e-20269999-ffffff").members, []);
+    t.done();
+  });
+  it("gives the set of an id that is not on this Mac: the records whose walk ends at it", () => {
+    const t = setup();
+    const next = later(t, SECOND, ID);
+    const links = linksOf(t.root);
+    assert.equal(links.firstOf(next.record), ID);
+    assert.deepEqual(idsOf(links.setOf(ID).members), [SECOND]);
+    t.done();
+  });
+  it("gives the handed-off records whose chain passes through an id, itself included: by the record, by a hand-off in final/, and by one in history/", () => {
+    const t = setup();
+    const { old, middle, newest, apart } = versions(t);
+    const links = () => linksOf(t.root);
+    assert.deepEqual(links().handedOffThrough(ID), [], "nothing was handed off");
+    // The newest version was finished; its chain passes through all three.
+    writeFileSync(recordFile(newest.folder, 2), recordText({ ...newest.record, rev: 2, finished: { revision: 1, at: "2026-10-22T10:00:00-05:00", on: "Mac Studio" } }));
+    for (const id of [ID, SECOND, THIRD]) assert.deepEqual(idsOf(links().handedOffThrough(id)), [THIRD], id);
+    assert.deepEqual(links().handedOffThrough(apart.record.id), []);
+    // The middle one has a hand-off in its final/, and the first in its history/, at any depth.
+    handOff(middle, SECOND);
+    assert.deepEqual(idsOf(links().handedOffThrough(SECOND)), [SECOND, THIRD].sort());
+    assert.deepEqual(idsOf(links().handedOffThrough(THIRD)), [THIRD]);
+    lay(old.folder, "history/2026-10-21 09.00/final/b.brimm-ops.json", handoffOf(2, ID, 1));
+    assert.deepEqual(idsOf(links().handedOffThrough(ID)), [ID, SECOND, THIRD].sort());
+    // Each as { folder, record }, the record as Episodes holds it.
+    assert.deepEqual(links().handedOffThrough(ID).find((one) => one.record.id === SECOND), { folder: middle.folder, record: middle.record });
+    t.done();
+  });
+  it("counts a hand-off by its file's name alone, even one that cannot be read, and not a final/ that holds only other files", () => {
+    const t = setup();
+    const { old, middle } = versions(t);
+    mkdirSync(join(middle.folder, "final"), { recursive: true });
+    writeFileSync(join(middle.folder, "final", "Talk.mp4"), "a video");
+    writeFileSync(join(middle.folder, "final", "Talk.srt"), "1\n");
+    assert.deepEqual(linksOf(t.root).handedOffThrough(ID), []);
+    mkdirSync(join(old.folder, "final"), { recursive: true });
+    writeFileSync(join(old.folder, "final", "broken.brimm-ops.json"), "{ not json");
+    assert.deepEqual(idsOf(linksOf(t.root).handedOffThrough(ID)), [ID]);
+    t.done();
+  });
+  it("follows a link only from an answered record, as the chain does: an unanswered record's chain is itself", () => {
+    const t = setup();
+    original(t);
+    const waiting = { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" }, versionOf: ID, finished: { revision: 1, at: "2026-10-22T10:00:00-05:00", on: "Mac Studio" } };
+    later(t, SECOND, ID, waiting);
+    assert.deepEqual(linksOf(t.root).handedOffThrough(ID), []);
+    assert.deepEqual(idsOf(linksOf(t.root).handedOffThrough(SECOND)), [SECOND]);
+    t.done();
+  });
+  it("reads each record once for all of them, and writes and calls nothing", () => {
+    const t = setup();
+    const { old, middle, newest } = versions(t);
+    handOff(middle, SECOND);
+    const tree = () => listAll(t.dir).map((rel) => [rel, statSync(join(t.dir, rel)).size, statSync(join(t.dir, rel)).mtimeMs]);
+    const before = tree();
+    const real = fs.readFileSync;
+    const reads = [];
+    fs.readFileSync = (path, ...rest) => {
+      if (String(path).includes("/record/")) reads.push(String(path));
+      return real(path, ...rest);
+    };
+    syncBuiltinESMExports();
+    try {
+      const links = linksOf(t.root);
+      links.setOf(ID);
+      const once = reads.length;
+      assert.ok(once >= 3, "the first reading reads every record");
+      links.chainOf(newest.record);
+      links.chainOf(old.record, old.folder);
+      links.firstOf(newest.record);
+      links.handedOffThrough(ID);
+      links.handedOffThrough(SECOND);
+      links.find(THIRD);
+      links.setOf(THIRD);
+      assert.equal(reads.length, once, "no record was read again");
+    } finally {
+      fs.readFileSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.deepEqual(tree(), before, "every file as it was, and none added");
+    assert.deepEqual([t.clones, t.calls, t.opened], [[], [], []]);
+    t.done();
+  });
+  it("reads Episodes only when a link is to be followed: none for a record that names no version", () => {
+    const t = setup();
+    const old = original(t);
+    const real = fs.readdirSync;
+    const looked = [];
+    fs.readdirSync = (path, ...rest) => {
+      looked.push(String(path));
+      return real(path, ...rest);
+    };
+    syncBuiltinESMExports();
+    try {
+      const links = linksOf(t.root);
+      links.chainOf(old.record, old.folder);
+      links.firstOf(old.record, old.folder);
+      assert.deepEqual(looked, []);
+    } finally {
+      fs.readdirSync = real;
+      syncBuiltinESMExports();
+    }
+    t.done();
+  });
+});
+
+describe("handedOff: a video that went to the BRIMM Ops page", () => {
+  it("is one whose record says it was finished, or that has a hand-off in its final/ or at any depth in its history/", () => {
+    const t = setup();
+    const found = original(t);
+    assert.equal(handedOff(found.folder, found.record), false);
+    assert.equal(handedOff(found.folder, { ...found.record, finished: { revision: 1 } }), true);
+    for (const rel of ["final/Talk.brimm-ops.json", "history/Talk.brimm-ops.json", "history/2026-10-20 15-00/final/Talk.brimm-ops.json"]) {
+      const u = setup();
+      const there = original(u);
+      lay(there.folder, rel, handoffOf(2, ID, 1));
+      assert.equal(handedOff(there.folder, there.record), true, rel);
+      u.done();
+    }
+    for (const rel of ["final/Talk.srt", "history/Talk.mov", "Talk.brimm-ops.json"]) {
+      const u = setup();
+      const there = original(u);
+      mkdirSync(dirname(join(there.folder, rel)), { recursive: true });
+      writeFileSync(join(there.folder, rel), "x");
+      assert.equal(handedOff(there.folder, there.record), false, rel);
+      u.done();
+    }
+    t.done();
+  });
+});
+
 // Hand-off version 2 (spec 2026-10-22, section 8), once this Mac's settings say so: the same finish writes version 2 for every
 // kind, an "episode" written as raw, under the first version's id and above every revision written for it. With the setting at
 // 1, or with none, it writes version 1 as it always has, title and all.
@@ -1223,6 +1403,74 @@ describe("finish, for a session and for a video not yet answered", () => {
   });
 });
 
+// A video of any kind whose session mark is not cleared is gated as a session is (gate.js gated), and its words must not reach the
+// shared folder either: cannotFinish refuses it as it refuses a session, by the gate's predicate (a mark cleared only by her
+// click on the dialog is cleared), in the session's words, before anything is read, copied or written (the merge's review, I-1).
+describe("finish, for a video of any kind marked a session, not cleared", () => {
+  const MARK = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
+  const CLEARED = { ...MARK, cleared: { at: "2026-10-22T11:00:00-05:00", on: "Mac Studio", to: "finished", confirmed: "dialog" } };
+  const TEACHINGS = { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: "sallie@example.com (BRIMM)", app: "sallie@example.com (BRIMM)" } };
+  const sessionWords = (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  const record = (over) => ({ id: ID, label: LABEL, name: { text: NAME, placeholder: false }, ...over });
+  it("cannotFinish refuses every kind with a mark that is not cleared, by the gate's predicate, in a session's words, named by its label", () => {
+    const marks = [["no cleared at all", MARK], ["cleared: true", { ...MARK, cleared: true }], ["cleared by something but her click", { ...MARK, cleared: { at: "x", on: "Mac Studio", to: "finished", confirmed: "typed" } }], ["a mark that is not an object", "yes"]];
+    for (const kind of ["finished", "raw", "short video", "episode"]) {
+      for (const [what, mark] of marks) assert.equal(cannotFinish(record({ kind, session: mark })), sessionWords(LABEL), `${kind}: ${what}`);
+      assert.equal(cannotFinish(record({ kind, label: undefined, session: MARK })), sessionWords(`a client or group session (${ID.slice(-6)})`), `${kind}: no label`);
+      assert.equal(cannotFinish(record({ kind, session: CLEARED })), "", `${kind}: cleared by her click`);
+      assert.equal(cannotFinish(record({ kind })), "", `${kind}: no mark`);
+    }
+  });
+  it("cannotFinish keeps its words for a session, cleared or not, and for a video not answered", () => {
+    assert.equal(cannotFinish(record({ kind: "session", session: CLEARED, name: { text: "Session, 2026-10-14", placeholder: false } })), sessionWords("Session, 2026-10-14"));
+    assert.equal(cannotFinish(record({ kind: "session" })), sessionWords(NAME), "a session with no mark is named by its name, which is its label once F3 has named it");
+    assert.equal(cannotFinish(record({ kind: null, session: MARK })), `${LABEL} is not answered yet: say what it is first. Nothing was written.`);
+  });
+  it("refuses finish at once for a short video whose mark is not cleared, with teachings on, under hand-off version 1: nothing claimed, copied or written, no run started", async () => {
+    const t = setup();
+    handoffVersion(t, 1);
+    writeSettings(t.home, { sessionTeachings: TEACHINGS });
+    const found = episodeFor(t, { record: { ...EDITED, kind: "short video", label: LABEL, session: MARK } });
+    for (const name of [`${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.shared(name, 2000);
+    const before = episodesTree(t);
+    const r = await command(t, "finish", LABEL, "--yes");
+    assert.deepEqual([r.code, r.text], [1, sessionWords(LABEL)]);
+    assert.doesNotMatch(r.text, /Pricing|\.mp4|\.mov|Looked in/);
+    assert.deepEqual(episodesTree(t), before, "no claim, and the record as it was");
+    assert.equal(reread(found).rev, found.record.rev);
+    assert.deepEqual(t.inFinal(found), []);
+    assert.deepEqual([t.started, t.calls, t.clones, t.opened], [[], [], [], []]);
+    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 4, "From Final Cut keeps every file");
+    t.done();
+  });
+  it("refuses the detached finish of it too, before anything is waited for or copied", async () => {
+    for (const version of [undefined, 1, 2]) {
+      const t = setup();
+      if (version) handoffVersion(t, version);
+      const found = await asked(t, { ...EDITED, label: LABEL, ...OPEN });
+      // It is marked only after finish was asked, as a short video.
+      writeFileSync(recordFile(found.folder, found.record.rev), recordText({ ...reread(found), kind: "short video", session: MARK }));
+      const before = episodesTree(t);
+      const result = await finishNow(t.ctx, found);
+      assert.deepEqual([result.ok, result.failed], [false, [sessionWords(LABEL)]], `setting ${version}`);
+      assert.deepEqual(episodesTree(t), before, `setting ${version}: nothing in final/, and the record as it was`);
+      assert.deepEqual([t.calls, t.clones], [[], []], `setting ${version}`);
+      t.done();
+    }
+  });
+  it("gives the progress panel the name edit.js shows (shownName), as a finish of an answered video begins", async () => {
+    // For every record that gets past cannotFinish, shownName is the name the record holds, so this holds before the change too:
+    // it pins that the panel is given a name edit.js would say, and not a file's.
+    const t = setup();
+    const found = await asked(t, { ...EDITED, ...OPEN });
+    const began = [];
+    const result = await finishNow(t.ctx, found, { progress: { ...noProgress, begin: (name) => began.push(name) } });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual(began, [NAME]);
+    t.done();
+  });
+});
+
 describe("the hand-off version a finish writes for a video", () => {
   const V1_FILE = JSON.stringify(V1);
   const V2_FILE = JSON.stringify(V2.finished);
@@ -1494,8 +1742,9 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
       }
     }
   });
-  it("names the video by its label, as edit.js names it, when it is itself marked a session, not cleared", async () => {
+  it("names the video by its label, as edit.js names it, when it is itself marked a session, not cleared: cannotFinish refuses it first, as a session", async () => {
     const MARKED = { kind: "finished", session: MARK };
+    const sessionWords = (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
     for (const [label, who] of [[LABEL, LABEL], [null, `a client or group session (${ID.slice(-6)})`]]) {
       const t = setup();
       handoffVersion(t, 2);
@@ -1504,13 +1753,13 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
       writeFileSync(recordFile(found.folder, found.record.rev), recordText({ ...reread(found), ...MARKED }));
       const before = episodesTree(t);
       const result = await finishNow(t.ctx, found);
-      assert.deepEqual([result.ok, result.failed], [false, [refusedAs(who)]], who);
+      assert.deepEqual([result.ok, result.failed], [false, [sessionWords(who)]], who);
       assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, `${who}: no name`);
       assert.deepEqual(episodesTree(t), before, `${who}: nothing in final/, and the record as it was`);
       // The quick part refuses it so too, at once.
       const said = t.said().split("\n").length;
       assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true, noHandEdits: ["reel 2"] }), 1, who);
-      assert.deepEqual(t.said().split("\n").slice(said), [refusedAs(who)], who);
+      assert.deepEqual(t.said().split("\n").slice(said), [sessionWords(who)], who);
       t.done();
     }
   });
@@ -1704,6 +1953,34 @@ describe("spell, for a finished video that is now a session or not answered", ()
           t.done();
         }
       }
+    }
+  });
+});
+
+// ...and behind the gate: a session whose mark she cleared with her click on the dialog is no longer gated, so the gate lets spell
+// through for it, and cannotFinish is the only line left (M-1 of the merge's review).
+describe("spell, for a finished video that is now a session whose mark she cleared", () => {
+  const CLEARED = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: null, cleared: { at: "2026-10-22T11:00:00-05:00", on: "Mac Studio", to: "finished", confirmed: "dialog" } };
+  it("is refused in cannotFinish's words, before any file in final/ is named or read, and nothing is written", async () => {
+    for (const version of [undefined, 1, 2]) {
+      const t = setup();
+      if (version) handoffVersion(t, version);
+      const found = await asked(t, { ...EDITED, label: LABEL });
+      assert.equal((await finishNow(t.ctx, found)).ok, true);
+      // It is a session now, as after a corrected answer, and its mark was cleared: the gate lets any command through for it.
+      const now = reread(found);
+      writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, kind: "session", name: { text: "Session, 2026-10-14", placeholder: false }, session: CLEARED }));
+      // final/ goes, so that a spelling which looked in it would name what it did not find there.
+      rmSync(join(found.folder, "final"), { recursive: true });
+      const how = `setting ${version}`;
+      const before = episodesTree(t);
+      const started = t.started.length;
+      const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+      assert.deepEqual([r.code, r.text], [1, NOT_YET[0][2]("Session, 2026-10-14")], how);
+      assert.doesNotMatch(r.text, /final\/|Pricing|\.mp4|\.mov|\.srt/, `${how}: no file named`);
+      assert.deepEqual(episodesTree(t), before, `${how}: the record as it was, and no spelling kept`);
+      assert.deepEqual(t.started.slice(started), [], `${how}: nothing started, nothing brought over`);
+      t.done();
     }
   });
 });

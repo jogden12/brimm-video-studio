@@ -17,6 +17,7 @@ import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName } from "./episode.js";
+import { gated } from "./gate.js";
 import { REELS_FILE } from "./reels.js";
 import { fileSafe } from "./names.js";
 import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
@@ -179,6 +180,19 @@ const handoffsBeside = (finalDir) => [[finalDir, false], [join(dirname(finalDir)
   .filter((h) => h !== null && typeof h === "object");
 /** Is a hand-off one of the video's whose id is `id`: by its `episode.id` (version 1) or its `video.id` (version 2)? */
 const handoffFor = (h, id) => [h.episode, h.video].some((who) => who && who.id === id);
+/** Whether the episode in `folder` has been handed off to the BRIMM Ops page: its record says it was finished, or a hand-off (a
+    .brimm-ops.json) is in its final/ or in its history/, at any depth, where a hand-off set aside is kept. A hand-off is known by
+    its file's name alone, even one that cannot be read, since a doubt here is the safe side. */
+export function handedOff(folder, record) {
+  if (record.finished) return true;
+  return ["final", "history"].some((dir) => {
+    try {
+      return readdirSync(join(folder, dir), { recursive: true }).some((n) => String(n).endsWith(".brimm-ops.json"));
+    } catch (e) {
+      return false;
+    }
+  });
+}
 /** The highest revision of the hand-offs of the video `id` among `handoffs`, or 0. */
 const highestRevision = (handoffs, id) => handoffs.reduce((most, h) => (handoffFor(h, id) && Number.isInteger(h.revision) ? Math.max(most, h.revision) : most), 0);
 /** The numbers a hand-off gives its suggestions and its Reels: a Reel made from a suggestion has the suggestion's. */
@@ -255,13 +269,36 @@ function walk(view, record, folder) {
     `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given.
     This only reads: nothing is written into any folder of the chain. */
 export function chainOf(root, record, folder) {
+  return linksOf(root).chainOf(record, folder);
+}
+
+/** A video's links, read from Episodes once for the length of a call: the one small, read-only helper over the walk and the set
+    that edit.js reads them through when she answers what a video is (`kind`), so that no walk is copied there. Episodes are read
+    only when a link is first followed, and no record is read again by a second question. Nothing is written. It gives:
+    - `find(id)`: the episode whose record has that id, as { folder, record }, or undefined; as Episodes holds it now;
+    - `chainOf(record, folder)`: the record's versions, newest first (chainOf), the folder found by the id when it is not given;
+    - `firstOf(record, folder)`: the id its chain starts from, which is the id of its hand-off (handoffIdOf);
+    - `setOf(first)`: the versions of the video that starts at the id `first`, { members, folders } as the hand-off writers
+      read them (setOf below): every record whose own walk ends at the id, and the folders whose hand-offs are read for it;
+    - `handedOffThrough(id)`: every episode, as { folder, record }, in the order of Episodes' folders, that was handed off to the
+      BRIMM Ops page (handedOff) and whose chain passes through the record with that id, the episode of that id itself included
+      when it was. A link that is moved changes the id such an episode went to the page under. */
+export function linksOf(root) {
   const view = viewOf(root);
-  const { chain } = walk(view, record, folder);
-  if (chain[0].folder === null) {
-    const own = view.find(record.id);
-    chain[0].folder = own ? own.folder : null;
-  }
-  return chain;
+  return {
+    find: (id) => view.find(id),
+    chainOf: (record, folder) => {
+      const { chain } = walk(view, record, folder);
+      if (chain[0].folder === null) {
+        const own = view.find(record.id);
+        chain[0].folder = own ? own.folder : null;
+      }
+      return chain;
+    },
+    firstOf: (record, folder) => walk(view, record, folder || null).first,
+    setOf: (first) => setOf(view, { chain: [], first }),
+    handedOffThrough: (id) => view.all().filter((one) => one.record && walk(view, one.record, one.folder).chain.some((link) => link.record.id === id) && handedOff(one.folder, one.record))
+  };
 }
 
 /** Why the chain of a video's versions cannot be followed to its first, or null when it can: { id, reason }. `missing` is an
@@ -287,14 +324,17 @@ export function chainGapWords(record, gap) {
 
 /** Why the Final Cut finish cannot finish a record yet, in plain words, or "" when it can: a client or group session, whose own
     finish comes with its teachings (the hand-off writer refuses any transcript of a session, and none of one may be in the
-    shared folder, spec 2026-10-22, section 2), and a video not yet answered, which has no kind to finish as. It is the same in
-    both versions of the hand-off, and is asked before any folder is looked in, any claim is taken, or anything is made, so
-    that nothing of such a video is read, printed or copied. The video is named as edit.js names it (episode.js shownName: a
-    video not answered by its label, a session by its session label), never by a file's name. */
+    shared folder, spec 2026-10-22, section 2); a video of any other kind whose session mark is not cleared, by the gate's own
+    predicate (gate.js gated: a mark is cleared only by her click on the dialog), since it is held back from the chat as a
+    session is, and its words must not reach the shared folder either; and a video not yet answered, which has no kind to
+    finish as. It is the same in both versions of the hand-off, and is asked before any folder is looked in, any claim is
+    taken, or anything is made, so that nothing of such a video is read, printed or copied. The video is named as edit.js names
+    it (episode.js shownName: a video not answered by its label, a session or a video marked one by its session label), never
+    by a file's name. */
 export function cannotFinish(record) {
   const who = shownName(record);
   const kind = kindOf(record);
-  if (kind === "session") return `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  if (kind === "session" || (kind !== null && gated(record))) return `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
   if (kind === null) return `${who} is not answered yet: say what it is first. Nothing was written.`;
   return "";
 }
@@ -319,7 +359,7 @@ export function writesV2For(settings, folder, record) {
 /** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops
     page takes a new version as a later revision. */
 export function handoffIdOf(root, record) {
-  return walk(viewOf(root), record, null).first;
+  return linksOf(root).firstOf(record);
 }
 
 /** The revision of the next hand-off of this video: one above the highest revision written for the hand-off's id (that of
@@ -544,7 +584,7 @@ export async function finishNow(ctx, found, deps = {}) {
       failed.push(refused);
       return result();
     }
-    progress.begin(record.name.text);
+    progress.begin(shownName(record));
     progress.steps(STEPS);
     const before = (record.finished && record.finished.parts) || {};
     const parts = asked.parts.map((p) => ({ ...p, path: p.video ? join(p.video.dir, p.video.name) : "" }));

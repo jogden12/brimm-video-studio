@@ -17,6 +17,7 @@ import { episodeWork, fromFinalCutFolder, workFolder, writeSettings } from "../s
 import { readStatuses, writeStatus } from "../importing.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
+import { fileSafe } from "../names.js";
 import { uneditedFolder, uneditedFolders } from "../unedited.js";
 import { noProgress } from "../progress.js";
 import { probed, TOLD, SRT, PAUSES } from "./fixtures.js";
@@ -318,6 +319,19 @@ function clientEpisode(t, { folder = LIGHT_FOLDER, video = VIDEO, id = "e-202610
 /** A ctx of this Mac (episodes.js), with its import set to `setting`, for findEpisode with no command: as in a helper. */
 const ctxOf = (t, setting = "light") => contextFor({ ...t.ctx.deps, settings: { ...t.ctx.settings, ...(setting ? { import: setting } : {}) } });
 
+/** What `say` says of `lines` once a command the gate keeps open (`command`) has found the episode named `said`, with ctx.asked set
+    as editMain sets it: the lines through the filter of the names of the video found (findEpisode, hideNames). The settings are
+    this Mac's, with the import light and the training gate on. */
+function saidAfterFinding(t, said, lines, command = "release") {
+  const out = [];
+  const settings = { ...t.ctx.settings, import: "light", sessionTeachings: TEACHINGS };
+  const ctx = { ...contextFor({ ...t.ctx.deps, say: (line) => out.push(line), settings }), asked: { command, words: [said] } };
+  const found = findEpisode(ctx, said);
+  assert.ok(found.folder, found.why);
+  for (const line of lines) ctx.say(line);
+  return out;
+}
+
 /** Put a conflicted copy of the record in `folder` beside its record of the same number, holding `over` laid on that record. */
 function conflictedRecord(folder, over = {}) {
   const { record } = readEpisode(folder, { pastCopies: true });
@@ -428,21 +442,19 @@ describe("a command the gate lets through, for a gated video", () => {
     assert.doesNotMatch(r.said.join("\n"), /Jane|15:01|Coaching/);
     t.done();
   });
-  it("keeps every line of a scoped command free of the video's names, though a step names a file or a folder", async () => {
-    // A session, with the training gate on: the gate lets finish through, and finish refuses it at once, by its name, which is
-    // its session label (finish.js cannotFinish, Part H).
+  it("keeps every line of a scoped command free of the video's names: finish is refused at once for a session, and for a video marked one", async () => {
+    // With the training gate on, the gate lets finish through for either, and finish refuses it at once, by its label, before it
+    // looks in any folder for what Final Cut made (finish.js cannotFinish, which reads a mark by the gate's predicate).
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: SESSION_OVER });
     const refused = await on(t.ctx.deps, "finish", SESSION);
     assert.deepEqual([refused.code, refused.said], [1, [`${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
-    // A video answered as another kind whose session mark is not cleared is gated as a session is, and finish runs for it: it
-    // looks in its folder for what Final Cut made.
     const u = setup();
     writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(u, { over: MARKED_OVER });
     const r = await on(u.ctx.deps, "finish", LABEL);
-    assert.ok(r.said.length > 1, r.said.join("\n"));
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
     u.done();
@@ -623,15 +635,25 @@ describe("status, and the result files of detached runs, for a gated video", () 
     assert.deepEqual(r.said, [`${LABEL} (a1b2c3): bring ended 0 minutes ago. Not done: This video is waiting for its answer: say what it is first.`]);
     t.done();
   });
-  it("writes no name of the video into the result of a run that goes on for a session", async () => {
+  it("writes no name of the video into the result of a finish that ends for a session, even in the error it meets letting go this Mac's claim", async () => {
+    // A session's finish is refused at once (finish.js cannotFinish): the words of that name only its label. What can still hold a
+    // name is the error of the claim's let-go, which the quick part took for the finish: the record cannot be written, and the
+    // error names the episode's folder, as a path does. The result's `clean` takes that out; without it this test fails.
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
-    clientEpisode(t, { over: SESSION_OVER });
+    clientEpisode(t, { over: { ...SESSION_OVER, editing: { by: "Mac Studio", since: AT } } });
     mkdirSync(episodeWork(t.home, LIGHT_FOLDER), { recursive: true });
-    writeFileSync(join(episodeWork(t.home, LIGHT_FOLDER), "finish.asked.json"), JSON.stringify({ version: 1, at: AT, rev: 1, parts: [{ key: "main", label: "the main video", projects: [], video: { name: `${STEM} main v1 a1b2c3.mov`, where: "this Mac" }, export: null, kept: false, noHandEdits: false }] }));
-    await on(depsOf(t), "finish", "--now", LIGHT_FOLDER);
+    writeFileSync(join(episodeWork(t.home, LIGHT_FOLDER), "finish.asked.json"), JSON.stringify({ version: 1, at: AT, rev: 1, claimed: true, parts: [{ key: "main", label: "the main video", projects: [], video: { name: `${STEM} main v1 a1b2c3.mov`, where: "this Mac" }, export: null, kept: false, noHandEdits: false }] }));
+    const clone = (from, to) => {
+      if (to.includes("/record/")) throw new Error(`${to} could not be cloned: it is not on the same disk`);
+      copyFileSync(from, to);
+    };
+    await on({ ...depsOf(t), clone }, "finish", "--now", LIGHT_FOLDER);
     const result = readResult(t.home, LIGHT_FOLDER, "finish");
-    assert.ok(result && result.failed.length, JSON.stringify(result));
+    assert.ok(result && result.failed.length === 2, JSON.stringify(result));
+    assert.equal(result.failed[0], `${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`);
+    assert.match(result.failed[1], /^This Mac still has the episode open: it could not be let go \(/);
+    assert.match(result.failed[1], /the video/, "the folder's name in the error was put as the video");
     assert.doesNotMatch(readFileSync(resultFile(t.home, LIGHT_FOLDER, "finish"), "utf8"), SECRET);
     t.done();
   });
@@ -958,12 +980,13 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
 
 describe("an error that leaves a command for a gated video (fix 2)", () => {
   it("is said through the names' filter, as the work stopping, and the command ends with 1", async () => {
-    // The finish of a video marked a session, not cleared, with teachings on, makes this Mac's From Final Cut first, which cannot
-    // be made. (A session's own finish is refused before that: finish.js cannotFinish, Part H.)
+    // A video marked a session, not cleared, is gated as a session is, and the gate lets `kind` run for it: the lock it takes on
+    // this Mac's own disk first needs BRIMM Video Work, which cannot be made. (Its finish is refused before it makes anything, by
+    // finish.js cannotFinish, which reads a mark by the gate's predicate.)
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: MARKED_OVER });
-    const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, "finish", LABEL));
+    const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again"));
     assert.equal(r.code, 1);
     assert.equal(r.said[r.said.length - 1], "The work stopped (EACCES).");
     assert.doesNotMatch(r.said.join("\n"), SECRET);
@@ -1039,6 +1062,56 @@ describe("the names a gated video had before (fix 3)", () => {
   });
 });
 
+// What a gated video's names are, as secretsOf takes them from its records, pinned directly (F3b, I-2): findEpisode resolves it
+// for a command the gate keeps open, with ctx.asked set as editMain sets it, and every line the command says after holds none of
+// its names. The test of "fix 3" above does not reach it any more: finish refuses a session before it names anything.
+describe("the names of a gated video, taken out of every line a command says after it finds the video (F3b, I-2)", () => {
+  const GIVEN = "Jane Doe: her pricing";
+  const PROJECT = "Acme Corp intake main v1 a1b2c3";
+  const CLIENT_FOLDER = "2026-10-20 Client intake notes (Mac Studio)";
+  /** A session (or `over`) in a folder named for none of its other names: its video IMG_4411.MOV, a name she gave it once, and a
+      project it was pushed to Final Cut as. Gives back what `say` says of `lines` once `command` has found it. */
+  function saying(lines, { words = SESSION, over = SESSION_OVER, command = "release" } = {}) {
+    const t = setup();
+    const folder = join(t.root, "Episodes", CLIENT_FOLDER);
+    mkdirSync(join(folder, "record"), { recursive: true });
+    writeFileSync(join(folder, "IMG_4411.MOV"), "video");
+    const base = newEpisode({ id: "e-20261020-a1b2c3", machine: "Mac Studio", at: AT, video: { file: "IMG_4411.MOV", bytes: 5, seconds: 120, created: null }, kind: "raw", writer: { commit: "c709b57", on: "Mac Studio" }, files: { "IMG_4411.MOV": 5 }, answer: ANSWERED });
+    const raw = { ...base, rev: 1, name: { text: GIVEN, placeholder: false }, main: { ...base.main, pushed: [{ v: 1, at: AT, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project: PROJECT, asked: null }] } };
+    writeFileSync(recordFile(folder, 1), recordText(raw));
+    writeFileSync(recordFile(folder, 2), recordText({ ...raw, ...over, rev: 2 }));
+    const said = saidAfterFinding(t, words, lines, command);
+    t.done();
+    return said;
+  }
+  it("takes out the name she gave it before, in its file-safe form too, the projects it was pushed as, its folder's name and its video's", () => {
+    const said = saying([
+      `Named ${GIVEN}.`,
+      `Named ${fileSafe(GIVEN)}.`,
+      `Pushed as ${PROJECT}.`,
+      `Kept in ${CLIENT_FOLDER}.`,
+      "Made from IMG_4411.MOV.",
+      "Made from IMG_4411.",
+      `${SESSION}: kept as it is.`
+    ]);
+    assert.deepEqual(said, [
+      "Named the video.",
+      "Named the video.",
+      "Pushed as the video.",
+      "Kept in the video.",
+      "Made from the video.",
+      "Made from the video.",
+      `${SESSION}: kept as it is.`
+    ]);
+  });
+  it("takes them out for a video marked a session, not cleared, whatever its kind, and for one not yet answered", () => {
+    for (const over of [{ ...MARKED_OVER, label: LABEL }, { kind: null, answer: ANSWER, label: LABEL }]) {
+      const said = saying([`Named ${fileSafe(GIVEN)}, pushed as ${PROJECT}, kept in ${CLIENT_FOLDER}.`], { words: LABEL, over });
+      assert.deepEqual(said, ["Named the video, pushed as the video, kept in the video."], JSON.stringify(over));
+    }
+  });
+});
+
 describe("findEpisode takes back what its lists say (fix 4)", () => {
   it("finds a gated video by \"<label> (<short id>)\", whatever its case and spacing", () => {
     const t = setup();
@@ -1099,19 +1172,19 @@ describe("the say filter's names (fix 7)", () => {
     }
   });
   it("leaves a path that is not the video's readable, and keeps the net on for a session whose name is its file's", async () => {
-    // A session whose name is its file's: finish refuses it at once (finish.js cannotFinish, Part H), by its label.
+    // A session whose name is its file's: finish refuses it at once (finish.js cannotFinish), by its label.
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: { ...SESSION_OVER, name: { text: STEM, placeholder: true } } });
     const refused = await on(t.ctx.deps, "finish", LABEL);
     assert.deepEqual([refused.code, refused.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
-    // A video marked a session, not cleared, whose name is its file's: finish runs for it, and says the folder it looked in.
+    // A video marked a session, not cleared, whose name is its file's: a command the gate keeps open that says a path of this Mac's
+    // own, and the name of the file, says the path whole and the name as "the video".
     const u = setup();
     writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(u, { over: { ...MARKED_OVER, name: { text: STEM, placeholder: true } } });
-    const r = await on(u.ctx.deps, "finish", LABEL);
-    assert.ok(r.said.some((line) => line.includes(fromFinalCutFolder(u.home))), r.said.join("\n"));
-    assert.doesNotMatch(r.said.join("\n"), SECRET);
+    const said = saidAfterFinding(u, LABEL, [`Looked in ${fromFinalCutFolder(u.home)} for ${STEM}.`, `${LABEL}: kept.`]);
+    assert.deepEqual(said, [`Looked in ${fromFinalCutFolder(u.home)} for the video.`, `${LABEL}: kept.`]);
     t.done();
     u.done();
   });

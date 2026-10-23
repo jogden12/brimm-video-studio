@@ -1324,3 +1324,327 @@ describe("kind: as open does it, and the time it takes (fix round 1, 7 and 10)",
     t.done();
   });
 });
+
+// --- F3b: the chain rules for --version-of and --again, once hand-offs exist ---
+
+describe("kind --version-of, and the links around it (F3b)", () => {
+  const SESSION_FIELDS = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: MARK, name: { text: "Session, 2026-10-14", placeholder: false } };
+  const FINISHED = { revision: 1, at: AT, on: "Mac Studio" };
+  const HANDED = "e-20261018-c3c3c3";
+  const ELSEWHERE = "e-20261011-bbbbbb";
+  const ANOTHER = "e-20261012-d4d4d4";
+  /** The made-up episode (ID, NAME), answered as a finished video, with `over` laid on its record. */
+  const first = (t, over = {}) => episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false }, ...over } });
+  /** Another answered video on this Mac, in a folder of its own, with a label of its own unless `over` gives one. */
+  const answeredVideo = (t, { id, folder, file, over = {} }) => addEpisode(t, { id, folder, file, over: { kind: "finished", answer: ANSWERED, label: `Video of ${id}`, ...over } });
+  /** The words of rule (a). */
+  const LOOP = (label, name) => `${label} cannot be a version of ${name}: ${name} is already a version of it.`;
+  /** The words of rule (d). */
+  const GONE = (label, name) => `${label} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
+  /** The words of rule (e). */
+  const SESSION_SET = (label) => `${label} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
+  /** Nothing was written, no claim was made, and nothing was started: the record `found` as it was. */
+  const writesNothing = (t, found, rev = 1) => assert.deepEqual([readEpisode(found.folder).record.rev, t.started, t.waits], [rev, [], []]);
+  /** Write the next record of the episode in `found`: the one there with `over` laid on it. */
+  const rewrite = (found, over) => {
+    const { record } = readEpisode(found.folder);
+    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, ...over, rev: record.rev + 1 }));
+  };
+  const answer = (t, ...more) => on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", ...more);
+
+  describe("(a) a video cannot be a version of one that is already a version of it", () => {
+    it("refuses a target whose chain holds the video, directly, by id or short id, and writes nothing, not even a claim", async () => {
+      for (const named of [ID, SHORT]) {
+        const t = setup();
+        first(t, { versionOf: OTHER_ID });
+        const added = addEpisode(t);
+        const r = await answer(t, "--version-of", named);
+        assert.deepEqual([r.code, r.said], [1, [LOOP(LABEL, NAME)]], named);
+        writesNothing(t, added);
+        t.done();
+      }
+    });
+    it("refuses it through other versions: a target that is a version of a version of the video", async () => {
+      const t = setup();
+      first(t, { versionOf: ELSEWHERE });
+      answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { versionOf: OTHER_ID } });
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, [LOOP(LABEL, NAME)]]);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("refuses it for an answered video answered again, in the words that name it by its name", async () => {
+      const t = setup();
+      first(t, { versionOf: OTHER_ID });
+      const added = addEpisode(t, { over: { kind: "raw", answer: ANSWERED } });
+      const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again", "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, [LOOP("Coaching call", NAME)]]);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("says a video is not a version of itself in the words it has always had, not in these", async () => {
+      const t = setup();
+      first(t);
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", OTHER_ID);
+      assert.deepEqual([r.code, r.said], [1, [`No answered video on this Mac has the id ${OTHER_ID}.`]]);
+      const own = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again", "--version-of", SHORT);
+      assert.deepEqual([own.code, own.said], [1, [`${NAME} cannot be a version of itself.`]]);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("lets a target through whose chain does not hold the video, however long it is", async () => {
+      const t = setup();
+      first(t, { versionOf: ELSEWHERE });
+      answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { versionOf: ANOTHER } });
+      answeredVideo(t, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", ID);
+      assert.equal(r.code, 0, r.text);
+      assert.equal(readEpisode(added.folder).record.versionOf, ID);
+      t.done();
+    });
+    it("checks again on the record read after the claim wait: a target linked to the video meanwhile stops the answer", async () => {
+      const t = setup();
+      const target = first(t);
+      const added = addEpisode(t);
+      duringWaits(t, CLAIM_WAIT_MS, () => rewrite(target, { versionOf: OTHER_ID }));
+      const r = await answer(t, "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, [LOOP(LABEL, NAME)]]);
+      const record = readEpisode(added.folder).record;
+      assert.deepEqual([record.rev, record.kind, record.versionOf ?? null, t.started], [2, null, null, []], "only the claim was written");
+      t.done();
+    });
+  });
+
+  describe("(d) a video a handed-off video's chain passes through keeps the version it is of", () => {
+    /** The old video (ID), the video answered (R, OTHER_ID) as a version of it, and a later version of R (H) that was handed
+        off: by its record unless `by` says where its hand-off is. */
+    function chain(t, { by = null, rOver = {}, hOver = {} } = {}) {
+      const old = first(t);
+      const r = addEpisode(t, { over: { kind: "finished", answer: ANSWERED, versionOf: ID, ...rOver } });
+      const h = answeredVideo(t, { id: HANDED, folder: "2026-10-18 Third cut (Mac Studio)", file: "Third cut.mov", over: { versionOf: OTHER_ID, ...(by ? {} : { finished: FINISHED }), ...hOver } });
+      if (by) {
+        mkdirSync(join(h.folder, by, ".."), { recursive: true });
+        writeFileSync(join(h.folder, by), "{}");
+      }
+      answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov" });
+      return { old, r, h };
+    }
+    const again = (t, ...more) => on(t.ctx.deps, "kind", OTHER_ID, "finished", "--private", "no", "--again", ...more);
+    it("refuses --version-of naming another video, with the handed-off video named, and writes nothing, not even a claim", async () => {
+      const t = setup();
+      const { r } = chain(t);
+      const refused = await again(t, "--version-of", ELSEWHERE);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Third cut")]]);
+      writesNothing(t, r);
+      assert.equal(readEpisode(r.folder).record.versionOf, ID);
+      t.done();
+    });
+    it("refuses --again with no --version-of, which clears the version it is of", async () => {
+      const t = setup();
+      const { r } = chain(t);
+      const refused = await again(t);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Third cut")]]);
+      writesNothing(t, r);
+      t.done();
+    });
+    it("refuses it when the hand-off is a file in the later version's final/ or its history/, whatever its record says", async () => {
+      for (const by of ["final/Talk.brimm-ops.json", "history/2026-10-20 15-00/final/Talk.brimm-ops.json"]) {
+        const t = setup();
+        const { r } = chain(t, { by });
+        const refused = await again(t, "--version-of", ELSEWHERE);
+        assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Third cut")]], by);
+        writesNothing(t, r);
+        t.done();
+      }
+    });
+    it("refuses it for a handed-off video further along the chain, and for one that is not the nearest", async () => {
+      const t = setup();
+      const { r } = chain(t, { hOver: { finished: null } });
+      // A later version of the later version was the one handed off.
+      answeredVideo(t, { id: ANOTHER, folder: "2026-10-19 Fourth cut (Mac Studio)", file: "Fourth cut.mov", over: { versionOf: HANDED, finished: FINISHED } });
+      const refused = await again(t, "--version-of", ELSEWHERE);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Fourth cut")]]);
+      writesNothing(t, r);
+      t.done();
+    });
+    it("names the first of the handed-off videos, by their folders' names, when more than one chain passes through it", async () => {
+      const t = setup();
+      const { r } = chain(t);
+      answeredVideo(t, { id: ANOTHER, folder: "2026-10-09 Second cut (Mac Studio)", file: "Second cut.mov", over: { versionOf: OTHER_ID, finished: FINISHED } });
+      const refused = await again(t, "--version-of", ELSEWHERE);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Second cut")]]);
+      writesNothing(t, r);
+      t.done();
+    });
+    it("refuses it for a video not yet answered that a handed-off video's chain ends at, answered with a version", async () => {
+      const t = setup();
+      first(t);
+      const r = addEpisode(t);
+      answeredVideo(t, { id: HANDED, folder: "2026-10-18 Third cut (Mac Studio)", file: "Third cut.mov", over: { versionOf: OTHER_ID, finished: FINISHED } });
+      const refused = await answer(t, "--version-of", ID);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE(LABEL, "Third cut")]]);
+      writesNothing(t, r);
+      t.done();
+    });
+    it("lets the same version be named again, and --again that changes only the answer, as nothing is re-linked", async () => {
+      const t = setup();
+      const { r } = chain(t);
+      const same = await again(t, "--version-of", ID);
+      assert.equal(same.code, 0, same.text);
+      assert.deepEqual([readEpisode(r.folder).record.versionOf, readEpisode(r.folder).record.kind], [ID, "finished"]);
+      const u = setup();
+      const none = chain(u, { rOver: { versionOf: null } });
+      const kept = await on(u.ctx.deps, "kind", OTHER_ID, "raw", "--private", "no", "--again");
+      assert.equal(kept.code, 0, kept.text);
+      assert.deepEqual([readEpisode(none.r.folder).record.versionOf, readEpisode(none.r.folder).record.kind], [null, "raw"]);
+      t.done();
+      u.done();
+    });
+    it("lets a video be re-linked that no handed-off video's chain passes through", async () => {
+      // A later version that was not handed off.
+      const t = setup();
+      const { r } = chain(t, { hOver: { finished: null } });
+      assert.equal((await again(t, "--version-of", ELSEWHERE)).code, 0);
+      assert.equal(readEpisode(r.folder).record.versionOf, ELSEWHERE);
+      t.done();
+      // A handed-off video whose chain goes elsewhere.
+      const u = setup();
+      const apart = chain(u, { hOver: { versionOf: ELSEWHERE } });
+      assert.equal((await again(u, "--version-of", ELSEWHERE)).code, 0);
+      assert.equal(readEpisode(apart.r.folder).record.versionOf, ELSEWHERE);
+      u.done();
+    });
+    it("leaves F3's words for a video handed off itself, even when a handed-off video's chain passes through it too", async () => {
+      const t = setup();
+      const { r } = chain(t, { rOver: { finished: FINISHED } });
+      const refused = await again(t, "--version-of", ELSEWHERE);
+      assert.deepEqual([refused.code, refused.said], [1, [`Coaching call has already gone to the BRIMM Ops page as a version of ${NAME}: ask Jason.`]]);
+      writesNothing(t, r);
+      t.done();
+    });
+    it("checks again on the record read after the claim wait: a version handed off meanwhile stops the answer", async () => {
+      const t = setup();
+      const { r, h } = chain(t, { hOver: { finished: null } });
+      duringWaits(t, CLAIM_WAIT_MS, () => rewrite(h, { finished: FINISHED }));
+      const refused = await again(t, "--version-of", ELSEWHERE);
+      assert.deepEqual([refused.code, refused.said], [1, [GONE("Coaching call", "Third cut")]]);
+      const record = readEpisode(r.folder).record;
+      assert.deepEqual([record.rev, record.versionOf, t.started], [2, ID, []], "only the claim was written");
+      t.done();
+    });
+  });
+
+  describe("(e) a non-session answer cannot make a video a version of a video whose versions hold a session", () => {
+    /** Another version of the made-up video (ID) that is a session not cleared, as `over` lays it on a record. */
+    const sessionOf = (t, over, id = ELSEWHERE) => answeredVideo(t, { id, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { label: "Video of 11 Oct, 09:00 (Mac Studio)", ...SESSION_FIELDS, ...over } });
+    it("refuses a target one of whose later versions is a session not cleared, and writes nothing, not even a claim", async () => {
+      const t = setup();
+      first(t);
+      sessionOf(t, { versionOf: ID });
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(LABEL)]]);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("refuses one of whose earlier versions is, and one beside it that is a version of the same video", async () => {
+      const earlier = setup();
+      first(earlier, { versionOf: ELSEWHERE });
+      sessionOf(earlier, {});
+      const a = addEpisode(earlier);
+      assert.deepEqual((await answer(earlier, "--version-of", ID)).said, [SESSION_SET(LABEL)]);
+      writesNothing(earlier, a);
+      earlier.done();
+      const beside = setup();
+      first(beside, { versionOf: ANOTHER });
+      answeredVideo(beside, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
+      sessionOf(beside, { versionOf: ANOTHER });
+      const b = addEpisode(beside);
+      assert.deepEqual((await answer(beside, "--version-of", ID)).said, [SESSION_SET(LABEL)]);
+      writesNothing(beside, b);
+      beside.done();
+    });
+    it("takes a session by its kind alone, and by its mark alone, of any other kind", async () => {
+      const marks = [["its kind, no mark", { session: undefined }], ["its mark, kind finished", { kind: "finished" }], ["its mark, kind raw", { kind: "raw" }], ["its mark, kind short video", { kind: "short video" }]];
+      for (const [what, over] of marks) {
+        const t = setup();
+        first(t);
+        sessionOf(t, { versionOf: ID, ...over });
+        const added = addEpisode(t);
+        const r = await answer(t, "--version-of", ID);
+        assert.deepEqual([r.code, r.said], [1, [SESSION_SET(LABEL)]], what);
+        writesNothing(t, added);
+        t.done();
+      }
+    });
+    it("names the video being answered by its label, and says no word of its file, which is a client's", async () => {
+      const t = setup();
+      first(t);
+      sessionOf(t, { versionOf: ID });
+      // The video is itself a client's: it is named by its label, and no word of its file is said.
+      const added = addEpisode(t, { file: "Coaching call Jane Doe.mov", folder: "2026-10-20 Coaching call Jane Doe (Mac Studio)" });
+      const r = await answer(t, "--version-of", SHORT);
+      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(LABEL)]]);
+      assert.doesNotMatch(r.text, /Jane|Coaching/);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("lets a session cleared by her click be in the set, a session answer be one, and a version of a set with none", async () => {
+      const cleared = setup();
+      first(cleared);
+      sessionOf(cleared, { versionOf: ID, session: { ...MARK, cleared: { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" } } });
+      const a = addEpisode(cleared);
+      assert.equal((await answer(cleared, "--version-of", ID)).code, 0);
+      assert.equal(readEpisode(a.folder).record.versionOf, ID);
+      cleared.done();
+      const asSession = setup();
+      first(asSession);
+      sessionOf(asSession, { versionOf: ID });
+      const b = addEpisode(asSession);
+      const r = await on(asSession.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--version-of", ID);
+      assert.equal(r.code, 0, r.text);
+      assert.equal(readEpisode(b.folder).record.versionOf, ID);
+      asSession.done();
+      const none = setup();
+      first(none);
+      answeredVideo(none, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { versionOf: ID } });
+      addEpisode(none);
+      assert.equal((await answer(none, "--version-of", ID)).code, 0);
+      none.done();
+    });
+    it("does not take a video not yet answered, at the head of the set, for a session", async () => {
+      const t = setup();
+      first(t, { versionOf: ELSEWHERE });
+      addEpisode(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { label: "Video of 11 Oct, 09:00 (Mac Studio)" } });
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", ID);
+      assert.equal(r.code, 0, r.text);
+      assert.equal(readEpisode(added.folder).record.versionOf, ID);
+      t.done();
+    });
+    it("leaves F3's words for a target that is itself a session", async () => {
+      const t = setup();
+      first(t, SESSION_FIELDS);
+      const added = addEpisode(t);
+      const r = await answer(t, "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, ["That video is a client or group session, so this new version is one too: answer it as a session."]]);
+      writesNothing(t, added);
+      t.done();
+    });
+    it("checks again on the record read after the claim wait: a version marked a session meanwhile stops the answer", async () => {
+      const t = setup();
+      first(t);
+      const other = answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { versionOf: ID } });
+      const added = addEpisode(t);
+      duringWaits(t, CLAIM_WAIT_MS, () => rewrite(other, SESSION_FIELDS));
+      const r = await answer(t, "--version-of", ID);
+      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(LABEL)]]);
+      const record = readEpisode(added.folder).record;
+      assert.deepEqual([record.rev, record.kind, record.versionOf ?? null, t.started], [2, null, null, []], "only the claim was written");
+      t.done();
+    });
+  });
+});
