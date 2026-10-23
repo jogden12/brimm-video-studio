@@ -2,7 +2,7 @@
 // cleared. It is pure: the command's name, the record and the command's words are all it is given, and it reads nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, gateFor } from "../gate.js";
+import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, gateFor, printWhy } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
@@ -111,6 +111,13 @@ describe("gateFor, a session whose mark is cleared, and the records of every oth
     for (const name of COMMAND_NAMES) assert.equal(gateFor(name, session({ session: { marked: AT, cleared } }), OFF), "", name);
     assert.equal(gateFor("open", { kind: "session", session: { marked: AT, cleared } }, OFF), "");
   });
+  it("counts a mark as cleared only when it holds the dialog's confirmation: nothing else clears it", () => {
+    for (const bad of ["no", "yes", true, 1, {}, { at: "x" }, { at: AT, on: "Mac Studio", to: "Sallie Ogden" }, { confirmed: "yes" }, { confirmed: true }, { confirmed: "Dialog" }, []]) {
+      assert.equal(gateFor("open", session({ session: { marked: AT, cleared: bad } }), ON), NOT_FOR_SESSION, JSON.stringify(bad));
+      assert.equal(gateFor("open", { kind: "episode", session: { marked: AT, cleared: bad } }, ON), NOT_FOR_SESSION, JSON.stringify(bad));
+    }
+    assert.equal(gateFor("open", session({ session: { marked: AT, cleared: { confirmed: "dialog" } } }), ON), "");
+  });
   it("lets an answered record that is not a session through every command, teachings on or off", () => {
     for (const kind of ["finished", "raw", "short video", "episode"]) {
       for (const name of [...COMMAND_NAMES, "teachings", "render", "read", "somethingNew"]) {
@@ -127,47 +134,81 @@ describe("gateFor, a session whose mark is cleared, and the records of every oth
 describe("gateFor, a Reel cut from a session", () => {
   const agreed = (...ns) => session({ session: { marked: AT, cleared: null, agreed: ns.map((n) => ({ n, at: AT })) } });
   const LABEL = "Session, 2026-10-22";
+  /** On, and asked to find the episode by what the first word says: the label, as findEpisode was asked it. */
+  const TAUGHT = { teachingsOn: true, said: LABEL };
   it("passes reel only as 'make <n>' of a Reel recorded as agreed", () => {
-    assert.equal(gateFor("reel", agreed(2), ON, [LABEL, "make", "2"]), "");
-    assert.equal(gateFor("reel", agreed(1, 2), ON, [LABEL, "make", "1"]), "");
-    assert.equal(gateFor("reel", agreed(2), ON, [LABEL, "make", "1"]), REEL_NOT_AGREED);
-    assert.equal(gateFor("reel", agreed(), ON, [LABEL, "make", "1"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), TAUGHT, [LABEL, "make", "2"]), "");
+    assert.equal(gateFor("reel", agreed(1, 2), TAUGHT, [LABEL, "make", "1"]), "");
+    assert.equal(gateFor("reel", agreed(2), TAUGHT, [LABEL, "make", "1"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(), TAUGHT, [LABEL, "make", "1"]), REEL_NOT_AGREED);
   });
   it("passes reel as '<n> --client-agreed', the dialog's own, whether or not the Reel is recorded yet", () => {
-    assert.equal(gateFor("reel", agreed(), ON, [LABEL, "2", "--client-agreed"]), "");
-    assert.equal(gateFor("reel", session(), ON, [LABEL, "2", "--client-agreed"]), "");
+    assert.equal(gateFor("reel", agreed(), TAUGHT, [LABEL, "2", "--client-agreed"]), "");
+    assert.equal(gateFor("reel", session(), TAUGHT, [LABEL, "2", "--client-agreed"]), "");
   });
   it("passes render only as 'reel <n>' of a Reel recorded as agreed", () => {
-    assert.equal(gateFor("render", agreed(3), ON, [LABEL, "reel", "3"]), "");
-    assert.equal(gateFor("render", agreed(3), ON, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
-    assert.equal(gateFor("render", session(), ON, [LABEL, "reel", "3"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("render", agreed(3), TAUGHT, [LABEL, "reel", "3"]), "");
+    assert.equal(gateFor("render", agreed(3), TAUGHT, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("render", session(), TAUGHT, [LABEL, "reel", "3"]), REEL_NOT_AGREED);
+  });
+  it("counts the words only when the first is the very word the episode was asked for, never a verb of today's reel", () => {
+    // `reel pick 14 --client-agreed` is today's reel, naming the episode "14": its first word, "pick", is not the label.
+    assert.equal(gateFor("reel", session(), { teachingsOn: true, said: "14" }, ["pick", "14", "--client-agreed"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", session(), { teachingsOn: true, said: "14" }, ["drop", "14", "--client-agreed"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "14" }, ["pick", "make", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "other" }, [LABEL, "make", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("render", agreed(2), { teachingsOn: true, said: "other" }, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
+  });
+  it("counts no words at all when it is not told which episode was asked for: it errs toward refusing", () => {
+    assert.equal(gateFor("reel", agreed(2), ON, [LABEL, "make", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", session(), ON, [LABEL, "2", "--client-agreed"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("render", agreed(2), ON, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: undefined }, [LABEL, "make", "2"]), REEL_NOT_AGREED);
   });
   it("refuses any other words: today's pick and drop, no words, extra words, a number that is not a whole one", () => {
     const words = [[], [LABEL], ["pick", LABEL, "2"], ["drop", LABEL, "2"], [LABEL, "pick", "2"], [LABEL, "make"], [LABEL, "make", "2", "3"], [LABEL, "make", "2", "--no-play"],
       [LABEL, "make", "0"], [LABEL, "make", "-1"], [LABEL, "make", "1.5"], [LABEL, "make", "two"], [LABEL, "2"], [LABEL, "--client-agreed", "2"], [LABEL, "2", "--client-agreed", "extra"],
       [LABEL, "2", "--client-agreed", "make", "1"], ["x", LABEL, "make", "2"], [LABEL, "make", "02"], [LABEL, "make", "2 "]];
-    for (const these of words) assert.equal(gateFor("reel", agreed(2, 0, -1, 1), ON, these), REEL_NOT_AGREED, JSON.stringify(these));
+    for (const these of words) assert.equal(gateFor("reel", agreed(2, 0, -1, 1), TAUGHT, these), REEL_NOT_AGREED, JSON.stringify(these));
     for (const these of [[], [LABEL], [LABEL, "2"], [LABEL, "reel"], [LABEL, "reel", "2", "3"], [LABEL, "make", "2"], [LABEL, "reel", "x"], [LABEL, "reel", "02"]]) {
-      assert.equal(gateFor("render", agreed(2), ON, these), REEL_NOT_AGREED, JSON.stringify(these));
+      assert.equal(gateFor("render", agreed(2), TAUGHT, these), REEL_NOT_AGREED, JSON.stringify(these));
     }
   });
   it("takes an agreement only as a list of { n, at }: a missing list, or one that is not a list, agrees to nothing", () => {
     for (const bad of [undefined, null, "all", { n: 2 }, 2, [2], [null], ["2"], [{ at: AT }], [{ n: "2" }]]) {
-      assert.equal(gateFor("reel", session({ session: { marked: AT, cleared: null, agreed: bad } }), ON, [LABEL, "make", "2"]), REEL_NOT_AGREED, JSON.stringify(bad));
+      assert.equal(gateFor("reel", session({ session: { marked: AT, cleared: null, agreed: bad } }), TAUGHT, [LABEL, "make", "2"]), REEL_NOT_AGREED, JSON.stringify(bad));
     }
-    assert.equal(gateFor("reel", session({ session: undefined }), ON, [LABEL, "make", "2"]), REEL_NOT_AGREED, "a kind of session and no mark agrees to nothing");
+    assert.equal(gateFor("reel", session({ session: undefined }), TAUGHT, [LABEL, "make", "2"]), REEL_NOT_AGREED, "a kind of session and no mark agrees to nothing");
   });
   it("reads a detached run's words as the command's, the episode's folder after --now standing for its label", () => {
-    assert.equal(gateFor("reel", agreed(2), ON, ["--now", "Session, 2026-10-22", "make", "2"]), "");
-    assert.equal(gateFor("reel", agreed(2), ON, ["--now", "Session, 2026-10-22", "make", "1"]), REEL_NOT_AGREED);
-    assert.equal(gateFor("render", agreed(2), ON, ["--now", "Session, 2026-10-22", "reel", "2"]), "");
-    assert.equal(gateFor("render", agreed(2), ON, ["--now", "Session, 2026-10-22"]), REEL_NOT_AGREED);
-    assert.equal(gateFor("reel", agreed(2), ON, ["--now"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), TAUGHT, ["--now", LABEL, "make", "2"]), "");
+    assert.equal(gateFor("reel", agreed(2), TAUGHT, ["--now", LABEL, "make", "1"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("render", agreed(2), TAUGHT, ["--now", LABEL, "reel", "2"]), "");
+    assert.equal(gateFor("render", agreed(2), TAUGHT, ["--now", LABEL]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), TAUGHT, ["--now"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "other" }, ["--now", LABEL, "make", "2"]), REEL_NOT_AGREED);
   });
   it("does not narrow the other commands by their words", () => {
-    assert.equal(gateFor("finish", session(), ON, [LABEL, "--yes"]), "");
-    assert.equal(gateFor("name", session(), ON, [LABEL, "anything at all"]), "");
+    assert.equal(gateFor("finish", session(), TAUGHT, [LABEL, "--yes"]), "");
+    assert.equal(gateFor("name", session(), TAUGHT, [LABEL, "anything at all"]), "");
     assert.equal(gateFor("reel", finished, OFF, ["pick", "x", "1"]), "", "a record that is not a session is not narrowed");
-    assert.equal(gateFor("reel", unanswered, ON, [LABEL, "make", "2"]), WAITING, "nor does a Reel words let an unanswered video through");
+    assert.equal(gateFor("reel", unanswered, TAUGHT, [LABEL, "make", "2"]), WAITING, "nor does a Reel words let an unanswered video through");
+  });
+});
+
+describe("printWhy, what `show` may not print into the chat", () => {
+  it("refuses a video waiting for its answer, and one left alone, in words that name no episode", () => {
+    assert.equal(printWhy(unanswered), "Its words are not shown in the chat while it waits for its answer.");
+    assert.equal(printWhy({ kind: null, answer: { state: "not for brimm-video" } }), "Its words are not shown in the chat while it waits for its answer.");
+    assert.equal(printWhy({}), "Its words are not shown in the chat while it waits for its answer.");
+  });
+  it("refuses a session whose mark is not cleared, whatever this Mac's training gate says", () => {
+    assert.equal(printWhy(session()), "A client or group session's words are not shown in the chat.");
+    assert.equal(printWhy({ kind: "session" }), "A client or group session's words are not shown in the chat.");
+    assert.equal(printWhy({ kind: "episode", session: { marked: AT, cleared: "no" } }), "A client or group session's words are not shown in the chat.");
+  });
+  it("lets every other record's words be shown: a cleared session, a finished video, a record from before the switch", () => {
+    assert.equal(printWhy(session({ session: { marked: AT, cleared: { confirmed: "dialog" } } })), "");
+    for (const kind of ["finished", "raw", "short video", "episode"]) assert.equal(printWhy({ kind }), "", kind);
   });
 });

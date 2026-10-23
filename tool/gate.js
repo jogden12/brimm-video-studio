@@ -29,14 +29,15 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 /** A whole number from 1, as a person types it: no sign, no zero in front, no fraction. */
 const isNumber = (word) => /^[1-9]\d*$/.test(word);
 
-/** Whether the record is of a client or group session whose mark is not cleared. A mark with no `cleared` in it, or one that is
-    null, is not cleared; so is a mark that cannot be read; and a record of kind "session" with no mark at all is a session not
-    cleared, since this is a gate and it errs toward refusing. */
+/** Whether the record is of a client or group session whose mark is not cleared. A mark is cleared only when it holds what her
+    click on the dialog leaves: `cleared` an object that says `confirmed: "dialog"`. Any other `cleared` (null, missing, "no",
+    true, 1, an object without the confirmation) leaves it not cleared; so does a mark that cannot be read; and a record of kind
+    "session" with no mark at all is a session not cleared, since this is a gate and it errs toward refusing. */
 function sessionNotCleared(record) {
   const mark = record.session;
   if (mark === undefined || mark === null) return record.kind === "session";
   if (!isObject(mark)) return true;
-  return !mark.cleared;
+  return !(isObject(mark.cleared) && mark.cleared.confirmed === "dialog");
 }
 
 /** The words of a command as the gate reads them. A detached run is started as `<command> --now <folder> <words…>` (detached.js),
@@ -54,10 +55,13 @@ function agreedTo(record, n) {
     - `reel "<label>" make <n>` of a Reel recorded as agreed;
     - `reel "<label>" <n> --client-agreed`, which asks on a dialog Claude cannot press, and notes the agreement;
     - `render "<label>" reel <n>` of a Reel recorded as agreed.
-    Any other words are not: the label is one word, as a quoted name is, so that these are all the words there are. */
-function reelWords(command, record, words) {
+    Any other words are not: the label is one word, as a quoted name is, so that these are all the words there are. And the
+    first word counts as the label only when it is the very word the episode was asked for (`said`, what findEpisode was given):
+    otherwise it is a verb of today's reel, as in `reel pick 14 --client-agreed`, which asks for the episode "14". Without `said`
+    no words count. */
+function reelWords(command, record, words, said) {
   const [label, second, third, ...rest] = wordsOf(words);
-  if (label === undefined || rest.length || third === undefined) return false;
+  if (label === undefined || typeof said !== "string" || label !== said || rest.length || third === undefined) return false;
   if (command === "reel" && second === "make") return isNumber(third) && agreedTo(record, Number(third));
   if (command === "reel" && third === "--client-agreed") return isNumber(second);
   if (command === "render" && second === "reel") return isNumber(third) && agreedTo(record, Number(third));
@@ -65,6 +69,7 @@ function reelWords(command, record, words) {
 }
 
 /** Why `command`, with `words`, may not run for the episode with this `record`: the plain words of why, or "" when it may.
+    `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
       UNANSWERED.
@@ -72,13 +77,23 @@ function reelWords(command, record, words) {
       SESSION_TAUGHT. Of those, `reel` and `render` run only with the words of a Reel she has agreed on (reelWords).
     - An answered record that is not a session, and a session whose mark is cleared, every command.
     A command named in none of the lists is refused for a record that is gated at all. */
-export function gateFor(command, record, { teachingsOn = false } = {}, words = []) {
+export function gateFor(command, record, { teachingsOn = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
   if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;
   if (!teachingsOn) return TEACHINGS_OFF;
-  if ((command === "reel" || command === "render") && !reelWords(command, record, words)) return REEL_NOT_AGREED;
+  if ((command === "reel" || command === "render") && !reelWords(command, record, words, said)) return REEL_NOT_AGREED;
+  return "";
+}
+
+/** Why `show` may not print a file of the episode with this `record` into the chat, in plain words, or "" when it may. The gate
+    lets `show` run for a video not answered and for a session (it names them, and opens nothing), but what it prints goes into
+    Sallie's chat, and a transcript, notes or cut plan hold words said in them. Until `show` opens a read-only copy on this Mac
+    instead, it prints no file of such a record, whether the training gate is on or off. */
+export function printWhy(record) {
+  if (kindOf(record) === null) return "Its words are not shown in the chat while it waits for its answer.";
+  if (sessionNotCleared(record)) return "A client or group session's words are not shown in the chat.";
   return "";
 }

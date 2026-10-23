@@ -31,9 +31,9 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
-import { readSettings, teachingsOn, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor } from "./gate.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf } from "./episode.js";
+import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { UNSCOPED, gateFor, printWhy } from "./gate.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -177,23 +177,48 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     answered, and this brimm-video cannot read the label a newer one names it by. */
 const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
 
+/** Why a command ends at an episode written by a newer brimm-video, in the words it has always used: by its short id alone. */
+const newerWhy = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+
+/** What the gate says when the record in force is not the newest file in the episode's record folder, for a record that may be a
+    session: Dropbox is still bringing the newer one, or it is one this code rejects. */
+const PENDING_WHY = "Dropbox is still bringing this episode's record over: say it again in a moment.";
+
+/** Whether a conflicted copy is shaped as a record: an object with an id and a version. What is not (`{}`, a file by the name of
+    a record) says nothing of the video and is not asked; what is, and says no kind, is asked, and is a video not answered. */
+const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.version);
+
 /** Whether the gate (gate.js) refuses the command editMain is running (`ctx.asked`, with its words) for the episode `e`, whose
-    records are `records`: { why }, in the gate's words, or null when it may run. The records are all that findEpisode knows
-    of an episode, and all that is read here. A conflicted episode is refused when any one of them refuses, so that a copy
-    not answered, or a session's, is not got round by the record in force. A conflicted copy that says no kind at all is not
-    a record, only a file by the name of one (as `{}`), and is not asked. A record of a layout newer than this code is
-    refused for every command that names an episode, in the words episodeFor has always used for it, with `newer: true`, so
-    that episodeFor ends the command with the code that command gives such a record. A command that names no episode
-    (UNSCOPED), and a call with no command on ctx, are not gated. */
-function gateOf(ctx, e, records) {
+    records are `records` and whose record in force is `inForce`: { why, name, folder, gate: true }, in the gate's words (the
+    name and folder are for the detached runs that leave a result, and are never said), or null when it may run. `said` is
+    what the episode was asked for by. The records are all that findEpisode knows of an episode, and all that is read here
+    (and the numbers of the files in its record folder). In this order:
+    - A command that names no episode (UNSCOPED), and a call with no command on ctx, are not gated.
+    - A record of a layout newer than this code is refused for every command that names an episode, in the words episodeFor has
+      always used for it, with `newer: true`, so that episodeFor ends the command with the code that command gives such a record.
+    - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
+      to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
+      refuses every command. With today's settings and records it is passed over, as it always was.
+    - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
+      by the record in force. A copy that is not shaped as a record (recordShaped) is not asked. */
+function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
-  if (e.read.newer) return { why: `That is ${newerName(e.read.record)}. Jason has a newer brimm-video. Ask him to update this Mac.`, newer: true };
+  const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
+  if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
+  if (inForce && (lightImport(ctx.settings) || layoutOf(inForce) === 3) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const on = teachingsOn(ctx.settings, ctx.now());
-  for (const record of records.filter((r) => Object.hasOwn(r, "kind"))) {
-    const why = gateFor(ctx.asked.command, record, { teachingsOn: on }, ctx.asked.words);
-    if (why) return { why };
+  for (const record of records.filter(recordShaped)) {
+    const why = gateFor(ctx.asked.command, record, { teachingsOn: on, said }, ctx.asked.words);
+    if (why) return refused(why);
   }
   return null;
+}
+
+/** A detached run (`bring`, `finish` or `ask` with --now) that the gate ended before it began leaves a result in the gate's words,
+    as a run that failed does, so that "how far is it?" says why and not that nothing is running. The words name no folder or
+    file. A run already at work on the episode is left to leave its own. */
+async function leaveGateResult(ctx, found, command) {
+  await runDetached({ home: ctx.home, folder: found.name, command, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
 }
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
@@ -212,8 +237,10 @@ export function findEpisode(ctx, said) {
   // The records a name or an id is matched against, and only that: for a conflicted episode, the one resolve would read and
   // the records' conflicted copies, as they are, which may not be whole.
   const copiesOf = (e) => conflictedCopies(e.folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(e.folder, c)));
+  // The record in force: the whole one, or for a conflicted episode the newest whole record past its copies.
+  const inForce = new Map(all.map((e) => [e, e.read.record || (e.read.code === "CONFLICTED" ? readEpisode(e.folder, { pastCopies: true }).record : undefined)]));
   const records = new Map(all.map((e) => {
-    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [readEpisode(e.folder, { pastCopies: true }).record, ...copiesOf(e)] : [];
+    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [inForce.get(e), ...copiesOf(e)] : [];
     return [e, read.filter((r) => r !== null && typeof r === "object" && !Array.isArray(r))];
   }));
   const known = (e) => records.get(e);
@@ -224,7 +251,7 @@ export function findEpisode(ctx, said) {
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
   const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
-  if (fits.length === 1) return gateOf(ctx, fits[0], known(fits[0])) || fits[0];
+  if (fits.length === 1) return gateOf(ctx, fits[0], known(fits[0]), said, inForce.get(fits[0])) || fits[0];
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
   return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
 }
@@ -403,7 +430,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(`That is ${newerName(read.record)}. Jason has a newer brimm-video. Ask him to update this Mac.`);
+    ctx.say(newerWhy(read.record));
     return { code: newerEnds };
   }
   return { found, record: read.record };
@@ -844,6 +871,7 @@ export async function bring(ctx, rest) {
   const found = findEpisode(ctx, folder);
   if (!found.read || !found.read.record) {
     ctx.say(found.why || `${folder}: ${found.read.why}.`);
+    if (found.gate) await leaveGateResult(ctx, found, "bring");
     return 1;
   }
   const { record } = found.read;
@@ -1363,6 +1391,12 @@ async function finish(ctx, rest) {
       // The episode is there but its record cannot be read (a conflicted copy, say): the finish leaves a result that says
       // why, so that status shows it and not "nothing is running" (the P1 check, T6).
       if (found.read) await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [why] }));
+      // The gate ended it: the same, in the gate's words, and the claim its quick part took for it is let go, as below.
+      if (found.gate) {
+        await leaveGateResult(ctx, found, "finish");
+        const gone = letGoClaim(ctx, { folder: found.folder, name: found.name });
+        if (gone) ctx.say(gone);
+      }
       return 1;
     }
     // The progress panel shows the finish as it shows an import (phase P).
@@ -1588,7 +1622,8 @@ const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-no
 
 /** `show "<episode>" transcript|notes|plan`: print the episode's transcript, Claude's notes or the cut plan, whole. Her session
     reads an episode's files only through this (spec section 4), and it takes no path. A file not whole on this Mac yet is
-    brought over by a detached run, as open does. */
+    brought over by a detached run, as open does. Of a video not yet answered, or a session whose mark is not cleared, it prints
+    nothing and brings nothing (printWhy): the gate lets it run for them, but what it prints goes into her chat. */
 async function show(ctx, rest) {
   const words = rest.slice();
   const kind = words.pop();
@@ -1599,6 +1634,9 @@ async function show(ctx, rest) {
   const got = episodeFor(ctx, words);
   if (!got.found) return got.code;
   const { found, record } = got;
+  // What it prints goes into her chat: of a video not answered or a session, nothing, and no file is brought for it either.
+  const held = printWhy(record);
+  if (held) return refuse(ctx, held);
   const [ending, what] = SHOWN[kind];
   const file = `${basename(record.video.file, extname(record.video.file))}${ending}`;
   const path = join(found.folder, file);
@@ -2080,6 +2118,7 @@ async function ask(ctx, rest) {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
       ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      if (found.gate) await leaveGateResult(ctx, found, "ask");
       return 1;
     }
     const deps = {
