@@ -1,6 +1,6 @@
 ---
 name: brimm-edit
-description: Use for anything about The BRIMM's videos and episodes: what is waiting, opening an episode or taking it over from the other Mac, its name and title, Reels, showing it in Final Cut, finishing it, handing it over, conflicts, and how far something has got.
+description: Use for anything about The BRIMM's videos and episodes: what is waiting, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode or taking it over from the other Mac, its name and title, Reels, showing it in Final Cut, finishing it, handing it over, conflicts, and how far something has got.
 ---
 
 # brimm-edit
@@ -11,18 +11,53 @@ Words with a `$`, a backtick, a backslash or a straight double quote go in singl
 
 ## At the start of each session
 
-Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits."
+Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits." Then run `episodes`, and show the card below for each video waiting for her answer.
+
+## The card: what a video is
+
+The card's words are a proposal, for Jason and Sallie to settle.
+
+`episodes` names a video waiting for her answer by its label, as "<label>: a video waiting for your answer, of 42:10, id 1a2b3c", and may add under it lines that start "Seen:", "Came:", "Guess:" and "Maybe a new version of:". For each such video in turn, one `AskUserQuestion`, never two videos in one card, with two questions:
+1. "What is <label>?", with these answers, in this order (a Maybe line wins over a Guess line):
+   - Maybe a new version of a video finished by your editor or an iPhone clip: "A new version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
+   - Maybe a new version of a video raw with retakes: "A finished version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
+   - Guess finished by your editor: "Finished by your editor", "Raw with retakes", "iPhone clip", "Client or group session"
+   - Guess raw with retakes: "Raw with retakes", "Finished by your editor", "iPhone clip", "Client or group session"
+   - Guess an iPhone clip: "iPhone clip", "Finished by your editor", "Raw with retakes", "Client or group session"
+   - No Guess line: "Finished by your editor", "Raw with retakes", "iPhone clip", "Client or group session"
+2. "Is it a private session with a client or a group?": "Yes", "No"
+
+Run `kind` only with both answers, and only when they agree: "Client or group session" with Yes, anything else with No. When they do not, ask her again and run nothing.
+
+| She answers | Run |
+|---|---|
+| "Finished by your editor" / "Raw with retakes" / "iPhone clip", and No | `kind "<label>" finished --private no` / `kind "<label>" raw --private no` / `kind "<label>" clip --private no` |
+| "A new version of <name>", and No | with the Maybe line's id: `kind "<label>" finished --private no --version-of <id>`, or, when that video is an iPhone clip, `kind "<label>" clip --private no --version-of <id>` |
+| "A finished version of <name>", and No | `kind "<label>" finished --private no --version-of <id>` |
+| "Raw with retakes", and No, when the Maybe line's video is raw | `kind "<label>" raw --private no --version-of <id>`: tell her it starts as a new raw video, and its edits begin again |
+| "Client or group session", and Yes | `kind "<label>" session --private yes`, then "A client or group session", below |
+| Other: "leave it" / "it's not for brimm-video" | `leave "<label>"`: it is not asked about again |
+| Other: anything else ("not now", "it's a podcast") | Nothing |
+
+When the Came line says it came as a Zoom download or as sound alone, or `kind` says to ask first whether it is a client or group session, ask her: "It came from Zoom (or: it is sound alone), which is often a client or group session. Is it really not one?" Only when she says clearly that it is not a session, run the same `kind` with `--not-a-session` added, as `kind "<label>" finished --private no --not-a-session`; if she says it is one, `kind "<label>" session --private yes`.
+
+Then tell her what `kind` says, in plain words: when Claude reads it, or that a notice will come. When it says what Claude made, go on as for "What did Claude find?".
 
 ## What she says, and what to run
 
 | She says | Run |
 |---|---|
-| "What's waiting?" | `episodes` |
+| "What's waiting?" | `episodes`, then the card for each video waiting for her answer |
+| "Which one is it?" | `which "<label>"`: it opens in QuickTime Player on her Mac |
+| "What did Claude find?" | `status "<video>"`: tell her what the reading made, or why not. Then, by what it is: finished by your editor, `reels "<video>"` (the Reel suggestions), then the spellings card; raw with retakes, `show "<video>" notes` (Claude's notes) and `reels "<video>"`, then the spellings card (its rough cut, version 0, is open in QuickTime Player already); an iPhone clip, the spellings card; a session, `principles "<label>"` and `ideas "<label>"` |
+| The spellings card | `spell "<video>" offers`, then one `AskUserQuestion`: "All of them", "None", "Let me choose" (she then says their numbers): `spell "<video>" offers all` / `spell "<video>" offers none` / `spell "<video>" offers 1 3`. If it offers none, answer none. For a finished video or an iPhone clip the hand-off is then written and shown in Finder: tell her to drop it on the BRIMM Ops page |
+| "It's actually raw" (or finished, or an iPhone clip) | `kind "<video>" raw --private no --again`, with finished or clip in place of raw. A session becomes another kind only by "Clear the session mark", below |
+| "It was a session after all" | `kind "<video>" session --private yes --again`. Tell her its words have already gone to Claude: drop the new revision it shows in Finder on the BRIMM Ops page, and tell Jason |
 | "Open the Pricing episode" | `open "<episode>"`. If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over`. If that take-over says Dropbox undid the claim and to say "take it over" again, run `open "<episode>" --take-over` again without asking her again. If it is bringing files over first, wait until "how far is it?" says the bring has ended; if it then says to say "take it over" again, run `open "<episode>" --take-over` again without asking her again; if it says some files are not here, tell her why, in plain words, and try again only when she says to. Take it over again unasked only in the conversation in which she said yes, and only if she has not said not to since; in a later one, run `open "<episode>"` and ask her as above. Never take an episode over unasked otherwise. |
 | "Call it …" | `name "<episode>" "<name>"` |
 | "Use that title" / "Make the title …" | `title "<episode>" --approve` / `title "<episode>" --words "<words>" --approve` (an approved title changes only with `--change`; say BRIMM Ops may have it already) |
 | "Reel 2's title is …" | `title "<episode>" reel 2 --words "<words>"` |
-| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview opens in QuickTime Player |
+| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview, when it has one, opens in QuickTime Player |
 | "Ask Claude again for Reels" | `ask "<episode>"`: it runs in the background, so say so, and that "how far is it?" shows how far it has got |
 | "Finish Reels 1 and 3" / "Drop 2" | `reel pick "<episode>" 1 3` / `reel drop "<episode>" 2` |
 | "Show it in Final Cut" / "Show reel 1 in Final Cut" | `push "<episode>"` / `push "<episode>" reel 1`, with the guard below |
@@ -33,7 +68,7 @@ Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; a
 | "Show the pricing chart when I say three numbers" | `graphic "<episode>" add "<picture>" --at-words "three numbers"`, with `--place corner` or `--place lower` if she says so (full unless she does). Ask which picture in her Pictures folder. "Any ideas for graphics?": `graphic "<episode>" ideas` |
 | "Make it Bright" / "Bold captions on Reel 2" / "It's a teaching clip" | `preset "<episode>" --look bright` / `preset "<episode>" reel 2 --captions bold` / `preset "<episode>" reel 2 --job "teaching clip"`. "What styles are there?": `preset "<episode>"`, and tell her the lists in plain words |
 | "Cut the bit where I say …" / "Keep the Hormozi story at 12:30" | `cut "<episode>" remove --words "<her words>"` (or `--at` and `--to`, times on that timeline) / `cut "<episode>" keep --at 12:30` (the cut nearest that time on that timeline) or `cut "<episode>" keep --words "<words>"`. Say a cut on the main video does not change a Reel |
-| "Show me the transcript / Claude's notes / the cut plan" | `show "<episode>" transcript` / `show "<episode>" notes` / `show "<episode>" plan` |
+| "Show me the transcript / Claude's notes / the cut plan" | `show "<episode>" transcript` / `show "<episode>" notes` / `show "<episode>" plan`. Of a session or a video not yet answered it prints nothing: it opens a read-only copy in TextEdit on her Mac, or says why not, which tell her. Never read, quote or ask her to paste such a file, and run nothing else that would print it |
 | "Finish the episode" | `finish "<episode>"`; answer its questions with her, then `finish "<episode>" --yes` and the answers it asks for |
 | "How far is it?" | `status` |
 | "Try it again" (an import that stopped) | `retry "<video>"` |
@@ -43,6 +78,20 @@ Run `behind`. If this Mac is behind, tell her: "Jason has a newer brimm-video; a
 In `--at-words` and `--words`, give her words without `$`, backticks, backslashes or double quotes, which are not matched, and keep apostrophes: "that's $100,000" is `--at-words "that's 100,000"`.
 
 Times in the cut plan, in Claude's notes and inside a marker's words are the recording's, not her timeline's: never pass one as `--at`. To keep a cut found there, pass its words.
+
+## A client or group session
+
+Once a session is marked, tell her: "Never rate, report or share a chat about a session: a thumbs rating or a report keeps the chat, whatever the settings say." Then ask her: "What do you want from it: its teachings (principles and Reel ideas), or the transcript only?"
+
+| She says | Run |
+|---|---|
+| "Its teachings" / "Get the teachings of <label>" | `teachings "<label>"`. If it says teachings are not turned on for this Mac yet, were turned on more than 90 days ago, or that another account is signed in, tell her so plainly, and to ask Jason |
+| "The transcript only" | `teachings "<label>" --transcript-only` |
+| "Show me the principles" / "Show me the Reel ideas" | `principles "<label>"` / `ideas "<label>"`: tell her each in plain words, read her brimm-video's line about the names it took out, and ask her what to keep, change or drop |
+| "Keep 1 and 3" / "Drop 2" / "Call 3 …" | `principles "<label>" keep 1 3` / `principles "<label>" drop 2` / `principles "<label>" edit 3 --name "<name>"`. A recurring principle: `principles "<label>" recurring keep 1`, and drop and edit so. A Reel idea: `ideas "<label>" keep 1`, and drop and edit so |
+| "Done" | `finish "<label>"`. If it says something is not decided yet, ask her about it. Then tell her to drop the hand-off it shows in Finder on the BRIMM Ops page |
+| "The client agreed to Reel 2" | `reel "<label>" 2 --client-agreed`: tell her a dialog is open on her Mac, where she types who agreed and when, then clicks "They agreed". Never ask who agreed in the chat |
+| "Clear the session mark" | Ask her what it is instead: finished by your editor, raw with retakes or an iPhone clip, never a session. Then `kind "<label>" <kind> --private no --again --clear-session`, with finished, raw or clip for <kind>. Tell her a dialog is open on her Mac, and she clicks "Clear it" herself (Return presses Cancel): Claude cannot press it |
 
 ## The guard, before showing a timeline again
 

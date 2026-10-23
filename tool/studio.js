@@ -1,10 +1,12 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio, on this Mac's own disk: her sessions in the Claude app run there. It
 // holds a CLAUDE.md, the folder's settings for Claude Code, the brimm-edit skill, and Pictures/ for her own pictures. The
-// settings let her session run brimm-video's edit.js and nothing else: they deny the editing and web tools, lock the
-// permission mode, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook answers in
-// every mode, which a mode alone does not: the Code tab may not honour dontAsk, and a mode picked there overrides the
-// folder's default. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes edit.js's path,
-// outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
+// settings let her session run brimm-video's edit.js and nothing else: they deny the editing and web tools, turn the Auto
+// and Bypass modes off, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook
+// answers in every mode, which a mode alone does not: a mode picked in the Code tab overrides the folder's default. So the
+// folder's mode is "default", not dontAsk: dontAsk denies AskUserQuestion, the card she answers what a video is on (spec
+// 2026-10-22, section 7), and the guard refuses everything else in any mode. Claude Code's own read block
+// (blockReadsOutsideWorkingDirectories) is not used: it takes edit.js's path, outside the folder, for a read, and stops
+// every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -23,7 +25,7 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
 function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
-      defaultMode: "dontAsk",
+      defaultMode: "default",
       allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`],
       deny: ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "mcp__*", "Monitor", "RemoteTrigger", "SendMessage"],
       disableBypassPermissionsMode: "disable",
