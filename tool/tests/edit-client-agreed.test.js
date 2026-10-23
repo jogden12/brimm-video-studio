@@ -66,6 +66,9 @@ const NO_IDEA = (n) => `${SESSION_NAME} has no Reel idea ${n}.`;
 const REFILM = (n) => `Reel idea ${n} of ${SESSION_NAME} is to be filmed again, not cut from the session: no client's agreement is needed.`;
 const NOT_KEPT = (n) => `Reel idea ${n} of ${SESSION_NAME} is not kept: keep it first.`;
 const CHANGED = `Not noted: ${SESSION_NAME} changed on the other Mac meanwhile. Say it again.`;
+const BUSY = `Another answer for ${SESSION_NAME} is being written on this Mac: say it again in a moment.`;
+const PENDING = "Not noted: Dropbox is still bringing this episode's record over: say it again in a moment.";
+const UNDONE = `Not noted: Dropbox undid this Mac's last change to ${SESSION_NAME}. Say it again.`;
 
 // What the stand-in osascript prints, as the real one does (dialog.test.js).
 const agreed = (text = TYPED) => ({ code: 0, stdout: `button returned:They agreed, text returned:${text}\n`, stderr: "" });
@@ -114,12 +117,14 @@ function dialogs(t, found, answer, { during, ...deps } = {}) {
 /** Where this Mac keeps who agreed, and its tool log. */
 const noteOf = (t) => join(episodeWork(t.home, FOLDER), "agreements.txt");
 const logOf = (t) => join(t.home, "Library", "Logs", "brimm-video.log");
+/** The lock a run holds for the episode from before its dialog to after its write, as `kind` holds it. */
+const lockOfAnswer = (t) => join(episodeWork(t.home, FOLDER), "answer.lock");
 /** Every file of the test's folders, whole, by its path: the record, the episode, the home, the root. */
 const snapshot = (t) => Object.fromEntries(listAll(t.dir).map((rel) => [rel, readFileSync(join(t.dir, rel), "utf8")]));
 /** Nothing was written, claimed, started or logged, and no note was made: every file as it was. */
 function unchanged(t, before, why = "") {
   assert.deepEqual(snapshot(t), before, why);
-  assert.deepEqual([t.started, t.waits, existsSync(noteOf(t)), existsSync(logOf(t))], [[], [], false, false], why);
+  assert.deepEqual([t.started, t.waits, existsSync(noteOf(t)), existsSync(logOf(t)), existsSync(lockOfAnswer(t))], [[], [], false, false, false], why);
 }
 /** Where what she typed is: the paths of the files that hold it (in their text or their name), and the lines said. */
 function whereTyped(t, d) {
@@ -199,6 +204,8 @@ describe("reel --client-agreed: noting it on her click", () => {
     // What she typed is in the note and nowhere else: not a line said, a file of the episode or the home, a record, or a call.
     assert.deepEqual(whereTyped(t, d), { files: [NOTE_REL(t)], said: [], elsewhere: [] });
     assert.doesNotMatch(r.text, secret);
+    // The lock is held for the dialog, and gone again at the end.
+    assert.equal(existsSync(lockOfAnswer(t)), false);
     t.done();
   });
   it("adds the agreement to a second Reel as a second line and a second entry", async () => {
@@ -225,6 +232,16 @@ describe("reel --client-agreed: noting it on her click", () => {
     assert.equal(r.code, 0, r.text);
     assert.equal(readFileSync(noteOf(t), "utf8"), `${at} Reel 2: Zebedee Quayle,  21 October by telephone\n`);
     t.done();
+  });
+  it("takes what holds a letter or a digit, in any alphabet, even with invisible characters among it", async () => {
+    for (const typed of ["21", "\u200bZoë\u200b", "田中 さん, 21 October", "Zebedee\u200b Quayle"]) {
+      const { t, found } = agreeMac();
+      const at = localStamp(new Date(t.now()));
+      const r = await dialogs(t, found, agreed(typed)).ask(...agree(2));
+      assert.equal(r.code, 0, `${typed}: ${r.text}`);
+      assert.equal(readFileSync(noteOf(t), "utf8"), `${at} Reel 2: ${typed}\n`);
+      t.done();
+    }
   });
   it("adds to a note that is there, and makes it hers alone", async () => {
     const { t, found } = agreeMac();
@@ -259,6 +276,9 @@ describe("reel --client-agreed: nothing changes unless she clicked They agreed w
     ["nothing typed", agreed(""), NOTHING_TYPED],
     ["only spaces typed", agreed("   "), NOTHING_TYPED],
     ["only a tab and line breaks typed", agreed("\t\r\n \n"), NOTHING_TYPED],
+    ["only zero-width spaces typed", agreed("\u200b\u200b \u2060\ufeff"), NOTHING_TYPED],
+    ["only control characters typed", agreed("\u0001\u0002\u007f"), NOTHING_TYPED],
+    ["only marks that are neither a letter nor a digit typed", agreed(" ... \u2014 !? "), NOTHING_TYPED],
     ["a reply that is no button", UNREADABLE, "Not noted: The dialog's answer could not be read. The Reel is not agreed."],
     ["a click with no text", { code: 0, stdout: "button returned:They agreed\n", stderr: "" }, "Not noted: The dialog's answer could not be read. The Reel is not agreed."],
     ["a button that was not shown", { code: 0, stdout: "button returned:Agreed, text returned:Zebedee Quayle\n", stderr: "" }, "Not noted: The dialog's answer could not be read. The Reel is not agreed."],
@@ -486,45 +506,107 @@ describe("reel --client-agreed: after her click it checks again, and writes noth
     }, { deps: { alive: (pid) => pid === 4242 } });
     t.done();
   });
+  it("refuses, before the note, when a newer record file is still coming over, and writes nothing", async () => {
+    const mac = agreeMac();
+    const { t, found } = mac;
+    // A record file above the one read, which Dropbox has not finished bringing: the whole one below it is what is read.
+    await stopped(mac, PENDING, () => writeFileSync(recordFile(found.folder, 2), '{"version":3,"id"'));
+    assert.deepEqual([reread(found).rev, existsSync(lockOfAnswer(t))], [1, false]);
+    t.done();
+  });
+  it("refuses, before the note, when Dropbox undid this Mac's last change, and then lets a second try through", async () => {
+    const mac = agreeMac();
+    const { t, found } = mac;
+    await stopped(mac, UNDONE, () => {
+      mkdirSync(join(writtenFile(t.home), ".."), { recursive: true });
+      writeFileSync(writtenFile(t.home), JSON.stringify({ [ID]: 9 }));
+    });
+    // As save does when it refuses for this, the rev read is accepted, so that the same words do not refuse again for ever.
+    const day = localDay(new Date(t.now()));
+    const again = await dialogs(t, found, agreed()).ask(...agree(2));
+    assert.deepEqual([again.code, again.said[1]], [0, NOTED(2, day)], again.text);
+    t.done();
+  });
+});
+
+describe("reel --client-agreed: one dialog at a time, under the answer lock of the episode", () => {
+  it("refuses a second run while the first's dialog is open, before any dialog of its own, and the first goes on as if alone", async () => {
+    const { t, found } = agreeMac();
+    const day = localDay(new Date(t.now()));
+    const at = localStamp(new Date(t.now()));
+    const second = dialogs(t, found, agreed("Mr Blenkinsop"));
+    let theirs = null;
+    const first = dialogs(t, found, agreed(), { during: async () => { theirs = await second.ask(...agree(3)); } });
+    const r = await first.ask(...agree(2));
+    // The second says its own line alone, in kind's busy words, with no dialog line before it, and wrote nothing.
+    assert.deepEqual([theirs.code, theirs.said, second.asked.length], [1, [BUSY], 0]);
+    // The first is noted as it is alone: one line, one entry, and no word of Dropbox having undone anything.
+    assert.deepEqual([r.code, r.said], [0, [OPEN(2), NOTED(2, day)]]);
+    assert.equal(readFileSync(noteOf(t), "utf8"), `${at} Reel 2: ${TYPED}\n`);
+    assert.deepEqual([reread(found).rev, reread(found).session.agreed], [2, [{ n: 2, at: day }]]);
+    assert.equal(existsSync(lockOfAnswer(t)), false);
+    t.done();
+  });
+  it("refuses while another run holds the lock, and leaves its lock alone", async () => {
+    const { t, found } = agreeMac();
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    const text = JSON.stringify({ pid: 4242, command: "kind" });
+    writeFileSync(lockOfAnswer(t), text);
+    const before = snapshot(t);
+    const d = dialogs(t, found, agreed(), { alive: (pid) => pid === 4242 });
+    const r = await d.ask(...agree(2));
+    assert.deepEqual([r.code, r.said, d.asked.length], [1, [BUSY], 0]);
+    assert.deepEqual([snapshot(t), existsSync(noteOf(t)), existsSync(logOf(t))], [before, false, false]);
+    assert.equal(readFileSync(lockOfAnswer(t), "utf8"), text);
+    t.done();
+  });
+  it("lets the lock go after every ending: a click, Cancel, a timeout and a refusal after the click", async () => {
+    const ends = [
+      ["a click", agreed(), () => undefined],
+      ["Cancel", CANCELED, () => undefined],
+      ["a timeout", OUT_OF_TIME, () => undefined],
+      ["a refusal after the click", agreed(), (found) => () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2 }))]
+    ];
+    for (const [what, answer, during] of ends) {
+      const { t, found } = agreeMac();
+      await dialogs(t, found, answer, { during: during(found) }).ask(...agree(2));
+      assert.equal(existsSync(lockOfAnswer(t)), false, what);
+      t.done();
+    }
+  });
 });
 
 describe("reel --client-agreed: when it cannot be written", () => {
-  it("says the note could not be written, and does not write the record, when the folder for the note is a file", async () => {
+  it("says the note could not be written, and does not write the record, when agreements.txt is a folder", async () => {
     const { t, found } = agreeMac();
-    mkdirSync(join(t.home, "BRIMM Video Work"), { recursive: true });
-    writeFileSync(episodeWork(t.home, FOLDER), "not a folder");
-    const before = snapshot(t);
+    mkdirSync(noteOf(t), { recursive: true });
     const d = dialogs(t, found, agreed());
     const r = await d.ask(...agree(2));
     assert.deepEqual([r.code, r.said], [1, [OPEN(2), NOT_WRITTEN]]);
-    assert.deepEqual([snapshot(t), existsSync(logOf(t)), reread(found).rev, reread(found).session.agreed], [before, false, 1, undefined]);
+    assert.deepEqual([existsSync(logOf(t)), existsSync(lockOfAnswer(t)), reread(found).rev, reread(found).session.agreed], [false, false, 1, undefined]);
     assert.deepEqual(whereTyped(t, d), { files: [], said: [], elsewhere: [] });
-    t.done();
-  });
-  it("says the same when agreements.txt is a folder", async () => {
-    const { t, found } = agreeMac();
-    mkdirSync(noteOf(t), { recursive: true });
-    const r = await dialogs(t, found, agreed()).ask(...agree(2));
-    assert.deepEqual([r.code, r.said], [1, [OPEN(2), NOT_WRITTEN]]);
-    assert.deepEqual([existsSync(logOf(t)), reread(found).rev, reread(found).session.agreed], [false, 1, undefined]);
     t.done();
   });
   it("says its own words and then that the Reel is not agreed, when the record cannot be written after the note", async () => {
     const { t, found } = agreeMac();
     const at = localStamp(new Date(t.now()));
-    // Dropbox undid this Mac's last change to the session while the dialog was open: save refuses to write over it.
-    const d = dialogs(t, found, agreed(), {
-      during: () => {
-        mkdirSync(join(writtenFile(t.home), ".."), { recursive: true });
-        writeFileSync(writtenFile(t.home), JSON.stringify({ [ID]: 9 }));
-      }
-    });
-    const r = await d.ask(...agree(2));
-    assert.equal(r.code, 1);
-    assert.deepEqual(r.said, [OPEN(2), `Dropbox undid this Mac's last change to ${SESSION_NAME}. Say it again. Nothing was written.`, RECORD_FAILED]);
-    // The note was made first, on this Mac only; the record is as it was, and nothing is logged.
+    // The record's folder cannot be written into while the dialog is open: save fails after the note was made.
+    const folder = join(found.folder, "record");
+    const d = dialogs(t, found, agreed(), { during: () => chmodSync(folder, 0o500) });
+    try {
+      const r = await d.ask(...agree(2));
+      assert.equal(r.code, 1);
+      assert.equal(r.said.length, 3, r.text);
+      assert.equal(r.said[0], OPEN(2));
+      assert.match(r.said[1], /^Nothing was written: /);
+      assert.equal(r.said[2], RECORD_FAILED);
+      assert.doesNotMatch(r.text, secret);
+    } finally {
+      chmodSync(folder, 0o700);
+    }
+    // The note was made first, on this Mac only; the record is as it was, nothing is logged, and the lock is let go.
     assert.equal(readFileSync(noteOf(t), "utf8"), `${at} Reel 2: ${TYPED}\n`);
-    assert.deepEqual([reread(found).rev, reread(found).session.agreed, existsSync(logOf(t))], [1, undefined, false]);
+    assert.deepEqual([reread(found).rev, reread(found).session.agreed, existsSync(logOf(t)), existsSync(lockOfAnswer(t))], [1, undefined, false, false]);
     assert.deepEqual(whereTyped(t, d), { files: [NOTE_REL(t)], said: [], elsewhere: [] });
     t.done();
   });

@@ -2376,10 +2376,12 @@ const LINE_BREAKS = /[\r\n\t\v\f\u0085\u2028\u2029]/g;
     filmed again, which needs no agreement; one she has not kept; one agreed already, which it says and ends well; and the other
     Mac's claim, or a run at work. Then it tells her to click, since Return presses Cancel, and shows the dialog (askHere, for
     DIALOG_MS at most), which names the video by its label and asks who agreed and when. Only her click on "They agreed", with
-    something typed, goes on. Cancel, a dialog that gave no click, nothing typed and a dialog not answered in time each say so, in
+    something typed (a letter or a digit, not only spaces or invisible characters), goes on. Cancel, a dialog that gave no click, nothing typed and a dialog not answered in time each say so, in
     a line of their own, and write nothing. Her click may come long after the record was read, so it is read again, and must be
-    the record she was asked about, and `checks` are made again (on this Mac's settings read again, for the gate). Then, in this
-    order: one line, with the time and the Reel, in agreements.txt in this Mac's work folder for the episode, a file only she can
+    the record she was asked about, and `checks` are made again (on this Mac's settings read again, for the gate), and so are the
+    two refusals save would make after the note (a newer record file still coming over; a change Dropbox undid). All of it is under
+    the answer lock of the episode, so that a second run is refused at once with `kind`'s words, before any dialog of its own. Then,
+    in this order: one line, with the time and the Reel, in agreements.txt in this Mac's work folder for the episode, a file only she can
     read; and one write of the record, by the rule, holding that the agreement was noted and on which day. What she typed is in that
     note and nowhere else: not in a line said, the tool log, the record, a result, a file of the episode or the hand-off. The log
     says only that it was noted, by id and label. A note that cannot be written writes no record; a record that cannot be written
@@ -2387,7 +2389,20 @@ const LINE_BREAKS = /[\r\n\t\v\f\u0085\u2028\u2029]/g;
 async function clientAgreed(ctx, label, n) {
   const got = episodeFor(ctx, [label], { newerEnds: 1 });
   if (!got.found) return got.code;
-  const { found, record } = got;
+  // One dialog at a time for an episode: the answer lock `kind` holds is held from before the dialog to after the write, so that
+  // two runs cannot both be open, note twice, and tell her that Dropbox undid a change it did not.
+  const lock = takeAnswerLock(ctx, got.found.name, "reel");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await noteAgreement(ctx, got.found, got.record, n);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** What `reel … --client-agreed` does once it holds the answer lock of the episode `found`, whose record is `record`: see
+    clientAgreed. */
+async function noteAgreement(ctx, found, record, n) {
   const name = shownName(record);
   if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: a client's agreement is noted only for a Reel cut from one.`);
   // Why the agreement may not be noted on the record `rec` with `settings`: { why }, with `already` when it was agreed already.
@@ -2421,7 +2436,8 @@ async function clientAgreed(ctx, label, n) {
     return refuse(ctx, why ? `${NOT_NOTED} ${why} ${NOT_AGREED}` : `${NOT_NOTED} the Reel is not agreed.`);
   }
   const typed = (typeof answer.text === "string" ? answer.text : "").replace(LINE_BREAKS, " ").trim();
-  if (!typed) return refuse(ctx, `${NOT_NOTED} nothing was typed. ${NOT_AGREED}`);
+  // Invisible characters, as a zero-width space, are not something typed: it holds a letter or a digit.
+  if (!/[\p{L}\p{N}]/u.test(typed)) return refuse(ctx, `${NOT_NOTED} nothing was typed. ${NOT_AGREED}`);
   const stop = (why) => refuse(ctx, `${NOT_NOTED} ${why}`);
   // The record is read again, and must be the one she was asked about. This Mac's settings are read again too, unless a test
   // gave them: Jason may have turned the training gate off meanwhile.
@@ -2431,6 +2447,14 @@ async function clientAgreed(ctx, label, n) {
   if (now.record.rev !== record.rev) return stop(`${name} changed on the other Mac meanwhile. Say it again.`);
   const again = await checks(now.record, ctx.deps.settings ? ctx.settings : readSettings(ctx.home).settings || {});
   if (again.why) return stop(again.why);
+  // save refuses a newer record file that is still coming over, and a change Dropbox undid: no note is made before such a refusal.
+  // As save does, it accepts the rev read when it refuses for the second, so that saying it again is not refused for ever.
+  if (recordNumbers(found.folder)[0] > now.record.rev) return stop(PENDING_WHY);
+  const gone = undone(now.record, ctx.home);
+  if (gone) {
+    acceptRev(ctx.home, now.record.id, now.record.rev);
+    return stop(gone);
+  }
   // The note first, on this Mac's own disk and never in Dropbox, then the record.
   const moment = new Date(ctx.now());
   const when = localStamp(moment);
@@ -2443,6 +2467,7 @@ async function clientAgreed(ctx, label, n) {
     chmodSync(file, 0o600);
     appendFileSync(file, `${when} Reel ${n}: ${typed}\n`);
   } catch (e) {
+    // Bare on purpose: nothing of the error is said, so that no message quotes the file's path or what she typed.
     return refuse(ctx, NOTE_NOT_WRITTEN);
   }
   const session = { ...now.record.session, agreed: [...((now.record.session || {}).agreed || []), { n, at: day }] };
