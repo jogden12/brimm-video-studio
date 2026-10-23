@@ -42,6 +42,12 @@ describe("the speakers of a Zoom transcript", () => {
     assert.deepEqual(map, {});
   });
 
+  it("do not keep a label whose bracketed note is the only place her name is", () => {
+    const { text, map } = replaceSpeakers("Jane Doe (Sallie's guest): Hello.");
+    assert.equal(text, "Participant 1: Hello.");
+    assert.deepEqual(map, { "Jane Doe (Sallie's guest)": "Participant 1" });
+  });
+
   it("do not keep the label of someone whose name only begins like hers", () => {
     const { text, map } = replaceSpeakers("Salliebeth Kay: Hello.");
     assert.equal(text, "Participant 1: Hello.");
@@ -126,6 +132,78 @@ describe("the speakers of a Zoom transcript", () => {
     assert.deepEqual(map, { hasOwnProperty: "Participant 1", toString: "Participant 2", valueOf: "Participant 3" });
   });
 
+  describe("in a WebVTT text, where Zoom puts them", () => {
+    const cue = (first) => lines("WEBVTT", "", "1", "00:00:01.000 --> 00:00:04.000", first, "");
+    const LABELS = [
+      "jane doe", "kip's iPhone", "Jan de Vries", "Jane Doe - Acme Coaching", "Jane Doe | Acme", "[Acme] Jane Doe", "Jane Doe she/her", "Jane 🌸", "李明", "محمد",
+      "jane.doe@acme.com", "Mary Ann Van Der Berg", "Dr. Jane Doe, PhD, LCSW", "Jane Doe (Acme Holdings International Group)", "Jane Doe (Sallie's guest)", "Speaker 2"
+    ];
+
+    it("are taken whole, whatever they are made of, as everything before the first colon of a cue's first line", () => {
+      for (const label of LABELS) {
+        const { text, map } = replaceSpeakers(cue(`${label}: Hello there.`));
+        assert.equal(text, cue("Participant 1: Hello there."), label);
+        assert.deepEqual(map, { [label]: "Participant 1" }, label);
+      }
+    });
+
+    it("end at the first colon that a space follows or that ends the line, within the first 80 characters", () => {
+      assert.equal(replaceSpeakers(cue("Jane Doe:")).text, cue("Participant 1:"));
+      assert.equal(replaceSpeakers(cue("  Jane Doe : Hello: there.")).text, cue("  Participant 1 : Hello: there."));
+      assert.equal(replaceSpeakers(cue("Jane at 10:30 Doe: Hi.")).text, cue("Participant 1: Hi."));
+      assert.equal(replaceSpeakers(cue(`${"A".repeat(79)}: Hi.`)).text, cue("Participant 1: Hi."));
+      for (const same of [`${"A".repeat(80)}: Hi.`, ": Hi.", "   : Hi.", "No colon that a space follows, at 10:30", "Hello"]) assert.equal(replaceSpeakers(cue(same)).text, cue(same), same);
+      assert.deepEqual(replaceSpeakers(cue(": Hi.")).map, {});
+    });
+
+    it("are the whole text of a voice tag, and a line that begins with a voice tag is not read for a colon", () => {
+      const vtt = lines("WEBVTT", "", "00:00:01.000 --> 00:00:04.000", "<v jane>Hello: world</v>", "", "00:00:05.000 --> 00:00:06.000", "<v.loud Kip Tolliver - Acme>Hi.</v>", "", "00:00:07.000 --> 00:00:08.000", "<v  jane >Again.</v>", "");
+      const { text, map } = replaceSpeakers(vtt);
+      assert.equal(text, lines("WEBVTT", "", "00:00:01.000 --> 00:00:04.000", "<v Participant 1>Hello: world</v>", "", "00:00:05.000 --> 00:00:06.000", "<v.loud Participant 2>Hi.</v>", "", "00:00:07.000 --> 00:00:08.000", "<v  Participant 1 >Again.</v>", ""));
+      assert.deepEqual(map, { jane: "Participant 1", "Kip Tolliver - Acme": "Participant 2" });
+    });
+
+    it("keep Sallie's label by every word given for her, outside any bracketed note", () => {
+      const vtt = lines("WEBVTT", "", "00:00:01.000 --> 00:00:04.000", "Sallie Ogden: One.", "", "00:00:05.000 --> 00:00:06.000", "Sallie Mae Jones: Two.", "", "00:00:07.000 --> 00:00:08.000", "Jane Doe (Sallie's guest): Three.", "");
+      const given = replaceSpeakers(vtt, "Sallie Ogden");
+      assert.equal(given.text, lines("WEBVTT", "", "00:00:01.000 --> 00:00:04.000", "Sallie Ogden: One.", "", "00:00:05.000 --> 00:00:06.000", "Participant 1: Two.", "", "00:00:07.000 --> 00:00:08.000", "Participant 2: Three.", ""));
+      assert.deepEqual(given.map, { "Sallie Mae Jones": "Participant 1", "Jane Doe (Sallie's guest)": "Participant 2" });
+      // With her first name alone, a Sallie Mae Jones is hers, and a note still says nothing of whose label it is.
+      assert.equal(replaceSpeakers(vtt).text, lines("WEBVTT", "", "00:00:01.000 --> 00:00:04.000", "Sallie Ogden: One.", "", "00:00:05.000 --> 00:00:06.000", "Sallie Mae Jones: Two.", "", "00:00:07.000 --> 00:00:08.000", "Participant 1: Three.", ""));
+    });
+  });
+
+  describe("in a saved Zoom transcript, where Zoom puts them", () => {
+    it("are the whole text in the brackets before the time, up to 80 characters", () => {
+      const saved = lines(
+        "[Sallie Ogden] 10:02:05", "Welcome.", "",
+        "[jane doe] 10:02:13", "Hello.", "",
+        "[Kip Tolliver - Acme] 10:02:20", "Hi.", "",
+        "[Jane Doe (Acme Holdings International Group)] 10:03:00", "Yes.", "",
+        `[${"A".repeat(80)}] 10:03:10`, "Long.", "",
+        `[${"B".repeat(81)}] 10:03:20`, "Too long.", "",
+        "[jane doe] 10:03:30", "Again."
+      );
+      const { text, map } = replaceSpeakers(saved);
+      assert.equal(text, lines(
+        "[Sallie Ogden] 10:02:05", "Welcome.", "",
+        "[Participant 1] 10:02:13", "Hello.", "",
+        "[Participant 2] 10:02:20", "Hi.", "",
+        "[Participant 3] 10:03:00", "Yes.", "",
+        "[Participant 4] 10:03:10", "Long.", "",
+        `[${"B".repeat(81)}] 10:03:20`, "Too long.", "",
+        "[Participant 1] 10:03:30", "Again."
+      ));
+      assert.deepEqual(map, { "jane doe": "Participant 1", "Kip Tolliver - Acme": "Participant 2", "Jane Doe (Acme Holdings International Group)": "Participant 3", ["A".repeat(80)]: "Participant 4" });
+    });
+  });
+
+  it("are, in a text with neither form, a label with a letter that has no case, but not one that begins with a figure", () => {
+    const { text, map } = replaceSpeakers(lines("李明: One.", "محمد Ali: Two.", "1: first point", "2 Jane: Three.", "Jane 2: Four."));
+    assert.equal(text, lines("Participant 1: One.", "Participant 2: Two.", "1: first point", "2 Jane: Three.", "Participant 3: Four."));
+    assert.deepEqual(map, { 李明: "Participant 1", "محمد Ali": "Participant 2", "Jane 2": "Participant 3" });
+  });
+
   it("come back as they were, with nothing in the map, when a text has no label", () => {
     const none = lines("So here's the thing: it works.", "and then we left", "");
     assert.deepEqual(replaceSpeakers(none), { text: none, map: {} });
@@ -144,7 +222,42 @@ describe("the names brimm-video can see", () => {
 
   it("are the words of the speakers' labels that it replaced", () => {
     const names = visibleNames({ map: { "Jane Doe": "Participant 1", "Jane's iPhone": "Participant 2", "Speaker 2": "Participant 3" } });
-    assert.deepEqual(sorted(names), ["Doe", "Jane", "Speaker", "iPhone"]);
+    assert.deepEqual(sorted(names), ["Doe", "Jane", "Phone", "Speaker", "iPhone"]);
+  });
+
+  it("are every word of a label it replaced, the note's too, whatever the show's names, the spellings and Sally say", () => {
+    assert.deepEqual(sorted(visibleNames({ map: { "Sally Jones": "Participant 1" } })), ["Jones", "Sally"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "Jason Ogden": "Participant 1" } })), ["Jason", "Ogden"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "Hormozi Smith (Acme Holdings)": "Participant 1" }, spellings: [["hormozy", "Hormozi"]] })), ["Acme", "Holdings", "Hormozi", "Smith"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "Ann Show": "Participant 1" } })), ["Ann", "Show"]);
+  });
+
+  it("are not a pronoun or a title in a label, nor a label word that begins in lowercase and that the recording writes so in a sentence", () => {
+    assert.deepEqual(sorted(visibleNames({ map: { "Jane Doe she/her": "Participant 1", "Kip Doe he/him/his": "Participant 2", "Pat Roe they/them/their/theirs/hers": "Participant 3" } })), ["Doe", "Jane", "Kip", "Pat", "Roe"]);
+    const titled = visibleNames({ map: { "Dr. Jane Doe, PhD, LCSW": "Participant 1", "Mr Ng Jr": "Participant 2" } });
+    assert.deepEqual(sorted(titled), ["Doe", "Jane", "LCSW", "Ng", "PhD", "Ph"].sort());
+    assert.deepEqual(sorted(visibleNames({ fileName: "Dr Jane Doe she her.mov" })), ["Doe", "Jane"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "jane doe": "Participant 1" }, words: say("We saw a doe run away") })), ["jane"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "Jane Doe": "Participant 1" }, words: say("We saw a doe run away") })), ["Doe", "Jane"]);
+    assert.deepEqual(sorted(visibleNames({ map: { "jane doe": "Participant 1" } })), ["doe", "jane"]);
+  });
+
+  it("are also the parts of a word that changes from lowercase to a capital, and the whole word", () => {
+    assert.deepEqual(sorted(visibleNames({ map: { JaneDoe: "Participant 1" } })), ["Doe", "Jane", "JaneDoe"]);
+    assert.deepEqual(sorted(visibleNames({ words: say("We met LinkedIn and a few more") })), ["In", "LinkedIn", "Linked"].sort());
+    assert.deepEqual(visibleNames({ fileName: "PricingTalk.mov" }), ["PricingTalk", "Pricing", "Talk"]);
+  });
+
+  it("read U+02BC as an apostrophe, as a curly one is", () => {
+    const apos = String.fromCharCode(0x2bc);
+    assert.deepEqual(visibleNames({ words: say(`We met Jane${apos}s team`) }), ["Jane"]);
+    assert.deepEqual(sorted(visibleNames({ map: { [`O${apos}Brien Kay`]: "Participant 1" } })), ["Kay", "O'Brien"]);
+  });
+
+  it("are not a title, nor a word after one as if it began a sentence, nor the initial of a first name", () => {
+    const words = say("So I talked to Dr. Patel and then Mrs. Okafor came in, and Mr. J. Henderson, with St. Clair and Prof. Ng.");
+    assert.deepEqual(sorted(visibleNames({ words })), ["Clair", "Henderson", "Ng", "Okafor", "Patel"]);
+    assert.deepEqual(sorted(visibleNames({ words: say("We met Ms. Roe and mx. Poe, then Jr. Lee and Sr. Kay too.") })), ["Kay", "Lee", "Poe", "Roe"]);
   });
 
   it("are the words of the file's name, but not its folder, its extension, a word with a figure in it or a word of less than two letters", () => {
@@ -152,8 +265,14 @@ describe("the names brimm-video can see", () => {
     assert.deepEqual(sorted(names), ["Kip", "Tolliver"]);
   });
 
-  it("are not the words of a name that is Zoom's, which holds no person's", () => {
+  it("are the words of a Zoom file name too, but not Zoom's own words, which hold no person's", () => {
     assert.deepEqual(visibleNames({ fileName: "GMT20261013-142933_Recording_gvo_1280x720.mp4" }), []);
+    assert.deepEqual(visibleNames({ fileName: "audio1449382767.m4a" }), []);
+    assert.deepEqual(sorted(visibleNames({ fileName: "GMT20261013-142933_Recording_Jane Doe.mp4" })), ["Doe", "Jane"]);
+    for (const own of ["GMT", "Recording", "gvo", "avo", "audio", "video", "gallery", "speaker", "shared", "screen", "view", "only", "transcript", "chat", "CHAT"]) {
+      assert.deepEqual(visibleNames({ fileName: `GMT20261013-142933_Recording_${own}_Kip.mp4` }), ["Kip"], own);
+    }
+    // Another name is not Zoom's, and all of its words are looked at.
     assert.deepEqual(sorted(visibleNames({ fileName: "Recording gvo.mp4" })), ["Recording", "gvo"]);
   });
 
@@ -333,7 +452,36 @@ describe("the name check on a reading", () => {
     assert.equal(checkNames({ recurringPrinciples: [{ n: 1, text: "Say so, Jos\u00e9." }] }, names).dropped.length, 1);
     assert.equal(checkNames({ recurringPrinciples: [{ n: 1, text: "Say so, Jose\u0301." }] }, names).dropped.length, 1);
     assert.equal(checkNames({ recurringPrinciples: [{ n: 1, text: "Say so, \uff2d\uff41\uff52\uff4b." }] }, ["Mark"]).dropped.length, 1);
-    assert.equal(checkNames({ recurringPrinciples: [{ n: 1, text: "Say so." }] }, ["Jose\u0301"]).dropped.length, 0);
+    // A name written with a separate accent is found in a field that writes it joined, and the other way round.
+    const apart = "Jose" + String.fromCharCode(0x301);
+    const joined = "Jos" + String.fromCharCode(0xe9);
+    assert.deepEqual(checkNames({ recurringPrinciples: [{ n: 1, text: `Say so, ${joined}.` }] }, [apart]).dropped, [{ field: "Recurring principle 1's text", why: WHY }]);
+    assert.deepEqual(checkNames({ recurringPrinciples: [{ n: 1, text: `Say so, ${apart}.` }] }, [joined]).dropped, [{ field: "Recurring principle 1's text", why: WHY }]);
+    assert.deepEqual(checkNames({ recurringPrinciples: [{ n: 1, text: "Say so, Jose." }] }, [joined]).dropped, []);
+  });
+
+  it("takes a name that was seen in lowercase in a word of any case, and a name in a script with no case", () => {
+    const check = (text, name) => checkNames({ recurringPrinciples: [{ n: 1, text }] }, [name]).dropped.length;
+    assert.equal(check("As d'Angelo put it.", "d'Angelo"), 1);
+    assert.equal(check("As D'Angelo put it.", "d'Angelo"), 1);
+    assert.equal(check("Mark the date.", "mark"), 1);
+    assert.equal(check("mark the date.", "mark"), 1);
+    assert.equal(check("mark the date.", "Mark"), 0);
+    assert.equal(check("李明 asked.", "李明"), 1);
+    assert.equal(check("Then 李明 asked.", "李明"), 1);
+    assert.equal(check("Then 王芳 asked.", "李明"), 0);
+    const seen = visibleNames({ map: { "d'Angelo Roe": "Participant 1" } });
+    assert.equal(check("As d'Angelo put it.", seen[0]), 1);
+  });
+
+  it("splits each of the names into words as it splits the fields, so that a whole name finds its first name", () => {
+    const check = (text, name) => checkNames({ recurringPrinciples: [{ n: 1, text }] }, [name]).dropped.length;
+    assert.equal(check("Jane asked.", "Jane Doe"), 1);
+    assert.equal(check("Ask Doe.", "Jane Doe"), 1);
+    assert.equal(check("Ask Jan.", "Jane Doe"), 0);
+    assert.equal(check("Jane said so.", "JaneDoe"), 1);
+    assert.equal(check("JaneDoe said so.", "Jane"), 1);
+    assert.equal(check("Ask Doe's friend.", "JaneDoe"), 1);
   });
 
   it("does not look at the keys that hold no words", () => {
@@ -555,8 +703,8 @@ describe("what a session hands over once she has decided", () => {
 
   it("gives an empty hand-off when she kept nothing", () => {
     const none = { principles: [principle(1, { approved: false })], recurringPrinciples: [], reelIdeas: [idea(1, { approved: false })] };
-    assert.deepEqual(approvedSession(none, []), { session: { principles: [], recurringPrinciples: [], reelsToFilm: [] } });
-    assert.deepEqual(approvedSession({}, []), { session: { principles: [], recurringPrinciples: [], reelsToFilm: [] } });
+    assert.deepEqual(approvedSession(none, []), { session: { principles: [], recurringPrinciples: [], reelsToFilm: [] }, dropped: [] });
+    assert.deepEqual(approvedSession({}, []), { session: { principles: [], recurringPrinciples: [], reelsToFilm: [] }, dropped: [] });
   });
 
   it("puts each list in the order of the numbers", () => {
@@ -567,20 +715,85 @@ describe("what a session hands over once she has decided", () => {
     assert.deepEqual(got.reelsToFilm.map((r) => r.n), [1, 2]);
   });
 
-  it("leaves out a field the name check took out, with no key and not as an empty text or list", () => {
+  it("writes a field the name check took out as an empty text, or an empty list, so that every key is there", () => {
     const given = session();
     given.principles[0] = principle(1, { example_application: "Mark does it.", steps: ["Ask Mark"], source_context: "Mark came up." });
     given.reelIdeas[0] = idea(1, { why: "Mark likes it.", principle: 1 });
-    const { session: got } = approvedSession(given, ["Mark"]);
-    assert.deepEqual(Object.keys(got.principles[0]), CONTRACT.filter((k) => k !== "example_application" && k !== "steps"));
-    assert.deepEqual(Object.keys(got.reelsToFilm[0]), ["n", "idea", "words", "principle"]);
+    const { session: got, dropped } = approvedSession(given, ["Mark"]);
+    assert.deepEqual(Object.keys(got.principles[0]), CONTRACT);
+    assert.equal(got.principles[0].example_application, "");
+    assert.deepEqual(got.principles[0].steps, []);
+    assert.equal(got.principles[0].name, "Rule 1");
+    assert.deepEqual(got.principles[0].red_flags, ["Hiding it"]);
+    assert.deepEqual(Object.keys(got.reelsToFilm[0]), ["n", "idea", "words", "why", "principle"]);
+    assert.deepEqual(got.reelsToFilm[0], { n: 1, idea: "Idea 1", words: "Words 1.", why: "", principle: 1 });
     assert.ok(!JSON.stringify(got).includes("Mark"));
+    assert.deepEqual(dropped, [
+      { field: "Principle 1's steps", why: "it held a name brimm-video can see" },
+      { field: "Principle 1's example_application", why: "it held a name brimm-video can see" },
+      { field: "Reel idea 1's why", why: "it held a name brimm-video can see" }
+    ]);
+  });
+
+  it("writes every key of a principle, an empty text or list when the item never had it", () => {
+    const bare = { principles: [{ n: 1, name: "Rule", approved: true }], recurringPrinciples: [], reelIdeas: [{ n: 1, idea: "A", words: "B", refilm: true, principle: null, approved: true }] };
+    const { session: got } = approvedSession(bare, []);
+    assert.deepEqual(got.principles, [{ n: 1, name: "Rule", category: "", description: "", steps: [], red_flags: [], green_flags: [], decision_criteria: [], example_application: "", verbatim_key_phrases: [] }]);
+    assert.deepEqual(got.reelsToFilm, [{ n: 1, idea: "A", words: "B", why: "", principle: null }]);
+  });
+
+  it("says which fields the check took out, and only those that are in the file", () => {
+    const given = session();
+    given.principles[0] = principle(1, { source_context: "Mark came up.", description: "Mark says so." });
+    given.principles[1] = principle(2, { description: "Mark says so.", approved: false });
+    given.reelIdeas[2] = idea(3, { refilm: false, from: "p5", to: "p7", words: "Mark says it.", principle: null });
+    const { dropped } = approvedSession(given, ["Mark"]);
+    assert.deepEqual(dropped, [{ field: "Principle 1's description", why: "it held a name brimm-video can see" }]);
+    assert.deepEqual(approvedSession(session(), ["Mark"]).dropped, []);
+  });
+
+  it("gives lists of its own, never the arrays the session holds", () => {
+    const given = session();
+    const { session: got } = approvedSession(given, []);
+    assert.notEqual(got.principles[0].steps, given.principles[0].steps);
+    for (const key of ["steps", "red_flags", "green_flags", "decision_criteria", "verbatim_key_phrases"]) {
+      assert.notEqual(got.principles[0][key], given.principles[0][key], key);
+      got.principles[0][key].push("changed");
+    }
+    assert.deepEqual(given.principles[0].steps, ["Name the price"]);
+    assert.deepEqual(approvedSession(given, []).session.principles[0].steps, ["Name the price"]);
+  });
+
+  it("has what hand-off version 2's check needs of every principle, recurring principle and Reel idea, also when fields were taken out", () => {
+    // The check itself (handoffFaultV2, on the branch that has handoff-v2.js) was run by hand on these results; see the report.
+    const texts = (v) => Array.isArray(v) && v.every((t) => typeof t === "string");
+    const fits = ({ principles, recurringPrinciples, reelsToFilm }) => {
+      for (const p of principles) {
+        assert.ok(typeof p.name === "string" && p.name.trim(), "name");
+        for (const key of ["category", "description", "example_application"]) assert.equal(typeof p[key], "string", key);
+        for (const key of ["steps", "red_flags", "green_flags", "decision_criteria", "verbatim_key_phrases"]) assert.ok(texts(p[key]), key);
+        assert.ok(!("source_context" in p) && !("approved" in p));
+      }
+      for (const r of recurringPrinciples) assert.ok(typeof r.text === "string" && r.text.trim());
+      for (const r of reelsToFilm) {
+        for (const key of ["idea", "words"]) assert.ok(typeof r[key] === "string" && r[key].trim(), key);
+        assert.equal(typeof r.why, "string");
+        assert.ok(r.principle === null || principles.some((p) => p.n === r.principle));
+      }
+    };
+    fits(approvedSession(session(), []).session);
+    const given = session();
+    given.principles[0] = principle(1, { category: "Mark's kind", description: "Mark says so.", steps: ["Ask Mark"], red_flags: ["Mark"], green_flags: ["Mark"], decision_criteria: ["Mark?"], example_application: "Mark does it.", verbatim_key_phrases: ["Mark"] });
+    given.reelIdeas[0] = idea(1, { why: "Mark likes it.", principle: 1 });
+    const got = approvedSession(given, ["Mark"]).session;
+    fits(got);
+    assert.equal(got.principles[0].category, "");
   });
 
   it("takes out again a name that is in a text she dictated", () => {
     const edited = approve(session().principles, ["edit", "1", "--description", "Mark said to ask early."]).items;
     const { session: got } = approvedSession({ ...session(), principles: edited }, ["Mark"]);
-    assert.ok(!("description" in got.principles[0]));
+    assert.equal(got.principles[0].description, "");
     assert.equal(got.principles[0].name, "Rule 1");
   });
 
@@ -621,6 +834,28 @@ describe("what a session hands over once she has decided", () => {
       "Reel idea 2's words held a name brimm-video took out: say it another way, or drop it."
     ) });
     assert.ok(!refused.why.includes("Mark"));
+  });
+
+  it("refuses a kept item whose name, text, idea or words is missing, not text, or blank", () => {
+    const NAME = "Principle 1's name held a name brimm-video took out: give it another name, or drop it.";
+    const TEXT = "Recurring principle 1's text held a name brimm-video took out: say it another way, or drop it.";
+    const given = (name, text, idea_, words) => ({
+      principles: [principle(1, { name })],
+      recurringPrinciples: [{ n: 1, text, approved: true }],
+      reelIdeas: [idea(1, { idea: idea_, words })]
+    });
+    for (const blank of ["", "   ", "\n", undefined, null, 3, ["x"], { a: 1 }]) {
+      assert.equal(approvedSession(given(blank, "Text.", "Idea", "Words."), []).why, NAME, JSON.stringify(blank));
+      assert.equal(approvedSession(given("Name", blank, "Idea", "Words."), []).why, TEXT, JSON.stringify(blank));
+      assert.equal(approvedSession(given("Name", "Text.", blank, "Words."), []).why, "Reel idea 1's idea held a name brimm-video took out: say it another way, or drop it.", JSON.stringify(blank));
+      assert.equal(approvedSession(given("Name", "Text.", "Idea", blank), []).why, "Reel idea 1's words held a name brimm-video took out: say it another way, or drop it.", JSON.stringify(blank));
+    }
+    const missing = given("Name", "Text.", "Idea", "Words.");
+    delete missing.principles[0].name;
+    delete missing.recurringPrinciples[0].text;
+    delete missing.reelIdeas[0].idea;
+    delete missing.reelIdeas[0].words;
+    assert.equal(approvedSession(missing, []).why, lines(NAME, TEXT, "Reel idea 1's idea held a name brimm-video took out: say it another way, or drop it.", "Reel idea 1's words held a name brimm-video took out: say it another way, or drop it."));
   });
 
   it("gives every line in one refusal, principles first", () => {

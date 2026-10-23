@@ -15,77 +15,126 @@ const list = (v) => (Array.isArray(v) ? v : []);
 /** Text on one line, with no space at either end. */
 const oneLine = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
-/** One word of a speaker's label: anything but white space, a colon or a bracket. */
-const LABEL_WORD = "[^\\s:()<>\\[\\]]+";
-/** What may be a speaker's label: one to four words, and a bracketed note after them. Whether it is one is for `isLabel` to say. */
-const LABEL = `${LABEL_WORD}(?:[ \\t]+${LABEL_WORD}){0,3}(?:[ \\t]+\\([^()\\r\\n]*\\))?`;
+/** How far into a line a label may reach: a cue's label ends at a colon before this, and a saved transcript's label is no longer. */
+const LABEL_MOST = 80;
 /** A WebVTT timing line, as "00:00:04.500 --> 00:00:07.000". */
 const TIMING = /^\s*(?:\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{1,3}\s*-->/;
-/** Each finds a label as its second group, with what comes before it as the first and what comes after it as the third. A label
-    begins a line and has a colon after it; or stands in a voice tag, "<v Jane Doe>"; or is in the brackets that begin a line of
-    Zoom's saved transcript, "[Jane Doe] 10:02:13". */
-const LEADING = new RegExp(`^([ \\t]*)(${LABEL})(:(?=\\s|$))`, "u");
-const VOICE = new RegExp(`(<v[ \\t]+)(${LABEL})(>)`, "gu");
-const SAVED = new RegExp(`^([ \\t]*\\[)(${LABEL})(\\](?=[ \\t]+\\d{1,2}:\\d{2}))`, "u");
+/** A colon that ends a cue's label: one that a space follows, or that ends the line. */
+const COLON = /:(?=\s|$)/;
+/** A line that begins with a voice tag, which names the speaker itself. */
+const VOICED = /^\s*<v[\s.]/;
+/** A voice tag, "<v Jane Doe>" or "<v.loud Jane Doe>": its text is the label. */
+const VOICE = /<v(?:\.[^\s>]*)?[ \t]+([^>\r\n]*)>/g;
+/** A line of Zoom's saved transcript, "[Jane Doe] 10:02:13": the text in the brackets is the label. */
+const SAVED = new RegExp(`^([ \\t]*\\[)([^\\]\\r\\n]{1,${LABEL_MOST}})(\\](?=[ \\t]+\\d{1,2}:\\d{2}))`);
 
-/** Whether what stands where a label may be is one: at most forty characters, and every word of it holding a capital letter or
-    being a number. So "Jane Doe", "Jane's iPhone" and "Speaker 2" are labels, and "So here's the thing" is not. */
+/** What may be a speaker's label in a text that has neither form: one to four words, and a bracketed note after them. Whether it
+    is one is for `isLabel` to say. */
+const LABEL_WORD = "[^\\s:()<>\\[\\]]+";
+const LEADING = new RegExp(`^([ \\t]*)(${LABEL_WORD}(?:[ \\t]+${LABEL_WORD}){0,3}(?:[ \\t]+\\([^()\\r\\n]*\\))?)(:(?=\\s|$))`, "u");
+
+/** Whether what stands where a label may be in a text with no timing lines and no brackets is one: at most forty characters, a
+    first word with a letter in it, and every word of it holding a capital letter or a letter that has no case, or being a number.
+    So "Jane Doe", "Jane's iPhone", "李明" and "Speaker 2" are labels, and "So here's the thing" and "1: first point" are not. */
 function isLabel(label) {
   if (label.length > 40) return false;
-  return label.replace(/[ \t]+\([^()]*\)$/, "").split(/[ \t]+/).every((w) => /\p{Lu}/u.test(w) || /^\+?\p{N}[\p{N}-]*$/u.test(w));
+  const words = label.replace(/[ \t]+\([^()]*\)$/, "").split(/[ \t]+/);
+  return /\p{L}/u.test(words[0]) && words.every((w) => /[\p{Lu}\p{Lt}\p{Lo}]/u.test(w) || /^\+?\p{N}[\p{N}-]*$/u.test(w));
 }
 
-/** Whether a label holds `word` as a whole word, whatever the case: "Sallie's iPhone" does, "Salliebeth Kay" does not. */
-const holds = (label, word) => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(word.toLowerCase());
+/** The words of a text in lowercase, apart from one another: runs of letters and figures. */
+const wordsAlone = (text) => String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+/** Whether a label is Sallie's: outside any bracketed note, it holds every word of `sallie` as a whole word, whatever the case.
+    "Sallie's iPhone" holds "Sallie", and "Salliebeth Kay" does not. "Jane Doe (Sallie's guest)" is not hers. */
+function isHers(label, sallie) {
+  const mine = wordsAlone(sallie || "");
+  const here = wordsAlone(label.replace(/\([^()]*\)/g, " "));
+  return (mine.length ? mine : ["sallie"]).every((w) => here.includes(w));
+}
+
+/** The place [from, to) of `line` between `from` and `to` with the white space at both ends left out, or null when nothing is left. */
+function trimmedPlace(line, from, to) {
+  const text = line.slice(from, to);
+  const start = from + text.length - text.trimStart().length;
+  const label = text.trim();
+  return label ? [start, start + label.length] : null;
+}
 
 /** A Zoom transcript with every speaker's label but Sallie's replaced by "Participant 1", "Participant 2" and so on, in the order
     the speakers first appear, the same label always by the same number: { text, map }. `map` goes from each label replaced, as it
-    is written, to its Participant. Sallie's label is any that holds `sallie` as a word, and is left as it is written.
-    What a label is depends on the text. In a WebVTT text (one with a timing line, "00:00:04.500 --> 00:00:07.000") it is the
-    "Label:" that begins the first line of a cue's words, and a voice tag. In a saved Zoom transcript, whose lines begin
-    "[Label] 10:02:13", it is the bracketed label. In a text with neither it is the "Label:" that begins any line. Everything else
-    in the text, the names said in it too, is as it was, character for character: that is for the name check. Not text gives no
-    text and an empty map. */
+    is written, to its Participant. Sallie's label is any that holds every word of `sallie`, outside a bracketed note, and is left
+    as it is written.
+    A label is found by where the format puts it, and is then everything that stands there, whatever it is made of, since a name
+    may be written in any way: in a WebVTT text (one with a timing line, "00:00:04.500 --> 00:00:07.000"), everything before the
+    first colon that a space follows, or that ends the line, in the first line of a cue's words if the colon is in its first 80
+    characters, and the whole text of a voice tag "<v Jane Doe>"; in a saved Zoom transcript, whose lines begin "[Jane Doe] 10:02:13",
+    the whole text in the brackets, of up to 80 characters. Only in a text with neither is a label told from words by what it looks
+    like (isLabel), as the "Label:" that begins a line. Everything else in the text, the names said in it too, is as it was,
+    character for character: that is for the name check. Not text gives no text and an empty map. */
 export function replaceSpeakers(zoomText, sallie = "Sallie") {
   if (typeof zoomText !== "string") return { text: "", map: {} };
-  const hers = String(sallie || "Sallie");
   const map = {};
   const named = (label) => {
-    if (!isLabel(label) || holds(label, hers)) return label;
+    if (isHers(label, sallie)) return label;
     // A label may be the name of a method every object has, which is why this asks whether the map has it of its own.
     if (!Object.hasOwn(map, label)) map[label] = `Participant ${Object.keys(map).length + 1}`;
     return map[label];
   };
-  const swap = (line, re) => line.replace(re, (all, before, label, after) => before + named(label) + after);
+  /** `line` with the label at `place` replaced. */
+  const swap = (line, place) => (place ? line.slice(0, place[0]) + named(line.slice(place[0], place[1])) + line.slice(place[1]) : line);
   const lines = zoomText.split("\n");
   const vtt = lines.some((l) => TIMING.test(l));
-  const saved = !vtt && lines.some((l) => { const m = SAVED.exec(l); return m !== null && isLabel(m[2]); });
+  const saved = !vtt && lines.some((l) => SAVED.test(l));
   const out = lines.map((line, i) => {
-    if (!vtt) return swap(line, saved ? SAVED : LEADING);
-    // Only the first line of a cue's words, the line right after its timing line, begins with a speaker. A later line may begin
-    // with words and a colon that are not one.
-    return swap(i > 0 && TIMING.test(lines[i - 1]) ? swap(line, LEADING) : line, VOICE);
+    if (vtt) {
+      // Only the first line of a cue's words, the line right after its timing line, begins with a speaker. A later line may begin
+      // with words and a colon that are not one. A line that begins with a voice tag names its speaker in the tag.
+      const colon = i > 0 && TIMING.test(lines[i - 1]) && !VOICED.test(line) ? COLON.exec(line) : null;
+      const first = swap(line, colon && colon.index < LABEL_MOST ? trimmedPlace(line, 0, colon.index) : null);
+      return first.replace(VOICE, (tag, text) => swap(tag, trimmedPlace(tag, tag.length - 1 - text.length, tag.length - 1)));
+    }
+    if (saved) return line.replace(SAVED, (all, before, text, after) => before + swap(text, trimmedPlace(text, 0, text.length)) + after);
+    return line.replace(LEADING, (all, before, label, after) => (isLabel(label) ? before + named(label) + after : all));
   });
   return { text: out.join("\n"), map };
 }
 
-/** The words of a text, as names are looked for among them: runs of letters, figures and apostrophes, a curly apostrophe read as
-    a straight one, with no apostrophe at either end and no possessive 's. The text is first written the one way (NFKC), so that an
-    accent written apart from its letter, as a Mac writes it in a file's name, is joined to it, and a full-width letter is a plain one. */
-const pieces = (text) =>
-  (String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}\p{N}'’]+/gu) || [])
-    .map((w) => w.replace(/’/g, "'").replace(/^'+|'+$/g, "").replace(/'s$/i, ""))
-    .filter(Boolean);
+/** An apostrophe, straight, curly or U+02BC. */
+const APOSTROPHES = new RegExp(`[’${String.fromCharCode(0x2bc)}]`, "g");
 const letters = (w) => (w.match(/\p{L}/gu) || []).length;
 const capital = (w) => /^\p{Lu}/u.test(w);
+const lowercase = (w) => /^\p{Ll}/u.test(w);
+
+/** The words of a text, as names are looked for among them: runs of letters, figures and apostrophes, with every kind of
+    apostrophe read as a straight one, none at either end, and no possessive 's. The text is first written the one way (NFKC), so
+    that an accent written apart from its letter, as a Mac writes it in a file's name, is joined to it, and a full-width letter is
+    a plain one. */
+const baseWords = (text) =>
+  (String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}\p{N}'’]+/gu) || [])
+    .map((w) => w.replace(APOSTROPHES, "'").replace(/^'+|'+$/g, "").replace(/'s$/i, ""))
+    .filter(Boolean);
+/** A word and, when it changes from lowercase to a capital, the parts it is made of: "JaneDoe" is "JaneDoe", "Jane" and "Doe". */
+const withParts = (w) => {
+  const parts = w.split(/(?<=\p{Ll})(?=\p{Lu})/u);
+  return parts.length > 1 ? [w, ...parts] : [w];
+};
+/** All the words of a text that can be looked for, parts included: the words a field is checked by. */
+const pieces = (text) => baseWords(text).flatMap(withParts);
 /** The pieces of a text that can be names: those of at least two letters. */
 const wordsOf = (text) => pieces(text).filter((w) => letters(w) >= 2);
 
 /** What ends a sentence as the transcriber writes it: a full stop, a question mark, an exclamation mark or an ellipsis, with any
-    closing quote or bracket after it. */
+    closing quote or bracket after it. A title, "Dr.", and a single letter with a full stop, "J.", do not end one. */
 const SENTENCE_END = /[.?!…]["'”’»)\]}]*$/;
+const ABBREVIATION = /(?:^|[^\p{L}\p{N}])(?:mr|mrs|ms|mx|dr|prof|st|jr|sr|\p{L})\.["'”’»)\]}]*$/iu;
+const endsSentence = (token) => SENTENCE_END.test(token) && !ABBREVIATION.test(token);
 /** I and its short forms are written with a capital in the middle of a sentence, and are nobody's name. */
 const I_FORM = /^I(?:'(?:m|ve|ll|d))?$/;
+/** Words that are nobody's name wherever they stand: pronouns, which a label may hold, and titles. */
+const NEVER_NAMES = new Set(["she", "her", "hers", "he", "him", "his", "they", "them", "their", "theirs", "mr", "mrs", "ms", "mx", "dr", "prof", "st", "jr", "sr"]);
+/** The words in the name of a file that Zoom downloads that are Zoom's own. */
+const ZOOM_WORDS = new Set(["gmt", "recording", "gvo", "avo", "audio", "video", "gallery", "speaker", "shared", "screen", "view", "only", "transcript", "chat"]);
 
 /** The words that a words file writes in the middle of a sentence: every word but the first of the recording, and but the first
     after one that ends a sentence. `words` is the words file's words, each {w} with spaces and punctuation round it, or a text. */
@@ -94,20 +143,21 @@ function midSentence(words) {
   const mid = [];
   let starts = true;
   for (const token of tokens) {
-    const found = pieces(token);
+    const found = baseWords(token);
     if (found.length) {
       mid.push(...(starts ? found.slice(1) : found));
       starts = false;
     }
-    if (SENTENCE_END.test(token)) starts = true;
+    if (endsSentence(token)) starts = true;
   }
   return mid;
 }
 
 /** Whether the transcriber capitalised the recording throughout: of the words it writes in the middle of a sentence that begin
-    with a letter, there are at least twenty, and more than half of them begin with a capital. Then a capital says nothing. */
+    with a letter, and have two letters or more as a word has, there are at least twenty, and more than half of them begin with a
+    capital. Then a capital says nothing. */
 function throughout(mid) {
-  const lettered = mid.filter((w) => /^\p{L}/u.test(w));
+  const lettered = mid.filter((w) => /^\p{L}/u.test(w) && letters(w) >= 2);
   return lettered.length >= 20 && lettered.filter(capital).length * 2 > lettered.length;
 }
 
@@ -121,28 +171,34 @@ export const namesSkipped = (words) => (throughout(midSentence(words)) ? SKIPPED
 const sidesOf = (s) => (Array.isArray(s) ? s.slice(0, 2) : s && typeof s === "object" ? [s.heard, s.spelled] : []);
 
 /** The single words that brimm-video can see are names, each once, in the spelling it saw first:
-    - every word of the labels in `map`, the speakers it replaced;
-    - unless `fileName` is Zoom's, every word of the file's name (its folder and its extension are not), of at least two letters
-      and no figure, but for one that `words` writes in lowercase in the middle of a sentence, which is an ordinary word;
+    - every word of the labels in `map`, the speakers it replaced, the words of a bracketed note too: the tool has ruled the label
+      is not Sallie's, so not even a word of the show's names, of a spelling or of Sally is left out, but for a pronoun, a title,
+      and a word that begins in lowercase and that `words` writes in lowercase in the middle of a sentence, which is an ordinary word;
+    - every word of the file's name (its folder and its extension are not), of at least two letters and no figure, but for one that
+      `words` writes in lowercase in the middle of a sentence, and, for a name that is Zoom's, Zoom's own words;
     - unless the recording is capitalised throughout, every word that `words` writes with a capital in the middle of a sentence;
-    but not, whatever the case, a word of the `show`'s names or of either side of a spelling of the episode's, which are
-    no one's. Each is spelled the show's way first, so that "Sally" is "Sallie" and left out. */
+    and of the last two, not, whatever the case, a word of the `show`'s names or of either side of a spelling of the episode's,
+    which are no one's, and each is spelled the show's way first, so that "Sally" is "Sallie" and left out. A word that changes
+    from lowercase to a capital is also the parts it is made of. */
 export function visibleNames({ map = {}, fileName = "", words = [], show = [SHOW, HOST, "The BRIMM"], spellings = [] } = {}) {
   const mid = midSentence(words);
-  // A word of the file's name in lowercase is found among these only when the recording writes it that way.
   const ordinary = new Set(mid);
+  const never = (w) => NEVER_NAMES.has(w.toLowerCase());
+  const speakers = Object.keys(map || {}).flatMap(wordsOf).filter((w) => !never(w) && !(lowercase(w) && ordinary.has(w.toLowerCase())));
   const file = String(fileName ?? "");
-  const found = [
-    ...Object.keys(map || {}).flatMap(wordsOf),
-    ...(isZoomName(file) ? [] : wordsOf(basename(file, extname(file))).filter((w) => !/\p{N}/u.test(w) && !ordinary.has(w.toLowerCase()))),
-    ...(throughout(mid) ? [] : mid.filter((w) => capital(w) && letters(w) >= 2 && !I_FORM.test(w)))
-  ];
+  const own = isZoomName(file) ? ZOOM_WORDS : new Set();
+  const fromFile = baseWords(basename(file, extname(file)))
+    .filter((w) => !/\p{N}/u.test(w))
+    .flatMap(withParts)
+    .filter((w) => letters(w) >= 2 && !never(w) && !own.has(w.toLowerCase()) && !ordinary.has(w.toLowerCase()));
+  const capitalised = throughout(mid) ? [] : mid.filter(capital).flatMap(withParts).filter((w) => letters(w) >= 2 && !never(w) && !I_FORM.test(w));
   const left = new Set([...list(show), ...list(spellings).flatMap(sidesOf)].flatMap(wordsOf).map((w) => w.toLowerCase()));
   const names = new Map();
-  for (const w of found.map(spellNames)) {
-    const key = w.toLowerCase();
-    if (!left.has(key) && !names.has(key)) names.set(key, w);
-  }
+  const add = (w) => {
+    if (!names.has(w.toLowerCase())) names.set(w.toLowerCase(), w);
+  };
+  speakers.forEach(add);
+  for (const w of [...fromFile, ...capitalised].map(spellNames)) if (!left.has(w.toLowerCase())) add(w);
   return [...names.values()];
 }
 
@@ -156,14 +212,21 @@ const NAME_SEEN = "it held a name brimm-video can see";
 
 /** A reading with every field that holds a name left out: { kept, dropped }. The reading is not changed. Every text field and
     every list of texts of every item of its lists (the principles, the recurring principles, the Reel ideas, and the Reel ideas
-    to film) is looked at, whichever of the lists the reading has. A field holds a name when one of its words, as visibleNames
-    splits them, is one of `names` whatever the case, and is written with a capital letter: the client "Mark" is in "Mark said"
-    and not in "mark the date". A field that holds one is not in its item in `kept`, and a list is left out whole. `dropped` has
-    one { field, why } for each, with `field` as she reads of it ("Principle 2's example_application") and `why` in plain words.
-    Neither holds the name or any word of the field: a field is named by its key, and the keys are the readers' own. */
+    to film) is looked at, whichever of the lists the reading has. Each of `names` is split into words as visibleNames splits
+    them. A field holds a name when one of its words, so split, is one of them whatever the case, and is either written with a
+    capital letter or a letter that has no case, or was seen beginning in lowercase: the client "Mark" is in "Mark said" and not in
+    "mark the date", and "d'Angelo" is in "As d'Angelo put it". A field that holds one is not in its item in `kept`, and a list is
+    left out whole. `dropped` has one { field, why } for each, with `field` as she reads of it ("Principle 2's example_application")
+    and `why` in plain words. Neither holds the name or any word of the field: a field is named by its key, and the keys are the
+    readers' own. */
 export function checkNames(reading, names) {
-  const known = new Set(list(names).map((n) => String(n).normalize("NFKC").toLowerCase()));
-  const holdsName = (value) => (Array.isArray(value) ? value.some(holdsName) : typeof value === "string" && pieces(value).some((w) => capital(w) && known.has(w.toLowerCase())));
+  // For each name, in lowercase: whether one of its spellings begins in lowercase, which takes a word of any case.
+  const known = new Map();
+  for (const w of list(names).flatMap(wordsOf)) known.set(w.toLowerCase(), known.get(w.toLowerCase()) || lowercase(w));
+  const holdsName = (value) => {
+    if (Array.isArray(value)) return value.some(holdsName);
+    return typeof value === "string" && pieces(value).some((w) => known.has(w.toLowerCase()) && (known.get(w.toLowerCase()) || !lowercase(w)));
+  };
   const kept = { ...reading };
   const dropped = [];
   for (const [key, label] of LISTS) {
@@ -245,40 +308,64 @@ export const undecided = (session) =>
       .map((item) => `${label} ${item.n} is not decided yet: keep it or drop it.`)
   );
 
-/** The keys of a principle that the page takes, in the order the hand-off has them, and the keys of a Reel idea to film that are
-    kept as they are: its `principle` is set on its own. */
+/** The keys of a principle that the page takes, in the order the hand-off has them, and the keys of a Reel idea to film that hold
+    words. */
 const PRINCIPLE_KEYS = ["n", "name", "category", "description", "steps", "red_flags", "green_flags", "decision_criteria", "example_application", "verbatim_key_phrases"];
-const REEL_KEYS = ["n", "idea", "words", "why"];
+const REEL_KEYS = ["n", "idea", "words", "why", "principle"];
 const pick = (item, keys) => Object.fromEntries(keys.filter((k) => Object.hasOwn(item, k)).map((k) => [k, item[k]]));
+/** Whether a value is text with something in it. */
+const filled = (v) => typeof v === "string" && v.trim() !== "";
+/** A text, or an empty one when the value is not text; and a list of texts, a copy, or an empty one. */
+const textOf = (v) => (typeof v === "string" ? v : "");
+const textsOf = (v) => list(v).filter((t) => typeof t === "string");
 
 /** What a session hands over once she has decided every item of it, for the hand-off to take as its `session`:
-    { session: { principles, recurringPrinciples, reelsToFilm } }, or { why } while it cannot be handed over. Only what she
-    approved is in it, ordered by `n`, and the name check is run on it again with `names`, as an edit she dictated may hold a
-    name. A principle has the keys the page takes and never its `source_context` or its `approved`; a field the check took out is
-    left out, and is not an empty text or list. A Reel idea to film (kept, with `refilm` true) has its `principle` only when that
+    { session: { principles, recurringPrinciples, reelsToFilm }, dropped }, or { why } while it cannot be handed over. Only what
+    she approved is in it, ordered by `n`, and the name check is run on it again with `names`, as an edit she dictated may hold a
+    name; `dropped` is what that check took out of what is in the file, as checkNames gives it. A principle has the keys the page
+    takes and never its `source_context` or its `approved`; a field the check took out is written as an empty text, or an empty
+    list, as the page reads a missing one. A Reel idea to film (kept, with `refilm` true) has its `principle` only when that
     principle is in the hand-off, and null otherwise. A kept idea that is not to be filmed is not in it: a Reel cut from the
-    session is made, with the client's agreement, by a later phase.
+    session is made, with the client's agreement, by a later phase. The lists are copies.
     It is refused, in plain words and with the name never in them, while an item is undecided, and for a kept item the check left
-    with nothing to say: a principle with no name, a recurring principle with no text, a Reel idea to film with no idea or no words. */
+    with nothing to say: a principle with no name, a recurring principle with no text, a Reel idea to film with no idea or no
+    words, each missing, not text, or blank. */
 export function approvedSession(session, names) {
   const open = undecided(session);
   if (open.length) return { why: open.join("\n") };
-  const approved = Object.fromEntries(SESSION_LISTS.map(([key]) => [key, list(session?.[key]).filter((item) => item.approved === true).sort((a, b) => a.n - b.n)]));
-  const { kept } = checkNames(approved, names);
-  const filmed = kept.reelIdeas.filter((r) => r.refilm === true);
+  const approved = (key) => list(session?.[key]).filter((item) => item?.approved === true).sort((a, b) => a.n - b.n);
+  // Only what goes into the file is looked at.
+  const chosen = {
+    principles: approved("principles").map((p) => pick(p, PRINCIPLE_KEYS)),
+    recurringPrinciples: approved("recurringPrinciples").map((r) => pick(r, ["n", "text"])),
+    reelIdeas: approved("reelIdeas").filter((r) => r.refilm === true).map((r) => pick(r, REEL_KEYS))
+  };
+  const { kept, dropped } = checkNames(chosen, names);
   const refusals = [
-    ...kept.principles.filter((p) => !p.name).map((p) => `Principle ${p.n}'s name held a name brimm-video took out: give it another name, or drop it.`),
-    ...kept.recurringPrinciples.filter((r) => !r.text).map((r) => `Recurring principle ${r.n}'s text held a name brimm-video took out: say it another way, or drop it.`),
-    ...filmed.flatMap((r) => ["idea", "words"].filter((field) => !r[field]).map((field) => `Reel idea ${r.n}'s ${field} held a name brimm-video took out: say it another way, or drop it.`))
+    ...kept.principles.filter((p) => !filled(p.name)).map((p) => `Principle ${p.n}'s name held a name brimm-video took out: give it another name, or drop it.`),
+    ...kept.recurringPrinciples.filter((r) => !filled(r.text)).map((r) => `Recurring principle ${r.n}'s text held a name brimm-video took out: say it another way, or drop it.`),
+    ...kept.reelIdeas.flatMap((r) => ["idea", "words"].filter((field) => !filled(r[field])).map((field) => `Reel idea ${r.n}'s ${field} held a name brimm-video took out: say it another way, or drop it.`))
   ];
   if (refusals.length) return { why: refusals.join("\n") };
-  const principles = kept.principles.map((p) => pick(p, PRINCIPLE_KEYS));
+  const principles = kept.principles.map((p) => ({
+    n: p.n,
+    name: p.name,
+    category: textOf(p.category),
+    description: textOf(p.description),
+    steps: textsOf(p.steps),
+    red_flags: textsOf(p.red_flags),
+    green_flags: textsOf(p.green_flags),
+    decision_criteria: textsOf(p.decision_criteria),
+    example_application: textOf(p.example_application),
+    verbatim_key_phrases: textsOf(p.verbatim_key_phrases)
+  }));
   const shown = new Set(principles.map((p) => p.n));
   return {
     session: {
       principles,
-      recurringPrinciples: kept.recurringPrinciples.map((r) => pick(r, ["n", "text"])),
-      reelsToFilm: filmed.map((r) => ({ ...pick(r, REEL_KEYS), principle: shown.has(r.principle) ? r.principle : null }))
-    }
+      recurringPrinciples: kept.recurringPrinciples.map((r) => ({ n: r.n, text: r.text })),
+      reelsToFilm: kept.reelIdeas.map((r) => ({ n: r.n, idea: r.idea, words: r.words, why: textOf(r.why), principle: shown.has(r.principle) ? r.principle : null }))
+    },
+    dropped
   };
 }
