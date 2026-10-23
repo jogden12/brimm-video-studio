@@ -63,7 +63,10 @@ const reelOf = (given, inSession) => {
 };
 
 /** A session's items, as they are given: the caller gives only what Sallie approved, and none of it is changed here, but only
-    the contract's keys of each are written. Lists not given are empty: a session revision may hold nothing yet. */
+    the contract's keys of each are written. Lists not given are empty: a session revision may hold nothing yet. A field not
+    given is left out, never made up: a principle's fields other than its number and name, and a Reel idea's words and why,
+    are left out where the name check took them out (spec 2026-10-22, section 8), and the page reads a missing text as "". A
+    Reel idea's principle is always written, null when not given. */
 const sessionOf = (given) => {
   const s = given || {};
   const items = (v, each) => (v === undefined ? [] : Array.isArray(v) ? v.map(each) : v);
@@ -329,8 +332,10 @@ export function handoffFaultV2(h) {
     principles.add(p.n);
     if (has(p, "source_context")) return `${which} holds "source_context", which stays out of the hand-off: it describes the session, for her eyes only.`;
     if (!text(p.name)) return `${which} has no name.`;
-    for (const key of ["category", "description", "example_application"]) if (typeof p[key] !== "string") return `${which}'s ${key} is not text.`;
-    for (const key of LISTS) if (!strings(p[key])) return `${which}'s ${key} is not a list of text.`;
+    // Any field but its number and name is left out of the file when the name check took it out (spec 2026-10-22, section 8),
+    // and the page reads a missing text as "": each is held to its kind only when it is there.
+    for (const key of ["category", "description", "example_application"]) if (has(p, key) && typeof p[key] !== "string") return `${which}'s ${key} is not text.`;
+    for (const key of LISTS) if (has(p, key) && !strings(p[key])) return `${which}'s ${key} is not a list of text.`;
     const more = unknown(which, p, PRINCIPLE);
     if (more) return more;
   }
@@ -351,8 +356,10 @@ export function handoffFaultV2(h) {
     if (films.has(p.n)) return `${which} is in it twice.`;
     films.add(p.n);
     if (!text(p.idea)) return `${which} has no idea.`;
-    if (!text(p.words)) return `${which} has no words to say.`;
-    if (typeof p.why !== "string") return `${which} has no reason (why).`;
+    // Its words and why are left out when the name check took them out, as a principle's fields are: held to their kind only
+    // when they are there. Its idea and its principle (a number, or null) are always there.
+    if (has(p, "words") && !text(p.words)) return `${which} has no words to say: they are left out when there are none.`;
+    if (has(p, "why") && typeof p.why !== "string") return `${which}'s reason (why) is not text.`;
     if (p.principle !== null && !whole(p.principle)) return `${which}'s principle is neither a principle's number nor null.`;
     if (p.principle !== null && !principles.has(p.principle)) return `${which} names principle ${p.principle}, which is not in it.`;
     const more = unknown(which, p, FILM);

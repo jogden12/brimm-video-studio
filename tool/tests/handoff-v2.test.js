@@ -419,20 +419,46 @@ describe("handoffFaultV2, in plain words", () => {
   });
   it("refuses a principle with no name, or a field of the wrong kind", () => {
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].name = ""; })), /Principle 1.*name/);
-    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.principles[0].description; })), /Principle 1.*description/);
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].description = 3; })), /Principle 1.*description/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].steps = "one"; })), /Principle 1.*steps.*list/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].red_flags = [1]; })), /Principle 1.*red_flags.*list/);
-    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.principles[0].verbatim_key_phrases; })), /Principle 1.*verbatim_key_phrases/);
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].verbatim_key_phrases = "What is it worth?"; })), /Principle 1.*verbatim_key_phrases.*list/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0].n = 0; })), /number/);
   });
   it("lets a principle's key phrases and example be empty: names left out, or no words of hers", () => {
     assert.equal(handoffFaultV2(changed(session, (h) => { h.session.principles[0].verbatim_key_phrases = []; h.session.principles[0].example_application = ""; })), "");
   });
+  it("lets a principle's fields other than its number and name, and a Reel idea's words and why, be left out, as the name check leaves them out, and holds each to its kind when it is there", () => {
+    // Spec 2026-10-22, section 8: a field the name check took out is left out of the file, and the page reads a missing text
+    // as "" and a missing link as null.
+    const OPTIONAL = ["category", "description", "steps", "red_flags", "green_flags", "decision_criteria", "example_application", "verbatim_key_phrases"];
+    assert.equal(handoffFaultV2(changed(session, (h) => { for (const key of OPTIONAL) delete h.session.principles[0][key]; })), "", "all of them");
+    for (const key of OPTIONAL) assert.equal(handoffFaultV2(changed(session, (h) => { delete h.session.principles[1][key]; })), "", key);
+    assert.equal(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].words; delete h.session.reelsToFilm[0].why; })), "");
+    // The writer leaves them out as they are given: no key is made up for one that is not there.
+    const left = buildHandoffV2({ ...GIVEN, record: SESSION, session: { principles: [{ n: 1, name: "Price the outcome", steps: ["Name the outcome"] }], recurringPrinciples: [], reelsToFilm: [{ n: 1, idea: "The first number", principle: 1 }] }, reels: [] });
+    assert.deepEqual([left.session.principles, left.session.reelsToFilm], [[{ n: 1, name: "Price the outcome", steps: ["Name the outcome"] }], [{ n: 1, idea: "The first number", principle: 1 }]]);
+    assert.equal(handoffFaultV2(left), "");
+    // What may not be left out: a principle's number and name, a recurring principle's text, and a Reel idea's number, idea and
+    // principle (a principle's number, or null).
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.principles[0].name; })), /Principle 1.*name/);
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.principles[0].n; })), /principle's number/);
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.recurringPrinciples[0].text; })), /Recurring principle 1.*text/);
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].n; })), /Reel idea's number/);
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].idea; })), /Reel idea 1.*idea/);
+    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].principle; })), /Reel idea 1.*principle/);
+    // Each is held to its kind when it is there.
+    for (const [key, value] of [["category", 3], ["description", null], ["example_application", []], ["steps", "one"], ["green_flags", [2]], ["decision_criteria", null]]) {
+      assert.match(handoffFaultV2(changed(session, (h) => { h.session.principles[0][key] = value; })), new RegExp(`Principle 1.*${key}`), key);
+    }
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].words = 5; })), /Reel idea 1.*words/);
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].why = null; })), /Reel idea 1.*why/);
+  });
   it("refuses a recurring principle with no words, and a Reel idea with no idea or words, or naming a principle that is not there", () => {
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.recurringPrinciples[0].text = ""; })), /Recurring principle 1.*text/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].idea = ""; })), /Reel idea 1.*idea/);
-    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].words; })), /Reel idea 1.*words/);
-    assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].why; })), /Reel idea 1.*why/);
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].words = ""; })), /Reel idea 1.*words/);
+    assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].why = 5; })), /Reel idea 1.*why/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].principle = 9; })), /Reel idea 1.*principle 9.*not in it/);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[0].principle = "1"; })), /Reel idea 1.*principle/);
     assert.match(handoffFaultV2(changed(session, (h) => { delete h.session.reelsToFilm[0].principle; })), /Reel idea 1.*principle/);
