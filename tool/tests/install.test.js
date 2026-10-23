@@ -101,7 +101,9 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       }
     }
     const env = {
-      HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
+      // The node that runs these tests is on the PATH of the installer, whatever PATH the tests were started with: with --machine it
+      // reads this Mac's settings with node, before anything is changed. `bare` is a Mac with no Homebrew and no node.
+      HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
       ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(app ? { BRIMM_FINAL_CUT: app } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
     const r = spawnSync("/bin/zsh", [INSTALL, ...args], { encoding: "utf8", input: "", env });
@@ -496,7 +498,9 @@ describe("the installer's own text", () => {
     // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them.
     assert.ok(!/backup/i.test(text), "the installer names no backups");
     assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
-    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"\n  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi\n'), made);
+    // It is told the settings of the switch that the installer was told (--drop, --import, --handoff, and --rules-only as readings
+    // off), and checks the old drop folder again itself.
+    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"\n  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi\n'), made);
     // Her folder for Claude is written only when Claude Code is new enough for its guard, and the install says so at the end
     // when it is not, and ends with 1.
     const end = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
@@ -576,10 +580,11 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of Final Cut Pro's own
-    // Info.plist and of what Claude Code says of its sign-in.
+    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of a setting in the JSON that
+    // settings.js writes (json_field, which comes first), of Final Cut Pro's own Info.plist and of what Claude Code says of its
+    // sign-in.
     const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
-    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Final Cut", "Claude", "Claude"]);
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : line.includes('plutil -extract "$1" raw -o - -') ? "settings" : / -o - - /.test(line) ? "Claude" : line)), ["settings", "agent", "agent", "Final Cut", "Claude", "Claude"]);
   });
 });
 
@@ -819,5 +824,259 @@ describe("the drop folder kept on the Mac (--machine)", { skip: notAMac }, () =>
     const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
     assert.ok(closing.includes('say "Once, in Finder: Control-click that folder and choose Make available offline, so that a video dropped there from'), closing);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("the drop folder the installer switches (--machine, --drop), asked what it would do", { skip: notAMac }, () => {
+  const LIGHT = "The light import needs the question in her chat, which is not built yet.";
+  const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
+  /** A folder made for one test that stands for BRIMM Video in Dropbox. `old` and `drop` make this Mac's folders in it. */
+  function box() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    const folder = (parent, machine = "Mac Studio") => {
+      mkdirSync(join(root, parent, machine), { recursive: true });
+      return join(root, parent, machine);
+    };
+    const status = (video, more = {}, machine = "Mac Studio") => {
+      mkdirSync(join(root, "Episodes", ".importing"), { recursive: true });
+      writeFileSync(join(root, "Episodes", ".importing", `${video} (${machine}) 1.json`), JSON.stringify({ version: 1, machine, pid: 4242, video, bytes: 5, seconds: 120, step: "Making the rough cut", at: "2026-10-23T09:00:00-04:00", ...more }));
+    };
+    return { dir, root, folder, status, held: () => readdirSync(dir, { recursive: true }).sort(), mine: (more = {}) => ({ machine: "Mac Studio", root, checkout: dirname(HERE), ...more }), done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  /** The settings the installer shows, as it says it would write them. */
+  const shown = (r) => JSON.parse(/settings\.json:\n(\{[\s\S]*?\n\})\n/.exec(r.out)[1]);
+  /** What is in the home folder of a Mac that was given settings, and nothing more. */
+  const SETTINGS_LEFT = ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"];
+  /** The run was refused by these lines, ended with 2, and changed nothing: the home folder holds the settings it was given, if any. */
+  const refusedWith = (r, lines, given = false) => {
+    assert.deepEqual([r.status, r.out], [2, `${lines.join("\n")}\n\nNothing was changed.\n`], r.out);
+    assert.deepEqual([r.agents, r.left, r.ran], [[], given ? SETTINGS_LEFT : [], ""]);
+  };
+
+  it("--drop Drop shows Drop/<this Mac> as the folder it would make, mark and watch, writes drop in the settings, and says the old one is left as it is", () => {
+    const d = box();
+    const old = d.folder("Unedited Video");
+    const before = d.held();
+    const r = ask("--print", "--machine", "Mac Studio", "--drop", "Drop", "--handoff", "2", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    const out = said(r);
+    for (const line of [
+      `  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio`,
+      `  Its marker there, ${d.root}/Drop/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
+      `  The old drop folder:  ${old}, no longer watched once this is done, and left as it is, for Jason to delete by hand once it is empty`,
+      `  Once, in Finder:  Control-click ${d.root}/Drop/Mac Studio and choose Make available offline, so that a video dropped there from another device is brought down at once`
+    ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), handoffVersion: 2, drop: "Drop" });
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Drop/Mac Studio`])]);
+    changedNothing(r);
+    assert.deepEqual(d.held(), before);
+    d.done();
+  });
+  it("says nothing of an old folder when the drop folder is not switched, or the old folder is not there", () => {
+    const d = box();
+    for (const [args, settings] of [[[], undefined], [["--drop", "Drop"], undefined], [[], d.mine({ drop: "Drop" })], [["--drop", "Drop"], d.mine({ drop: "Drop" })]]) {
+      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.doesNotMatch(r.out, /The old drop folder/, args.join(" "));
+    }
+    // Switched back, the folder it came from is the old one, and is left as it is.
+    d.folder("Drop");
+    const back = askWith({ settings: d.mine({ drop: "Drop" }) }, "--print", "--machine", "Mac Studio", "--drop", "Unedited Video", d.root);
+    assert.equal(back.status, 0, back.err + back.out);
+    assert.ok(back.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Unedited Video/Mac Studio\n`), back.out);
+    assert.ok(back.out.includes(`\n  The old drop folder:  ${d.root}/Drop/Mac Studio, no longer watched once this is done`), back.out);
+    d.done();
+  });
+  it("keeps a Mac on Drop when it is run again without --drop: the plist, the summary and the settings all name Drop/<this Mac>", () => {
+    const d = box();
+    const r = askWith({ settings: d.mine({ drop: "Drop", later: { x: 1 } }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Drop/Mac Studio`])]);
+    assert.ok(r.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), r.out);
+    assert.ok(r.out.includes(`\n  Its marker there, ${d.root}/Drop/Mac Studio/.brimm-watched-by, saying:  Mac Studio\n`), r.out);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), drop: "Drop", later: { x: 1 } });
+    // Nothing is changed: the home folder holds the settings it was given, as they were.
+    assert.deepEqual([r.left, r.ran], [SETTINGS_LEFT, ""]);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+    d.done();
+  });
+  it("shows every setting it keeps, and writes what it is told over them: --import full, --handoff, --drop, and --rules-only as readings off", () => {
+    const d = box();
+    const kept = d.mine({ import: "light", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
+    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "full", "--handoff", "2", "--rules-only", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.deepEqual(shown(r), { ...kept, version: 1, import: "full", readings: false, handoffVersion: 2 });
+    // Not told, they stay as the file has them, readings on included: no --rules-only never writes readings on.
+    const quiet = askWith({ settings: d.mine({ readings: false }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.deepEqual(shown(quiet), { ...d.mine({ readings: false }), version: 1 });
+    const on = askWith({ settings: d.mine({ readings: true, import: "full" }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.deepEqual(shown(on), { ...d.mine({ readings: true, import: "full" }), version: 1 });
+    d.done();
+  });
+  it("writes readings off, with --rules-only, for a Mac that has no settings yet, with and without node here", () => {
+    const d = box();
+    const withNode = ask("--print", "--machine", "Mac Studio", "--rules-only", d.root);
+    assert.deepEqual(shown(withNode), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), readings: false });
+    const bare = askWith({ bare: true }, "--print", "--machine", "Mac Studio", "--rules-only", d.root);
+    assert.equal(bare.status, 0, bare.err + bare.out);
+    assert.deepEqual(shown(bare), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), readings: false });
+    d.done();
+  });
+  it("refuses the light import until it is built, by settings.js's words, before anything is shown or changed", () => {
+    const d = box();
+    for (const settings of [undefined, d.mine()]) refusedWith(askWith({ settings }, "--print", "--machine", "Mac Studio", "--import", "light", d.root), [LIGHT], Boolean(settings));
+    d.done();
+  });
+  it("refuses a value that will not do, and settings in the file that will not do, by settings.js's words", () => {
+    const d = box();
+    refusedWith(ask("--print", "--machine", "Mac Studio", "--drop", "Elsewhere", d.root), ['Not written: --drop takes Drop or "Unedited Video".']);
+    refusedWith(ask("--print", "--machine", "Mac Studio", d.root, "--handoff", "3"), ["Not written: --handoff takes 1 or 2."]);
+    refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light").'], true);
+    // What it is told mends that one.
+    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "full", d.root);
+    assert.equal(mended.status, 0, mended.out);
+    assert.equal(shown(mended).import, "full");
+    d.done();
+  });
+  it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
+    const d = box();
+    const old = d.folder("Unedited Video");
+    writeFileSync(join(old, "Talk.mov"), "video");
+    writeFileSync(join(old, ".brimm-watched-by"), "Mac Studio\n");
+    const before = d.held();
+    refusedWith(ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root), [
+      "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
+      `  Talk.mov: waits in ${old}.`,
+      ADVICE
+    ]);
+    assert.deepEqual(d.held(), before);
+    // It says nothing of the switch, and is not refused, when no switch is asked for.
+    assert.equal(ask("--print", "--machine", "Mac Studio", d.root).status, 0);
+    d.done();
+  });
+  it("refuses to switch while an import of this Mac failed or its late check found a problem, by the video's file name, or its label, and never by the status file's name", () => {
+    const d = box();
+    d.status("Budget.mov", { failed: "the sound could not be read for Budget.mov" });
+    d.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
+    d.status("Light.mov", { failed: "ffprobe", label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+    d.status("Theirs.mov", { failed: "the sound could not be read" }, "Sallie's laptop");
+    const r = ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.equal(r.status, 2, r.out);
+    const gone = ", and its video is not in the old folder now: only its status file, in " + `${d.root}/Episodes/.importing` + ", holds this, and a person takes it away by hand";
+    assert.equal(r.out, [
+      "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
+      `  Budget.mov: its import failed${gone}.`,
+      `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`,
+      `  Talk.mov: it was copied in, but its late check found a problem${gone}.`,
+      ADVICE,
+      "",
+      "Nothing was changed.",
+      ""
+    ].join("\n"));
+    assert.doesNotMatch(r.out, /\(Mac Studio\) 1\.json|Theirs|Light\.mov|sound could not/);
+    d.done();
+  });
+  it("under the light import, names a waiting video by its label when it has one and counts it when it has none: no part of a client's file name is shown", () => {
+    const d = box();
+    const old = d.folder("Unedited Video");
+    writeFileSync(join(old, "Coaching call Jane Doe.mp4"), "12345");
+    writeFileSync(join(old, "Sales call Jane Doe's firm.mov"), "12345");
+    const light = d.mine({ import: "light" });
+    const counted = askWith({ settings: light }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.equal(counted.status, 2, counted.out);
+    assert.ok(counted.out.includes(`\n  2 videos wait in ${old}.\n`), counted.out);
+    d.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+    const labelled = askWith({ settings: light }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.ok(labelled.out.includes(`\n  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.\n  1 video waits in ${old}.\n`), labelled.out);
+    for (const r of [counted, labelled]) assert.doesNotMatch(r.out, /Jane|Doe|Coaching|Sales call/);
+    d.done();
+  });
+  it("is not stopped by videos in the new folder, and looks at the old one only when the folder changes", () => {
+    const d = box();
+    writeFileSync(join(d.folder("Drop"), "Early.mov"), "video");
+    const r = ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.equal(r.status, 0, r.out);
+    // Already on Drop: a stray video in the old folder is no hindrance to a run that keeps Drop.
+    writeFileSync(join(d.folder("Unedited Video"), "Stray.mov"), "video");
+    const again = askWith({ settings: d.mine({ drop: "Drop" }) }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.equal(again.status, 0, again.out);
+    d.done();
+  });
+  it("refuses --drop, --import and --handoff without --machine, and with no value after them, before anything else", () => {
+    const d = box();
+    for (const option of ["--drop", "--import", "--handoff"]) {
+      const without = ask("--print", option, "Drop", "/Volumes/Work/Unedited video");
+      assert.deepEqual([without.status, without.out], [2, '--drop, --import and --handoff are for one of the two Macs, set up with --machine: ./install.sh --machine "Mac Studio" --drop Drop "<path to BRIMM Video>"\n'], option);
+      assert.deepEqual([without.agents, without.left, without.ran], [[], [], ""]);
+    }
+    for (const [args, said] of [
+      [["--machine", "Mac Studio", d.root, "--drop"], 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".'],
+      [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light or --import full."],
+      [["--machine", "Mac Studio", d.root, "--handoff"], "Say which version after --handoff, as --handoff 1 or --handoff 2."]
+    ]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out, r.left, r.ran], [2, `${said}\n`, [], ""], args.join(" "));
+    }
+    d.done();
+  });
+  it("refuses plainly, before any change, when node is not here and it is told --drop, --import or --handoff, or this Mac has settings", () => {
+    const d = box();
+    const WHY = "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again.";
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+      const r = askWith({ bare: true, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
+      assert.deepEqual([r.status, r.out], [2, `${WHY}\n\nNothing was changed.\n`], args.join(" "));
+      assert.deepEqual([r.left, r.ran], [settings ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"] : [], ""]);
+    }
+    // With no settings and none of those options, a Mac with no node is set up as it always was: Homebrew installs node first.
+    const fresh = askWith({ bare: true }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(fresh.status, 0, fresh.out);
+    assert.ok(fresh.out.includes("\n  Programs to install with Homebrew:  ffmpeg whisper-cpp node\n"), fresh.out);
+    d.done();
+  });
+  it("takes the settings from what settings.js says, and not from what node says of itself on its standard error: a warning is shown and changes nothing", () => {
+    const d = box();
+    // A node that says something on the way, as a runtime warning would, and then runs as the real one does.
+    const noisy = `echo "(node:1) Warning: made for the test" >&2\nexec "${process.execPath}" "$@"\n`;
+    const r = askWith({ onPath: { node: noisy }, settings: d.mine({ drop: "Drop" }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.ok(r.out.includes("(node:1) Warning: made for the test"), r.out);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), drop: "Drop" });
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Drop/Mac Studio`])]);
+    d.done();
+  });
+  it("refuses plainly when the node here is older than 22, which cannot read the settings", () => {
+    const d = box();
+    const r = askWith({ onPath: { node: 'case "$1" in\n  --version) echo v20.1.0 ;;\n  -e) exit 1 ;;\nesac\n' } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.deepEqual([r.status, r.out], [2, "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node\n\nNothing was changed.\n"]);
+    d.done();
+  });
+  it("still refuses a drop folder another Mac's marker names, in the folder the settings name", () => {
+    const d = box();
+    const drop = d.folder("Drop");
+    writeFileSync(join(drop, ".brimm-watched-by"), "Sallie's laptop\n");
+    const r = ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.deepEqual([r.status, r.out], [2, `The folder ${drop} is watched by Sallie's laptop already. A drop folder is watched by one Mac only.\n`]);
+    d.done();
+  });
+  it("asks settings.js before it says anything or changes anything, and has write told the same options, in the real run", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    // The check is made where the Mac's own folders are worked out, before the summary.
+    const planAt = text.indexOf('"$node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
+    assert.ok(planAt > 0, "plan, in install.sh");
+    assert.ok(planAt < text.indexOf('say "The unedited-video tool"'), "the check is made before the summary");
+    assert.ok(planAt < text.indexOf('drop="$root/$drop_name/$machine"'), "and before the drop folder is worked out");
+    // Nothing is changed before it: the first change, the removal of a left-behind check, comes after "Go ahead".
+    assert.ok(planAt < text.indexOf('read -q "go?Go ahead? [y/N] "'), "and before the question");
+    // The real run's write is told what the check was, and so checks the old folder again; the marker is made first, as it was.
+    const writeAt = text.indexOf('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
+    assert.ok(writeAt > text.indexOf('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), "the write, after the marker");
+    assert.ok(text.includes('[[ -z "$rules_only" ]] || switch_args+=(--readings off)'), "--rules-only is written as readings off");
+  });
+  it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
+    const r = ask("--print", "--help");
+    const help = r.out.replace(/\s+/g, " ");
+    for (const said of ["--drop Drop", '--drop "Unedited Video"', "--import light", "--handoff 2", "BRIMM Video/Drop/<this Mac>", "no longer watched", "left as it is", "refused", "--rules-only also writes readings off"]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
   });
 });

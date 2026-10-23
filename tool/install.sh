@@ -14,11 +14,23 @@
 #                                    transcript tool's own launch agent stay
 #   ./install.sh --machine "Mac Studio" "/path/to/The BRIMM DB/BRIMM Video"
 #                                    set this Mac up for episodes: it watches its own drop folder, BRIMM Video/Unedited
-#                                    Video/<this Mac>, which is made, with a marker that names this Mac, and each video
-#                                    dropped there is imported into BRIMM Video/Episodes. This Mac's settings are written in
+#                                    Video/<this Mac>, or BRIMM Video/Drop/<this Mac> once its settings name Drop (--drop,
+#                                    below), which is made, with a marker that names this Mac, and each video dropped there
+#                                    is imported into BRIMM Video/Episodes. This Mac's settings are written in
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
 #                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro and Claude Code's
 #                                    sign-in are here, and what Jason does by hand for any that is not
+# ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
+#                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
+#                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
+#                                    left as it is, for Jason to delete by hand once it is empty. A run with no --drop keeps the
+#                                    folder the settings name. It is refused, before anything is changed, while the old folder
+#                                    still holds a video, or an import of this Mac failed or found a problem: it names each, and
+#                                    says to deal with it first. Run it with --print first
+# ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
+#                                    write the import (light or full) and the version of the hand-off (1 or 2) in this Mac's
+#                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
+#                                    --machine, --rules-only also writes readings off. These three options are for --machine only
 #
 # It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
 # 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
@@ -59,6 +71,11 @@ CHECK_LOG="$HOME/Library/Logs/brimm-video-claude-check.log"
 MODEL_DIR="$HOME/Library/Application Support/BRIMM Transcribe"
 MODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+# This Mac's settings for episodes, which settings.js writes and checks (and reads here, to see what a run would change), the
+# folder for its work in Final Cut, and the checkout this runs from.
+SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
+WORK="$HOME/BRIMM Video Work"
+CHECKOUT="${HERE:h}"
 
 say() { print -r -- "$@"; }
 
@@ -74,6 +91,10 @@ machined="no"
 # What came after --machine when it was an option and not a name, such as --print: refused below, so a print run is never
 # taken for an install of a Mac of that name.
 machine_option=""
+# The settings of the switch, with --machine: each of --drop, --import and --handoff, and the value after it, kept as they are
+# said for settings.js to read and check. An option with no value after it is named in switch_missing, refused below.
+switch_options=()
+switch_missing=""
 while (( $# )); do
   arg="$1"
   shift
@@ -82,6 +103,8 @@ while (( $# )); do
     --remove) mode="remove" ;;
     --rules-only) rules_only="$arg" ;;
     --yes) yes="yes" ;;
+    --drop|--import|--handoff)
+      if (( $# )) && [[ "$1" != -* ]]; then switch_options+=("$arg" "$1"); shift; else switch_missing="${switch_missing:-$arg}"; fi ;;
     --machine)
       machined="yes"
       if [[ "${1-}" == -* ]]; then machine_option="$1"; else machine="${1-}"; (( $# )) && shift; fi ;;
@@ -91,6 +114,19 @@ while (( $# )); do
     *) folders+=("${arg:A}") ;;
   esac
 done
+# The switch's options are for a Mac set up with --machine, and each needs the word after it.
+if [[ -n "$switch_missing" ]]; then
+  case "$switch_missing" in
+    --drop) say 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".' ;;
+    --import) say "Say which import after --import, as --import light or --import full." ;;
+    --handoff) say "Say which version after --handoff, as --handoff 1 or --handoff 2." ;;
+  esac
+  exit 2
+fi
+if [[ ${#switch_options[@]} -gt 0 && "$machined" != "yes" ]]; then
+  say '--drop, --import and --handoff are for one of the two Macs, set up with --machine: ./install.sh --machine "Mac Studio" --drop Drop "<path to BRIMM Video>"'
+  exit 2
+fi
 # There is no folder it would watch without being told. Stopping the watching needs none.
 if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; then
   say 'Name the folder to watch for unedited video: ./install.sh "<folder>"'
@@ -107,6 +143,8 @@ find_program() {
   done
   return 1
 }
+# The value of a setting at the top of the JSON that settings.js writes, read from the standard input: nothing when there is none.
+json_field() { plutil -extract "$1" raw -o - - 2>/dev/null || true; }
 # Claude Code, where unedited.js finds it when a launch agent runs it: along the agent's own PATH, and then in .local/bin in
 # the home folder, where Claude Code's own installer puts it. This shell's PATH may lead to one the agent never sees. A test
 # names a stand-in in BRIMM_CLAUDE, so that no test runs the Claude Code of the Mac it runs on.
@@ -255,7 +293,48 @@ if [[ "$machined" == "yes" ]]; then
       exit 2
     fi
   done
-  drop="$root/Unedited Video/$machine"
+  # Node reads and checks this Mac's settings, so it is needed before anything is changed, when there are settings to read or the
+  # switch's options are given. A Mac with none, told none, is set up as it always was: Homebrew installs node, and the settings
+  # are written once it is here.
+  node="$(find_program node || true)"
+  if [[ -z "$node" && ( ${#switch_options[@]} -gt 0 || -e "$SETTINGS_FILE" ) ]]; then
+    say "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again."
+    say ""
+    say "Nothing was changed."
+    exit 2
+  fi
+  # What settings.js is told, besides the Mac, BRIMM Video and the checkout: the settings of the switch, as they are said, and
+  # --rules-only as readings off. A setting that is not told is left as the file has it, so no --rules-only never turns
+  # readings on.
+  switch_args=()
+  [[ -z "$rules_only" ]] || switch_args+=(--readings off)
+  switch_args+=("${switch_options[@]}")
+  # The one check, before anything changes, with --print and without: settings.js says what it would write, or why it refuses
+  # (a value that will not do, what is not built yet, and a switch of the drop folder while the old folder holds work). Its
+  # answer is the settings shown below, and the drop folder is the one they name: --drop, else the settings', else Unedited Video.
+  planned=""
+  if [[ -n "$node" ]]; then
+    if ! "$node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
+      say "Node here is $("$node" --version), and the tool needs 22 or later. Run: brew upgrade node"
+      say ""
+      say "Nothing was changed."
+      exit 2
+    fi
+    # What it says is its standard output alone, which is read below: anything node says on its standard error, a warning or why
+    # it could not run, goes to this one's own output as it comes (fd 3), and is never taken for the settings.
+    if ! { planned="$("$node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)"; } 3>&1; then
+      say "$planned"
+      say ""
+      say "Nothing was changed."
+      exit 2
+    fi
+  fi
+  drop_name="$(print -rn -- "$planned" | json_field drop)"
+  drop_name="${drop_name:-Unedited Video}"
+  # The folder the settings name now, from which this run would switch: its folder is left as it is.
+  old_drop_name="$({ json_field drop < "$SETTINGS_FILE"; } 2>/dev/null || true)"
+  old_drop_name="${old_drop_name:-Unedited Video}"
+  drop="$root/$drop_name/$machine"
   marker="$drop/.brimm-watched-by"
   if [[ -f "$marker" ]]; then
     owner="$(head -n 1 "$marker")"
@@ -283,17 +362,21 @@ need=()
 [[ -n "$whisper" ]] || need+=(whisper-cpp)
 [[ -n "$node" ]] || need+=(node)
 
-# This Mac's settings for episodes, as JSON: settings.js writes them, and this is what it is told.
+# This Mac's settings for episodes, as JSON: what settings.js said it would write. A Mac with no node here has none of its own, no
+# settings yet and no switch to make, so what is written is this Mac, BRIMM Video and the checkout, and readings off for --rules-only.
 json() { print -rn -- "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
-SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
-WORK="$HOME/BRIMM Video Work"
-CHECKOUT="${HERE:h}"
 settings_json() {
+  if [[ -n "$planned" ]]; then print -r -- "$planned"; return 0; fi
   print -r -- "{"
   print -r -- "  \"version\": 1,"
   print -r -- "  \"machine\": \"$(json "$machine")\","
   print -r -- "  \"root\": \"$(json "$root")\","
-  print -r -- "  \"checkout\": \"$(json "$CHECKOUT")\""
+  if [[ -n "$rules_only" ]]; then
+    print -r -- "  \"checkout\": \"$(json "$CHECKOUT")\","
+    print -r -- "  \"readings\": false"
+  else
+    print -r -- "  \"checkout\": \"$(json "$CHECKOUT")\""
+  fi
   print -r -- "}"
 }
 
@@ -303,6 +386,10 @@ if [[ -n "$machine" ]]; then
   say "  BRIMM Video:  $root"
   say "  Its drop folder, to make in Dropbox and watch:  $drop"
   say "  Its marker there, $marker, saying:  $machine"
+  # When the drop folder is switched, the one it was is no longer watched, and is left as it is: nothing in Dropbox is deleted.
+  if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
+    say "  The old drop folder:  $root/$old_drop_name/$machine, no longer watched once this is done, and left as it is, for Jason to delete by hand once it is empty"
+  fi
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
   say "  On this Mac:  $WORK/From Final Cut"
@@ -455,7 +542,7 @@ mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 if [[ -n "$machine" ]]; then
   mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
-  "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT"
+  "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
 fi
 
@@ -503,6 +590,9 @@ if [[ -n "$machine" ]]; then
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
   say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
+  if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
+    say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. Delete it by hand once it is empty."
+  fi
   if [[ -n "$studio_why" ]]; then
     say "Her folder for Claude was not written: $studio_why."
     exit 1
