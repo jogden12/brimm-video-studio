@@ -1036,6 +1036,15 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.ok(fresh.out.includes("\n  Programs to install with Homebrew:  ffmpeg whisper-cpp node\n"), fresh.out);
     d.done();
   });
+  it("shows no account's email when it shows the settings, those of the teachings from sessions among them, and says nothing of one anywhere else", () => {
+    const d = box();
+    const teachings = { on: true, at: "2026-10-22T20:00:00-04:00", accounts: { cli: "jason@example.com", app: "sallie@example.com" } };
+    const r = askWith({ settings: d.mine({ drop: "Drop", sessionTeachings: teachings }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.deepEqual(shown(r).sessionTeachings, { on: true, at: teachings.at, accounts: { cli: "(not shown)", app: "(not shown)" } });
+    assert.doesNotMatch(r.out + r.err, /jason@|sallie@|example\.com/);
+    d.done();
+  });
   it("keeps a Mac on its drop folder whatever else its settings hold: a field that JSON writes as an escape does not make it fall back to Unedited Video", () => {
     const d = box();
     // The installer read the drop folder back out of the JSON with plutil, which could not read this one, and fell back quietly:

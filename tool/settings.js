@@ -202,8 +202,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                (by label where there is one), and what to do first
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
-                               say what write would write, whole, as JSON, and then the drop folder as it is now and as it
-                               will be, a line each, or why it would refuse it. Nothing is written. install.sh asks this
+                               say what write would write, whole, as JSON, but for the emails of the accounts of the
+                               teachings from sessions, shown as (not shown), and then the drop folder as it is now and as
+                               it will be, a line each, or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
@@ -329,8 +330,8 @@ function write(home, rest, say, now) {
   });
 }
 
-/** `plan`: the settings `write` would write, whole, as JSON, then the drop folder now and as it will be, each on a line of its
-    own, and nothing written; or the lines `write` would refuse by. Gives the
+/** `plan`: the settings `write` would write, whole, as JSON (the emails of the accounts of the teachings from sessions shown as
+    "(not shown)"), then the drop folder now and as it will be, each on a line of its own, and nothing written; or the lines `write` would refuse by. Gives the
     number it ends with, or a promise of it when the drop folder changes. */
 function plan(home, rest, say, now) {
   return afterwards(planned(home, rest, now), (result) => {
@@ -338,7 +339,13 @@ function plan(home, rest, say, now) {
       for (const line of result.said) say(line);
       return result.code;
     }
-    say(JSON.stringify(result.settings, null, 2));
+    // The settings as write writes them, but for the emails of the accounts the teachings were checked on, which the installer, that
+    // shows what is said here, shows nowhere else.
+    const accounts = result.settings.sessionTeachings?.accounts;
+    const shown = accounts && typeof accounts === "object"
+      ? { ...result.settings, sessionTeachings: { ...result.settings.sessionTeachings, accounts: Object.fromEntries(Object.keys(accounts).map((account) => [account, "(not shown)"])) } }
+      : result.settings;
+    say(JSON.stringify(shown, null, 2));
     // The drop folder as it is and as it would be, each on a line of its own, for install.sh, which reads them without parsing JSON.
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);

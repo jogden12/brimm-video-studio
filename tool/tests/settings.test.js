@@ -808,6 +808,31 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     assert.equal(t.held(), `${planned}\n`);
     t.done();
   });
+  it("plan does not show the emails of the accounts the teachings were checked on, and write, which writes them as they are, keeps them", async () => {
+    // The installer shows what plan prints, and shows no account's email anywhere else.
+    const t = mac({ import: "full" });
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com", "--app-account", "sallie@example.com");
+    const at = readSettings(t.home).settings.sessionTeachings.at;
+    t.said.length = 0;
+    const before = t.held();
+    assert.equal(await t.run("plan", ...t.told, "--readings", "off"), 0);
+    const shown = JSON.parse(t.said[0]);
+    assert.deepEqual(shown.sessionTeachings, { on: true, at, accounts: { cli: "(not shown)", app: "(not shown)" } });
+    assert.ok(!/@|example\.com/.test(t.said.join("\n")), t.said.join("\n"));
+    assert.equal(t.held(), before);
+    // What write writes is unchanged: the accounts as they were, and everything else plan printed.
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told, "--readings", "off"), 0);
+    const written = readSettings(t.home).settings;
+    assert.deepEqual(written.sessionTeachings.accounts, { cli: "jason@example.com", app: "sallie@example.com" });
+    assert.deepEqual({ ...written, sessionTeachings: shown.sessionTeachings }, shown);
+    // With no teachings, or off, there is nothing to hide, and plan prints the settings as they are.
+    const off = mac();
+    assert.equal(await off.run("plan", ...off.told), 0);
+    assert.equal(JSON.parse(off.said[0]).sessionTeachings, undefined);
+    off.done();
+    t.done();
+  });
   it("plan gives the settings of a Mac with no settings as they would be written, with what is told and nothing more", async () => {
     const t = setup();
     const run = async (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT });
