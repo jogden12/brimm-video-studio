@@ -150,8 +150,10 @@ function releaseEpisodeLock(lock, text) {
     { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. The bring of a take-over
     that brought every file also resolves `takeOver`, { by, since, next }: the claim it was for, and what to say next while
     that claim stands, which the result keeps. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
-    work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. */
-export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now }, work) {
+    work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. `clean` is what
+    each line of the result is written as, which `status` prints into Sallie's chat: for a video not yet answered, or a session,
+    the line with nothing of the video's names in it (edit.js), and for any other the line as it is. */
+export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
   const lock = lockOf(home, folder);
   mkdirSync(episodeWork(home, folder), { recursive: true });
   const took = takeEpisodeLock(lock, command, alive);
@@ -165,8 +167,8 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
   } catch (e) {
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
-  const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: done.made || [], failed: done.failed || [], next: done.next || "" };
-  if (done.takeOver) result.takeOver = done.takeOver;
+  const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" };
+  if (done.takeOver) result.takeOver = { ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");
   } finally {

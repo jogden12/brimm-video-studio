@@ -2,9 +2,10 @@
 // (spec 2026-10-22, section 1). Her chat is Claude, and a file's name is often a client's or a meeting's, so a label is made
 // of the length, the Mac and the moment the video was dropped, and never of the name.
 // Nothing here touches a disk or runs a program.
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import { stamp } from "./shared/text.js";
 import { episodeKind } from "./filing.js";
+import { fileSafe } from "./names.js";
 
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -100,4 +101,40 @@ export function seenLine({ facts, plan }) {
   if (plan == null) return seen;
   const n = retakesIn(plan);
   return `${seen}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
+}
+
+/** The names a video's file goes by, which a line about it must not hold while it is named by its label: the file's own name,
+    that name without its ending, and that in the file-safe form its episode's folder and projects are named with. Each of
+    `files` is a file's name, or a path to it. */
+export function namesOf(...files) {
+  const names = [];
+  for (const file of files.filter((f) => typeof f === "string" && f !== "")) {
+    const name = basename(file);
+    const stem = basename(name, extname(name));
+    names.push(file, name, stem, fileSafe(stem));
+  }
+  return [...new Set(names.filter((n) => n !== "" && n !== "video"))];
+}
+
+/** Text as a regular expression takes it, letter for letter. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A path in a line: from a "/" or "~/" that starts a word, or one just inside a quote or a bracket, up to a quote, a bracket, a
+    colon or a comma with a space after it, a space and an opening bracket, a full stop at the end of a sentence, or the end of
+    the line. A path may hold spaces, as Dropbox's do, and a folder's name in it may end in a bracketed part, as an episode's
+    "(Mac Studio)" does: so it is taken to its end, and never word by word. */
+const PATH = /(^|[\s'"(\[=])~?\/(?:[^\n'"()[\]]|\([^\n'"()/]*\)(?=\/))*?(?=['")\]\n]| \((?![^\n'"()/]*\)\/)|: |, |\.?$|\.\s)/gm;
+
+/** `text` with nothing in it of the names in `names` (namesOf: a video's file and what is named from it), each put as "the
+    video" wherever it stands as a whole word, in any case, and with each path in it put as "a file": a line about a video
+    named by its label (spec 2026-10-22, section 1). What is in `keep` stays as it is, as the label itself does when the file's
+    name is a word of it ("Video.mov"): the text is taken apart at each of them, and only the parts between are looked at. */
+export function withoutNames(text, names = [], keep = []) {
+  const texts = (given) => [...new Set(given.filter((x) => typeof x === "string" && x !== "").map((x) => x.normalize("NFC")))].sort((a, b) => b.length - a.length);
+  let parts = [{ text: String(text ?? "").normalize("NFC"), kept: false }];
+  for (const k of texts(keep)) parts = parts.flatMap((p) => (p.kept ? [p] : p.text.split(k).flatMap((piece, i) => [...(i ? [{ text: k, kept: true }] : []), { text: piece, kept: false }])));
+  const found = texts(names).map((name) => new RegExp(String.raw`(?<![\p{L}\p{N}])${literally(name)}(?![\p{L}\p{N}])`, "giu"));
+  // A name is put as a mark of its own until the paths are taken out, so that no shorter name is found in what it is put as.
+  const plain = (piece) => found.reduce((out, re) => out.replace(re, "\u0001"), piece).replace(PATH, "$1a file").replace(/\u0001/g, "the video");
+  return parts.map((p) => (p.kept ? p.text : plain(p.text))).join("");
 }

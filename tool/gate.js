@@ -40,6 +40,11 @@ function sessionNotCleared(record) {
   return !(isObject(mark.cleared) && mark.cleared.confirmed === "dialog");
 }
 
+/** Whether a record is gated at all: a video with no kind (not yet answered, or left alone as not for brimm-video), or a session
+    whose mark is not cleared. Such a record is named by its label in everything edit.js prints (shownName, in episode.js), and
+    never by its folder or its file. Anything that is not a record is not one. */
+export const gated = (record) => isObject(record) && (kindOf(record) === null || sessionNotCleared(record));
+
 /** The words of a command as the gate reads them. A detached run is started as `<command> --now <folder> <words…>` (detached.js),
     and the folder stands where the person said the episode: so those words are read as `<folder> <words…>`. */
 const wordsOf = (words) => (words[0] === "--now" ? words.slice(1) : words);

@@ -2,7 +2,7 @@
 // hold the file's name. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine } from "../kinds.js";
+import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine, namesOf, withoutNames } from "../kinds.js";
 
 /** A cut plan holding `n` ranges the rules cut as `kind`, among a few that are kept and some pauses. */
 const plan = (n, kind = "retake") => ({
@@ -220,5 +220,33 @@ describe("what was seen, in a line", () => {
   });
   it("leaves the retakes out when there is no plan, since the rules never counted them", () => {
     for (const plan of [null, undefined]) assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan, came: "camera" }), "wide, 42:10");
+  });
+});
+
+describe("withoutNames, a line about a video named by its label", () => {
+  const DROPPED = "/Users/sallie/Dropbox/BRIMM Video/Unedited Video/Mac Studio/Coaching call Jane Doe.mov";
+  const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
+  it("knows a file by its name, its name without its ending and its file-safe form, and by the path it was given", () => {
+    assert.deepEqual(namesOf(DROPPED), [DROPPED, "Coaching call Jane Doe.mov", "Coaching call Jane Doe"]);
+    assert.deepEqual(namesOf("Pricing: what?.mov"), ["Pricing: what?.mov", "Pricing: what?", "Pricing- what-"]);
+    assert.deepEqual(namesOf(undefined, ""), []);
+  });
+  it("puts each name as \"the video\", whatever its case, and only where it stands as a whole word", () => {
+    const names = namesOf("Talk.mov");
+    assert.equal(withoutNames("talk.mov failed, and Talk.transcript.txt is missing", names), "the video failed, and the video.transcript.txt is missing");
+    assert.equal(withoutNames("Talking about it", names), "Talking about it");
+  });
+  it("puts each path as \"a file\", spaces and an episode's bracketed folder and all, up to where it ends", () => {
+    // The path it was given is a name of the video's; another path to it is a path.
+    assert.equal(withoutNames(`the sound could not be read (${DROPPED}: Invalid data found)`, namesOf(DROPPED)), "the sound could not be read (the video: Invalid data found)");
+    assert.equal(withoutNames(`the sound could not be read (/tmp/run/Coaching call Jane Doe.mov: Invalid data found)`, namesOf(DROPPED)), "the sound could not be read (a file: Invalid data found)");
+    assert.equal(withoutNames("ENOENT: no such file or directory, open '/x/BRIMM Video/Episodes/2026-10-20 Talk (Mac Studio)/record/0001.json'", []), "ENOENT: no such file or directory, open 'a file'");
+    // A bracketed part at a path's very end cannot be told from words in brackets after it: it is left, and holds no name.
+    assert.equal(withoutNames("It is in /x/BRIMM Video/Episodes/2026-10-20 Talk (Mac Studio) (it is 2 bytes there).", namesOf("Talk.mov")), "It is in a file (Mac Studio) (it is 2 bytes there).");
+    assert.equal(withoutNames("Reel 1/2, and/or", []), "Reel 1/2, and/or");
+  });
+  it("keeps what it is told to keep as it is, though a name is a word of it", () => {
+    assert.equal(withoutNames(`${LABEL}: Video.mov could not be read`, namesOf("Video.mov"), [LABEL]), `${LABEL}: the video could not be read`);
+    assert.equal(withoutNames(`${LABEL} and 1.mov`, namesOf("1.mov"), [LABEL]), `${LABEL} and the video`);
   });
 });

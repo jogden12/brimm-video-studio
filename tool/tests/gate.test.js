@@ -2,7 +2,7 @@
 // cleared. It is pure: the command's name, the record and the command's words are all it is given, and it reads nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, gateFor, printWhy } from "../gate.js";
+import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, gateFor, printWhy, gated } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
@@ -210,5 +210,18 @@ describe("printWhy, what `show` may not print into the chat", () => {
   it("lets every other record's words be shown: a cleared session, a finished video, a record from before the switch", () => {
     assert.equal(printWhy(session({ session: { marked: AT, cleared: { confirmed: "dialog" } } })), "");
     for (const kind of ["finished", "raw", "short video", "episode"]) assert.equal(printWhy({ kind }), "", kind);
+  });
+});
+
+describe("gated, which records are named by their label", () => {
+  it("is a video with no kind, waiting or left alone, and a session whose mark is not cleared, as the gate takes them", () => {
+    for (const record of [unanswered, { kind: null, answer: { state: "not for brimm-video" } }, {}, session(), { kind: "session" }, { kind: "episode", session: { marked: AT, cleared: "no" } }]) {
+      assert.equal(gated(record), true, JSON.stringify(record));
+    }
+  });
+  it("is no other record, and nothing that is not a record", () => {
+    for (const record of [finished, session({ session: { marked: AT, cleared: { confirmed: "dialog" } } }), { kind: "episode" }, { kind: "short video" }, null, undefined, "x", []]) {
+      assert.equal(gated(record), false, JSON.stringify(record));
+    }
   });
 });

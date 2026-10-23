@@ -63,7 +63,7 @@ import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS }
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
-import { cameFrom, guessKind, labelFor, numbered, seenLine } from "./kinds.js";
+import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { readStatuses, importState } from "./importing.js";
@@ -627,8 +627,9 @@ const LIGHT_PLAN_NOTE = "The times here are the recording's own, from its start.
 /** The episode on this Mac that a new video, given by its length in `seconds`, its `fingerprint` and its `words`, is a new
     version of (matchVersion, in versions.js): { id, folder }, or null. Each whole record in Episodes under `root` is a
     candidate, and an episode's words are read from its .words.json only when that file is whole on this Mac (`whole`):
-    nothing is brought down from Dropbox for it, and the log says so, by the episode's label. A record of before the switch has
-    no fingerprint, and never matches. Nothing is thrown from here: a folder that cannot be read is no match. */
+    nothing is brought down from Dropbox for it, and the log says so, by the episode's label, or its id when it has none. A
+    record of before the switch has no fingerprint, and never matches. Nothing is thrown from here: a folder that cannot be
+    read is no match. */
 function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
   let names = [];
   try {
@@ -647,7 +648,8 @@ function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
   }
   const readWords = (folder) => {
     const record = records.get(folder);
-    const named = record.label || basename(folder);
+    // Named by its label, or by its id: never by its folder, whose name is its file's.
+    const named = record.label || record.id;
     const words = cutOutputs(join(folder, record.video.file)).words;
     if (!whole(words)) {
       log(`${named}: its words are not on this Mac, so it was not compared.`);
@@ -704,10 +706,21 @@ function lightFields({ name, facts, plan, words, root }, deps) {
 }
 
 async function workOn(file, deps) {
-  const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
+  const { run, tools, model, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
   let progress = deps.progress || noProgress;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
+  const { episode } = deps;
+  // With this Mac's settings saying `import: "light"`, an episode's import is the light one (below). Its every log line names the
+  // video by its label (`shown`), and until the label is known as "A video in the drop folder"; and what a step logs on the
+  // way, as a program's error or a file that could not be put somewhere, is logged with nothing of the file's names or a path
+  // in it (kinds.js withoutNames), as is why it failed in its status. Its file is often named for a client.
+  const light = Boolean(episode && deps.light);
+  const hide = { names: light ? namesOf(file) : [], keep: [] };
+  const plain = (text) => (light ? withoutNames(text, hide.names, hide.keep) : text);
+  const said = deps.log || (() => {});
+  const log = light ? (line) => said(plain(line)) : said;
+  let shown = light ? "A video in the drop folder" : name;
   // A file has arrived when its size has settled and it is whole on this Mac: Dropbox can show a file at its full size before
   // it has brought any of it over, and ffprobe could then hang on it or fail.
   const whole = deps.isWhole || isWhole;
@@ -725,19 +738,16 @@ async function workOn(file, deps) {
   while (!settled(sizes) || !whole(file)) {
     if (settled(sizes) && !broughtDown.has(readKey())) {
       broughtDown.add(readKey());
-      log(`${name}: Dropbox has not brought it down to this Mac yet, so it is asked for.`);
-      await bringDown(file).catch((e) => log(`${name}: it could not be read through (${e.code || e.message}).`));
+      log(`${shown}: Dropbox has not brought it down to this Mac yet, so it is asked for.`);
+      await bringDown(file).catch((e) => log(`${shown}: it could not be read through (${e.code || e.message}).`));
     }
     if (sizes.length > MAX_LOOKS) {
-      log(`${name}: still arriving. It is taken the next time the folder changes.`);
+      log(`${shown}: still arriving. It is taken the next time the folder changes.`);
       return { ok: false, name, arriving: true, message: "still arriving" };
     }
     await wait(LOOK_MS);
     sizes.push(sizeOf(file));
   }
-  // An episode's import keeps its own folder in BRIMM Video Work, on the same disk as Dropbox, until the late check: macOS
-  // may clear the temp folder before a late check that a restart left is made.
-  const { episode } = deps;
   // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
   const arrived = episode ? fileId(file) : null;
   // With this Mac's settings saying `import: "light"`, an episode's import is the light one (spec 2026-10-22, section 1): the
@@ -748,34 +758,39 @@ async function workOn(file, deps) {
   // this Mac first saw the video in its drop folder (seen.json, filing.js noteSeen), so that a queue of drops keeps their own
   // times; when that was not noted, it is the moment this import began. Videos first seen at one look of the folder share
   // that moment, so a label this Mac has given already is numbered, "(2)", "(3)", as a session's is.
-  const light = Boolean(episode && deps.light);
   const noted = light && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
   const dropped = noted && Number.isFinite(noted.at) ? new Date(noted.at) : deps.now ? deps.now() : new Date();
   const unnumbered = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
   const label = light ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, { video: name, importId: importIdOf(arrived) })) : "";
-  const shown = light ? label : name;
+  if (light) {
+    shown = label;
+    hide.keep.push(label);
+  }
+  // An episode's import keeps its own folder in BRIMM Video Work, on the same disk as Dropbox, until the late check: macOS
+  // may clear the temp folder before a late check that a restart left is made.
   const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   // Whether the run's folder stays when the run ends: it does once an episode's files are in Dropbox, for the late check.
   let keepWork = false;
   // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
   // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
-  const files = filesOf(work, { name, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
+  const files = filesOf(work, { name: shown, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
   // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see. A light
   // import's status carries the video's label, for the commands to name it by in place of its file (Part F).
   if (episode) {
     const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
     progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
-  deps = { ...deps, files, progress };
-  const fail = (why) => {
+  deps = { ...deps, log, files, progress };
+  const fail = (given) => {
+    const why = plain(given);
     // An episode's import writes nothing into the drop folder: its status file says why (importing.js).
     if (episode) progress.fail(why);
     else {
       writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
       files.put(out.failed);
     }
-    log(`${name}: failed. ${why}.`);
+    log(`${shown}: failed. ${why}.`);
     notify(episode ? `No transcript could be made from ${shown}. It stays in the drop folder; see the log.` : `No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
   };
@@ -790,7 +805,7 @@ async function workOn(file, deps) {
   let finished = false;
   try {
     progress.step("Reading the sound");
-    log(`${name}: reading the sound.`);
+    log(`${shown}: reading the sound.`);
     const probed = join(work, "facts.json");
     const probe = await run(tools.ffprobe, probeArgs(file, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
@@ -811,7 +826,7 @@ async function workOn(file, deps) {
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
     if (a.code !== 0 || !existsSync(wav)) return fail(`the sound could not be read from the file (${lastLine(a.stderr)})`);
     progress.step("Writing the transcript");
-    log(`${name}: writing the transcript, with a time for every word.`);
+    log(`${shown}: writing the transcript, with a time for every word.`);
     const outBase = join(work, "captions");
     let b = await run(tools.whisper, wordArgs({ model, wav, outBase }));
     // On some recordings the transcriber dies inside its word timing, every time it is tried, and reads the same sound
@@ -820,7 +835,7 @@ async function workOn(file, deps) {
     let untimed = "";
     if (b.code !== 0) {
       untimed = `the transcriber could not time the words (${reasonOf(b)})`;
-      log(`${name}: ${untimed}. Writing the transcript without them.`);
+      log(`${shown}: ${untimed}. Writing the transcript without them.`);
       b = await run(tools.whisper, whisperArgs({ model, wav, outBase }));
     }
     if (b.code !== 0) return fail(`the transcriber stopped (${reasonOf(b)})`);
@@ -830,7 +845,7 @@ async function workOn(file, deps) {
     const heard = captionCount(written) ? await run(tools.ffmpeg, silenceArgs(wav), { keep: 1000000 }) : null;
     const silent = heard && heard.code === 0 ? silences(heard.stderr) : [];
     const quiet = dropSilent(written, silent);
-    if (quiet.dropped) log(`${name}: left out ${quiet.dropped} caption${quiet.dropped === 1 ? "" : "s"} written where nobody speaks.`);
+    if (quiet.dropped) log(`${shown}: left out ${quiet.dropped} caption${quiet.dropped === 1 ? "" : "s"} written where nobody speaks.`);
     const srt = spellNames(quiet.srt);
     const captions = captionCount(srt);
     if (!captions) return fail("the transcriber found no speech in it");
@@ -842,7 +857,7 @@ async function workOn(file, deps) {
     files.text(out.txt, stampedText(srt));
     files.text(out.srt, srt);
     if (!episode) rmSync(out.failed, { force: true });
-    log(`${name}: the transcript is written, ${captions} captions.`);
+    log(`${shown}: the transcript is written, ${captions} captions.`);
 
     // From here on a step that fails costs the plan or a file made from it, and never the transcript: what was made is kept
     // and filed, and the plan's own text says what is missing. A short clip that could not be cut is the one thing it does
@@ -871,7 +886,7 @@ async function workOn(file, deps) {
       try {
         files.text(out.fcpxml, project.textFor(resolve(video)).text);
       } catch (e) {
-        log(`${name}: its Final Cut file names it in a folder it is not in, and could not be written again (${e.code || e.message}).`);
+        log(`${shown}: its Final Cut file names it in a folder it is not in, and could not be written again (${e.code || e.message}).`);
       }
     };
     /** What a plan comes to, as the log says it. */
@@ -887,16 +902,22 @@ async function workOn(file, deps) {
       files.text(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
     } else if (light) {
       // The light import makes no video: the words, the rough cut's captions, placed by the plan's own arithmetic, the cut log,
-      // whose first line says its times are the recording's, and the plan, written last, as below.
-      log(`${name}: the cut plan ${sums(plan)}.`);
-      files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
-      const roughSrt = roughCaptions(plan.phrases, keptSpans(plan.ranges, roughRate(facts)));
-      files.text(out.roughTxt, stampedText(roughSrt));
-      files.text(out.roughSrt, roughSrt);
-      files.text(out.planTxt, planText(plan, LIGHT_PLAN_NOTE));
-      files.text(out.plan, planJson(plan, null));
+      // whose first line says its times are the recording's, and the plan, written last, as below. A file that cannot be written
+      // ends the import as one that failed, whose status says why with nothing of the file's names in it (fail), and nothing is
+      // filed: the next try makes them again.
+      log(`${shown}: the cut plan ${sums(plan)}.`);
+      try {
+        files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
+        const roughSrt = roughCaptions(plan.phrases, keptSpans(plan.ranges, roughRate(facts)));
+        files.text(out.roughTxt, stampedText(roughSrt));
+        files.text(out.roughSrt, roughSrt);
+        files.text(out.planTxt, planText(plan, LIGHT_PLAN_NOTE));
+        files.text(out.plan, planJson(plan, null));
+      } catch (e) {
+        return fail(`the work stopped (${e.code || e.message})`);
+      }
     } else {
-      log(`${name}: the cut plan ${sums(plan)}.`);
+      log(`${shown}: the cut plan ${sums(plan)}.`);
 
       // Claude reads the rules' plan before anything is made from it. Its decisions are applied with the pauses ffmpeg heard,
       // so a cut of its own falls where the rules' cuts fall, and the clips it picked are taken from the plan as it then is.
@@ -916,12 +937,12 @@ async function workOn(file, deps) {
         ignored = [...read.problems, ...applied.ignored, ...picked.ignored];
         clips = picked.clips;
         if (kind === "short video" && clips.length) {
-          log(`${name}: it is a short video, so the clips Claude picked are not cut.`);
+          log(`${shown}: it is a short video, so the clips Claude picked are not cut.`);
           clips = [];
         }
         // A recording with no picture gets no Reel candidates: none could have a preview or a project.
         if (episode && !facts.height && clips.length) {
-          log(`${name}: it has no picture, so the clips Claude picked are not Reel candidates.`);
+          log(`${shown}: it has no picture, so the clips Claude picked are not Reel candidates.`);
           clips = [];
         }
         changes = (plan.changes || []).length;
@@ -964,9 +985,9 @@ async function workOn(file, deps) {
       let centred = "";
       const atCentre = [];
       if (!needsReframe(facts)) {
-        if (facts.height) log(`${name}: its picture is not wider than it is tall, so it needs no upright version.`);
+        if (facts.height) log(`${shown}: its picture is not wider than it is tall, so it needs no upright version.`);
       } else if (kind === "short video") {
-        log(`${name}: it is a short video, so it gets no upright version.`);
+        log(`${shown}: it is a short video, so it gets no upright version.`);
       } else if (!spans.length) lacks.push({ what: "upright version", why: "the plan keeps nothing" });
       else {
         const made = await upright(file, out.vertical, { facts, spans, streams }, work, deps);
@@ -979,12 +1000,12 @@ async function workOn(file, deps) {
       // the upright version, and a small upright preview of each. No full-size clip, no Story and no caption file: only a Reel
       // that is picked gets more (design, section 3). A preview that cannot be made is noted, as a clip that cannot be cut is.
       if (episode && clips.length) {
-        log(`${name}: making the previews of ${clips.length} Reel candidate${clips.length === 1 ? "" : "s"}.`);
+        log(`${shown}: making the previews of ${clips.length} Reel candidate${clips.length === 1 ? "" : "s"}.`);
         candidates = await makePreviews(file, reelCandidates({ clips, plan, facts, stills }), { facts, streams }, deps);
         cut = candidates.map((c) => ({ clip: clips.find((clip) => clip.n === c.n), files: c.preview ? [join(dirname(file), c.preview)] : [], named: c.preview ? [c.preview] : [], failed: c.failed ? [`the preview of Reel ${c.n} could not be made: ${c.failed}`] : [] }));
         if (wide(facts) && candidates.some((c) => c.preview)) atCentre.push("the Reel previews");
       } else if (clips.length) {
-        log(`${name}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
+        log(`${shown}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
         cut = await cutClips(file, clips, { plan, facts, stills, streams }, deps);
         if (wide(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
       }
@@ -1051,8 +1072,8 @@ async function workOn(file, deps) {
       const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
       files.text(out.plan, planJson(plan, claude));
     }
-    for (const what of missing) log(`${name}: ${what}.`);
-    if (!missing.length) log(`${name}: done.`);
+    for (const what of missing) log(`${shown}: ${what}.`);
+    if (!missing.length) log(`${shown}: done.`);
     // For a watched folder, the video is filed away with the files the run held for it, the plan last. Its Final Cut file
     // names it in the folder it is filed in: when it cannot be moved there, the file is first written again to name the
     // video where it stays.
@@ -1080,27 +1101,29 @@ async function workOn(file, deps) {
         // offer first. It is a new version of that one only once she says so.
         filed = fileEpisode(light ? { ...given, fcpxml: "", kind: null, label, ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root }, { log, whole }) } : given, deps);
         const match = light && filed.record.answer ? filed.record.answer.match : null;
-        if (match) log(`${name}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
+        if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
         const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt), ...(light ? { label } : {}) };
         try {
           writePending(episode.home, pending);
-          log(`${name}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
+          log(`${shown}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
         } catch (e) {
-          log(`${name}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
+          log(`${shown}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
         }
       } catch (e) {
         if (e.code === "DROP_CHANGED") {
           // Nothing of it was put into Dropbox. The new file is imported on its own, as another recording.
-          log(`${name}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
+          log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
           progress.drop();
           return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
         }
-        const why = `it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`;
+        // A light import's record is the last file filed: why it could not be, as a clone's error naming the file, is said in its
+        // status with nothing of the file's names in it.
+        const why = plain(`it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`);
         missing.push(why);
         progress.fail(why);
-        log(`${name}: ${why}. It stays in the drop folder, and is done again the next time.`);
+        log(`${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
       // The label names the Mac it was dropped on, so the notice does not say it again.
       if (filed && light) notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
@@ -1117,8 +1140,9 @@ async function workOn(file, deps) {
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } catch (e) {
     // Something nobody foresaw stopped an episode's import: its status says so, so that both Macs see it failed, and it is not
-    // taken again until a person says to.
-    if (episode) progress.fail(`the work stopped (${e.code || e.message})`);
+    // taken again until a person says to. A light import's label goes with the error, for the log to name the video by it.
+    if (episode) progress.fail(plain(`the work stopped (${e.code || e.message})`));
+    if (light && e !== null && typeof e === "object") e.label = label;
     throw e;
   } finally {
     progress.end(finished);
@@ -1141,8 +1165,10 @@ export async function uneditedFile(file, deps) {
   try {
     return await workOn(file, deps);
   } catch (e) {
-    const why = String(e.code || e.message);
-    (deps.log || (() => {}))(`${basename(file)}: the work stopped (${why}).`);
+    // A light import names the video by its label, and says why with nothing of the file's names in it, as workOn does.
+    const light = Boolean(deps.episode && deps.light);
+    const why = light ? withoutNames(String(e.code || e.message), namesOf(file)) : String(e.code || e.message);
+    (deps.log || (() => {}))(`${light ? (e && e.label) || "A video in the drop folder" : basename(file)}: the work stopped (${why}).`);
     return { ok: false, name: basename(file), message: why };
   }
 }

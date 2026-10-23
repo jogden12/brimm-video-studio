@@ -120,6 +120,18 @@ export function kindOf(r) {
   return KINDS.includes(kind) ? kind : null;
 }
 
+/** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
+    session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
+    and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its
+    own), or by its short id when it has none; every other record by its name, as today. A session's name is its label: F3
+    sets it in the same write as the mark, and F7 checks any rename. A record that has no name to give, as a conflicted copy
+    that is not whole may be, is named by its short id. */
+export function shownName(r) {
+  const short = isObject(r) && typeof r.id === "string" ? r.id.slice(-6) : "";
+  if (kindOf(r) === null) return isObject(r) && isText(r.label) ? r.label : `a video not yet answered (${short})`;
+  return isObject(r.name) && isText(r.name.text) ? r.name.text : `an episode (${short})`;
+}
+
 /** The layout a record is written at: 3 once it holds anything of the switch (a kind other than "episode" or "short video",
     and having none is one; an answer, a session mark, a reading, or the episode it is a version of; or a version with a `how`,
     one that was rendered); otherwise 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
@@ -371,7 +383,8 @@ export const acceptRev = (home, id, rev) => noteWritten(home, id, rev);
     their own, and this is what stands for it. */
 export function undone(record, home) {
   if (!isObject(record) || !Number.isInteger(record.rev) || record.rev >= lastWritten(home, record.id)) return "";
-  const name = isObject(record.name) && isText(record.name.text) ? record.name.text : record.id;
+  // A video not yet answered is named by its label: its name is still the file's (shownName).
+  const name = kindOf(record) === null ? shownName(record) : isObject(record.name) && isText(record.name.text) ? record.name.text : record.id;
   return `Dropbox undid this Mac's last change to ${name}. Say it again.`;
 }
 
@@ -449,10 +462,11 @@ export function filesProblems(folder, record, { stat = statSync } = {}) {
 export const heldElsewhere = (record, machine) => (record.editing && record.editing.by !== machine ? record.editing : null);
 
 /** Why a command that writes the record, pushes or puts files into the episode must not change it now, because another Mac
-    has it open (spec section 1, "Picking an episode up"), in plain words: "" when nobody does, or `machine` does. */
+    has it open (spec section 1, "Picking an episode up"), in plain words: "" when nobody does, or `machine` does. The episode is
+    named as everything edit.js prints names it (shownName). */
 export const heldText = (record, machine) => {
   const held = heldElsewhere(record, machine);
-  return held ? `${held.by} has ${record.name.text} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
+  return held ? `${held.by} has ${shownName(record)} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
 };
 
 /** The record with `machine` editing it since `at`. */

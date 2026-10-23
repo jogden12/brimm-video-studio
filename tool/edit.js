@@ -31,9 +31,10 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, printWhy } from "./gate.js";
+import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
+import { isZoomName, namesOf, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -136,13 +137,17 @@ export function contextFor(deps = {}) {
   const got = deps.settings ? { settings: deps.settings } : readSettings(home);
   if (!got.settings) return { why: "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
   const { settings } = got;
+  // The names of a gated video that a command has found (findEpisode, hideNames), which no line it says after may hold.
+  const hidden = { names: [], keep: [] };
+  const say = deps.say || ((line) => process.stdout.write(`${line}\n`));
   return {
     settings,
     machine: settings.machine,
     root: settings.root,
     episodes: episodesFolder(settings.root),
     home,
-    say: deps.say || ((line) => process.stdout.write(`${line}\n`)),
+    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep) : line),
+    hidden,
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
     stat: deps.stat || ((path) => statSync(path, { throwIfNoEntry: false })),
@@ -168,6 +173,8 @@ function folders(ctx) {
 
 /** A name as it is compared with what a person said: whatever its case, and however its accents are written. */
 const plainly = (text) => String(text || "").normalize("NFC").toLowerCase();
+/** A label as it is compared with what a person said: as plainly does, and whatever its spacing. */
+const spaced = (text) => plainly(text).replace(/\s+/g, " ").trim();
 
 /** Some things as they are said in a row: "a", "a and b", "a, b and c". */
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
@@ -218,42 +225,135 @@ function gateOf(ctx, e, records, said, inForce) {
     as a run that failed does, so that "how far is it?" says why and not that nothing is running. The words name no folder or
     file. A run already at work on the episode is left to leave its own. */
 async function leaveGateResult(ctx, found, command) {
-  await runDetached({ home: ctx.home, folder: found.name, command, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
+  await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
+}
+
+/** An episode in Episodes by its folder's `name`, as findEpisode and the lists know it: { name, folder, read, inForce, records,
+    newer }. `read` is what readEpisode gave; `inForce` is the record in force: the whole one, or for a conflicted episode the
+    newest whole record past its copies; `records` are the records it is known by, and all that is read of it: that one, and for
+    a conflicted episode each conflicted copy of a record, as it is, which may not be whole. `newer` is the record a newer
+    brimm-video wrote, when one did, the one past the copies included; null otherwise. */
+function episodeAt(ctx, name) {
+  const folder = join(ctx.episodes, name);
+  const read = readEpisode(folder);
+  const past = read.code === "CONFLICTED" ? readEpisode(folder, { pastCopies: true }) : null;
+  const inForce = read.record || (past ? past.record : undefined);
+  const copies = past ? conflictedCopies(folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(folder, c))) : [];
+  const records = (read.record ? [read.record] : past ? [inForce, ...copies] : []).filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
+  const newer = read.newer ? read.record : past && past.newer ? past.record : null;
+  return { name, folder, read, inForce, records, newer };
+}
+
+/** Whether an episode is gated (gate.js): any record it is known by is a video not yet answered or a session not cleared, so
+    that a conflicted copy of one names it so, as the gate asks it. A copy not shaped as a record is not asked. */
+const isGated = (e) => e.records.filter(recordShaped).some(gated);
+
+/** The record a gated episode is named by: the first of its records that is gated. */
+const gatedRecord = (e) => e.records.filter(recordShaped).find(gated);
+
+/** An episode whose record cannot be read at all, as it is named on a Mac that does the light import: by the day and the Mac its
+    folder's name begins and ends with (names.js episodeFolderName), as "an episode of 2026-10-22 from the Mac Studio whose
+    record cannot be read", and never by the rest, which is the video's file's name. */
+function unreadName(name) {
+  const m = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/.exec(name);
+  return `an episode${m ? ` of ${m[1]} from ${spokenMac(m[2])}` : ""} whose record cannot be read`;
+}
+
+/** How an episode is named in a list of several, and wherever edit.js would name it by its folder: a gated one by its label and
+    its short id, since two labels may be the same (shownName); one a newer brimm-video wrote by its short id alone
+    (newerName); on a Mac that does the light import, one with no record that can be read by its day and Mac alone
+    (unreadName); and any other by its folder's name, as always. */
+function listedAs(ctx, e) {
+  if (e.newer) return newerName(e.newer);
+  if (isGated(e)) {
+    const r = gatedRecord(e);
+    return `${shownName(r)} (${String(r.id).slice(-6)})`;
+  }
+  if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
+  return e.name;
+}
+
+/** The episode `found` (findEpisode's), as a line names it where it would name its folder: as listedAs names it. */
+const calledAs = (ctx, found) => listedAs(ctx, episodeAt(ctx, found.name));
+
+/** What a line about the gated episode `e` must not hold, and what it keeps: { names, keep }. The names are its folder's, its
+    video's file and what is named from it (namesOf), and every name its records have given it, those in its record folder and
+    its conflicted copies alike; what it keeps is how it is named now (shownName) and each label its records hold. */
+function secretsOf(e) {
+  const history = recordNumbers(e.folder).map((n) => recordAt(recordFile(e.folder, n)));
+  const all = [...e.records, ...history].filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
+  const keep = [...new Set(all.flatMap((r) => [gated(r) ? shownName(r) : "", typeof r.label === "string" ? r.label : ""]).filter(Boolean))];
+  const names = [e.name, ...all.flatMap((r) => [...namesOf(r.video && r.video.file), r.name && r.name.text])].filter((n) => typeof n === "string" && n !== "" && !keep.includes(n));
+  return { names: [...new Set(names)], keep };
+}
+
+/** Text about the episode `e` with nothing in it of its video's names when it is gated (secretsOf), and as it is otherwise. */
+const cleanFor = (e) => {
+  if (!isGated(e)) return (text) => text;
+  const { names, keep } = secretsOf(e);
+  return (text) => withoutNames(text, names, keep);
+};
+
+/** Have every line the command editMain is running says from here on hold nothing of the names of `e`, the gated episode it
+    found (ctx.hidden, which contextFor's `say` reads): for a command that names an episode, since its own lines may name a file
+    or a folder of it on the way, as an error does. A command of UNSCOPED names each episode as it is to be named, and is left
+    alone. */
+function hideNames(ctx, e) {
+  if (!ctx.hidden || !ctx.asked || UNSCOPED.includes(ctx.asked.command) || !isGated(e)) return;
+  const { names, keep } = secretsOf(e);
+  ctx.hidden.names.push(...names);
+  ctx.hidden.keep.push(...keep);
+}
+
+/** What a detached run writes into its result for an episode, by what the command found (ctx.hidden): nothing of a gated
+    video's names. Undefined, so that runDetached writes it as it is, for any other. */
+const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep) : undefined);
+
+/** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
+    folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
+    gated episode is named by its label and short id, and its why names no file of its video; one a newer brimm-video wrote is
+    named by its short id; and on a Mac that does the light import, one with no record that can be read at all is named by its
+    day and Mac alone, and Jason is asked. */
+function notRead(ctx, found, said = found.name) {
+  const e = episodeAt(ctx, found.name);
+  const shown = listedAs(ctx, e);
+  if (shown === e.name) return `${said}: ${found.read.why}.`;
+  if (!e.inForce) return `${capital(shown)}: ask Jason.`;
+  const clean = e.newer ? (text) => withoutNames(text, [e.name, ...namesOf(e.newer.video && e.newer.video.file)]) : cleanFor(e);
+  return `${capital(shown)}: ${clean(found.read.why)}.`;
 }
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
-    name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
-    fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
-    renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
-    whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
-    every command but `resolve` refuses it. In the lists of episodes it says, one a newer brimm-video wrote is named by its
-    short id alone (newerName).
+    name or its own name; and a gated one by its label (shownName), the whole of it, whatever its case and spacing, so that a
+    label numbered " (2)" fits that video alone and the bare label the first. Gives back { folder, name, read }, where `read` is
+    what readEpisode gave, or { why } when no episode fits or more than one does. An episode with a conflicted copy is found
+    by its own name, label and id as well, since `name` never renames its folder: by the newest whole record past the copies,
+    and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
+    there. Its `read` still says it is conflicted, so every command but `resolve` refuses it. In the lists of episodes it says,
+    each is named as listedAs names it: never a gated one by its folder.
     When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
     gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
-    read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. */
+    read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
+    line the command says after hold nothing of its names (hideNames). */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
-  const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
-  // The records a name or an id is matched against, and only that: for a conflicted episode, the one resolve would read and
-  // the records' conflicted copies, as they are, which may not be whole.
-  const copiesOf = (e) => conflictedCopies(e.folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(e.folder, c)));
-  // The record in force: the whole one, or for a conflicted episode the newest whole record past its copies.
-  const inForce = new Map(all.map((e) => [e, e.read.record || (e.read.code === "CONFLICTED" ? readEpisode(e.folder, { pastCopies: true }).record : undefined)]));
-  const records = new Map(all.map((e) => {
-    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [inForce.get(e), ...copiesOf(e)] : [];
-    return [e, read.filter((r) => r !== null && typeof r === "object" && !Array.isArray(r))];
-  }));
-  const known = (e) => records.get(e);
+  const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE");
+  const known = (e) => e.records;
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
+  const labelled = (r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""].filter(Boolean);
+  const byLabel = all.filter((e) => known(e).some((r) => labelled(r).some((label) => spaced(label) === spaced(said))));
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
-  const fits = exact.length ? exact : byId.length ? byId : byWords;
-  const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
-  if (fits.length === 1) return gateOf(ctx, fits[0], known(fits[0]), said, inForce.get(fits[0])) || fits[0];
-  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
-  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
+  const fits = exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  if (fits.length === 1) {
+    const e = fits[0];
+    hideNames(ctx, e);
+    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read };
+  }
+  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
+  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
 /** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
@@ -304,51 +404,91 @@ function folderSize(folder) {
 }
 
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
-    late check. Only those whose video `fits`, when it is given. A video that is held in the drop folder, not imported, is no
-    import: the list of the videos waiting says why it waits. */
+    late check. Only those whose video `fits`, when it is given: by its file's name, or by its label. A video that is held in
+    the drop folder, not imported, is no import: the list of the videos waiting says why it waits. A light import's status,
+    which carries its video's label (Part L), is named by its label, and why it failed or what its late check found is said
+    with no path or name of its file in it (withoutNames). */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && (fits(s.status.video) || (s.status.label && fits(s.status.label))) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
-    if (state === "failed") return `  ${status.video}: its import failed on ${status.machine}: ${status.failed}`;
-    if (state === "problem") return `  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`;
-    if (state === "stopped") return `  ${status.video}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
-    return `  ${status.video}: being imported on ${status.machine}, at ${status.step}`;
+    const who = status.label || status.video;
+    const plain = (text) => (status.label ? withoutNames(text, namesOf(status.video), [status.label]) : text);
+    if (state === "failed") return `  ${who}: its import failed on ${status.machine}: ${plain(status.failed)}`;
+    if (state === "problem") return `  ${who}: copied in on ${status.machine}, but the late check found a problem: ${plain(status.problem)}`;
+    if (state === "stopped") return `  ${who}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
+    return `  ${who}: being imported on ${status.machine}, at ${status.step}`;
   });
 }
 
+/** The label a status of the Mac `machine` gives the video `video` in its drop folder, of a light import (Part L), or "". */
+function labelIn(statuses, video, machine) {
+  const labelled = statuses.find(({ status }) => status && status.video === video && status.machine === machine && status.label);
+  return labelled ? labelled.status.label : "";
+}
+
+/** A video in a drop folder that has no label, as it is named on a Mac that does the light import: by what it is and its size,
+    as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. */
+const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"} of ${sizeText(bytes)}`;
+
+/** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
+    them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
+    files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
+    answer, a client or group session, or a video left alone (`left`), with no folder; its title, which Claude may have made of
+    its words, is not said; and no line of it names its video's files (cleanFor). An episode whose record cannot be read is
+    named as listedAs names it, and so is one a newer brimm-video wrote. */
+function episodeLines(ctx, e, left) {
+  const r = e.read.record;
+  if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
+  if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    Not right: ${e.read.why}.`];
+  if (!e.inForce) return [`  ${capital(listedAs(ctx, e))}: ask Jason.`];
+  const record = e.inForce;
+  const lines = [];
+  const clean = cleanFor(e);
+  if (isGated(e)) {
+    const named = gatedRecord(e);
+    const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : "a client or group session, of";
+    lines.push(`  ${shownName(named)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
+  } else {
+    const kind = record.kind === "short video" ? "a short video" : "an episode";
+    lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
+  }
+  if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
+  if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
+  const pushed = record.main && Array.isArray(record.main.pushed) ? record.main.pushed : [];
+  if (pushed.length) lines.push(`    Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}`);
+  if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
+  for (const problem of filesProblems(e.folder, record)) lines.push(`    Not right: ${clean(problem)}`);
+  return lines;
+}
+
+/** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
+const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
+
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
-    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). */
+    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). A video not
+    yet answered, or a session, is named by its label (episodeLines), and one she has left alone is listed apart, under a
+    heading of its own. On a Mac that does the light import, a video waiting in a drop folder is named by its label, or by
+    what it is and its size, and why it waits holds no name of its file; with the light import off, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
-  const shown = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) }))
-    .filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  const shown = all.filter((e) => !isLeft(e));
+  const left = all.filter(isLeft);
   if (!shown.length) say("No episodes yet.");
   else {
     say("Episodes, newest first:");
-    for (const { name, folder, read } of shown) {
-      const r = read.record;
-      if (!r) {
-        say(`  ${name}`);
-        say(`    Not right: ${read.why}.`);
-        continue;
-      }
-      if (read.newer) {
-        say(`  ${capital(newerName(r))}: Jason updates this Mac before it is changed here.`);
-        continue;
-      }
-      const kind = r.kind === "short video" ? "a short video" : "an episode";
-      say(`  ${r.name.text}${r.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(r.video.seconds)}, in ${name}, id ${r.id.slice(-6)}`);
-      if (r.editing) say(`    Editing: ${r.editing.by}, since ${shownAt(r.editing.since)}`);
-      if (r.title) say(`    Title: ${r.title.text}${r.title.approved ? "" : " (recommended)"}`);
-      const pushed = r.main && Array.isArray(r.main.pushed) ? r.main.pushed : [];
-      if (pushed.length) say(`    Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}`);
-      if (r.finished) say(`    Finished: revision ${r.finished.revision}, on ${r.finished.on}`);
-      for (const problem of filesProblems(folder, r)) say(`    Not right: ${problem}`);
-    }
+    for (const e of shown) for (const line of episodeLines(ctx, e, false)) say(line);
+  }
+  if (left.length) {
+    say("Left alone, not for brimm-video:");
+    for (const e of left) for (const line of episodeLines(ctx, e, true)) say(line);
   }
   // The videos in each Mac's drop folder.
   const drops = join(ctx.root, "Unedited Video");
+  const light = lightImport(ctx.settings);
+  const statuses = light ? readStatuses(ctx.root, ctx.now()) : [];
   const waiting = [];
   let macs = [];
   try {
@@ -372,7 +512,13 @@ export async function episodes(ctx) {
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
       const noted = readSeen(ctx.home)[seenKey(video, found)];
       const came = noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs;
-      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      if (!light) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      else {
+        // A video waiting here has not been answered: it is named by its label, which retry takes, or by what it is and its size.
+        const label = labelIn(statuses, video, mac);
+        const who = label || capital(unlabelled(video, found.size));
+        waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
+      }
     }
   }
   if (waiting.length) {
@@ -385,7 +531,7 @@ export async function episodes(ctx) {
     say("Imports:");
     for (const line of imports) say(line);
   }
-  // This Mac's libraries, and the space left for them.
+  // This Mac's libraries, and the space left for them. A library of a gated episode is named as its episode is.
   say("On this Mac:");
   let work = [];
   try {
@@ -395,7 +541,9 @@ export async function episodes(ctx) {
   }
   for (const name of work) {
     const library = join(workFolder(ctx.home), name, `${name}.fcpbundle`);
-    if (statSync(library, { throwIfNoEntry: false })) say(`  ${name}.fcpbundle: ${sizeText(folderSize(library))}`);
+    if (!statSync(library, { throwIfNoEntry: false })) continue;
+    const named = listedAs(ctx, episodeAt(ctx, name));
+    say(`  ${named === name ? `${name}.fcpbundle` : `The library of ${named}`}: ${sizeText(folderSize(library))}`);
   }
   try {
     const disk = ctx.statfs(ctx.home);
@@ -426,7 +574,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
   }
   const { read } = found;
   if (!read.record) {
-    ctx.say(`${found.name}: ${read.why}.`);
+    ctx.say(notRead(ctx, found));
     return { code: 1 };
   }
   if (read.newer) {
@@ -605,7 +753,7 @@ export async function open(ctx, rest) {
     await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
     const again = readEpisode(found.folder);
     if (!again.record) {
-      say(`${found.name}: ${again.why}.`);
+      say(notRead(ctx, { ...found, read: again }));
       return 1;
     }
     // The record read again is older than the claim this Mac wrote, or has nobody editing it: Dropbox took the claim away.
@@ -870,7 +1018,7 @@ export async function bring(ctx, rest) {
   }
   const found = findEpisode(ctx, folder);
   if (!found.read || !found.read.record) {
-    ctx.say(found.why || `${folder}: ${found.read.why}.`);
+    ctx.say(found.why || notRead(ctx, found, folder));
     if (found.gate) await leaveGateResult(ctx, found, "bring");
     return 1;
   }
@@ -878,7 +1026,7 @@ export async function bring(ctx, rest) {
   const name = record.name.text;
   // The claim she said to take over, as the record has it when the bring starts: none when nobody else has it by then.
   const taking = takeOver ? heldElsewhere(record, ctx.machine) : null;
-  const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
     const coming = wanted();
     const read = ctx.deps.readAll || readThrough;
@@ -901,11 +1049,11 @@ export async function bring(ctx, rest) {
     return { ok: true, made, failed, next, takeOver: { by: taking.by, since: taking.since, next: `Every file of ${name} is here. Say "take it over" again.` } };
   });
   if (result.taking) {
-    ctx.say(`Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+    ctx.say(`Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
     return 1;
   }
   if (result.running) {
-    ctx.say(`${result.running} is running for ${found.name} already.`);
+    ctx.say(`${result.running} is running for ${calledAs(ctx, found)} already.`);
     return 1;
   }
   return result.ok ? 0 : 1;
@@ -927,7 +1075,9 @@ function nextOf(ctx, folder, r) {
 
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
-    say next (nextOf). With words, only what they fit. */
+    say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
+    session, by its label and short id, and what its runs left with nothing of its video's names in it (cleanFor), a result
+    left before it became one included. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -960,8 +1110,11 @@ export async function status(ctx, rest) {
     // There is no BRIMM Video Work yet.
   }
   for (const folder of local) {
+    const e = episodeAt(ctx, folder);
+    const shown = listedAs(ctx, e);
+    const clean = cleanFor(e);
     const command = runningCommand(ctx.home, folder, ctx.alive);
-    if (command) lines.push(`${folder}: ${command} is running.`);
+    if (command) lines.push(`${shown}: ${command} is running.`);
     let results = [];
     try {
       results = readdirSync(episodeWork(ctx.home, folder)).filter((n) => n.endsWith(".result.json")).sort();
@@ -971,9 +1124,9 @@ export async function status(ctx, rest) {
     for (const file of results) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
       if (!r || r.command === command) continue;
-      const done = r.failed.length ? ` Not done: ${r.failed.join(" ").replace(/([^.])$/, "$1.")}` : "";
+      const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
       const next = nextOf(ctx, folder, r);
-      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${next ? ` ${next}` : ""}`);
+      lines.push(`${shown}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -984,31 +1137,33 @@ export async function status(ctx, rest) {
     when its import stopped on this Mac before its late check, that check holds the episode for ask and --from-plan on both
     Macs (unedited.js importHolds), and is made only at the import's next run: so the launch agent is asked to look, which
     makes it. When this Mac owes no late check of it, a stopped status of this Mac's own for it can never be cleared by a late
-    check, and is taken away. Otherwise it is refused, as before. */
-function lateCheckOwed(ctx, video, held) {
+    check, and is taken away. Otherwise it is refused, as before. `who` is the video as retry names it (retry), and `plain`
+    what a line about it is said as: for a light import's video, with no path or name of its file in it. */
+function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   const { say } = ctx;
   const owed = readPendings(ctx.home).find((p) => p.video === video && p.machine === ctx.machine && resolve(p.root) === resolve(ctx.root));
   const stopped = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine && importState(s.status, ctx.now()) === "stopped");
-  const name = owed ? owed.name : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
+  // The episode is named as listedAs names it: a gated one by its label and short id, and never by its folder.
+  const name = owed ? listedAs(ctx, episodeAt(ctx, owed.name)) : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
   if (!owed && !stopped.length) {
-    say(`${video} is ${held}`);
+    say(`${who} is ${plain(held)}`);
     return 1;
   }
   if (!owed) {
     for (const { status } of stopped) removeStatus(ctx.root, video, ctx.machine, status.import || "");
-    say(`${video} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
+    say(`${who} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
     return 0;
   }
-  const problem = owed.problem ? String(owed.problem).replace(/\.$/, "") : "";
+  const problem = owed.problem ? plain(String(owed.problem).replace(/\.$/, "")) : "";
   const due = dueAt(owed);
   const later = due > ctx.now() ? `when it is due, at ${clockAt(due)}` : "";
   // A run at work makes a due check within a minute, but makes a check that found a problem only once, at its start.
   if (ctx.agentRunning()) {
     if (problem) {
-      say(`${video} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
+      say(`${who} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
       return 1;
     }
-    say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
+    say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
     return 0;
   }
   try {
@@ -1017,14 +1172,17 @@ function lateCheckOwed(ctx, video, held) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  if (problem) say(`${video} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
-  else say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
+  if (problem) say(`${who} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
+  else say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
   return 0;
 }
 
 /** `retry "<video>"`: import again a video in this Mac's drop folder whose import failed or stopped. It is found by its
-    file's name or its name without the ending, whatever their case. Refused when an episode holds it already (but see
-    lateCheckOwed), and while its import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart). */
+    file's name or its name without the ending, whatever their case, or by the label a light import's status of this Mac gives
+    it (Part L), whatever its case and spacing. Refused when an episode holds it already (but see lateCheckOwed), and while its
+    import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart).
+    A video with a label is named by it in every line, and why its import failed is said with no path or name of its file in
+    it; on a Mac that does the light import, a video with none is named by what it is and its size, and never by its file. */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();
@@ -1039,34 +1197,42 @@ export async function retry(ctx, rest) {
   } catch (e) {
     // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
   }
-  const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said));
+  const light = lightImport(ctx.settings);
+  const statuses = readStatuses(ctx.root, ctx.now());
+  const labelOf = (v) => labelIn(statuses, v, ctx.machine);
+  const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
+  const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {
-    say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
+    const held = light ? videos.map((v) => labelOf(v) || unlabelled(v, sizeOf(v))) : videos;
+    say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(held)}.` : "It is empty."}`);
     return 1;
   }
   const bytes = statSync(join(drop, video)).size;
+  const label = labelOf(video);
+  const who = label || (light ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
+  const plain = (text) => (label || light ? withoutNames(text, namesOf(video), [label]) : text);
   const held = episodeHolding({ root: ctx.root, video, bytes });
-  if (held) return lateCheckOwed(ctx, video, held);
+  if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
-  const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  const mine = statuses.filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
   // A video the import holds in the folder on purpose, a Zoom download, is held again however often it is tried: its status
   // says why, and what to do. The status of a held video that is another file now is of no use, and is taken away below.
   const left = mine.find((s) => importState(s.status, ctx.now()) === "held" && s.status.bytes === bytes);
   if (left) {
-    say(`${video} is held: ${left.status.held}`);
+    say(`${who} is held: ${plain(left.status.held)}`);
     return 1;
   }
   const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
   const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
   if (!again.length && running) {
-    say(`${video} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
+    say(`${who} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
     return 1;
   }
   for (const { status } of again) removeStatus(ctx.root, video, ctx.machine, status.import || "");
   const how = (status) => {
     const state = importState(status, ctx.now());
-    if (state === "failed") return `which failed: ${String(status.failed).replace(/\.$/, "")}`;
+    if (state === "failed") return `which failed: ${plain(String(status.failed).replace(/\.$/, ""))}`;
     if (state === "problem") return "whose late check found a problem";
     if (state === "held") return "which was held, as another file";
     return `which stopped at ${status.step}`;
@@ -1076,7 +1242,7 @@ export async function retry(ctx, rest) {
   // A run of the launch agent at work now takes the video when it next looks: it looks again each minute while it waits for
   // a late check, and once more before it ends. Asking the agent to start would do nothing while it runs.
   if (ctx.agentRunning()) {
-    say(`${video} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
+    say(`${who} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
     return 0;
   }
   // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
@@ -1087,7 +1253,7 @@ export async function retry(ctx, rest) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  say(`${video} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
+  say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
   return 0;
 }
 
@@ -1317,7 +1483,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   if (record.name && record.name.placeholder) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
   const problems = filesProblems(found.folder, record);
-  if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
+  if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running) stops.push(`${running} is running for this episode. Say "how far is it?"`);
   const here = fromFinalCutFolder(ctx.home);
@@ -1366,7 +1532,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   if (!record.editing) {
     if ((await save(ctx, found, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return 1;
     const again = readEpisode(found.folder);
-    if (!again.record) return refuse(ctx, `${found.name}: ${again.why}.`);
+    if (!again.record) return refuse(ctx, notRead(ctx, { ...found, read: again }));
     rev = again.record.rev;
   }
   const asked = { version: 1, at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map((p) => ({ key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects, video: p.video, export: p.export, kept: p.kept, noHandEdits: noHandEdits.includes(p.key) })) };
@@ -1386,11 +1552,11 @@ async function finish(ctx, rest) {
   if (flags.now) {
     const found = findEpisode(ctx, words.join(" "));
     if (!found.read || !found.read.record) {
-      const why = found.why || `${words.join(" ")}: ${found.read.why}.`;
+      const why = found.why || notRead(ctx, found, words.join(" "));
       ctx.say(why);
       // The episode is there but its record cannot be read (a conflicted copy, say): the finish leaves a result that says
       // why, so that status shows it and not "nothing is running" (the P1 check, T6).
-      if (found.read) await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [why] }));
+      if (found.read) await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [why] }));
       // The gate ended it: the same, in the gate's words, and the claim its quick part took for it is let go, as below.
       if (found.gate) {
         await leaveGateResult(ctx, found, "finish");
@@ -1401,9 +1567,9 @@ async function finish(ctx, rest) {
     }
     // The progress panel shows the finish as it shows an import (phase P).
     const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
-    const result = await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
     if (result.taking || result.running) {
-      ctx.say(result.taking ? `Another run is taking over ${found.name}'s lock. Say finish again in a moment.` : `${result.running} is running for ${found.name} already.`);
+      ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
       // The finish never ran: a claim its quick part took for it is let go (the P1 check, T17).
       const gone = letGoClaim(ctx, { folder: found.folder, name: found.name });
       if (gone) ctx.say(gone);
@@ -1492,7 +1658,7 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
-  const name = record.name.text;
+  const name = shownName(record);
   const newest = newestPushes(record);
   const mine = newest.filter((p) => p.last && p.last.on === ctx.machine);
   // An episode nobody has open may be changed without opening it, so one this Mac pushed last is handed over as well.
@@ -1537,7 +1703,7 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
   const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
   const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
-  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
+  if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
   if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
   let notYet = [];
@@ -1640,7 +1806,7 @@ async function show(ctx, rest) {
   const [ending, what] = SHOWN[kind];
   const file = `${basename(record.video.file, extname(record.video.file))}${ending}`;
   const path = join(found.folder, file);
-  if (!existsSync(path)) return refuse(ctx, `${record.name.text} has no ${what} yet.`);
+  if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
   if (!ctx.isWhole(path)) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [file] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
@@ -1707,7 +1873,9 @@ function studioStale(ctx) {
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the
-    same. */
+    same. When either side is a video not yet answered, or a session (gate.js gated), what its name, its label and its video
+    hold is never said into the chat: only that they differ, as [what, null, null]; and a file of it is named without the
+    video's name. */
 function recordDifferences(a, b) {
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
@@ -1743,8 +1911,10 @@ function recordDifferences(a, b) {
     ...sizes("File", a.files, b.files),
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
+  const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
+  const said = names ? rows.map(([what, x, y]) => (["Name", "Label", "Video"].includes(what) ? [what, null, null] : [withoutNames(what, names), x, y])) : rows;
   // Two sides are never said to hold the same unless they do, but for their rev and who wrote them.
-  return rows.length || sameRecord(a, b) ? rows : [["The rest of the record", "as A holds it", "as B holds it"]];
+  return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
 /** A record file read as it is, or null when it is not there or cannot be read. */
@@ -1800,9 +1970,9 @@ const plainWhy = (e) => String(e && e.message ? e.message : e).replace(/ Nothing
 
 async function resolveIn(ctx, found, keep) {
   const read = readEpisode(found.folder, { pastCopies: true });
-  if (!read.record) return refuse(ctx, `${found.name}: ${read.why}.`);
+  if (!read.record) return refuse(ctx, notRead(ctx, { ...found, read }));
   const { record } = read;
-  const name = record.name.text;
+  const name = shownName(record);
   const shownFile = join(episodeWork(ctx.home, found.name), "resolve.shown.json");
   const pin = (() => {
     try {
@@ -1858,7 +2028,7 @@ async function resolveIn(ctx, found, keep) {
       else if (copyRecord) {
         const differ = recordDifferences(record, copyRecord);
         ctx.say(differ.length ? "They differ in:" : "They hold the same.");
-        for (const [what, x, y] of differ) ctx.say(`  ${what}: A: ${x}; B: ${y}`);
+        for (const [what, x, y] of differ) ctx.say(x === null ? `  ${what}: A and B differ, and neither is shown here.` : `  ${what}: A: ${x}; B: ${y}`);
       }
     } else {
       const side = (s) => (s ? `${sizeText(s.size)}${s.size >= 1024 ? ` (${s.size} bytes)` : ""}, written ${shownAt(localStamp(new Date(s.mtimeMs)))}` : "not there");
@@ -2098,7 +2268,7 @@ function askRefusal(ctx, found, record) {
   if (claimHeld(ctx, record)) return { why: claimHeld(ctx, record) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
-  if (running) return { why: `${running} is running for ${found.name} already. Say it again when it has finished.` };
+  if (running) return { why: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.` };
   if (!(ctx.deps.tools || findPrograms()).claude) return { why: "Claude Code is not installed on this Mac, so Claude cannot be asked." };
   return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
 }
@@ -2118,7 +2288,7 @@ async function ask(ctx, rest) {
   if (rest[0] === "--now") {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
-      ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      ctx.say(found.why || notRead(ctx, found, rest[1]));
       if (found.gate) await leaveGateResult(ctx, found, "ask");
       return 1;
     }
@@ -2133,9 +2303,9 @@ async function ask(ctx, rest) {
       log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
       ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
     };
-    const result = await runDetached({ home: ctx.home, folder: found.name, command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
     if (result.taking || result.running) {
-      ctx.say(result.running ? `${result.running} is running for ${found.name} already.` : `Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+      ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
       return 1;
     }
     return result.ok ? 0 : 1;
