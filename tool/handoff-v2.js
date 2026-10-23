@@ -1,0 +1,276 @@
+// The hand-off file, version 2: what brimm-video gives BRIMM Ops for a finished video, a raw video, a session or an iPhone clip,
+// in one file that a person drops on the BRIMM Ops page (spec section 8, agreed with the page's own session). Its tests, and the
+// four fixtures in tests/fixtures that brimm-operations keeps a copy of, are the contract between the two: change neither
+// without changing both. The page refuses a session's hand-off for any key it does not know, so the writer writes only the
+// keys the contract names, and the check refuses any other.
+// Version 1, in handoff.js, is unchanged and still read by the page.
+// Nothing here touches a disk or runs a program.
+import { FORMAT } from "./handoff.js";
+import { kindOf } from "./episode.js";
+import { tidyTranscript } from "./shared/transcript.js";
+
+export const VERSION_2 = 2;
+
+/** The kinds version 2 knows. A record kept as an "episode" is written "raw" (kindOf). */
+const KINDS = ["finished", "raw", "session", "short video"];
+
+/** The keys of the contract, in the order they are written. A Reel's `inMain` is only where there is a main video, and its
+    `clientAgreed` only for a session's. */
+const TOP = ["format", "version", "revision", "made", "madeOn", "madeBy", "video", "main", "suggestions", "reels", "session"];
+const VIDEO = ["id", "kind", "name", "recorded", "recordedFrom"];
+const MAIN = ["file", "seconds", "srt", "onPicture"];
+const SUGGESTION = ["n", "start", "end", "stretches", "first", "last", "why", "point"];
+const STRETCH = ["start", "end"];
+const REEL = ["n", "title", "file", "seconds", "inMain", "srt", "fromSuggestion"];
+const SESSION_REEL = ["n", "title", "file", "seconds", "srt", "fromSuggestion", "clientAgreed"];
+const SESSION = ["principles", "recurringPrinciples", "reelsToFilm"];
+const LISTS = ["steps", "red_flags", "green_flags", "decision_criteria", "verbatim_key_phrases"];
+const PRINCIPLE = ["n", "name", "category", "description", "steps", "red_flags", "green_flags", "decision_criteria", "example_application", "verbatim_key_phrases"];
+const RECURRING = ["n", "text"];
+const FILM = ["n", "idea", "words", "why", "principle"];
+
+/** The parts of a suggestion that are words, and what each is called when it is missing. */
+const SUGGESTION_WORDS = [["first", "first words"], ["last", "last words"], ["why", "reason"], ["point", "point"]];
+
+/** Of `o`, the keys in `keys`, in that order and as they are given: a key that is not there is left out, and a list is
+    copied. Nothing the contract does not name is carried, whatever the record's own items hold. */
+function pick(o, keys) {
+  const out = {};
+  if (o && typeof o === "object") for (const k of keys) if (o[k] !== undefined) out[k] = Array.isArray(o[k]) ? [...o[k]] : o[k];
+  return out;
+}
+
+const suggestionOf = (given) => {
+  const s = given || {};
+  const out = pick(s, ["n", "start", "end"]);
+  if (s.stretches !== undefined) out.stretches = Array.isArray(s.stretches) ? s.stretches.map((t) => pick(t, STRETCH)) : s.stretches;
+  return { ...out, ...pick(s, ["first", "last", "why", "point"]) };
+};
+
+/** A made Reel. Its place in the main is left out when it was not found, or when there is no main video; its suggestion is
+    null when it was made from times she gave; and a session's Reel carries the day the client's agreement was noted. */
+const reelOf = (given, inSession) => {
+  const r = given || {};
+  return {
+    ...pick(r, ["n", "title", "file", "seconds"]),
+    ...(!inSession && r.inMain ? { inMain: pick(r.inMain, STRETCH) } : {}),
+    ...pick(r, ["srt"]),
+    fromSuggestion: r.fromSuggestion === undefined ? null : r.fromSuggestion,
+    ...(inSession ? pick(r, ["clientAgreed"]) : {})
+  };
+};
+
+/** A session's items, as they are given: the caller gives only what Sallie approved, and none of it is changed here, but only
+    the contract's keys of each are written. Lists not given are empty: a session revision may hold nothing yet. */
+const sessionOf = (given) => {
+  const s = given || {};
+  const items = (v, each) => (v === undefined ? [] : Array.isArray(v) ? v.map(each) : v);
+  return {
+    principles: items(s.principles, (p) => pick(p, PRINCIPLE)),
+    recurringPrinciples: items(s.recurringPrinciples, (p) => pick(p, RECURRING)),
+    reelsToFilm: items(s.reelsToFilm, (p) => ({ ...pick(p, FILM.slice(0, 4)), principle: p && p.principle !== undefined ? p.principle : null }))
+  };
+};
+
+/** The hand-off, in the spec's order, by the kind of the record (`kindOf`).
+    - `id` is the video's first version's id, which a new version keeps; `revision` rises across versions and formats.
+    - `main` is the final video's file name in final/, its length in seconds and its captions as the transcript tool writes
+      them; a session has none. `onPicture` is the words drawn on a raw video's or a clip's picture, in order, and is left out
+      when there are none and for a finished video or a session, whose picture brimm-video does not draw on.
+    - `suggestions` are a finished or raw video's, and are left out when there are none or for any other kind.
+    - `reels` are the Reels made here: a finished or raw video's, or a session's Reels with `clientAgreed`; a short video has
+      no `reels` key.
+    - `session` is a session's approved principles, recurring principles and Reel ideas, and null for any other kind.
+    There is no title: titles live on the page. */
+export function buildHandoffV2({ record, revision, made, madeOn, commit, id, main = {}, onPicture, suggestions, reels = [], session }) {
+  const kind = kindOf(record);
+  const inSession = kind === "session";
+  const drawn = (kind === "raw" || kind === "short video") && Array.isArray(onPicture) && onPicture.length > 0;
+  const name = record && record.name ? record.name.text : undefined;
+  const video = (record && record.video) || {};
+  const out = {
+    format: FORMAT,
+    version: VERSION_2,
+    revision,
+    made,
+    madeOn,
+    madeBy: `brimm-video ${commit}`,
+    video: { id, kind, name, recorded: video.recorded, recordedFrom: video.recordedFrom }
+  };
+  if (!inSession) out.main = { ...pick(main, ["file", "seconds", "srt"]), ...(drawn ? { onPicture: [...onPicture] } : {}) };
+  if ((kind === "finished" || kind === "raw") && Array.isArray(suggestions) && suggestions.length > 0) out.suggestions = suggestions.map(suggestionOf);
+  if (kind !== "short video") out.reels = Array.isArray(reels) ? reels.map((r) => reelOf(r, inSession)) : reels;
+  out.session = inSession ? sessionOf(session) : null;
+  return out;
+}
+
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const text = (v) => typeof v === "string" && v.trim() !== "";
+const number = (v) => typeof v === "number" && Number.isFinite(v);
+const seconds = (v) => number(v) && v > 0;
+const whole = (v) => Number.isInteger(v) && v >= 1;
+const strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
+/** A day, as 2026-10-23, that the calendar has: not 2026-02-30. */
+const day = (v) => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const at = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().startsWith(v);
+};
+/** Captions the BRIMM Ops page can read: tidyTranscript, the page's own reader, makes lines of them. */
+const captions = (srt) => text(srt) && /-->/.test(srt) && tidyTranscript(srt).startsWith("[");
+/** The first key `o` holds that the contract does not name, as words, or "". */
+const unknown = (who, o, keys) => {
+  const k = Object.keys(o).find((key) => !keys.includes(key));
+  return k === undefined ? "" : `${who} holds "${k}", which the contract does not name.`;
+};
+
+/** What is wrong with a hand-off, in plain words, or "" when nothing is. The first fault found is the one given. A session's
+    hand-off may hold no key that the contract does not name, since the page refuses it for one; the other kinds' are held to
+    the same, since only this writer makes them. */
+export function handoffFaultV2(h) {
+  if (!isObject(h) || h.format !== FORMAT) return `It is not a ${FORMAT}.`;
+  if (h.version !== VERSION_2) return `It is version ${h.version}, and this reads version ${VERSION_2}.`;
+  if (!Number.isInteger(h.revision) || h.revision < 1) return "Its revision is not a whole number from 1.";
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(String(h.made))) return "The time it was made is not a local time with its offset.";
+  if (!text(h.madeOn) || !/^brimm-video \S+$/.test(String(h.madeBy))) return "It does not say which Mac and which brimm-video made it.";
+
+  const v = h.video;
+  if (!isObject(v)) return "It has no video.";
+  if (!/^e-\d{8}-[0-9a-f]{6}$/.test(String(v.id))) return "The video's id is not an id brimm-video gives.";
+  if (!KINDS.includes(v.kind)) return "The video's kind is none of finished, raw, session or short video.";
+  if (has(v, "title")) return "A video has no title in it: titles live on the BRIMM Ops page.";
+  if (!text(v.name)) return "The video has no name.";
+  if (!day(v.recorded) || !["video", "import"].includes(v.recordedFrom)) return "The day it was recorded, or where that day was read from, is missing.";
+  const fault = unknown("The video", v, VIDEO);
+  if (fault) return fault;
+  const kind = v.kind;
+
+  if (kind === "session") {
+    if (has(h, "main")) return "A session's hand-off has no main video: it holds no transcript of the session.";
+    if (has(h, "suggestions")) return "A session's hand-off has no suggestions.";
+  }
+  if (kind === "short video") {
+    if (has(h, "suggestions")) return "A short video's hand-off has no suggestions.";
+    if (has(h, "reels")) return "A short video has no Reels.";
+  }
+  const top = unknown("The hand-off", h, TOP);
+  if (top) return top;
+
+  let length = 0;
+  if (kind !== "session") {
+    const m = h.main;
+    if (!isObject(m)) return "It has no main video.";
+    if (!text(m.file) || !seconds(m.seconds)) return "The main video has no file or no length.";
+    if (!captions(m.srt)) return "The main video's captions cannot be read.";
+    if (has(m, "onPicture")) {
+      if (kind === "finished") return "A finished video's main video has no words on its picture (onPicture): the page refuses them.";
+      if (Array.isArray(m.onPicture) && m.onPicture.length === 0) return "The main video's onPicture is an empty list: it is left out when no words are drawn on the picture.";
+      if (!Array.isArray(m.onPicture) || !m.onPicture.every(text)) return "The main video's onPicture is not a list of the words drawn on its picture.";
+    }
+    const extra = unknown("The main video", m, MAIN);
+    if (extra) return extra;
+    length = m.seconds;
+  }
+  /** Is this a stretch of the main video? */
+  const within = (start, end) => number(start) && number(end) && start >= 0 && end > start && end <= length + 0.01;
+
+  if (has(h, "suggestions")) {
+    if (!Array.isArray(h.suggestions)) return "Its suggestions are not a list.";
+    const seen = new Set();
+    for (const s of h.suggestions) {
+      if (!isObject(s) || !whole(s.n)) return "A suggestion's number is not a whole number from 1.";
+      const which = `Suggestion ${s.n}`;
+      if (seen.has(s.n)) return `${which} is in it twice.`;
+      seen.add(s.n);
+      for (const [key, what] of SUGGESTION_WORDS) if (!text(s[key])) return `${which} has no ${what}.`;
+      if (!within(s.start, s.end)) return `${which}'s times are not a stretch of the main video.`;
+      const parts = s.stretches;
+      if (!Array.isArray(parts) || parts.length === 0 || !parts.every((t) => isObject(t) && within(t.start, t.end)) || parts.some((t, i) => i > 0 && t.start < parts[i - 1].end)) return `${which}'s stretches are not kept stretches of the main video, in order.`;
+      if (parts[0].start !== s.start || parts[parts.length - 1].end !== s.end) return `${which}'s stretches do not run from its start to its end.`;
+      if (kind === "finished" && parts.length !== 1) return `A finished video's suggestion is one stretch of it, and ${which} is ${parts.length}.`;
+      for (const t of parts) {
+        const extra = unknown(`${which}'s stretch`, t, STRETCH);
+        if (extra) return extra;
+      }
+      const extra = unknown(which, s, SUGGESTION);
+      if (extra) return extra;
+    }
+  }
+
+  if (kind !== "short video") {
+    if (!Array.isArray(h.reels)) return "Its Reels are not a list.";
+    const seen = new Set();
+    for (const r of h.reels) {
+      if (!isObject(r) || !whole(r.n)) return "A Reel's number is not a whole number from 1.";
+      const which = `Reel ${r.n}`;
+      if (seen.has(r.n)) return `${which} is in it twice.`;
+      seen.add(r.n);
+      if (kind !== "session" && has(r, "clientAgreed")) return `${which} holds clientAgreed, which only a session's Reels have.`;
+      if (typeof r.title !== "string") return `${which} has no title: it may be empty, but it must be there.`;
+      if (!text(r.file) || !seconds(r.seconds)) return `${which} has no file or no length.`;
+      if (!captions(r.srt)) return `${which}'s captions cannot be read.`;
+      if (!has(r, "fromSuggestion") || (r.fromSuggestion !== null && !whole(r.fromSuggestion))) return `${which}'s fromSuggestion is neither a suggestion's number nor null.`;
+      if (kind === "session") {
+        if (!has(r, "clientAgreed")) return `${which} has no clientAgreed: a session's Reel is made only once the client's agreement is noted, as a date.`;
+        if (!day(r.clientAgreed)) return `${which}'s clientAgreed is not a date written like 2026-10-23: the day the agreement was noted, never who.`;
+      } else if (has(r, "inMain")) {
+        if (!isObject(r.inMain) || !within(r.inMain.start, r.inMain.end)) return `${which}'s place in the main video is not a stretch of it.`;
+        const extra = unknown(`${which}'s place in the main video`, r.inMain, STRETCH);
+        if (extra) return extra;
+      }
+      const extra = unknown(which, r, kind === "session" ? SESSION_REEL : REEL);
+      if (extra) return extra;
+    }
+  }
+
+  if (kind !== "session") {
+    if (!has(h, "session")) return "It has no session: that is null unless the video is a session.";
+    if (h.session !== null) return "Only a session holds session items, and this video is not one.";
+    return "";
+  }
+  const s = h.session;
+  if (!isObject(s)) return "A session's hand-off holds no session items: its session is not filled.";
+  for (const list of SESSION) if (!Array.isArray(s[list])) return `The session's ${list} are not a list.`;
+  const extra = unknown("The session", s, SESSION);
+  if (extra) return extra;
+
+  const principles = new Set();
+  for (const p of s.principles) {
+    if (!isObject(p) || !whole(p.n)) return "A principle's number is not a whole number from 1.";
+    const which = `Principle ${p.n}`;
+    if (principles.has(p.n)) return `${which} is in it twice.`;
+    principles.add(p.n);
+    if (has(p, "source_context")) return `${which} holds "source_context", which stays out of the hand-off: it describes the session, for her eyes only.`;
+    if (!text(p.name)) return `${which} has no name.`;
+    for (const key of ["category", "description", "example_application"]) if (typeof p[key] !== "string") return `${which}'s ${key} is not text.`;
+    for (const key of LISTS) if (!strings(p[key])) return `${which}'s ${key} is not a list of text.`;
+    const more = unknown(which, p, PRINCIPLE);
+    if (more) return more;
+  }
+  const recurring = new Set();
+  for (const p of s.recurringPrinciples) {
+    if (!isObject(p) || !whole(p.n)) return "A recurring principle's number is not a whole number from 1.";
+    const which = `Recurring principle ${p.n}`;
+    if (recurring.has(p.n)) return `${which} is in it twice.`;
+    recurring.add(p.n);
+    if (!text(p.text)) return `${which} has no text.`;
+    const more = unknown(which, p, RECURRING);
+    if (more) return more;
+  }
+  const films = new Set();
+  for (const p of s.reelsToFilm) {
+    if (!isObject(p) || !whole(p.n)) return "A Reel idea's number is not a whole number from 1.";
+    const which = `Reel idea ${p.n}`;
+    if (films.has(p.n)) return `${which} is in it twice.`;
+    films.add(p.n);
+    if (!text(p.idea)) return `${which} has no idea.`;
+    if (!text(p.words)) return `${which} has no words to say.`;
+    if (typeof p.why !== "string") return `${which} has no reason (why).`;
+    if (p.principle !== null && !whole(p.principle)) return `${which}'s principle is neither a principle's number nor null.`;
+    if (p.principle !== null && !principles.has(p.principle)) return `${which} names principle ${p.principle}, which is not in it.`;
+    const more = unknown(which, p, FILM);
+    if (more) return more;
+  }
+  return "";
+}
