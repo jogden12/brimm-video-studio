@@ -25,8 +25,8 @@
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
 #                                    left as it is, for Jason to delete by hand once it is empty. A run with no --drop keeps the
 #                                    folder the settings name. It is refused, before anything is changed, while the old folder
-#                                    still holds a video, or an import of this Mac failed or found a problem: it names each, and
-#                                    says to deal with it first. Run it with --print first
+#                                    still holds a video, or an import of this Mac failed or found a problem: it says which,
+#                                    and to deal with each first. Run it with --print first
 # ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
 #                                    write the import (light or full) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With

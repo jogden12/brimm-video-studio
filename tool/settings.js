@@ -198,8 +198,8 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, as set reads them, and any setting it is not told is kept.
                                It refuses what set refuses, and a switch of the drop folder while the old drop folder
-                               still holds a video, or an import of this Mac that failed or found a problem: it names
-                               each, and says what to do first
+                               still holds a video, or an import of this Mac failed or found a problem: it says which
+                               (by label where there is one), and what to do first
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                say what write would write, whole, as JSON, or why it would refuse it.
