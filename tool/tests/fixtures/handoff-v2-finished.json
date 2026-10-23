@@ -1,0 +1,67 @@
+{
+  "format": "brimm-video hand-off",
+  "version": 2,
+  "revision": 1,
+  "made": "2026-10-22T15:02:11-04:00",
+  "madeOn": "Sallie's laptop",
+  "madeBy": "brimm-video c709b57",
+  "video": {
+    "id": "e-20261022-a41d7e",
+    "kind": "finished",
+    "name": "Pricing talk",
+    "recorded": "2026-10-22",
+    "recordedFrom": "video"
+  },
+  "main": {
+    "file": "Pricing talk.mov",
+    "seconds": 63.72,
+    "srt": "1\n00:00:00,000 --> 00:00:03,200\n Welcome to the show. Today we are going to talk about\n\n2\n00:00:03,200 --> 00:00:06,200\n pricing, and how to decide what to charge.\n\n3\n00:00:06,500 --> 00:00:09,600\n I get asked this more than almost anything else,\n\n4\n00:00:09,600 --> 00:00:12,200\n so let's take it one step at a time.\n\n5\n00:00:12,600 --> 00:00:16,000\n Most people price their work by what feels safe.\n\n6\n00:00:16,000 --> 00:00:20,100\n They look at what others charge, they shave a little off,\n\n7\n00:00:20,100 --> 00:00:24,100\n and they hope nobody pushes back. But your price is not\n\n8\n00:00:24,100 --> 00:00:28,000\n a guess about the market. It is a message about what\n\n9\n00:00:28,000 --> 00:00:30,400\n you believe the work is worth.\n\n10\n00:00:30,900 --> 00:00:33,700\n Now, I know that sounds nice in theory.\n\n11\n00:00:33,700 --> 00:00:36,400\n So let me show you what I actually do.\n\n12\n00:00:36,700 --> 00:00:40,700\n Here's the thing about discounts. The moment you offer one,\n\n13\n00:00:40,700 --> 00:00:44,300\n you teach people that the first price was never real.\n\n14\n00:00:44,300 --> 00:00:48,000\n So start with your costs, add the time it takes,\n\n15\n00:00:48,000 --> 00:00:51,600\n add what the result is worth to the person buying,\n\n16\n00:00:51,600 --> 00:00:55,800\n and then stand behind that number, and that's why it works.\n\n17\n00:00:56,400 --> 00:01:00,200\n That's it for today. If this helped, send it to a friend\n\n18\n00:01:00,200 --> 00:01:03,600\n who is stuck on their pricing. See you next time.\n\n"
+  },
+  "suggestions": [
+    {
+      "n": 1,
+      "start": 12.6,
+      "end": 30.4,
+      "stretches": [
+        {
+          "start": 12.6,
+          "end": 30.4
+        }
+      ],
+      "first": "Most people price",
+      "last": "the work is worth.",
+      "why": "It stands alone: one claim, the reason for it, and the line that ties them together.",
+      "point": "A price is a message about what the work is worth, not a guess about the market."
+    },
+    {
+      "n": 2,
+      "start": 36.7,
+      "end": 55.8,
+      "stretches": [
+        {
+          "start": 36.7,
+          "end": 55.8
+        }
+      ],
+      "first": "Here's the thing about",
+      "last": "and that's why it works.",
+      "why": "It gives the whole method in one breath and ends on its point.",
+      "point": "Do not discount: build the price from costs, time and worth, then stand behind it."
+    }
+  ],
+  "reels": [
+    {
+      "n": 2,
+      "title": "Stop discounting your best work",
+      "file": "Pricing talk reel 2 v3 a41d7e.mp4",
+      "seconds": 19.1,
+      "inMain": {
+        "start": 36.7,
+        "end": 55.8
+      },
+      "srt": "1\n00:00:00,000 --> 00:00:04,000\n Here's the thing about discounts. The moment you offer one,\n\n2\n00:00:04,000 --> 00:00:07,600\n you teach people that the first price was never real.\n\n3\n00:00:07,600 --> 00:00:11,300\n So start with your costs, add the time it takes,\n\n4\n00:00:11,300 --> 00:00:14,900\n add what the result is worth to the person buying,\n\n5\n00:00:14,900 --> 00:00:19,100\n and then stand behind that number, and that's why it works.\n\n",
+      "fromSuggestion": 2
+    }
+  ],
+  "session": null
+}

@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode, freeLibrary, status, titleEpisode } from "../edit.js";
-import { episodeWork, fromFinalCutFolder, libraryFor } from "../settings.js";
+import { episodeWork, fromFinalCutFolder, libraryFor, writeSettings } from "../settings.js";
 import { resultFile, readResult } from "../detached.js";
-import { setup, episodeFor, reread, EDITED, PROJECT, FOLDER } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, EDITED, NOT_YET, PROJECT, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Final Cut's files at the end of the made-up edit: each part Shared, the main and Reel 1 exported after their Shares, and
     Reel 2 never exported. */
@@ -132,6 +132,16 @@ describe("finish, the part that looks and asks", () => {
     assert.deepEqual(busy.started, []);
     busy.done();
   });
+  it("with hand-off version 1, still asks for an approved title", async () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 1 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 1 };
+    sharedAll(t);
+    assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, title: null } }), { yes: true, noHandEdits: ["reel 2"] }), 1);
+    assert.match(t.said(), /Approve a title first\./);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
   it("lets a short video finish without a title, and with no Reels", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { ...EDITED, kind: "short video", title: null, reels: [] } });
@@ -149,6 +159,179 @@ describe("finish, the part that looks and asks", () => {
     assert.match(t.said(), /The main video has not been Shared from Final Cut\./);
     assert.match(t.said(), /Looked in .*From Final Cut.* for: .*Pricing- what to charge- main v5 3fa9c1\.mov/s);
     t.done();
+  });
+});
+
+describe("finish, the part that looks and asks, with hand-off version 2", () => {
+  /** A made-up root whose Mac's settings say version 2, with Final Cut's files of the made-up edit. */
+  const v2 = () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 2 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 2 };
+    sharedAll(t);
+    return t;
+  };
+  const PLACEHOLDER = { text: "Pricing talk", placeholder: true };
+  it("starts a finish with no approved title: titles live on the BRIMM Ops page", async () => {
+    for (const title of [null, { ...EDITED.title, approved: false }]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, title } }), { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+      assert.doesNotMatch(t.said(), /Approve a title/);
+      assert.equal(t.started.length, 1);
+      t.done();
+    }
+  });
+  it("refuses a placeholder name only for a raw video, an episode imported before the switch among them", async () => {
+    for (const kind of ["episode", "raw"]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER } }), { yes: true, noHandEdits: ["reel 2"] }), 1, kind);
+      assert.match(t.said(), /Give the episode its name first: it is still called "Pricing talk", from the video's file name\./, kind);
+      assert.deepEqual(t.started, [], kind);
+      t.done();
+    }
+    // A finished video's name is its file's, and a short video's is too: either finishes with it.
+    for (const [kind, more] of [["finished", {}], ["short video", { title: null, reels: [] }]]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER, ...more } }), { yes: true, noHandEdits: ["reel 2"] }), 0, `${kind}: ${t.said()}`);
+      assert.doesNotMatch(t.said(), /Give the episode its name first/, kind);
+      assert.equal(t.started.length, 1, kind);
+      t.done();
+    }
+  });
+  // An answered video that is not a session is named by its name, as edit.js names it (episode.js shownName), label or none.
+  it("refuses a new version whose earlier version is not on this Mac, or names it back, by its name as edit.js names it, and writes nothing", async () => {
+    const FIRST = "e-20261010-7c1d2e";
+    const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+    const first = (t, record = {}) => episodeAs(t, { id: FIRST, name: "2026-10-10 Pricing talk, first cut (Mac Studio)", record: { kind: "raw", ...record } });
+    const missing = (who) => `${who} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`;
+    const cases = [
+      [() => {}, { label: LABEL }, missing(NAME)],
+      [() => {}, {}, missing(EDITED.name.text)],
+      [(t) => first(t, { versionOf: ID }), { label: LABEL }, `${NAME} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`]
+    ];
+    for (const [before, more, words] of cases) {
+      const t = v2();
+      before(t);
+      const found = episodeFor(t, { record: { ...EDITED, versionOf: FIRST, ...more } });
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, words);
+      assert.ok(t.said().split("\n").includes(words), t.said());
+      assert.deepEqual(t.started, []);
+      assert.equal(reread(found).rev, found.record.rev, "no claim was written");
+      t.done();
+    }
+    // Once it is here, the finish starts.
+    const t = v2();
+    first(t);
+    assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, versionOf: FIRST, label: LABEL } }), { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+});
+
+// A video already handed off as version 2 is handed off as version 2 again, whatever the setting says now (a rollback, or the two
+// Macs not both switched yet): a version 1 hand-off written over it would move the BRIMM Ops page's id for the video. So the
+// quick part asks for what version 2 needs, and refuses what version 2 refuses, by the hand-off on file.
+describe("finish, the part that looks and asks, for a video already handed off as version 2, with the setting at 1", () => {
+  const FIRST = "e-20261010-7c1d2e";
+  const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+  const ON_FILE = "final/Pricing- what to charge-.brimm-ops.json";
+  const FIXTURES = { 1: "handoff-v1", 2: "handoff-v2-finished" };
+  /** The contract's hand-off of `version`, as the made-up episode's own: under its id, which it went to the page under. */
+  const ownHandoff = (version) => {
+    const handoff = JSON.parse(readFileSync(new URL(`./fixtures/${FIXTURES[version]}.json`, import.meta.url), "utf8"));
+    for (const who of [handoff.episode, handoff.video]) if (who) who.id = ID;
+    return JSON.stringify(handoff, null, 2) + "\n";
+  };
+  /** The made-up edit finished before, its hand-off of `version` on file in final/ (none when `version` is not given), the
+      setting at 1, and Final Cut's files in From Final Cut. */
+  const handedOff = (version, more = {}, text = null) => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 1 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 1 };
+    sharedAll(t);
+    const finished = { revision: 1, at: "2026-10-20T15:20:00-05:00", on: "Mac Studio", handoff: ON_FILE, parts: {} };
+    const found = episodeFor(t, { record: { ...EDITED, title: null, finished, ...more } });
+    if (version || text !== null) {
+      mkdirSync(join(found.folder, "final"), { recursive: true });
+      writeFileSync(join(found.folder, ON_FILE), text !== null ? text : ownHandoff(version));
+    }
+    return { t, found };
+  };
+  it("asks for no approved title, since the hand-off it will write is version 2", async () => {
+    const { t, found } = handedOff(2);
+    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+    assert.doesNotMatch(t.said(), /Approve a title/);
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+  it("refuses a new version whose earlier version is not on this Mac, by its name as edit.js names it, as version 2 does", async () => {
+    const { t, found } = handedOff(2, { versionOf: FIRST, label: LABEL });
+    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1);
+    assert.ok(t.said().split("\n").includes(`${NAME} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`), t.said());
+    assert.deepEqual(t.started, []);
+    assert.equal(reread(found).rev, found.record.rev, "no claim was written");
+    t.done();
+  });
+  it("still asks for an approved title when the hand-off on file is version 1, is not there, or cannot be read", async () => {
+    for (const [version, text] of [[1, null], [null, null], [null, "{ not a hand-off"]]) {
+      const { t, found } = handedOff(version, {}, text);
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, `${version} ${text}`);
+      assert.match(t.said(), /Approve a title first\./);
+      assert.deepEqual(t.started, []);
+      t.done();
+    }
+  });
+});
+
+// Version 1 is under the episode's own id, so it never asks whether the chain of the video's versions can be followed: with the
+// setting at 1 or none, an answered new version whose earlier version is not on this Mac finishes as it always has.
+describe("finish, the part that looks and asks, with hand-off version 1", () => {
+  it("does not look for the earlier version of a new version, with the setting at 1 or with none", async () => {
+    for (const version of [undefined, 1]) {
+      const t = setup();
+      if (version) {
+        writeSettings(t.home, { handoffVersion: version });
+        t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
+      }
+      sharedAll(t);
+      const found = episodeFor(t, { record: { ...EDITED, versionOf: "e-20261010-7c1d2e", label: "Video of 14 Oct, 09:12 (Mac Studio)" } });
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, `setting ${version}: ${t.said()}`);
+      assert.doesNotMatch(t.said(), /not on this Mac yet|each say they are a version of the other/);
+      assert.equal(t.started.length, 1);
+      t.done();
+    }
+  });
+});
+
+// A client or group session's own finish comes with its teachings, and a video not yet answered has no kind to finish as. Until
+// then the Final Cut finish would copy a session's main video and its transcripts into final/, in Dropbox, which no session's
+// transcript may ever be in (spec 2026-10-22, section 2). So it refuses them at once, in either version of the hand-off, before it
+// looks in any folder: no part line, no "Looked in" line and no file name is printed, and no claim is written.
+describe("finish, the part that looks and asks, for a session and for a video not yet answered", () => {
+  it("refuses it at once, as edit.js names it (a session by its session label, a video not answered by its label or else its short id), and prints no file name, no part line and no folder it looked in", async () => {
+    for (const version of [undefined, 1, 2]) {
+      for (const [what, kind, words, named] of NOT_YET) {
+        for (const label of ["Video of 14 Oct, 09:12 (Mac Studio)", undefined]) {
+          const who = named(label);
+          const t = setup();
+          if (version) {
+            writeSettings(t.home, { handoffVersion: version });
+            t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
+          }
+          // Every Share of the made-up edit is in From Final Cut, so that a finish which looked would say what it found.
+          sharedAll(t);
+          const found = episodeFor(t, { record: { ...EDITED, ...kind, ...(label ? { label } : {}) } });
+          const how = `${what}, setting ${version}, ${label ? "labelled" : "no label"}`;
+          assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, how);
+          assert.deepEqual(t.said().split("\n"), [words(who)], how);
+          assert.doesNotMatch(t.said(), /Pricing|\.mp4|\.mov|Looked in/, how);
+          assert.deepEqual(t.started, [], how);
+          assert.equal(reread(found).rev, found.record.rev, `${how}: no claim was written`);
+          assert.equal(existsSync(join(episodeWork(t.home, FOLDER), "finish.asked.json")), false, how);
+          t.done();
+        }
+      }
+    }
   });
 });
 

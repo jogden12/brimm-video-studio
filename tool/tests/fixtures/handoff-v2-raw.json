@@ -1,0 +1,83 @@
+{
+  "format": "brimm-video hand-off",
+  "version": 2,
+  "revision": 1,
+  "made": "2026-10-21T11:48:30-04:00",
+  "madeOn": "Mac Studio",
+  "madeBy": "brimm-video c709b57",
+  "video": {
+    "id": "e-20261020-c4e5a7",
+    "kind": "raw",
+    "name": "Pricing: when to raise it?",
+    "recorded": "2026-10-20",
+    "recordedFrom": "video"
+  },
+  "main": {
+    "file": "Pricing- when to raise it- main v4 c4e5a7.mp4",
+    "seconds": 61.62,
+    "srt": "1\n00:00:00,000 --> 00:00:03,300\n Hi, I'm Sallie, and today we're talking about when to\n\n2\n00:00:03,300 --> 00:00:05,100\n raise your prices.\n\n3\n00:00:05,500 --> 00:00:08,500\n Someone asked me last week if it was too early,\n\n4\n00:00:08,500 --> 00:00:11,500\n and my answer was, you do not need a reason.\n\n5\n00:00:11,500 --> 00:00:15,100\n You need a pattern. If three people in a row say yes\n\n6\n00:00:15,100 --> 00:00:18,500\n without a single question, your price is too low.\n\n7\n00:00:18,500 --> 00:00:22,000\n That is the signal. Not your birthday, not inflation.\n\n8\n00:00:22,500 --> 00:00:26,300\n When you raise a price, tell people early and plainly.\n\n9\n00:00:26,300 --> 00:00:29,300\n Say what is changing, say when it starts,\n\n10\n00:00:29,300 --> 00:00:32,200\n and thank the people who have been with you.\n\n11\n00:00:32,500 --> 00:00:35,800\n Keep the old price for anyone who is mid-project,\n\n12\n00:00:35,800 --> 00:00:38,800\n so nobody feels caught out. Then move on.\n\n13\n00:00:39,300 --> 00:00:42,900\n People ask me what percent is fair. Here is my answer.\n\n14\n00:00:42,900 --> 00:00:45,900\n Raise it until you hear a little hesitation,\n\n15\n00:00:45,900 --> 00:00:49,400\n then stay right there for a month. If the hesitation\n\n16\n00:00:49,400 --> 00:00:52,800\n goes away, you can go higher. If it gets louder,\n\n17\n00:00:52,800 --> 00:00:55,800\n come back down a little and keep going from there.\n\n18\n00:00:56,300 --> 00:00:59,100\n That's it for today. Thanks for watching,\n\n19\n00:00:59,100 --> 00:01:01,500\n and I'll see you in the next one.\n\n",
+    "onPicture": [
+      "Sallie Ogden",
+      "Founder, The BRIMM"
+    ]
+  },
+  "suggestions": [
+    {
+      "n": 1,
+      "start": 22.5,
+      "end": 38.8,
+      "stretches": [
+        {
+          "start": 22.5,
+          "end": 32.2
+        },
+        {
+          "start": 32.5,
+          "end": 38.8
+        }
+      ],
+      "first": "When you raise a price",
+      "last": "Then move on.",
+      "why": "Two short stretches that read as one: how to announce a price change, and who keeps the old price.",
+      "point": "Raise a price early and plainly, and keep the old one for work already started."
+    },
+    {
+      "n": 3,
+      "start": 39.3,
+      "end": 55.8,
+      "stretches": [
+        {
+          "start": 39.3,
+          "end": 55.8
+        }
+      ],
+      "first": "People ask me what",
+      "last": "keep going from there.",
+      "why": "One question, one answer, and a rule that can be tried this week.",
+      "point": "Raise a price until people hesitate, hold it for a month, then go higher or come back down a little."
+    }
+  ],
+  "reels": [
+    {
+      "n": 2,
+      "title": "Do not wait for everyone else",
+      "file": "Pricing- when to raise it- reel 2 v1 c4e5a7.mp4",
+      "seconds": 12.8,
+      "srt": "1\n00:00:00,000 --> 00:00:03,400\n Some people tell me prices are going up everywhere,\n\n2\n00:00:03,400 --> 00:00:06,600\n so they wait. That's a trap. Waiting for everyone\n\n3\n00:00:06,600 --> 00:00:10,200\n else to move first means you are always the last\n\n4\n00:00:10,200 --> 00:00:12,800\n one to be paid properly.\n\n",
+      "fromSuggestion": 2
+    },
+    {
+      "n": 4,
+      "title": "",
+      "file": "Pricing- when to raise it- reel 4 v2 c4e5a7.mp4",
+      "seconds": 16.5,
+      "inMain": {
+        "start": 5.5,
+        "end": 22
+      },
+      "srt": "1\n00:00:00,000 --> 00:00:03,000\n Someone asked me last week if it was too early,\n\n2\n00:00:03,000 --> 00:00:06,000\n and my answer was, you do not need a reason.\n\n3\n00:00:06,000 --> 00:00:09,600\n You need a pattern. If three people in a row say yes\n\n4\n00:00:09,600 --> 00:00:13,000\n without a single question, your price is too low.\n\n5\n00:00:13,000 --> 00:00:16,500\n That is the signal. Not your birthday, not inflation.\n\n",
+      "fromSuggestion": null
+    }
+  ],
+  "session": null
+}

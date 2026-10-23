@@ -160,6 +160,9 @@ const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by:
 /** What a record of a client or group session holds over the video's own, as F3 writes it: the kind, the mark not cleared, and
     the session's label for its name. */
 const SESSION_OVER = { kind: "session", answer: ANSWERED, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null }, name: { text: SESSION, placeholder: false } };
+/** A video answered as another kind whose session mark is not cleared, as when a session is answered again as finished: gated
+    as a session is, and named by its label, but not a session to finish.js cannotFinish, so finish runs for it. */
+const MARKED_OVER = { ...SESSION_OVER, kind: "finished" };
 /** This Mac's settings with the training gate on, as Jason's check of both accounts leaves it. */
 const TEACHINGS = { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: "sallie@example.com (BRIMM)", app: "sallie@example.com (BRIMM)" } };
 
@@ -426,14 +429,23 @@ describe("a command the gate lets through, for a gated video", () => {
     t.done();
   });
   it("keeps every line of a scoped command free of the video's names, though a step names a file or a folder", async () => {
-    // A session, with the training gate on: finish runs for it, and looks in its folder for what Final Cut made.
+    // A session, with the training gate on: the gate lets finish through, and finish refuses it at once, by its name, which is
+    // its session label (finish.js cannotFinish, Part H).
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: SESSION_OVER });
-    const r = await on(t.ctx.deps, "finish", SESSION);
+    const refused = await on(t.ctx.deps, "finish", SESSION);
+    assert.deepEqual([refused.code, refused.said], [1, [`${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    // A video answered as another kind whose session mark is not cleared is gated as a session is, and finish runs for it: it
+    // looks in its folder for what Final Cut made.
+    const u = setup();
+    writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
+    clientEpisode(u, { over: MARKED_OVER });
+    const r = await on(u.ctx.deps, "finish", LABEL);
     assert.ok(r.said.length > 1, r.said.join("\n"));
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
+    u.done();
   });
 });
 
@@ -946,11 +958,12 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
 
 describe("an error that leaves a command for a gated video (fix 2)", () => {
   it("is said through the names' filter, as the work stopping, and the command ends with 1", async () => {
-    // A session's finish, with teachings on, makes this Mac's From Final Cut first, which cannot be made.
+    // The finish of a video marked a session, not cleared, with teachings on, makes this Mac's From Final Cut first, which cannot
+    // be made. (A session's own finish is refused before that: finish.js cannotFinish, Part H.)
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
-    clientEpisode(t, { over: SESSION_OVER });
-    const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, "finish", SESSION));
+    clientEpisode(t, { over: MARKED_OVER });
+    const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, "finish", LABEL));
     assert.equal(r.code, 1);
     assert.equal(r.said[r.said.length - 1], "The work stopped (EACCES).");
     assert.doesNotMatch(r.said.join("\n"), SECRET);
@@ -1086,13 +1099,21 @@ describe("the say filter's names (fix 7)", () => {
     }
   });
   it("leaves a path that is not the video's readable, and keeps the net on for a session whose name is its file's", async () => {
+    // A session whose name is its file's: finish refuses it at once (finish.js cannotFinish, Part H), by its label.
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: { ...SESSION_OVER, name: { text: STEM, placeholder: true } } });
-    const r = await on(t.ctx.deps, "finish", LABEL);
-    assert.ok(r.said.some((line) => line.includes(fromFinalCutFolder(t.home))), r.said.join("\n"));
+    const refused = await on(t.ctx.deps, "finish", LABEL);
+    assert.deepEqual([refused.code, refused.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    // A video marked a session, not cleared, whose name is its file's: finish runs for it, and says the folder it looked in.
+    const u = setup();
+    writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
+    clientEpisode(u, { over: { ...MARKED_OVER, name: { text: STEM, placeholder: true } } });
+    const r = await on(u.ctx.deps, "finish", LABEL);
+    assert.ok(r.said.some((line) => line.includes(fromFinalCutFolder(u.home))), r.said.join("\n"));
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
+    u.done();
   });
 });
 
