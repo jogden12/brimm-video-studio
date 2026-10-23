@@ -10,6 +10,7 @@ import { stamp } from "./shared/text.js";
 import { basename, extname, join } from "node:path";
 import { cropsFor, stretchesOf, fitReel } from "./reframe.js";
 import { isAnswered, shownName } from "./episode.js";
+import { gated } from "./gate.js";
 import { suggestionsOnClock, KEPT_IN_100 } from "./handoff-v2.js";
 import { spelled } from "./final-transcript.js";
 import { timelineAt } from "./clock.js";
@@ -370,10 +371,13 @@ function suggestionsText(reels, record, now) {
     and for what each Reel is now: one it does not know of is a candidate.
     For a video she has answered the card of (episode.js isAnswered) it is the list of suggestions on the clock she is reading,
     `now` being clockFor's read of the main video, or null (suggestionsText); `whyNot` is then not said, since asking Claude again
-    is not offered. For any other record it is this list, as it always was, whatever `now` is: layoutOf is not asked, since it
-    turns 3 for an old video that only holds a version with a `how`. */
+    is not offered. So it is for a record the gate holds (gate.js gated: a video not yet answered, or a session not cleared),
+    whatever its answer says, so that no line of this can name `reels.video` for one: it is named by its label. For any other
+    record it is this list, as it always was, whatever `now` is: layoutOf is not asked, since it turns 3 for an old video that only
+    holds a version with a `how`. A bare shape with no `kind` at all is no record a session reads (episode.js refuses one), and is
+    not held by the gate here. */
 export function reelsText(reels, record, whyNot = "", now = null) {
-  if (isAnswered(record)) return suggestionsText(reels, record, now);
+  if (isAnswered(record) || (record.kind !== undefined && gated(record))) return suggestionsText(reels, record, now);
   const name = reels.video;
   if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
   if (!reels.candidates.length) {

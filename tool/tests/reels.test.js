@@ -434,6 +434,29 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
     assert.match(text, /^Reel suggestions of Video of 22 Oct, 09:00 \(Mac Studio\): 4, with times on main v1\.\n/);
     assert.ok(!text.includes("IMG_4821"), text);
   });
+  it("never names the video's file for a video that is not answered, or a session not cleared, whatever its answer says", () => {
+    const FILE = "SECRET_FILE_0042.MOV";
+    const waiting = { id: "e-20261022-4a7c10", kind: null, answer: { state: "needs your answer", guess: "raw", seen: "wide", came: "camera" }, label: "Video of 22 Oct, 09:00 (Mac Studio)", reels: [] };
+    const left = { ...waiting, answer: { ...waiting.answer, state: "not for brimm-video" } };
+    const mark = { marked: made, on: "Mac Studio", teachings: null, cleared: null };
+    const session = { id: "e-20261022-4a7c10", kind: "session", session: mark, label: "Video of 22 Oct, 09:00 (Mac Studio)", name: { text: "SECRET_FILE_0042", placeholder: true }, reels: [] };
+    const records = [waiting, left, { ...waiting, answer: { ...waiting.answer, state: "answered" } }, session, { ...session, answer: { ...ANSWERED, state: "needs your answer" } }, { ...session, kind: "short video" }, { ...session, kind: "raw", answer: ANSWERED }];
+    const lists = [
+      reelsFile({ video: FILE, by: "read", made, candidates: [KEPT, CUT] }),
+      reelsFile({ video: FILE, by: "read", made, candidates: [], none: "Claude suggested no stretch that stands alone" }),
+      reelsFile({ video: FILE, by: "read", made, candidates: [] })
+    ];
+    for (const record of records) {
+      for (const list of lists) {
+        for (const [whyNot, now] of [["", null], ["Claude cannot be asked.", NOW], ["", { ...NOW, words: [] }]]) {
+          const text = reelsText(list, record, whyNot, now);
+          assert.ok(!text.includes("SECRET_FILE"), `${JSON.stringify([record.kind, record.answer && record.answer.state])}: ${text}`);
+          assert.ok(!text.includes("ask Claude again") && !text.includes("No preview"), text);
+        }
+      }
+    }
+    assert.match(reelsText(lists[0], waiting, "", null), /^Reel suggestions of Video of 22 Oct, 09:00 \(Mac Studio\): 2, with times on the recording's own clock\.\n/);
+  });
   it("counts the seconds of a suggestion's own stretches that the clock keeps, not the gap between them that it keeps too", () => {
     const apart = suggestion(6, [{ start: 10, end: 15 }, { start: 20, end: 25 }]);
     const list = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [apart] });
