@@ -285,13 +285,14 @@ function planned(home, rest, now) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
-      if (![work, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to };
-      const head = unreadable.length && ![work, problem, imported, kept].some((lines) => lines.length) ? "and the old one could not be looked at:" : "and work is not finished in the old one:";
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
+      if (![work, running, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to };
+      const head = unreadable.length && ![work, running, problem, imported, kept].some((lines) => lines.length) ? "and the old one could not be looked at:" : "and work is not finished in the old one:";
       // Each kind of line is followed by the advice for it alone: what to do about a failed import is not what to do about a late
-      // check that found a problem (leave its video where it is), nor about an imported video.
+      // check that found a problem (leave its video where it is), nor about an import at work (wait for it), nor an imported video.
       const kinds = [
         [work, ["Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]],
+        [running, ["Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs."]],
         [problem, [
           ...(problemHere ? ["Try each of these again with retry, which makes its late check again from the video in the old folder: leave the video there, and run this again once the check has passed."] : []),
           ...(problemGone ? ["A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it."] : [])

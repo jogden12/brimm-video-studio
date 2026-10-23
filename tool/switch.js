@@ -27,9 +27,12 @@ function namesIn(folder) {
 }
 
 /** What the old drop folder `old` ("Unedited Video" or "Drop") of the Mac `machine`, in BRIMM Video at `root`, still holds that
-    stops the switch, in plain words: { work, problem, imported, kept, unreadable }, each a list of lines, all [] when it holds
-    nothing of the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still
-    arriving are none), and an import of this Mac, in Episodes/.importing, that failed. `problem` is an import of this Mac whose
+    stops the switch, in plain words: { work, running, problem, imported, kept, unreadable }, each a list of lines, all [] when it
+    holds nothing of the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still
+    arriving are none), and an import of this Mac, in Episodes/.importing, that failed. `running` is a video that no episode holds
+    and whose import this Mac has at work now (its status says so, and was written in the last 10 minutes): the import makes its
+    late check from this video, so it is to be waited for and left there, never taken out. An import that stopped (a crash left
+    it) is a video that waits, as one with no status is. `problem` is an import of this Mac whose
     late check found a problem: it is made again from the video in the old folder, so the video is to stay there, and
     `problemHere` and `problemGone` say whether some have their video there and some have not. A video that an
     episode holds already is imported, and is one of two kinds, by whether `home`, this Mac's own folder, holds the late check
@@ -94,9 +97,11 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   const pendings = home ? readPendings(home) : [];
   const imported = new Set();
   const kept = new Set();
+  const running = new Set();
   let counted = 0;
   let importedCounted = 0;
   let keptCounted = 0;
+  let runningCounted = 0;
   for (const video of videos.filter((v) => !named.has(v))) {
     // A video that cannot be looked at (a link that goes round in a circle) is a video all the same, whose size is not known.
     let bytes;
@@ -116,12 +121,17 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
         else imported.add(`  ${label || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
       } else if (!label && light) keptCounted += 1;
       else kept.add(`  ${label || video}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
+    } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
+      // This Mac's import is at work on it now, and will make its late check from this video: it is to be waited for and left there.
+      if (!label && light) runningCounted += 1;
+      else running.add(`  ${label || video}: it is being imported now.`);
     } else if (label) lines.add(`  ${label}: waits in ${folder}.`);
     else if (light) counted += 1;
     else lines.add(`  ${video}: waits in ${folder}.`);
   }
   if (counted) lines.add(`  ${counted === 1 ? "1 video waits" : `${counted} videos wait`} in ${folder}.`);
+  if (runningCounted) running.add(runningCounted === 1 ? "  1 video is being imported now." : `  ${runningCounted} videos are being imported now.`);
   if (importedCounted) imported.add(importedCounted === 1 ? "  1 video is already imported, and its late check is still to come." : `  ${importedCounted} videos are already imported, and their late checks are still to come.`);
   if (keptCounted) kept.add(keptCounted === 1 ? "  1 video is already imported, and nothing of this Mac's import will take it out of the old folder." : `  ${keptCounted} videos are already imported, and nothing of this Mac's import will take them out of the old folder.`);
-  return { work: [...lines], problem: [...problem], problemHere, problemGone, imported: [...imported], kept: [...kept], unreadable };
+  return { work: [...lines], running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept: [...kept], unreadable };
 }

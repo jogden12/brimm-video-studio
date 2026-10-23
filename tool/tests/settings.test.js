@@ -756,6 +756,10 @@ describe("node settings.js write and plan, with the settings of the switch", () 
   const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
   const LATE = "A video that is already imported leaves the old folder once its late check has passed: run this again after that.";
   const KEPT = "Delete each of these from the old folder by hand, then run this again.";
+  /** When a status was written that an import left behind when it stopped: more than 10 minutes before the time of these tests. */
+  const STOPPED = new Date(AT.getTime() - 30 * 60000).toISOString();
+  // An import at work on a video makes its late check from the video in the old folder, so it is to be waited for and left there.
+  const RUNNING = "Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs.";
   // A late check that found a problem restores from the video in the old folder, so its advice is to leave the video there.
   const PROBLEM_HERE = "Try each of these again with retry, which makes its late check again from the video in the old folder: leave the video there, and run this again once the check has passed.";
   const PROBLEM_GONE = "A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it.";
@@ -1095,10 +1099,74 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const old = t.folder();
       put(old, "Talk.mov", "12345");
       put(old, "Budget.mov", "123456");
-      t.status("Talk.mov", { bytes: 5, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
+      // The import of Talk.mov stopped (a crash left its status): it waits, and is named by the label its status carries.
+      t.status("Talk.mov", { bytes: 5, label: "Video of 20 Oct, 15:00 (Mac Studio)", at: STOPPED });
       t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, "Video of 21 Oct, 09:00 (Mac Studio)");
       // The video an episode holds is imported already: it has a line of its own, and its own advice, after the lines of work.
       assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Video of 20 Oct, 15:00 (Mac Studio): waits in ${old}.`, ADVICE, KEPT_LINE("Video of 21 Oct, 09:00 (Mac Studio)"), KEPT]);
+      t.done();
+    });
+    it("says of a video whose import is at work now, in this Mac's own status for it, that it is being imported, and to wait and run the installer again: never to take it out", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      t.status("Talk.mov", { bytes: 5, step: "Making the rough cut" });
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, "  Talk.mov: it is being imported now.", RUNNING]);
+      assert.ok(!said.some((line) => /take the video out|delete|waits in/.test(line)), said.join("\n"));
+      t.done();
+    });
+    it("names a video whose import is at work by its label when the status has one", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      t.status("Talk.mov", { bytes: 5, label: "Video of 23 Oct, 09:40 (Mac Studio)" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  Video of 23 Oct, 09:40 (Mac Studio): it is being imported now.", RUNNING]);
+      t.done();
+    });
+    it("counts videos whose import is at work under the light import when they have no label, and names none", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4", "12345");
+      t.status("Coaching call Jane Doe.mp4", { bytes: 5 });
+      const one = await refused(t, "--drop", "Drop");
+      assert.deepEqual(one, [HEAD, "  1 video is being imported now.", RUNNING]);
+      put(old, "Sales call Acme Ltd.mov", "123456");
+      t.status("Sales call Acme Ltd.mov", { bytes: 6 });
+      const two = await refused(t, "--drop", "Drop");
+      assert.deepEqual(two, [HEAD, "  2 videos are being imported now.", RUNNING]);
+      // With a label it is named by it, and the others still counted.
+      t.status("Sales call Acme Ltd.mov", { bytes: 6, label: "Video of 23 Oct, 09:40 (Mac Studio)" });
+      const labelled = await refused(t, "--drop", "Drop");
+      assert.deepEqual(labelled, [HEAD, "  Video of 23 Oct, 09:40 (Mac Studio): it is being imported now.", "  1 video is being imported now.", RUNNING]);
+      assert.ok(!/Jane|Doe|Acme|Coaching|Sales/.test([...one, ...two, ...labelled].join("\n")), [...one, ...two, ...labelled].join("\n"));
+      t.done();
+    });
+    it("follows the lines of an import at work with its own advice, after the lines of work and with its own apart from theirs", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      put(old, "Budget.mov", "123456");
+      t.status("Budget.mov", { bytes: 6 });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, ADVICE, "  Budget.mov: it is being imported now.", RUNNING]);
+      t.done();
+    });
+    it("leaves as they are a video whose import stopped, another Mac's import at work, and a video an episode holds, whatever its status says", async () => {
+      const t = mac();
+      const old = t.folder();
+      // A stopped import (a crash left it) is a video that waits: this Mac's next run imports it again.
+      put(old, "Talk.mov", "12345");
+      t.status("Talk.mov", { bytes: 5, at: new Date(AT.getTime() - 30 * 60000).toISOString() });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, ADVICE]);
+      // Another Mac's import at work is not this Mac's, and a status of another recording of the name (another size) is not this video's.
+      put(old, "Budget.mov", "123456");
+      t.status("Budget.mov", { bytes: 6 }, "Sallie's laptop");
+      t.status("Budget.mov", { bytes: 99 });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Budget.mov: waits in ${old}.`, `  Talk.mov: waits in ${old}.`, ADVICE]);
+      // An episode that holds the video says what the video is: imported.
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6);
+      t.status("Budget.mov", { bytes: 6 });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, ADVICE, KEPT_LINE("Budget.mov"), KEPT]);
       t.done();
     });
     it("says a video an episode holds, when this Mac owes it a late check, is imported and its late check is still to come, by when, and to run the installer again after it", async () => {
@@ -1194,7 +1262,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const two = await refused(t, "--drop", "Drop");
       assert.deepEqual(two, [HEAD, `  2 videos wait in ${old}.`, ADVICE]);
       // With a label, by the label: from this Mac's status, or from the episode that holds the video.
-      t.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+      t.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)", at: STOPPED });
       put(old, "Coaching call Jane Doe.mp4", "12345");
       t.episode("2026-10-22 Sales call (Mac Studio)", "Sales call Acme Ltd.mov", 5, "Video of 22 Oct, 11:00 (Mac Studio)");
       put(old, "Sales call Acme Ltd.mov", "12345");
@@ -1410,7 +1478,8 @@ describe("what --help says of write, plan and set", () => {
       "one it owes none (the check passed, or it is a copy of an imported video) is said to be one nothing of its import will take out, for a person to delete by hand before the installer is run again",
       "an old folder or status files that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
       "a node older than 22 counts as no node when the settings are to be checked",
-      "try a late check that found a problem again with `retry` and leave its video in the old folder, since the check is made again from that video"
+      "try a late check that found a problem again with `retry` and leave its video in the old folder, since the check is made again from that video",
+      "a video whose import is at work now is said to be being imported, to wait for it and run the installer again, and to leave its video in the old folder"
     ]) assert.ok(paragraph.includes(said), `${said}\n---\n${paragraph}`);
   });
   it("is as the header of settings.js says, for each of the three: the line that names the command and its options is the same", () => {
