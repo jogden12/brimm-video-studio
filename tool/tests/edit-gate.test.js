@@ -531,7 +531,7 @@ describe("reel, which a session passes only with the words of a Reel she has agr
   });
   it("counts the words when the first is the word findEpisode was asked, as '<label> <n> --client-agreed' and '<label> make <n>' are", async () => {
     const t = setup();
-    episodeFor(t, { record: { ...SESSION_RECORD, session: { ...SESSION_RECORD.session, agreed: [{ n: 2, at: AT }] } } });
+    episodeFor(t, { record: { ...SESSION_RECORD, session: { ...SESSION_RECORD.session, agreed: [{ n: 2, at: AT.slice(0, 10) }] } } });
     const ctx = contextFor({ ...taught(t), say: () => {} });
     const asked = (command, words, said) => findEpisode({ ...ctx, asked: { command, words } }, said);
     assert.equal(asked("reel", [FOLDER, "2", "--client-agreed"], FOLDER).name, FOLDER);

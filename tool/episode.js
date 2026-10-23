@@ -116,13 +116,24 @@ const byItem = (v, each) => isObject(v) && Object.entries(v).every(([list, items
 /** Her decision of an item, and her change of one: the keys she may change, each to words. */
 const isDecision = (d) => d === "kept" || d === "dropped";
 const isEdit = (e, list) => isObject(e) && Object.entries(e).every(([key, text]) => SESSION_EDITS[list].includes(key) && isText(text));
+/** A day as the calendar has it, written 2026-10-23: not 2026-02-30. */
+const isDay = (v) => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const at = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().startsWith(v);
+};
+/** A client's agreement to a Reel cut from a session, as `reel … --client-agreed` records it: the Reel idea's number, a whole
+    number from 1, and the day it was noted. Nothing else: who agreed stays on the Mac that noted it. */
+const isAgreement = (a) => isObject(a) && Object.keys(a).every((k) => k === "n" || k === "at") && Number.isInteger(a.n) && a.n >= 1 && isDay(a.at);
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
     when it was cleared, if it was: confirmed by her click on a dialog. Once her teachings are asked for, when (`asked`); and
     what she decided of each item Claude read (`decided`, "kept" or "dropped", by list and number) and what she changed of one
-    (`edits`), which only her command writes (spec 2026-10-22, section 8). */
+    (`edits`), which only her command writes (spec 2026-10-22, section 8); and the Reel ideas a client's agreement to cutting a
+    Reel from the session was noted for, by number and day (`agreed`). */
 const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
   && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))
-  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit));
+  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit))
+  && listOf(x.agreed, isAgreement);
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
     ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
     own folder. */

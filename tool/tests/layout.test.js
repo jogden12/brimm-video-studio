@@ -156,6 +156,23 @@ describe("the record's layout 3", () => {
     ]) {
       assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
     }
+    // A client's agreement to a Reel cut from a session (F8b): the Reel idea's number and the day it was noted, and no other key,
+    // since who agreed stays on one Mac and the record keeps only that it was noted.
+    const DAY = "2026-10-23";
+    for (const agreed of [[], [{ n: 1, at: DAY }], [{ n: 2, at: DAY }, { n: 11, at: "2024-02-29" }]]) {
+      assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, agreed } }), "", JSON.stringify(agreed));
+    }
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "finished", session: { ...SESSION, agreed: [{ n: 3, at: DAY }], cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } } }), "");
+    for (const agreed of [
+      null, "all", {}, [1], [null], ["2026-10-23"],
+      [{ n: 0, at: DAY }], [{ n: "2", at: DAY }], [{ n: 1.5, at: DAY }], [{ n: -1, at: DAY }], [{ n: null, at: DAY }], [{ at: DAY }],
+      [{ n: 1 }], [{ n: 1, at: null }], [{ n: 1, at: 20261023 }], [{ n: 1, at: "2026-02-30" }], [{ n: 1, at: "2025-02-29" }], [{ n: 1, at: "2026-13-01" }],
+      [{ n: 1, at: "2026-10-23T09:00:00-05:00" }], [{ n: 1, at: "2026-10-23T00:00:00Z" }], [{ n: 1, at: "23 Oct" }], [{ n: 1, at: "2026-1-3" }],
+      [{ n: 1, at: DAY, who: "Jane Doe" }], [{ n: 1, at: DAY, by: "Mac Studio" }], [{ n: 1, at: DAY }, { n: 2, at: DAY, text: "x" }], [{ n: 1, at: DAY }, { n: 2 }]
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed } }), /session/, JSON.stringify(agreed));
+    }
     for (const bad of [{ kind: "" }, { model: 1 }, { at: "later" }, { on: "" }, { account: null }, { outcome: "" }]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, ...bad } }), /reading/, JSON.stringify(bad));
     }
