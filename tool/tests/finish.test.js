@@ -1351,3 +1351,104 @@ describe("where a video's next hand-off goes", () => {
     t.done();
   });
 });
+
+// A session's words are kept out of the shared folder, and its hand-off redacts what the page holds for its id (spec 2026-10-22,
+// sections 2 and 8). A hand-off of another version of the same video, under the same id, would rise above the session's revision
+// and bring those words back. So no hand-off of a video that is not a session is written while any version of it, earlier or
+// later, is a session whose mark is not cleared (one with no mark at all among them): the video is named by its label, else
+// "This video", never by its name.
+describe("a hand-off of a video one of whose versions is a client or group session", () => {
+  const MARK = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
+  const CLEARED = { ...MARK, cleared: { at: "2026-10-22T11:00:00-05:00", on: "Mac Studio", to: "finished", confirmed: "dialog" } };
+  /** A session by its kind with no mark, by its kind with a mark not cleared, and by a mark not cleared alone. */
+  const SESSIONS = [["a session with no mark", { kind: "session" }], ["a session whose mark is not cleared", { kind: "session", session: MARK }], ["a video marked a session, not cleared", { kind: "finished", session: MARK }]];
+  const refusedAs = (who) => `${who} is a version of a client or group session: ask Jason. Nothing was written.`;
+  /** The made-up episode, finish asked of it with Final Cut's files in From Final Cut, as a new version of FIRST, or as the first
+      version of a video that SECOND is a later version of. `as` lays the session's fields on that other version, after finish
+      was asked. */
+  async function askedBeside(t, { earlier, as, label = LABEL }) {
+    handoffVersion(t, 2);
+    const first = earlier ? firstCut(t) : null;
+    const found = await asked(t, { ...EDITED, ...(earlier ? { versionOf: FIRST } : {}), ...(label ? { label } : {}), ...OPEN });
+    if (earlier) writeFileSync(recordFile(first.folder, 2), recordText({ ...first.record, rev: 2, ...as }));
+    else later(t, SECOND, ID, as);
+    return found;
+  }
+  it("is refused by the detached finish, when an earlier or a later version is such a session, and nothing is written", async () => {
+    for (const earlier of [true, false]) {
+      for (const [what, as] of SESSIONS) {
+        for (const [label, who] of [[LABEL, LABEL], [null, "This video"]]) {
+          const t = setup();
+          const how = `${earlier ? "earlier" : "later"}: ${what}, ${who}`;
+          const found = await askedBeside(t, { earlier, as, label });
+          const before = episodesTree(t);
+          const result = await finishNow(t.ctx, found);
+          assert.equal(result.ok, false, how);
+          assert.deepEqual(result.failed, [refusedAs(who)], how);
+          assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, `${how}: no name`);
+          assert.deepEqual(episodesTree(t), before, `${how}: nothing in final/, and every record as it was`);
+          assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], how);
+          t.done();
+        }
+      }
+    }
+  });
+  it("is refused by the quick part at once, before it looks in any folder, prints a part line or takes a claim", async () => {
+    for (const earlier of [true, false]) {
+      for (const [what, as] of SESSIONS) {
+        const t = setup();
+        handoffVersion(t, 2);
+        if (earlier) firstCut(t, as);
+        const found = episodeFor(t, { record: { ...EDITED, ...(earlier ? { versionOf: FIRST } : {}), label: LABEL } });
+        if (!earlier) later(t, SECOND, ID, as);
+        for (const name of [`${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.shared(name, 2000);
+        const how = `${earlier ? "earlier" : "later"}: ${what}`;
+        assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, how);
+        assert.deepEqual(t.said().split("\n"), [refusedAs(LABEL)], how);
+        assert.deepEqual(t.started, [], how);
+        assert.equal(reread(found).rev, found.record.rev, `${how}: no claim was written`);
+        t.done();
+      }
+    }
+  });
+  it("is refused by spell, when an earlier or a later version became such a session after the finish, and nothing is written", async () => {
+    for (const earlier of [true, false]) {
+      for (const [what, as] of SESSIONS) {
+        const t = setup();
+        handoffVersion(t, 2);
+        const first = earlier ? firstCut(t) : null;
+        const found = await asked(t, { ...EDITED, ...(earlier ? { versionOf: FIRST } : {}), label: LABEL });
+        assert.equal((await finishNow(t.ctx, found)).ok, true);
+        if (earlier) writeFileSync(recordFile(first.folder, 2), recordText({ ...first.record, rev: 2, ...as }));
+        else later(t, SECOND, ID, as);
+        const how = `${earlier ? "earlier" : "later"}: ${what}`;
+        const before = episodesTree(t);
+        const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+        assert.deepEqual([r.code, r.text], [1, refusedAs(LABEL)], how);
+        assert.deepEqual(episodesTree(t), before, `${how}: final/ and the record as they were, and no spelling kept`);
+        t.done();
+      }
+    }
+  });
+  it("is written as ever once the session is cleared, and for a session's own record nothing is refused here", async () => {
+    const t = setup();
+    const found = await askedBeside(t, { earlier: false, as: { kind: "finished", session: CLEARED } });
+    const result = await finishNow(t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([handoffIn(found).video.id, handoffIn(found).revision], [ID, 1]);
+    // A session's own hand-off (its empty revision, Part F) is the session's: another version being one too refuses nothing.
+    const session = later(t, THIRD, ID, { kind: "session", session: MARK });
+    assert.deepEqual(handoffTarget({ root: t.root, settings: t.ctx.settings }, session), { v2: true, refusal: "", id: ID, revision: 2 });
+    t.done();
+  });
+  it("is not looked for in version 1, which is under the episode's own id", async () => {
+    const t = setup();
+    handoffVersion(t, 1);
+    const found = await asked(t, { ...EDITED, label: LABEL });
+    later(t, SECOND, ID, { kind: "session" });
+    const result = await finishNow(t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([handoffIn(found).version, handoffIn(found).episode.id], [1, ID]);
+    t.done();
+  });
+});

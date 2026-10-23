@@ -321,27 +321,35 @@ export function handoffIdOf(root, record) {
     { folder, record }. This only reads. */
 export function nextRevision(root, found) {
   const view = viewOf(root);
-  return revisionIn(view, walk(view, found.record, found.folder));
+  const walked = walk(view, found.record, found.folder);
+  return revisionIn(setOf(view, walked), walked.first);
 }
 
-/** nextRevision, in a view of Episodes already made, for a chain already walked (`walked`, as walk gives it). */
-function revisionIn(view, { chain, first }) {
+/** A video's versions on this Mac, for a chain already walked (`walked`, as walk gives it): `members`, every record whose own
+    walk ends at the chain's first id, earlier versions and later ones alike, the chain's own records first, each as
+    { folder, record } (a record may be there twice: once as the writer has it, once as its folder holds it); and `folders`, the
+    folders whose hand-offs are read for that id. */
+function setOf(view, { chain, first }) {
+  const members = [...chain];
+  const folders = new Set(chain.map((link) => link.folder).filter(Boolean));
+  for (const one of view.all()) {
+    folders.add(one.folder);
+    if (one.record && walk(view, one.record, one.folder).first === first) members.push(one);
+  }
+  return { members, folders };
+}
+
+/** nextRevision, of a video's versions (setOf) under the id `first`. */
+function revisionIn({ members, folders }, first) {
   let most = 0;
-  const finished = (record) => {
-    if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
-  };
-  const folders = new Set();
-  for (const link of chain) {
-    finished(link.record);
-    if (link.folder) folders.add(link.folder);
-  }
-  for (const { folder, record } of view.all()) {
-    folders.add(folder);
-    if (record && walk(view, record, folder).first === first) finished(record);
-  }
+  for (const { record } of members) if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
   for (const folder of folders) most = Math.max(most, lastRevision(join(folder, "final"), first));
   return most + 1;
 }
+
+/** Is a record a client or group session whose mark is not cleared? One is known by its kind or by its mark, as `ask` knows one
+    (unedited.js askBlocked), and a session with no mark at all is not cleared either. */
+const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "session" || Boolean(record.session)) && !(record.session && record.session.cleared);
 
 /** Where the next hand-off of a video goes, as every hand-off writer asks it (finishEpisode, finishNow, saveSpellings, and
     Part F's writers), from one reading of Episodes: { v2, refusal, id, revision }. `found` is { folder, record }, the record's
@@ -350,16 +358,26 @@ function revisionIn(view, { chain, first }) {
     - Version 1 is under the episode's own id, one revision above its record's last finish and every hand-off of that id in its
       own final/ and history/ (lastRevision), as it has always been: nothing else in Episodes is read, and nothing is refused.
     - Version 2 is under the video's first version's id (handoffIdOf), one revision above every one written for that id on this
-      Mac (nextRevision). `refusal` is why it cannot be written, in plain words, after which the writer writes nothing, or "":
-      a gap in the chain of the video's versions (chainGapWords). On a refusal, `id` and `revision` are null, since they would
-      not be the chain's. */
+      Mac (nextRevision). `refusal` is why it cannot be written, in plain words, after which the writer writes nothing, or "".
+      The first of these that applies:
+      - a gap in the chain of the video's versions (chainGapWords);
+      - for a video that is not a session, any version of it, earlier or later (every record whose walk ends at the id), that
+        is a client or group session whose mark is not cleared (spec 2026-10-22, sections 2 and 8): the page redacts a
+        session's words by the id, and this hand-off, under the same id and above the session's revision, would bring them
+        back. A session's own hand-off (Part F's empty session revision) is the session's, and is not refused for it. The
+        video is named by its label, else "This video", never by its name.
+      On a refusal, `id` and `revision` are null, since no hand-off is to be written under them. */
 export function handoffTarget({ root, settings }, { folder, record }) {
   const v2 = writesV2For(settings, folder, record);
   if (!v2) return { v2, refusal: "", id: record.id, revision: Math.max((record.finished && record.finished.revision) || 0, lastRevision(join(folder, "final"), record.id)) + 1 };
   const view = viewOf(root);
   const walked = walk(view, record, folder);
-  if (walked.gap) return { v2, refusal: chainGapWords(record, walked.gap), id: null, revision: null };
-  return { v2, refusal: "", id: walked.first, revision: revisionIn(view, walked) };
+  const refused = (refusal) => ({ v2, refusal, id: null, revision: null });
+  if (walked.gap) return refused(chainGapWords(record, walked.gap));
+  const set = setOf(view, walked);
+  const who = record.label || "This video";
+  if (kindOf(record) !== "session" && set.members.some((one) => unclearedSession(one.record))) return refused(`${who} is a version of a client or group session: ask Jason. Nothing was written.`);
+  return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first) };
 }
 
 /** Is there a record of the episode numbered above `n`? */

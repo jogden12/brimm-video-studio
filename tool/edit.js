@@ -1262,6 +1262,11 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // claim is written.
   const notYet = cannotFinish(record);
   if (notYet) return refuse(ctx, notYet);
+  // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
+  // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
+  // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
+  const target = handoffTarget(ctx, { folder: found.folder, record });
+  if (target.refusal) return refuse(ctx, target.refusal);
   const stops = [];
   const gone = undone(record, ctx.home);
   if (gone) {
@@ -1270,14 +1275,10 @@ export async function finishEpisode(ctx, found, answers = {}) {
   }
   // What the hand-off needs, in the version it will be written in (spec 2026-10-22, section 8): the one this Mac's settings say,
   // or version 2 when the hand-off on file is version 2 already (writesV2For). Version 1 needs a name, and an approved title for
-  // all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished video's name is its file's);
-  // it is written under the video's first version's id, so a gap in the chain of its versions is refused here, before the claim
-  // is written, as the detached part refuses it before anything is copied (finish.js handoffTarget, which every writer asks).
-  const target = handoffTarget(ctx, { folder: found.folder, record });
+  // all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished video's name is its file's).
   const { v2 } = target;
   if (record.name && record.name.placeholder && (!v2 || kindOfRecord(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
-  if (target.refusal) stops.push(target.refusal);
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
