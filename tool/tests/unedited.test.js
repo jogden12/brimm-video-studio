@@ -25,7 +25,7 @@ import { writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
 
-const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
+const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } };
 /** Where ffmpeg heard silence in the made-up recording. */
 const HEARD = pausesOf(PAUSES);
 /** What the rules make of the made-up recording. The rules have tests of their own: here it is what the files must hold. */
