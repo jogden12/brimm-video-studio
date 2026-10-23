@@ -6,7 +6,7 @@
 // copy checks the copies again; only when they are whole does it delete from From Final Cut what it took from there.
 // Nothing here asks anything: what a person must check is said in the result, which status shows.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, join, relative } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { probeArgs, factsOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled } from "./lib.js";
@@ -17,6 +17,7 @@ import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf } from "./episode.js";
+import { REELS_FILE } from "./reels.js";
 import { fileSafe } from "./names.js";
 import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
@@ -151,10 +152,10 @@ function versionOf(record, part, name) {
   const push = (Array.isArray(pushed) ? pushed : []).find((p) => String(p.project).normalize("NFC") === own);
   return push ? push.v : undefined;
 }
-/** The hand-offs in a folder, as paths from it, at any depth when `deep`: every name that ends as a hand-off's does. A folder is
-    read on its own, one at a time, so that one which cannot be read, or has gone, is passed over and loses only its own
-    hand-offs. [] when the folder itself cannot be read. */
-const handoffsIn = (dir, deep) => {
+/** The files in a folder whose names end in `ending`, as paths from it, at any depth when `deep`. A folder is read on its own,
+    one at a time, so that one which cannot be read, or has gone, is passed over and loses only its own files. [] when the
+    folder itself cannot be read. */
+const namesIn = (dir, deep, ending) => {
   let entries = [];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -164,27 +165,36 @@ const handoffsIn = (dir, deep) => {
   const found = [];
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      if (deep) found.push(...handoffsIn(join(dir, entry.name), true).map((name) => join(entry.name, name)));
-    } else if (entry.name.endsWith(".brimm-ops.json")) {
+      if (deep) found.push(...namesIn(join(dir, entry.name), true, ending).map((name) => join(entry.name, name)));
+    } else if (entry.name.endsWith(ending)) {
       found.push(entry.name);
     }
   }
   return found;
 };
+/** Every hand-off of an episode as it is read: each in its final/ (`finalDir`), and each set aside into history/ beside it, at
+    any depth, by every name that ends as a hand-off's does. One that cannot be read is passed over. */
+const handoffsBeside = (finalDir) => [[finalDir, false], [join(dirname(finalDir), "history"), true]]
+  .flatMap(([dir, deep]) => namesIn(dir, deep, ".brimm-ops.json").map((name) => readJson(join(dir, name))))
+  .filter((h) => h !== null && typeof h === "object");
+/** Is a hand-off one of the video's whose id is `id`: by its `episode.id` (version 1) or its `video.id` (version 2)? */
+const handoffFor = (h, id) => [h.episode, h.video].some((who) => who && who.id === id);
+/** The highest revision of the hand-offs of the video `id` among `handoffs`, or 0. */
+const highestRevision = (handoffs, id) => handoffs.reduce((most, h) => (handoffFor(h, id) && Number.isInteger(h.revision) ? Math.max(most, h.revision) : most), 0);
+/** The numbers a hand-off gives its suggestions and its Reels: a Reel made from a suggestion has the suggestion's. */
+const numbersOf = (h) => [h.suggestions, h.reels].flatMap((list) => (Array.isArray(list) ? list : [])).map((item) => item && item.n).filter(Number.isInteger);
 /** The highest revision of a hand-off of this video already in final/, or set aside into history/ beside it, at any depth: a
     revision is never used twice, even when the record of the last finish was never written, and one that was replaced or
     cleared is still one the page holds. A hand-off is the video's when its `episode.id` (version 1) or its `video.id`
     (version 2) is `id`. */
 export function lastRevision(finalDir, id) {
-  let most = 0;
-  for (const [dir, deep] of [[finalDir, false], [join(dirname(finalDir), "history"), true]]) {
-    for (const name of handoffsIn(dir, deep)) {
-      const h = readJson(join(dir, name));
-      if (h && [h.episode, h.video].some((who) => who && who.id === id) && Number.isInteger(h.revision)) most = Math.max(most, h.revision);
-    }
-  }
-  return most;
+  return highestRevision(handoffsBeside(finalDir), id);
 }
+/** An episode's lists of Reel candidates as they are read: its reels.json, and each one set aside into its history/, at any
+    depth, by every name that ends as reels.json's does. One that cannot be read, or is not such a list, is passed over. */
+const reelsListsIn = (folder) => [join(folder, REELS_FILE), ...namesIn(join(folder, "history"), true, REELS_FILE).map((name) => join(folder, "history", name))]
+  .map(readJson)
+  .filter((list) => list !== null && typeof list === "object" && list.format === "brimm-video reels");
 
 /** Every folder in Episodes, each as { folder, record }, read as it lies now, past any conflicted copy: nothing is written. The
     record is null for a folder with no whole record, as an import not finished. */
@@ -339,12 +349,55 @@ function setOf(view, { chain, first }) {
   return { members, folders };
 }
 
-/** nextRevision, of a video's versions (setOf) under the id `first`. */
-function revisionIn({ members, folders }, first) {
+/** nextRevision, of a video's versions (setOf) under the id `first`. `handoffsAt` gives a folder's hand-offs (handoffsBeside),
+    read once when it is asked again. */
+function revisionIn({ members, folders }, first, handoffsAt = (folder) => handoffsBeside(join(folder, "final"))) {
   let most = 0;
   for (const { record } of members) if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
-  for (const folder of folders) most = Math.max(most, lastRevision(join(folder, "final"), first));
+  for (const folder of folders) most = Math.max(most, highestRevision(handoffsAt(folder), first));
   return most + 1;
+}
+
+/** The highest number ever given to a suggestion or a Reel of a video, on this Mac, or 0 when none was: of every hand-off for
+    the video's id (handoffIdOf) in final/ and history/ of the folders of its versions (setOf), of the Reels each version's
+    record holds, and of each version's reels.json and those set aside into its history/ (their `highest`, and each candidate's
+    number). Numbers never repeat within a video, across asking again, a corrected kind and a new version (spec 2026-10-22,
+    section 8), so a new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it
+    is not given. This only reads. */
+export function highestNumberOf(root, record, folder) {
+  const view = viewOf(root);
+  const walked = walk(view, record, folder || null);
+  const { members, folders } = setOf(view, walked);
+  let most = 0;
+  const take = (n) => {
+    if (Number.isInteger(n) && n > most) most = n;
+  };
+  for (const at of folders) for (const h of handoffsBeside(join(at, "final"))) if (handoffFor(h, walked.first)) numbersOf(h).forEach(take);
+  for (const { record: one } of members) for (const reel of Array.isArray(one.reels) ? one.reels : []) take(reel && reel.n);
+  for (const at of new Set(members.map((one) => one.folder).filter(Boolean))) {
+    for (const list of reelsListsIn(at)) {
+      take(list.highest);
+      for (const candidate of Array.isArray(list.candidates) ? list.candidates : []) take(candidate && candidate.n);
+    }
+  }
+  return most;
+}
+
+/** Why a version 2 hand-off cannot be written because it gives a suggestion or a Reel a number again that another version of
+    the video gave already, in a hand-off for the same id (`taken`, as handoffTarget gives it), in plain words; or "" when it
+    gives none. A number is a suggestion's or a Reel's identity on the BRIMM Ops page, and never repeats within a video (spec
+    2026-10-22, section 8). Until a new version's reading numbers on from the highest ever given (highestNumberOf, Part F), such a
+    hand-off is refused, and nothing is written. The video is named by its label, else "This video". */
+export function numbersTakenWords(record, handoff, taken) {
+  const again = [
+    ...(Array.isArray(handoff.suggestions) ? handoff.suggestions : []).map((s) => [s.n, `suggestion ${s.n}`]),
+    ...(Array.isArray(handoff.reels) ? handoff.reels : []).map((r) => [r.n, `Reel ${r.n}`])
+  ].filter(([n]) => taken.includes(n));
+  if (!again.length) return "";
+  const named = again.map(([, words]) => words);
+  const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+  const numbers = new Set(again.map(([n]) => n)).size === 1 ? "that number" : "those numbers";
+  return `${record.label || "This video"}'s hand-off would give ${list} again: another version of the video gave ${numbers} already, and a number is never given twice within a video. Ask Jason. Nothing was written.`;
 }
 
 /** Is a record a client or group session whose mark is not cleared? One is known by its kind or by its mark, as `ask` knows one
@@ -352,13 +405,17 @@ function revisionIn({ members, folders }, first) {
 const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "session" || Boolean(record.session)) && !(record.session && record.session.cleared);
 
 /** Where the next hand-off of a video goes, as every hand-off writer asks it (finishEpisode, finishNow, saveSpellings, and
-    Part F's writers), from one reading of Episodes: { v2, refusal, id, revision }. `found` is { folder, record }, the record's
-    own episode folder and the record as the writer has it. This only reads.
+    Part F's writers), from one reading of Episodes: { v2, refusal, id, revision, taken }. `found` is { folder, record }, the
+    record's own episode folder and the record as the writer has it. This only reads.
     - `v2` is whether it is written as version 2 (writesV2For: this Mac's settings, or a version 2 hand-off on file).
     - Version 1 is under the episode's own id, one revision above its record's last finish and every hand-off of that id in its
-      own final/ and history/ (lastRevision), as it has always been: nothing else in Episodes is read, and nothing is refused.
+      own final/ and history/ (lastRevision), as it has always been: nothing else in Episodes is read, nothing is refused, and
+      no number is taken.
     - Version 2 is under the video's first version's id (handoffIdOf), one revision above every one written for that id on this
-      Mac (nextRevision). `refusal` is why it cannot be written, in plain words, after which the writer writes nothing, or "".
+      Mac (nextRevision). `taken` is the suggestion and Reel numbers that the hand-offs for that id in the other folders of
+      its versions give (their final/ and history/), in order, which this hand-off may not give again (numbersTakenWords): the
+      writer's own folder is not among them, since its own earlier revisions give its numbers by right. `refusal` is why it
+      cannot be written, in plain words, after which the writer writes nothing, or "".
       The first of these that applies:
       - a gap in the chain of the video's versions (chainGapWords);
       - for a video that is not a session, any version of it, earlier or later (every record whose walk ends at the id), that
@@ -366,18 +423,27 @@ const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "ses
         session's words by the id, and this hand-off, under the same id and above the session's revision, would bring them
         back. A session's own hand-off (Part F's empty session revision) is the session's, and is not refused for it. The
         video is named by its label, else "This video", never by its name.
-      On a refusal, `id` and `revision` are null, since no hand-off is to be written under them. */
+      On a refusal, `id` and `revision` are null and `taken` is empty, since no hand-off is to be written under them. */
 export function handoffTarget({ root, settings }, { folder, record }) {
   const v2 = writesV2For(settings, folder, record);
-  if (!v2) return { v2, refusal: "", id: record.id, revision: Math.max((record.finished && record.finished.revision) || 0, lastRevision(join(folder, "final"), record.id)) + 1 };
+  if (!v2) return { v2, refusal: "", id: record.id, revision: Math.max((record.finished && record.finished.revision) || 0, lastRevision(join(folder, "final"), record.id)) + 1, taken: [] };
   const view = viewOf(root);
   const walked = walk(view, record, folder);
-  const refused = (refusal) => ({ v2, refusal, id: null, revision: null });
+  const refused = (refusal) => ({ v2, refusal, id: null, revision: null, taken: [] });
   if (walked.gap) return refused(chainGapWords(record, walked.gap));
   const set = setOf(view, walked);
   const who = record.label || "This video";
   if (kindOf(record) !== "session" && set.members.some((one) => unclearedSession(one.record))) return refused(`${who} is a version of a client or group session: ask Jason. Nothing was written.`);
-  return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first) };
+  // Each folder's hand-offs are read once, for the revision and for the numbers taken.
+  const read = new Map();
+  const handoffsAt = (at) => {
+    if (!read.has(at)) read.set(at, handoffsBeside(join(at, "final")));
+    return read.get(at);
+  };
+  const own = resolve(folder || (view.find(record.id) || {}).folder || "");
+  const taken = new Set();
+  for (const at of set.folders) if (resolve(at) !== own) for (const h of handoffsAt(at)) if (handoffFor(h, walked.first)) numbersOf(h).forEach((n) => taken.add(n));
+  return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first, handoffsAt), taken: [...taken].sort((a, b) => a - b) };
 }
 
 /** Is there a record of the episode numbered above `n`? */
@@ -590,6 +656,12 @@ export async function finishNow(ctx, found, deps = {}) {
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);
+      return result();
+    }
+    // A number another version of the video gave already, under the same id, is never given again (spec section 8).
+    const again = v2 ? numbersTakenWords(record, handoff, target.taken) : "";
+    if (again) {
+      failed.push(again);
       return result();
     }
     const handoffName = `${fileSafe(record.name.text)}.brimm-ops.json`;

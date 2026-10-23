@@ -39,7 +39,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2317,6 +2317,9 @@ async function saveSpellings(ctx, found, spellings, done) {
     const handoff = v2 ? respelledHandoffV2(onFile, { ...given, id: target.id, spellings: spelledWith.main || [] }) : respelledHandoff(onFile, given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) return refuse(ctx, `The hand-off could not be made again (${fault.replace(/\.$/, "")}). Nothing was changed.`);
+    // A number another version of the video gave already, under the same id, is never given again (spec section 8).
+    const again = v2 ? numbersTakenWords(record, handoff, target.taken) : "";
+    if (again) return refuse(ctx, again);
     writes.push([finished.handoff, handoffText(handoff)]);
     // Nothing is put into final/ that the record could not then take: a change Dropbox took away is said first, as save says
     // it, and a finish on the other Mac whose late check of final/ is still to come would put its own copies back over these.
