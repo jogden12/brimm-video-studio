@@ -1013,11 +1013,13 @@ export async function finishFinished(ctx, found, { record }) {
   const captionsRel = `${stem}.srt`;
   // What it is made from, here and whole: the import's captions, the reels.json of the reading (a finished video's suggestions),
   // and, when it is made again, the hand-off on file.
+  // The final files it replaces are read first, to be put back as they were if the record cannot be written, so they are whole too.
   const wanted = [captionsRel, ...(kind === "finished" ? [REELS_FILE] : []), ...(prior ? [prior.handoff] : [])];
-  const absent = wanted.filter((rel) => !existsSync(join(folder, rel)));
-  const missing = absent.find((rel) => !listed(rel) && (rel !== REELS_FILE));
+  const replaced = prior ? [`final/${stem}.srt`, `final/${stem}.transcript.txt`] : [];
+  const absent = [...wanted, ...replaced].filter((rel) => !existsSync(join(folder, rel)));
+  const missing = wanted.find((rel) => absent.includes(rel) && !listed(rel) && rel !== REELS_FILE);
   if (missing) return { why: missing === captionsRel ? `${who} has no captions from the import to hand off. Nothing was written.` : `${missing} is not in the episode's folder, so the hand-off cannot be made again. Nothing was changed.` };
-  const coming = wanted.filter((rel) => (absent.includes(rel) ? listed(rel) : !ctx.isWhole(join(folder, rel))));
+  const coming = [...wanted, ...replaced].filter((rel) => (absent.includes(rel) ? listed(rel) : !ctx.isWhole(join(folder, rel))));
   if (coming.length) return { coming };
   let imported = "";
   let reels = null;

@@ -122,6 +122,8 @@ const WAITS = "The hand-off is written once this Mac hands off version 2: ask Ja
 const LEFT3 = "Suggestion 3 is left out of the hand-off: it has no reason.";
 const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
 
+/** One of the contract's fixtures, which BRIMM Ops keeps a copy of. */
+const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/handoff-v2-${name}.json`, import.meta.url), "utf8"));
 /** The hand-off a spell wrote into final/. */
 const handoffIn = (found) => JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8"));
 /** What a file in the episode's folder holds. */
@@ -205,6 +207,9 @@ describe("spell … offers none, for a finished video, with this Mac handing off
     assert.deepEqual(handoff.reels, []);
     assert.equal(handoff.session, null);
     assert.equal("title" in handoff.video || "episode" in handoff, false);
+    // Its keys are the contract's, in the contract's order.
+    const contract = fixture("finished");
+    assert.deepEqual([Object.keys(handoff), Object.keys(handoff.video), Object.keys(handoff.main), Object.keys(handoff.suggestions[0]), Object.keys(handoff.suggestions[0].stretches[0])], [Object.keys(contract), Object.keys(contract.video), Object.keys(contract.main), Object.keys(contract.suggestions[0]), Object.keys(contract.suggestions[0].stretches[0])]);
     // finish's shape: the transcripts beside the hand-off in final/, and the record says what was finished.
     assert.deepEqual(listAll(join(found.folder, "final")), [HANDOFF, "Pricing talk.srt", "Pricing talk.transcript.txt"]);
     assert.equal(text(found, "final/Pricing talk.srt"), IMPORT_SRT);
@@ -494,6 +499,8 @@ describe("spell … offers, for an iPhone clip", () => {
     assert.equal(handoff.main.file, VIDEO);
     assert.match(handoff.main.srt, /Sallie Ogden\./);
     assert.deepEqual(["suggestions" in handoff, "reels" in handoff, handoff.session], [false, false, null]);
+    const contract = fixture("short-video");
+    assert.deepEqual([Object.keys(handoff), Object.keys(handoff.video), Object.keys(handoff.main)], [Object.keys(contract), Object.keys(contract.video), Object.keys(contract.main).filter((key) => key !== "onPicture")]);
     assert.deepEqual(listAll(join(found.folder, "final")), [HANDOFF, "Pricing talk.srt", "Pricing talk.transcript.txt"]);
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", HANDOFF)] }]);
     t.done();
@@ -655,6 +662,18 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     assert.equal(t.started.length, 1);
     assert.equal(reread(found).offers.answered, undefined);
     assert.equal(existsSync(join(found.folder, "final")), false);
+    t.done();
+  });
+  it("starts Dropbox bringing over the final transcripts a later spell is to replace, when they are not whole here, and changes nothing", async () => {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const before = tree(t);
+    t.ctx.deps.isWhole = (path) => !path.endsWith("final/Pricing talk.srt");
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.deepEqual([r.code, r.text], [1, "Dropbox is bringing the import's captions over to this Mac. Say it again when it is done. Nothing was changed."]);
+    assert.equal(t.started.length, 1);
+    assert.deepEqual(tree(t), before);
+    assert.deepEqual(reread(found).spellings, []);
     t.done();
   });
   it("takes its files out of final/ again when the record cannot be written, and keeps no answer", async () => {
