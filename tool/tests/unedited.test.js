@@ -13,7 +13,7 @@ import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked,
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions, roughRate } from "../cuts.js";
-import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "../notes.js";
+import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "../notes.js";
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
@@ -321,11 +321,56 @@ describe("one unedited video", () => {
     assert.deepEqual([file.words[0], file.words[47]], [{ w: "Welcome", start: 0, end: 1.4 }, { w: "Sallie.", start: 20.36, end: 20.94 }]);
     t.done();
   });
+  it("keeps the pauses ffmpeg heard in the cut plan, as the rules were given them, for a reading made later", async () => {
+    const t = setup();
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.deepEqual(plan.pauses, [[0, 1.111], [2.788, 3.695], [4.843, 6.07], [9.638, 12.459], [13.06, 13.583], [16.33, 17.246], [19.022, 19.414], [21.097, 23.423]]);
+    assert.deepEqual(pausesOfPlan(plan), HEARD);
+    // The plan is the rules' plan, whichever way it is changed after.
+    assert.deepEqual(Object.keys(plan).filter((key) => !["pauses", "by"].includes(key)), ["version", "video", "facts", "phrases", "ranges", "kept", "cut"]);
+    t.done();
+  });
+  it("keeps no pause for a recording ffmpeg heard none in", async () => {
+    const t = setup({ pauses: "" });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")).pauses, []);
+    t.done();
+  });
+  it("ends a pause that never ends where the video ends, since a time with no end cannot be written in the plan's JSON", async () => {
+    const t = setup({
+      probed: probed({ duration: "110.000000" }),
+      srt: "1\n00:01:45,000 --> 00:01:46,740\n Hey, Charlie, how are you?\n\n",
+      told: told([[105000, 106740, [[" Hey", 10530], [",", 10540], [" Charlie", 10580], [",", 10585], [" how", 10610], [" are", 10630], [" you", 10660], ["?", 10670]]]]),
+      pauses: "[silencedetect @ 0x1] silence_start: 0\n[silencedetect @ 0x1] silence_end: 104.9 | silence_duration: 104.9\n[silencedetect @ 0x1] silence_start: 106.7\n"
+    });
+    await uneditedFile(t.video("call.mp4"), t.deps);
+    const plan = JSON.parse(t.read("call.cut-plan.json"));
+    assert.deepEqual(plan.pauses, [[0, 104.9], [106.7, 110]]);
+    // The plan's ranges are what the end of that pause is: the silence after the last words, to the end of the video.
+    assert.deepEqual(plan.ranges.map((x) => [x.start, x.end, x.keep]), [[0, 104.7, false], [104.7, 106.9, true], [106.9, 110, false]]);
+    t.done();
+  });
+  it("gives a reading made later, on the plan as it is read back from its file, the pauses the import used: Claude keeping what the rules cut gets the same ranges", async () => {
+    const t = setup();
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const back = JSON.parse(t.read("talk.cut-plan.json"));
+    // Claude keeps every phrase the rules cut: the silence beside each is then kept or cut by where ffmpeg heard it.
+    const decisions = PLAN.phrases.filter((p) => !p.keep).map((p) => ({ id: p.id, keep: true, why: "She means it." }));
+    const at = applyDecisions(PLAN, decisions, HEARD);
+    const later = applyDecisions(back, decisions, pausesOfPlan(back));
+    assert.deepEqual(later.plan.ranges, at.plan.ranges);
+    assert.deepEqual(later.plan.changes, at.plan.changes);
+    assert.deepEqual([later.plan.kept, later.plan.cut], [at.plan.kept, at.plan.cut]);
+    // With none given, whole silences are kept beside the phrases Claude keeps.
+    assert.notDeepEqual(applyDecisions(back, decisions, []).plan.ranges, at.plan.ranges);
+    t.done();
+  });
   it("gets the cut plan twice: to work from, and to read", async () => {
     const t = setup();
     await uneditedFile(t.video("talk.mov"), t.deps);
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules" });
-    assert.deepEqual(Object.keys(JSON.parse(t.read("talk.cut-plan.json"))), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "by"]);
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules" });
+    assert.deepEqual(Object.keys(JSON.parse(t.read("talk.cut-plan.json"))), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "pauses", "by"]);
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN));
     assert.deepEqual(t.read("talk.cut-plan.txt").split("\n").slice(0, 2), ["Kept 0:12 of 0:23. Cut 0:11.", "0:00 to 0:03  CUT  retake: said again at 0:06, the later one is kept  |  Welcome to the show. Today we are..."]);
     t.done();
@@ -1124,7 +1169,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const made = used(reply);
     const plan = JSON.parse(t.read("talk.cut-plan.json"));
     assert.deepEqual(plan, {
-      version: 1, video: "talk.mov", facts: FACTS, phrases: made.plan.phrases, ranges: made.plan.ranges, kept: 9.198, cut: 14.225, by: "rules and Claude",
+      version: 1, video: "talk.mov", facts: FACTS, phrases: made.plan.phrases, ranges: made.plan.ranges, kept: 9.198, cut: 14.225, pauses: HEARD, by: "rules and Claude",
       changes: [{ ids: ["p8"], was: "keep", now: "cut", why: "It adds nothing to the line before it." }],
       claude: {
         decisions: reply.decisions,
@@ -1133,7 +1178,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
         clips: [{ ...made.clips[0], files: ["talk.reel-1.mp4", "talk.reel-1.srt"] }]
       }
     });
-    assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "by", "changes", "claude"]);
+    assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "pauses", "by", "changes", "claude"]);
     assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphics", "ignored", "clips"]);
     assert.deepEqual([plan.claude.clips[0].n, plan.claude.clips[0].ranges], [1, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]]);
     t.done();
@@ -1218,7 +1263,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(r, { ok: true, name: "talk.mov", captions: 5, kept: 11.882, cut: 11.541, folder: "", message: "" });
     assert.deepEqual(t.names(), WITH_NOTES.map((ending) => "talk." + ending));
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN, "Claude read this plan and changed nothing in it. Its notes are in talk.edit-notes.txt."));
     assert.equal(t.read("talk.edit-notes.txt").split("\n").slice(2).join("\n"), "Its notes\nA short talk about pricing. Nothing to change.\n");
     assert.deepEqual(t.logs.slice(4, 7), ["talk.mov: asking Claude to read the cut plan.", "talk.mov: Claude changed nothing in the cut plan.", "talk.mov: making the rough cut."]);
@@ -1270,7 +1315,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
 
 describe("a video Claude could not be asked about", () => {
   /** What the video's files hold when the plan is the rules' alone, as it is today. */
-  const RULES = { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, by: "rules" };
+  const RULES = { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules" };
   const EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed";
   /** Each way the asking can fail: what Claude Code ends with, and the reason the tool gives. */
   const FAILS = [
@@ -1889,6 +1934,20 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
     assert.deepEqual(await videosFromPlan(file, t.deps), stopped(`there is no cut plan at ${at(t)}`));
     assert.deepEqual(t.logs, [`talk.mov: there is no video at ${gone}. Nothing was made.`, `talk.mov: there is no cut plan at ${at(t)}. Nothing was made.`]);
     assert.deepEqual([t.calls, t.names(), readdirSync(t.work)], [[], ["talk.mov"], []]);
+    t.done();
+  });
+  it("makes the videos from a plan that holds the pauses ffmpeg heard, and from a plan written before they were kept in it", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    const { file } = await doneOnce(t);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.deepEqual(plan.pauses, HEARD);
+    const { pauses, ...old } = plan;
+    for (const [text, what] of [[JSON.stringify(plan), "with the pauses"], [JSON.stringify(old), "without them"]]) {
+      rewrite(t, text);
+      t.logs.length = 0;
+      assert.deepEqual(await videosFromPlan(file, t.deps), { ok: true, name: "talk.mov", made: ["talk.rough-cut.mp4", "talk.rough-cut.vertical.mp4", "talk.reel-1.mp4"], message: "" }, what);
+      assert.deepEqual(t.logs.filter((line) => /could not be read|Nothing was made/.test(line)), [], what);
+    }
     t.done();
   });
   it("stops with a plain line, and changes nothing, when the plan cannot be read or is not one this tool wrote", async () => {

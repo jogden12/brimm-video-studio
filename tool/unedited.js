@@ -46,7 +46,7 @@ import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
 import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, soundStream, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
-import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "./notes.js";
+import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
 import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, reelEntries, readReels, mergeCandidates, REELS_FILE } from "./reels.js";
@@ -920,13 +920,16 @@ async function workOn(file, deps) {
       // The plan is written after everything made from it. It is what says this video is done, so a run cut short while the
       // rough cut, the upright version or a clip is being made does the video again. When it cannot be written the run
       // stops here, and the video is done again the next time: for a watched folder nothing has been put anywhere, and what
-      // was held in the run's own folder goes with it. It says who made the plan. When Claude read it, it keeps what Claude
-      // decided, its ideas for graphics as they were read, what was left out of its reply and why, and each clip with the
-      // names of the files that were made of it, so that a person can see what changed. Nothing reads the ideas back yet:
-      // they are there for what is made of the plan later. The title Claude recommends comes first, when it gave one: the
-      // import of an episode takes it for the episode's title, for a person to approve.
+      // was held in the run's own folder goes with it. It keeps the pauses ffmpeg heard, which the plan was made from, so that
+      // a reading made later, perhaps on the other Mac with no sound file, changes the plan with the same pauses (pausesOfPlan,
+      // in notes.js). A pause that never ends lasts to the end of the video, and is written so: JSON has no time with no end,
+      // and nothing changes by it. It says who made the plan. When Claude read it, it keeps what Claude decided, its ideas for
+      // graphics as they were read, what was left out of its reply and why, and each clip with the names of the files that
+      // were made of it, so that a person can see what changed. Nothing reads the ideas back yet: they are there for what is
+      // made of the plan later. The title Claude recommends comes first, when it gave one: the import of an episode takes it
+      // for the episode's title, for a person to approve.
       const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
-      files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
+      files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, pauses: planned.pauses.map(([start, end]) => [start, Math.min(end, facts.duration)]), by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
     }
     for (const what of missing) log(`${name}: ${what}.`);
     if (!missing.length) log(`${name}: done.`);
@@ -1563,7 +1566,8 @@ export async function askAgain({ folder, record }, deps) {
     const streams = streamsOf(printed);
     const asked = await askClaude(name, plan, plan.facts, work, deps);
     if (!asked.read) return { ok: false, made: [], failed: [`Claude could not be asked (${asked.why}).`], next: as };
-    const picked = clipRanges(plan, asked.read.clips, []);
+    // The plan was read back from its file, so the pauses ffmpeg heard are the ones it kept.
+    const picked = clipRanges(plan, asked.read.clips, pausesOfPlan(plan));
     // What was wrong with Claude's reply, and the clips of it that were left out, are said whatever else happens.
     const said = [...asked.read.problems, ...picked.ignored];
     if (!picked.clips.length) return { ok: true, made: [], failed: said, next: `Claude picked no clip that stands alone. ${as}` };

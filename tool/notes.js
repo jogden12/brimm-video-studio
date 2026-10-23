@@ -184,11 +184,23 @@ export function readNotes(reply) {
 const ms = (t) => Math.round(t * 1000) / 1000;
 
 /** Where a plan itself shows that silence was heard, each as [start, end]: its ranges that were cut as a pause, with the fifth
-    of a second that was kept on each side put back. A plan on disk does not hold the pauses it was made from. These are all
-    of them that making it again needs, wherever the rules kept the phrases on both sides. Beside a phrase the rules cut, the
-    silence was part of that phrase's range, and the plan does not say where it was. The silence the recording starts or ends
-    with comes out a fifth of a second longer than the recording, which changes nothing. */
+    of a second that was kept on each side put back. A plan made before the pauses were kept in it (pausesOfPlan) does not hold
+    the pauses it was made from. These are all of them that making it again needs, wherever the rules kept the phrases on both
+    sides. Beside a phrase the rules cut, the silence was part of that phrase's range, and the plan does not say where it was.
+    The silence the recording starts or ends with comes out a fifth of a second longer than the recording, which changes
+    nothing. */
 const silencesIn = (ranges) => ranges.filter((r) => r.kind === "pause").map((r) => [ms(r.start - KEPT_SIDE), ms(r.end + KEPT_SIDE)]);
+
+/** The pauses a plan on disk was made from, as the import wrote them in its `pauses`: each [start, end] in seconds of the video,
+    the same pauses cutPlan and applyDecisions are given. Give these to applyDecisions and clipRanges wherever a plan that was
+    read back from its file is changed by Claude's decisions or its clips, so the new plan has the cuts the rules would make.
+    A plan made before the pauses were kept in it has none, and so does one whose `pauses` is not a list of [start, end]: the
+    list is then empty, which says that no silence was heard, as it does for a recording that has none. */
+export function pausesOfPlan(plan) {
+  const pauses = plan && plan.pauses;
+  const pause = (p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
+  return Array.isArray(pauses) && pauses.every(pause) ? pauses : [];
+}
 
 /** The seconds that the ranges of a plan keep. */
 const keptIn = (ranges) => ms(ranges.reduce((sum, r) => sum + (r.keep ? r.end - r.start : 0), 0));
@@ -215,10 +227,11 @@ function byTime(words, phrases) {
     back. The new plan says by: "rules and Claude", and `changes` lists what changed, each {ids, was, now, why}, where `was` and
     `now` are "keep" or "cut". `ignored` names each decision that was dropped and says why, in plain words. When nothing
     changes, the plan given comes back as it is.
-    `pauses` is where ffmpeg heard silence, as cutPlan is given it. Give it whenever it is at hand. Without it the silences are
-    read back from the plan's own ranges, and the new plan is the same wherever Claude only cuts. Where Claude keeps a phrase
-    the rules cut, the silence beside that phrase is then kept whole, however long it is: only what was heard as silent is
-    ever cut, and the plan does not say what was heard there.
+    `pauses` is where ffmpeg heard silence, as cutPlan is given it. Give it whenever it is at hand: a plan read back from its
+    file has them in `pauses`, which pausesOfPlan gives. Without it the silences are read back from the plan's own ranges, and
+    the new plan is the same wherever Claude only cuts. Where Claude keeps a phrase the rules cut, the silence beside that
+    phrase is then kept whole, however long it is: only what was heard as silent is ever cut, and a plan made before the pauses
+    were kept in it does not say what was heard there.
     A change has a `check` as well when there is something about it for a person to check by eye, in one or two plain
     sentences. There are two such things:
     - Claude cut the telling that the rules cut an earlier one for. The earlier one stays cut, with the rules' reason, so the
