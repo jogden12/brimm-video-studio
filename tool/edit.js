@@ -62,7 +62,7 @@ import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
 import { readEpisodeNow, accountOf, READ_KINDS } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
-import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
+import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -3610,6 +3610,7 @@ const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const nameHolds = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
 const FILES_NAME = "That is the name of the video's file: give the session another name.";
 const NO_FILE_NAME = "That name cannot name the session's files: give it another.";
+const NAME_TOO_LONG = `That name is longer than ${SESSION_NAME_MOST} characters: give a shorter one.`;
 const editHolds = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
 /** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
 const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
@@ -3887,6 +3888,7 @@ async function sessionNameWhy(ctx, found, words) {
   if (!text) return "";
   // Its label is the session's own, and holds no one's name.
   if (SESSION_LABEL.test(text)) return "";
+  if ([...text].length > SESSION_NAME_MOST) return NAME_TOO_LONG;
   if (isFilesName(text, record)) return FILES_NAME;
   // Its teachings files and its hand-off are named by it: a name that cannot name a file, as one that begins with a dot, is none.
   if (!isTeachingsName(`${fileSafe(text)}.principles.json`)) return NO_FILE_NAME;

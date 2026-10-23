@@ -97,6 +97,10 @@ export const planOf = (record) => `${basename(record.video.file, extname(record.
     holds no one's name. */
 export const SESSION_LABEL = /^Session, \d{4}-\d{2}-\d{2}(?: \(\d+\))?$/;
 
+/** The most characters a session's name may have: its teachings files and its hand-off are named by it, and a file's name is
+    at most 255 bytes on a Mac. */
+export const SESSION_NAME_MOST = 100;
+
 /** A name as the name of a file is compared with one, whatever its case, its accents and its punctuation: its letters and
     figures alone, in lowercase. */
 const fileKey = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
@@ -123,8 +127,11 @@ const lettersOf = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/
     `hers.strict` whatever its case (as if written with a capital), and one of `hers.lenient` only with its capital, as
     sessions.js holdsName reads Claude's prose: those are the words the transcript writes with a capital mid-sentence and says in
     lowercase too, which are ordinary words ("Reels" and "reels"). A name of several words (`hers.joined`, letters only) counts
-    joined, in any case ("quillonmarsh", "@QuillonMarsh"). */
-export function herWordsName(text, { strict = [], lenient = [], joined = [] } = {}) {
+    joined, in any case ("quillonmarsh", "@QuillonMarsh"). `hers` is required: without it, it throws. */
+export function herWordsName(text, hers) {
+  // Without the names to check against, every word would pass: a caller that does not give them is a mistake, and fails here.
+  if (!isObject(hers) || ![hers.strict, hers.lenient, hers.joined].every(Array.isArray)) throw new Error("herWordsName needs the names it checks against: sessionSeen's `hers`.");
+  const { strict, lenient, joined } = hers;
   if (typeof text !== "string") return "";
   const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
   const all = [...strict, ...lenient];
@@ -155,7 +162,8 @@ function spellingNames(spellings) {
     { strict, lenient, joined }. A name the transcript writes with a capital mid-sentence and also says in lowercase (or its plain
     plural or singular) is an ordinary word, `lenient`, unless a name of another place holds it too: a speaker brimm-video
     replaced, the name of a file, a name she gave before, a spelling (`sources`, their texts). Every other name is `strict`.
-    `joined` is each run of two or more names side by side in one of `sources`, letters only, in lowercase ("quillonmarsh"). */
+    `joined` is each run of two or more names side by side in one of `sources`, or written with a capital side by side in the
+    transcript (`said`), letters only, in lowercase ("quillonmarsh"). */
 function hersOf(names, { said, sources }) {
   const lower = new Set((said.normalize("NFKC").match(/[\p{L}\p{M}'’]+/gu) || []).filter((w) => /^\p{Ll}/u.test(w)).map((w) => w.replace(/['’]s$/i, "").toLowerCase()));
   const elsewhere = new Set(sources.flatMap((text) => String(text ?? "").normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}]+/gu) || []));
@@ -165,18 +173,24 @@ function hersOf(names, { said, sources }) {
   };
   const known = new Set(names.map((n) => n.toLowerCase()));
   const joined = new Set();
-  for (const text of sources) {
-    const words = String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}]+/gu) || [];
+  /** Every run of two or more of `words` side by side for which `takes` is true, joined: each `{ w, ends }`, where `ends` says a
+      run stops after it. */
+  const runsOf = (words, takes) => {
     let run = [];
-    for (const w of [...words, ""]) {
-      if (w && known.has(w.toLowerCase())) {
-        run.push(w);
-        continue;
+    for (const word of [...words, null]) {
+      if (word && takes(word.w)) run.push(word.w);
+      if (!word || !takes(word.w) || word.ends) {
+        for (let i = 0; i < run.length; i++) for (let j = i + 2; j <= run.length; j++) joined.add(lettersOf(run.slice(i, j).join("")));
+        run = [];
       }
-      for (let i = 0; i < run.length; i++) for (let j = i + 2; j <= run.length; j++) joined.add(lettersOf(run.slice(i, j).join("")));
-      run = [];
     }
-  }
+  };
+  // In a speaker's label, a file's name, a name she gave or a spelling, names side by side in any case.
+  for (const text of sources) runsOf((String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}]+/gu) || []).map((w) => ({ w, ends: false })), (w) => known.has(w.toLowerCase()));
+  // In the transcript, names it writes with a capital side by side ("my client Quillon Marsh asked"), a run stopping at a mark
+  // that ends a sentence or a clause. These are for `joined` alone: they make no name strict.
+  const spoken = said.normalize("NFKC").split(/\s+/).filter(Boolean).map((token) => ({ w: token.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "").replace(/['’]s$/i, ""), ends: /[.,;:!?…)\]"”]$/u.test(token) }));
+  runsOf(spoken, (w) => /^\p{Lu}/u.test(w) && known.has(w.toLowerCase()));
   return { strict: names.filter((n) => !ordinary(n)), lenient: names.filter(ordinary), joined: [...joined] };
 }
 

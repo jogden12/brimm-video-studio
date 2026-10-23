@@ -18,7 +18,7 @@ import { requestFor } from "../readings.js";
 import { replaceSpeakers, EDITS } from "../sessions.js";
 import { HOST } from "../shared/show.js";
 import { CLAUDE_MODEL } from "../unedited.js";
-import { sameAccount, teachingsWhy, OTHER_ACCOUNT } from "../teachings.js";
+import { sameAccount, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -1266,5 +1266,69 @@ describe("fix round 2, 7: the earlier hand-off set aside, when the record cannot
     assert.equal(fileOf(found, HANDOFF), first);
     assert.deepEqual(readdirSync(join(found.folder, "history")).filter((name) => name.endsWith(".brimm-ops.json")), []);
     t.done();
+  });
+});
+
+// --- Fix round 3 ---
+
+describe("fix round 3, 1: a name of several words the transcript alone says, joined", () => {
+  it("is refused in her words, letters only and in any case, though no file or speaker holds it", async () => {
+    const file = "Zed Thorn.mp4";
+    const phrases = [...PHRASES.slice(0, 4), { id: "p5", start: 20.5, end: 26, keep: true, text: "Then my client Quillon Marsh asked about it." }];
+    const files = { [file]: "the recording", "Zed Thorn.cut-plan.json": JSON.stringify({ ...PLAN, video: file, phrases }, null, 2) + "\n" };
+    const { t } = await readSession({ files, over: { video: { file, bytes: 13, seconds: 26, recorded: "2026-10-20", recordedFrom: "video" } } });
+    for (const [words, word] of [["@quillonmarsh", "quillonmarsh"], ["QUILLONMARSH", "QUILLONMARSH"], ["ask quillonmarsh", "quillonmarsh"]]) {
+      assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words)).said, [EDIT_HOLDS(word)], words);
+    }
+    assert.deepEqual((await on(t.ctx.deps, "name", LABEL, "quillonmarsh notes")).said, [NAME_HOLDS("quillonmarsh")]);
+    // Words side by side that are not both names, and ordinary words joined, are taken.
+    assert.equal((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", "myclient pricing")).code, 0);
+    t.done();
+  });
+});
+
+describe("fix round 3, 2: pins", () => {
+  it("refuses in lowercase a name a file holds, though the transcript also says the word in lowercase", async () => {
+    const phrases = [...PHRASES.slice(0, 4), { id: "p5", start: 20.5, end: 26, keep: true, text: "We met the Marsh team, then walked by the marsh." }];
+    const { t } = await readSession({ files: { ...FILES, [`${STEM}.cut-plan.json`]: JSON.stringify({ ...PLAN, phrases }, null, 2) + "\n" } });
+    assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", "a walk by the marsh")).said, [EDIT_HOLDS("marsh")]);
+    t.done();
+  });
+  it("refuses at finish a name written by hand that cannot name the session's files", async () => {
+    const mac = await decidedSession();
+    writeOver(mac.found, { name: { text: ".pricing notes", placeholder: false } });
+    const before = snapshot(mac.found);
+    const r = await on(mac.t.ctx.deps, "finish", SHORT);
+    assert.deepEqual([r.code, r.said], [1, ["This session's name cannot name its files: give it another name first. Nothing was written."]]);
+    assert.deepEqual([snapshot(mac.found), existsSync(join(mac.found.folder, "final"))], [before, false]);
+    mac.t.done();
+  });
+});
+
+describe("fix round 3, 3: a session's name is 100 characters at most", () => {
+  it("is refused longer at name, and at finish when written by hand, writing nothing", async () => {
+    const long = "Pricing ".repeat(13).trim();
+    assert.equal([...long].length, 103);
+    const mac = await decidedSession();
+    const before = snapshot(mac.found);
+    const r = await on(mac.t.ctx.deps, "name", LABEL, long);
+    assert.deepEqual([r.code, r.said], [1, ["That name is longer than 100 characters: give a shorter one."]]);
+    assert.deepEqual(snapshot(mac.found), before);
+    assert.equal((await on(mac.t.ctx.deps, "name", LABEL, long.slice(0, 100))).code, 0);
+    writeOver(mac.found, { name: { text: long, placeholder: false } });
+    const done = await on(mac.t.ctx.deps, "finish", SHORT);
+    assert.deepEqual([done.code, done.said], [1, ["This session's name is longer than 100 characters: give it a shorter one first. Nothing was written."]]);
+    assert.equal(existsSync(join(mac.found.folder, "final")), false);
+    mac.t.done();
+  });
+});
+
+describe("fix round 3, 4: herWordsName needs the names it checks against", () => {
+  it("throws when it is not given them whole, rather than passing every word", () => {
+    for (const hers of [undefined, null, {}, { strict: [] }, { strict: [], lenient: [] }, { strict: "Quillon", lenient: [], joined: [] }]) {
+      assert.throws(() => herWordsName("quillon", hers), /herWordsName/, JSON.stringify(hers));
+    }
+    assert.equal(herWordsName("quillon", { strict: ["Quillon"], lenient: [], joined: [] }), "quillon");
+    assert.equal(herWordsName("pricing", { strict: ["Quillon"], lenient: [], joined: [] }), "");
   });
 });

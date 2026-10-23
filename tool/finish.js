@@ -26,7 +26,7 @@ import { runProgram } from "./run.js";
 import { commitOf } from "./filing.js";
 import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
-import { TEACHINGS_FORMAT, SESSION_LABEL, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
+import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
 
 /** How often a finished video's size is looked at while Final Cut may still be writing it, and how many looks before the
     finish stops: ten minutes. */
@@ -1197,6 +1197,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     the session's files, or it holds `word`, a name brimm-video can see, as she wrote it. */
 const SESSION_NAME_FILES = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
 const SESSION_NAME_NO_FILE = "This session's name cannot name its files: give it another name first. Nothing was written.";
+const SESSION_NAME_LONG = `This session's name is longer than ${SESSION_NAME_MOST} characters: give it a shorter one first. Nothing was written.`;
 const sessionNameHolds = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
 
 /** Write the hand-off of a client or group session, of what she approved of its teachings (edit.js finish, for a session): the
@@ -1232,6 +1233,7 @@ export async function finishSession(ctx, found, { host } = {}) {
   const written = record.name.text;
   if ((written !== who && !SESSION_LABEL.test(written)) || isFilesName(written, record)) return { why: SESSION_NAME_FILES };
   if (!isTeachingsName(`${fileSafe(written)}.principles.json`)) return { why: SESSION_NAME_NO_FILE };
+  if ([...written].length > SESSION_NAME_MOST) return { why: SESSION_NAME_LONG };
   const handoffRel = `final/${fileSafe(written)}.brimm-ops.json`;
   // The hand-off its last finish wrote under another name, as before she renamed it, is set aside into history/ (below).
   const earlier = record.finished && typeof record.finished.handoff === "string" ? record.finished.handoff : "";
