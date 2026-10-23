@@ -664,12 +664,14 @@ function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
 
 /** What a light import puts into a video's record beyond today's fields (spec 2026-10-22, section 1): her answer, waiting, with
     the tool's guess at the kind, what it saw and how the video came (kinds.js); the fingerprint of its words; and the id of
-    the episode it is a new version of, or null (versionIn). `name` is the file's, which only says whether it came from Zoom. */
+    the episode it is a new version of, or null (versionIn). `name` is the file's, which only says whether it came from Zoom.
+    With no plan the rules counted no retakes, so there is no guess. With no `facts`, when ffprobe could not read the file,
+    nothing is said of how it came or what was seen: `came` is null and `seen` is "". */
 function lightFields({ name, facts, plan, words, root }, deps) {
-  const came = cameFrom({ name, facts });
-  const answer = { state: "needs your answer", guess: guessKind({ facts, plan, came }), seen: seenLine({ facts, plan, came }), came };
+  const came = facts ? cameFrom({ name, facts }) : null;
+  const answer = { state: "needs your answer", guess: facts && plan ? guessKind({ facts, plan, came }) : null, seen: facts ? seenLine({ facts, plan, came }) : "", came };
   const fingerprint = fingerprintOf(words);
-  const match = fingerprint ? versionIn(root, { seconds: facts.duration, fingerprint, words }, deps) : null;
+  const match = fingerprint && facts ? versionIn(root, { seconds: facts.duration, fingerprint, words }, deps) : null;
   return { answer, fingerprint, versionOf: match ? match.id : null };
 }
 
@@ -1040,7 +1042,7 @@ async function workOn(file, deps) {
         const given = { file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived };
         // A light import's video waits for her answer: it has no kind yet and no Final Cut file, and it has its label, its guess,
         // the fingerprint of its words, and the episode it is a new version of, when its words match one on this Mac.
-        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: null, label, ...lightFields({ name, facts: given.facts, plan, words: planned.words || [], root: episode.root }, { log, whole }) } : given, deps);
+        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: null, label, ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root }, { log, whole }) } : given, deps);
         if (light && filed.record.versionOf) log(`${name}: its words are those of the episode ${filed.record.versionOf}, so it is filed as a new version of it.`);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.

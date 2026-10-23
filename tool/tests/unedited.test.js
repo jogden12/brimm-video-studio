@@ -4757,7 +4757,17 @@ describe("the light import", () => {
     await uneditedFolder(t.drop, t.deps);
     const r = t.record();
     assert.deepEqual([r.kind, r.answer.state, r.label, r.fingerprint], [null, "needs your answer", LABEL, undefined]);
+    // The rules made no plan, so they counted no retakes: there is no guess, and the line of what was seen says no count.
+    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera" });
     assert.deepEqual(listAll(t.episodeFolder()), ["Talk.cut-plan.txt", "Talk.mov", "Talk.srt", "Talk.transcript.txt", "record/0001.json"]);
+    assert.deepEqual(t.notes, [READY]);
+    t.done();
+  });
+  it("says nothing of how a video came or what was seen when ffprobe could not read it, and makes no guess", async () => {
+    const t = episodeImport({ probe: "fail" });
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record();
+    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null }, LABEL]);
     assert.deepEqual(t.notes, [READY]);
     t.done();
   });

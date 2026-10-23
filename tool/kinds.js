@@ -89,9 +89,12 @@ export function sessionLabel(day, taken = []) {
 
 /** What the tool saw, in a line for her card, with nothing of the file's name: "wide, 42:10, 2 retakes". The shape is "wide",
     "upright" (a square picture too, as episodeKind has it) or "sound only", then the length, then what the rules cut as
-    retakes, false starts and spoken cues, counted together. */
+    retakes, false starts and spoken cues, counted together. With no plan the rules counted nothing, and the count is left
+    out: "wide, 42:10". */
 export function seenLine({ facts, plan }) {
   const shape = !facts.height ? "sound only" : upright(facts) ? "upright" : "wide";
+  const seen = `${shape}, ${stamp(Math.round(facts.duration))}`;
+  if (plan == null) return seen;
   const n = retakesIn(plan);
-  return `${shape}, ${stamp(Math.round(facts.duration))}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
+  return `${seen}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
 }

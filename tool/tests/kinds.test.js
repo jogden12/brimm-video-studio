@@ -201,6 +201,9 @@ describe("what was seen, in a line", () => {
     assert.equal(seenLine({ facts: { width: 1080, height: 1080, duration: 45 }, plan: plan(0), came: "camera" }), "upright, 0:45, no retakes");
   });
   it("rounds the length to the second, and reads a plan with no ranges as having no retakes", () => {
-    assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan: null, came: "camera" }), "wide, 42:10, no retakes");
+    assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan: { ranges: [] }, came: "camera" }), "wide, 42:10, no retakes");
+  });
+  it("leaves the retakes out when there is no plan, since the rules never counted them", () => {
+    for (const plan of [null, undefined]) assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan, came: "camera" }), "wide, 42:10");
   });
 });

@@ -93,8 +93,9 @@ const isLayered = (x) => listOf(x.texts, isTextLayer) && listOf(x.graphics, isGr
 const isReel = (c) => isObject(c) && Number.isInteger(c.n) && c.n >= 1 && REEL_STATUSES.includes(c.status) && isNumber(c.from) && isNumber(c.to) && c.from < c.to && typeof c.title === "string" && (c.pushed === undefined || (Array.isArray(c.pushed) && c.pushed.every(isPush))) && isLayered(c);
 
 /** What the person said to the card about a video (layout 3): where it stands, what the import guessed, what it saw, how the
-    video came, and once answered, who answered, on which Mac, when, and whether it is a private session. */
-const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && CAMES.includes(a.came)
+    video came, and once answered, who answered, on which Mac, when, and whether it is a private session. How it came is null
+    when the import could not read the file's facts, and what was seen is then "". */
+const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
     when it was cleared, if it was: confirmed by her click on a dialog. */
