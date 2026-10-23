@@ -320,22 +320,26 @@ export async function readEpisodeNow(ctx, found, deps) {
   // A session is shown no file name, and the meeting's speakers only when one but her was replaced: the same `about` reads it.
   const about = session ? { duration, ...(seen.speakers ? { speakers: seen.speakers } : {}) } : { video, duration };
   const request = requestFor(kind, plan, about);
-  /** For a session, why it may not be read now, by this Mac's settings read again and the account it is signed in to, or "". */
+  /** For a session, why it may not be read now, by this Mac's settings read again and the account it is signed in to, or "".
+      Settings that cannot be read now are a refusal: nothing says the gate is still on. */
   const sessionWhy = (account) => {
     if (!session) return "";
-    const settings = readSettings(home).settings || ctx.settings;
+    const settings = readSettings(home).settings;
+    if (!settings) return `This Mac's settings cannot be read now, so Claude did not read ${name}: ask Jason.`;
     return teachingsWhy(settings, now()) || accountWhy(account, settings) || (settings.readings === false ? READINGS_OFF : "");
   };
   const work = join(runsFolder(home), `read-${process.pid}-${now()}`);
   mkdirSync(work, { recursive: true });
   try {
     // The account first: the record is read again after it, right before each try of the call.
-    const account = await accountOf(deps, join(work, "account"));
+    let account = await accountOf(deps, join(work, "account"));
     log(`${named}: Claude is asked to read it as ${KIND_SAID[kind]}.`);
     let read = null;
     let why = "";
     for (let n = 1; n <= CLAUDE_TRIES && !read; n++) {
       if (n > 1) await wait(AGAIN_MS);
+      // A session's account is read again before each try after the first: it is checked right before every call.
+      if (session && n > 1) account = await accountOf(deps, join(work, "account"));
       const gate = sessionWhy(account);
       if (gate) return stop(gate);
       const still = again();

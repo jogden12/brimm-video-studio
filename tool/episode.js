@@ -105,8 +105,9 @@ const isId = (v) => typeof v === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(v);
 const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
   && (a.match === undefined || a.match === null || isId(a.match))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
-/** The keys of each list of a session's items that she may change by her command (sessions.js EDITS), by the list. */
-const SESSION_EDITS = { principles: ["name", "category", "description", "example_application"], recurringPrinciples: ["text"], reelIdeas: ["idea", "words", "why"] };
+/** The keys of each list of a session's items that she may change by her command, by the list: sessions.js EDITS, which a test
+    holds this to (episode.js reads no module of a session's). */
+export const SESSION_EDITS = { principles: ["name", "category", "description", "example_application"], recurringPrinciples: ["text"], reelIdeas: ["idea", "words", "why"] };
 /** An item's number, as a key of an object: a whole number from 1, as she says it. */
 const isItemKey = (k) => /^[1-9]\d*$/.test(k);
 /** For each list of a session's items, something kept by the item's number: each list's object of numbers, each number's
@@ -123,8 +124,11 @@ const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.t
   && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))
   && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
-    ended. */
-const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome);
+    ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
+    own folder. */
+const isTeachingsFile = (v) => typeof v === "string" && v.length > ".principles.json".length && v.endsWith(".principles.json") && !/[/\\]/.test(v) && !v.startsWith(".");
+const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome)
+  && (x.principles === undefined || isTeachingsFile(x.principles));
 /** A field of layout 3 that may be missing or null, and is checked when it is there. */
 const optional = (v, ok) => v === undefined || v === null || ok(v);
 

@@ -61,8 +61,8 @@ import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
 import { readEpisodeNow, accountOf, READ_KINDS } from "./reading.js";
-import { approve, EDITS, holdsName } from "./sessions.js";
-import { ITEM_LISTS, CHECK_NAMES, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
+import { approve, EDITS } from "./sessions.js";
+import { ITEM_LISTS, CHECK_NAMES, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsHold, isFilesName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -2318,7 +2318,7 @@ async function name(ctx, rest) {
   if (!got.found) return got.code;
   const found = { ...got.found, record: got.record };
   if (asSession(got.record)) {
-    const why = sessionNameWhy(ctx, found, words.join(" "));
+    const why = await sessionNameWhy(ctx, found, words.join(" "));
     if (why) return refuse(ctx, why);
   }
   return nameEpisode(ctx, found, words.join(" "));
@@ -3605,8 +3605,13 @@ export async function whichCommand(ctx, rest) {
 // --- A client or group session's teachings (spec 2026-10-22, sections 2, 3 and 8) ---
 
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
-/** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"). */
+/** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"), or that is
+    its video file's name, and what an edit of hers says of words that hold one. */
 const NAME_HOLDS = "That name holds a name brimm-video can see in this session: give it another.";
+const FILES_NAME = "That is the name of the video's file: give the session another name.";
+const EDIT_HOLDS = "Those words hold a name brimm-video can see in this session: say it another way.";
+/** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
+const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
 /** What `finish` says of a session on a Mac that hands off version 1, which has no session kind. */
 const SESSION_V1 = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What is said while a session's teachings or the files its names are seen from are not whole on this Mac yet. */
@@ -3627,15 +3632,40 @@ const asSession = (record) => recordKind(record) === "session" || (recordKind(re
     mark not cleared. One whose mark she cleared by her click on the dialog is read as the kind she answered with it (F8). */
 const taughtSession = (record) => recordKind(record) === "session" && gated(record);
 
+/** The files `rels` of the episode `found` that are still not whole on this Mac once each one that was not has been read through
+    (dropbox.js readThrough, as a reading reads its files), so that Dropbox brings it down: the gate refuses `bring` for a
+    session, and a file online-only on this Mac would otherwise never come. */
+async function broughtOver(ctx, found, rels) {
+  for (const rel of rels.filter((r) => !ctx.isWhole(join(found.folder, r)))) {
+    try {
+      await (ctx.deps.readAll || readThrough)(join(found.folder, rel));
+    } catch (e) {
+      // It is said by what is still not whole.
+    }
+  }
+  return rels.filter((r) => !ctx.isWhole(join(found.folder, r)));
+}
+
+/** The names brimm-video can see in the session `found` (teachings.js sessionSeen), once what they are seen from is whole on this
+    Mac, read through if need be: { names } or { why }, which fails closed. */
+async function sessionNames(ctx, found) {
+  const { record } = found;
+  if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
+  const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+  return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names };
+}
+
 /** Why a session's record may not be written on by this Mac now, in plain words, or "": another Mac has it, or a run is at work
     on it. A `read` whose reading of the teachings asked for is in the record already is only making its late check, which
-    replaces no record: it does not stop her decisions or the hand-off. `what` says what was not done. */
-function sessionBusy(ctx, found, record, what) {
+    replaces no record: it does not stop her decisions or the hand-off; and with `read`, no `read` at all stops what is written
+    (her answer of the transcript only, which the reading refuses before its call once it is in the record). `what` says what
+    was not done. */
+function sessionBusy(ctx, found, record, what, { read = false } = {}) {
   const name = shownName(record);
   const held = heldElsewhere(record, ctx.machine);
   if (held) return `${held.by} has ${name} open, so ${what}. Say it again once it is let go there.`;
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (!running) return "";
+  if (!running || (read && running === "read")) return "";
   const reading = sessionReading(record);
   const asked = record.session && Date.parse(record.session.asked);
   if (running === "read" && reading && Date.parse(reading.at) >= asked) return "";
@@ -3692,7 +3722,9 @@ export async function teachingsCommand(ctx, rest) {
 async function transcriptOnly(ctx, found, record) {
   const name = shownName(record);
   const said = `${name}: its transcript stays on this Mac. Nothing goes to Claude.`;
-  const busy = sessionBusy(ctx, found, record, "her answer was not recorded");
+  // Her answer is recorded while the reading of an earlier ask still waits: that reading refuses, before it asks Claude anything,
+  // once the record no longer says her teachings are asked for.
+  const busy = sessionBusy(ctx, found, record, "her answer was not recorded", { read: true });
   if (busy) return refuse(ctx, busy);
   if (record.session && record.session.teachings === "transcript only") {
     ctx.say(said);
@@ -3769,7 +3801,8 @@ async function sessionItems(ctx, rest, command) {
   if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: it has no ${command === "ideas" ? "Reel ideas" : "principles"} of its own.`);
   const gate = teachingsWhy(ctx.settings, ctx.now());
   if (gate) return refuse(ctx, gate);
-  const read = readTeachings(found.folder, record, ctx.isWhole);
+  let read = readTeachings(found.folder, record, ctx.isWhole);
+  if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, record, ctx.isWhole);
   if (read.none) return refuse(ctx, `${name} has no teachings yet: Claude has not read it.`);
   if (read.coming) return refuse(ctx, TEACHINGS_COMING);
   if (read.why) return refuse(ctx, `${name}'s teachings cannot be read (${read.why}).`);
@@ -3782,6 +3815,17 @@ async function sessionItems(ctx, rest, command) {
   if (busy) return refuse(ctx, busy);
   const done = approve(items[key], asked, EDITS[key]);
   if (done.why) return refuse(ctx, done.why);
+  // What she changes is checked now, whatever its case, against the names brimm-video can see (teachings.js herWordsHold), and
+  // refused when it holds one: the finish checks it again.
+  const changedTexts = done.items.flatMap((item) => {
+    const before = items[key].find((one) => one.n === item.n);
+    return EDITS[key].filter((field) => item[field] !== before[field]).map((field) => item[field]);
+  });
+  if (changedTexts.length) {
+    const seen = await sessionNames(ctx, { ...found, record });
+    if (seen.why) return refuse(ctx, seen.why);
+    if (changedTexts.some((text) => herWordsHold(text, seen.names))) return refuse(ctx, EDIT_HOLDS);
+  }
   // Her decision of each item, and what she changed of one, by the item's number.
   const session = record.session;
   const decided = { ...(session.decided || {}), [key]: { ...((session.decided || {})[key] || {}) } };
@@ -3835,13 +3879,14 @@ function sayItems(ctx, name, record, teachings, items, command) {
 /** Why the name `words` cannot be given to the session `found`, in plain words, or "": it holds a name brimm-video can see in
     the session (sessions.js holdsName, against teachings.js sessionSeen), or what that is seen from is not whole on this Mac,
     or cannot be read, which fails closed (spec 8, "A session's name"). */
-function sessionNameWhy(ctx, found, words) {
+async function sessionNameWhy(ctx, found, words) {
   const { record } = found;
-  if (!oneLine(words)) return "";
-  if (seenFrom(record).some((rel) => !ctx.isWhole(join(found.folder, rel)))) return "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
-  const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
-  if (seen.why) return `${shownName(record)} cannot be given a name now: ${seen.why}.`;
-  return holdsName(oneLine(words), seen.names) ? NAME_HOLDS : "";
+  const text = oneLine(words);
+  if (!text) return "";
+  if (isFilesName(text, record)) return FILES_NAME;
+  const seen = await sessionNames(ctx, found);
+  if (seen.why) return seen.why;
+  return herWordsHold(text, seen.names) ? NAME_HOLDS : "";
 }
 
 /** `finish "<session>"` for a client or group session: its own hand-off, of what she approved (finish.js finishSession), never the
@@ -3851,7 +3896,8 @@ async function finishSessionCommand(ctx, found) {
   const name = shownName(record);
   const busy = sessionBusy(ctx, found, record, "its hand-off was not written");
   if (busy) return refuse(ctx, busy);
-  const done = await finishSession(ctx, found, { host: ctx.settings.host });
+  let done = await finishSession(ctx, found, { host: ctx.settings.host });
+  if (done.coming && !(await broughtOver(ctx, found, done.coming)).length) done = await finishSession(ctx, found, { host: ctx.settings.host });
   if (done.waits) return refuse(ctx, SESSION_V1);
   if (done.coming) return refuse(ctx, "Dropbox is still bringing its teachings, or the words they are checked against, over to this Mac: say it again in a minute.");
   if (done.why) {

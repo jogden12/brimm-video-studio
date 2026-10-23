@@ -1184,7 +1184,7 @@ describe("the say filter's names (fix 7)", () => {
   });
   it("leaves a path that is not the video's readable, and keeps the net on for a session whose name is its file's", async () => {
     // A session whose name is its file's: its own finish (F7) refuses it at once on a Mac that hands off version 1, naming nothing;
-    // and under version 2, before Claude has read it, by its label.
+    // and under version 2 for that name, naming nothing either (F7 fix 1).
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: { ...SESSION_OVER, name: { text: STEM, placeholder: true } } });
@@ -1192,7 +1192,7 @@ describe("the say filter's names (fix 7)", () => {
     assert.deepEqual([refused.code, refused.said], [1, ["A session's hand-off is written once this Mac hands off version 2: ask Jason."]]);
     writeSettings(t.home, { handoffVersion: 2 });
     const unread = await on(t.ctx.deps, "finish", LABEL);
-    assert.deepEqual([unread.code, unread.said], [1, [`${LABEL} has no teachings to hand off yet: Claude has not read it. Nothing was written.`]]);
+    assert.deepEqual([unread.code, unread.said], [1, ["This session's name is the name of its video's file: give it another name first. Nothing was written."]]);
     // A video marked a session, not cleared, whose name is its file's: a command the gate keeps open that says a path of this Mac's
     // own, and the name of the file, says the path whole and the name as "the video".
     const u = setup();

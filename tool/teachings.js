@@ -5,7 +5,8 @@
 // nothing.
 import { readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
-import { replaceSpeakers, visibleNames, namesSkipped } from "./sessions.js";
+import { replaceSpeakers, visibleNames, namesSkipped, holdsName, NOT_NAMES, PUBLIC_NAMES } from "./sessions.js";
+import { SHOW, HOST } from "./shared/show.js";
 import { teachingsOn, teachingsLapsed } from "./settings.js";
 import { TEACHINGS_OFF, TEACHINGS_LAPSED } from "./gate.js";
 import { recordFile, recordNumbers, kindOf, shownName } from "./episode.js";
@@ -69,6 +70,9 @@ export function earlierTeachings(record) {
   return [`${stem}.principles.json`, `${stem}.principles.txt`, `${stem}.reel-ideas.txt`];
 }
 
+/** Whether `rel` names a teachings file as a reading writes one: `<name>.principles.json`, in the episode's own folder. */
+export const isTeachingsName = (rel) => typeof rel === "string" && rel.length > ".principles.json".length && rel.endsWith(".principles.json") && !/[/\\]/.test(rel) && !rel.startsWith(".");
+
 /** The reading of a session that counts, as the record holds it: one made as a session, after her answer, which names its
     teachings file (`principles`); or null. */
 export function sessionReading(record) {
@@ -87,6 +91,42 @@ export const meetingTranscripts = (record) => Object.keys((record && record.file
 
 /** The import's cut plan of a video, by its file's stem: the words a reading is made of. */
 export const planOf = (record) => `${basename(record.video.file, extname(record.video.file))}.cut-plan.json`;
+
+/** A name as the name of a file is compared with one, whatever its case, its accents and its punctuation: its letters and
+    figures alone, in lowercase. */
+const fileKey = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+/** Whether `text` is the name of the video's file, or its name without its ending, in any case or form: "quillon marsh",
+    "Quillon-Marsh.MP4" and "QuillonMarsh" are "Quillon Marsh.mp4"'s. A session's name is never its file's (spec 2, "The session
+    mark"). */
+export function isFilesName(text, record) {
+  const file = String((record && record.video && record.video.file) || "");
+  const key = fileKey(text);
+  return key !== "" && file !== "" && [file, basename(file, extname(file))].some((name) => fileKey(name) === key);
+}
+
+/** Whether words she gave, a session's name or what she changed of an item, hold one of `names`, read as hers and not as Claude's
+    prose: whatever their case, split at every mark that is not a letter or a figure ("quillon.marsh" is "quillon" and
+    "marsh"), and each word also without a plain plural or possessive ending ("s", "'s", "’s"), so that "quillon's", "Quillons"
+    and "brandvale’s" hold "Quillon" and "Brandvale". Claude's prose is held to sessions.js holdsName, which takes a word in
+    lowercase for a name only when the name was seen so: hers are held to it too, each word read as if written with a capital. */
+export function herWordsHold(text, names) {
+  if (typeof text !== "string") return false;
+  if (holdsName(text, names)) return true;
+  const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+  const words = text.normalize("NFKC").split(/[^\p{L}\p{M}\p{N}'’]+/u).flatMap((w) => [w, ...w.split(/['’]/)]).filter(Boolean);
+  const forms = words.flatMap((w) => [w, w.replace(/['’]s$/i, ""), w.replace(/s$/i, "")]).filter((w) => /\p{L}/u.test(w));
+  return forms.some((w) => holdsName(capital(w), names));
+}
+
+/** The words of the record's spellings, both sides of each, as names: a spelling she gave may be a client's name, and none
+    leaves a word out for a session (fail closed). The words that are nobody's name in sessions.js, and the show's own names
+    and the host's, are not taken: a spelling of hers ("Sally" as "Sallie") makes no name of them. */
+function spellingNames(spellings) {
+  const nobody = new Set([...NOT_NAMES, ...PUBLIC_NAMES, ...[SHOW, HOST, "The BRIMM"].flatMap((n) => n.toLowerCase().split(/[^\p{L}]+/u))]);
+  const sides = list(spellings).flatMap((pair) => (Array.isArray(pair) ? pair.slice(0, 2) : []));
+  return sides.flatMap((side) => String(side ?? "").normalize("NFKC").match(/[\p{L}\p{M}]{2,}/gu) || []).filter((w) => !nobody.has(w.toLowerCase()));
+}
 
 /** The files of the episode that the names brimm-video can see in a session are read from: its plan, and the meeting's own
     transcripts. Each must be whole on this Mac first. */
@@ -111,11 +151,13 @@ function givenNames(folder, record) {
 /** What brimm-video can see of the session in `folder` whose record is `record`, from its files on this Mac (seenFrom, each
     whole: the caller sees to that): { names, speakers, skipped, plan }, or { why } when one cannot be read.
     - `speakers` is the meeting's own transcript with every speaker but her replaced (sessions.js replaceSpeakers, her name the
-      settings' `host`, or "Sallie"), only when one was replaced: undefined otherwise, as for a session of one file, so that no
-      speaker labels go to Claude in a form not recognised;
+      settings' `host`, or the show's host's full name, HOST, which fails closed: a label of her first name alone is a
+      participant's), only when one was replaced: undefined otherwise, as for a session of one file, so that no speaker labels
+      go to Claude in a form not recognised;
     - `names` the names it can see (visibleNames): the speakers it replaced, the names a person gave its files (the video she
       dropped, a meeting transcript named for the meeting, names given before it was a session), and the words its plan's
-      phrases write with a capital mid-sentence. A session has no spellings: none is left out for one;
+      phrases write with a capital mid-sentence; and the words of the record's spellings, both sides (spellingNames). No spelling
+      leaves a word out for a session;
     - `skipped` the line saying its capitalised words were not checked, or "" (namesSkipped);
     - `plan` the cut plan, read. */
 export function sessionSeen(folder, record, { host } = {}) {
@@ -133,12 +175,15 @@ export function sessionSeen(folder, record, { host } = {}) {
   } catch (e) {
     return { why: `the meeting's own transcript cannot be read (${e.code || e.message})` };
   }
-  const replaced = meetings.length ? replaceSpeakers(zoom, typeof host === "string" && host.trim() ? host : "Sallie") : { text: "", map: {} };
+  const replaced = meetings.length ? replaceSpeakers(zoom, typeof host === "string" && host.trim() ? host : HOST) : { text: "", map: {} };
   const words = list(plan.phrases).map((p) => String((p && p.text) ?? "")).join(" ");
   // Zoom's fixed names are no person's: their lowercase words would match a field's words in any case.
   const fileName = [record.video.file, ...meetings.filter((rel) => !ZOOM_FIXED.includes(rel.toLowerCase())), ...givenNames(folder, record)];
+  const seen = visibleNames({ map: replaced.map, fileName, words, spellings: [] });
+  const known = new Set(seen.map((n) => n.toLowerCase()));
+  const spelled = spellingNames(record.spellings).filter((w) => !known.has(w.toLowerCase()) && Boolean(known.add(w.toLowerCase())));
   return {
-    names: visibleNames({ map: replaced.map, fileName, words, spellings: [] }),
+    names: [...seen, ...spelled],
     speakers: Object.keys(replaced.map).length ? replaced.text : undefined,
     skipped: namesSkipped(words),
     plan
@@ -152,6 +197,8 @@ export function readTeachings(folder, record, whole) {
   const reading = sessionReading(record);
   if (!reading) return { none: true };
   const rel = reading.principles;
+  // Only a teachings file in the episode's own folder, as a reading writes it, is read.
+  if (!isTeachingsName(rel)) return { why: "its reading names no teachings file a reading writes" };
   if (!whole(join(folder, rel))) return { coming: rel };
   try {
     const teachings = JSON.parse(readFileSync(join(folder, rel), "utf8"));
@@ -165,13 +212,14 @@ export function readTeachings(folder, record, whole) {
 /** The items of a session's teachings with what she decided of each and what she changed, as the record keeps them
     (`session.decided`, `session.edits`): { principles, recurringPrinciples, reelIdeas }, each item as the reading wrote it, with
     her changes laid over it, and `approved` true for one she kept, false for one she dropped, and none while it is undecided:
-    as sessions.js approve and approvedSession take them. Nothing given is changed. */
+    as sessions.js approve and approvedSession take them. Only the record decides: an `approved` the teachings file holds is not
+    hers, and is left out. Nothing given is changed. */
 export function itemsOf(teachings, session) {
   const decided = (isObject(session) && isObject(session.decided) && session.decided) || {};
   const edits = (isObject(session) && isObject(session.edits) && session.edits) || {};
   const out = {};
   for (const [key] of ITEM_LISTS) {
-    out[key] = list(teachings && teachings[key]).filter(isObject).map((item) => {
+    out[key] = list(teachings && teachings[key]).filter(isObject).map(({ approved, ...item }) => {
       const n = String(item.n);
       const said = isObject(decided[key]) ? decided[key][n] : undefined;
       const changed = isObject(edits[key]) && isObject(edits[key][n]) ? edits[key][n] : {};

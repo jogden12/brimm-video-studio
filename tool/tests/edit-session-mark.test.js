@@ -8,14 +8,15 @@
 // Player, Finder and the notice are stand-ins. Every name in it is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLAIM_WAIT_MS, READ_POLL_MS, editMain } from "../edit.js";
 import { episodeFault, localStamp, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
-import { writeSettings } from "../settings.js";
-import { readResult, resultFile } from "../detached.js";
+import { settingsFile, writeSettings } from "../settings.js";
+import { readResult, resultFile, lockOf, takeEpisodeLock, releaseEpisodeLock } from "../detached.js";
 import { requestFor } from "../readings.js";
-import { replaceSpeakers } from "../sessions.js";
+import { replaceSpeakers, EDITS } from "../sessions.js";
+import { HOST } from "../shared/show.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import { sameAccount, teachingsWhy, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
@@ -135,11 +136,11 @@ const ASKED_OVER = { session: { ...MARK, teachings: "asked", asked: ASKED }, edi
 /** A Mac with the made-up session on it, its record with `over` laid on it, `files` in its folder, Claude Code a stand-in that
     replies `reply` and says it is signed in as `status` (null: it cannot say), and settings laid on this Mac's settings file:
     the training gate on, unless `taught` says otherwise. { t, found, asks, notices, state }: `state` may be changed by a test
-    (its reply, its status, and `onAuth`, done when `auth status` is asked). */
+    (its reply, its status, `onAuth`, done when `auth status` is asked, and `onAsk`, which may give the call's result itself). */
 function sessionMac({ over = {}, files = FILES, reply = REPLY, status = STATUS, taught = TAUGHT, settings = {} } = {}) {
   const asks = [];
   const notices = [];
-  const state = { reply, status, onAuth: () => {} };
+  const state = { reply, status, onAuth: () => {}, onAsk: () => null };
   const t = setup({
     programs: {
       CLAUDE: (args, asked) => {
@@ -148,7 +149,7 @@ function sessionMac({ over = {}, files = FILES, reply = REPLY, status = STATUS, 
           return state.status ? { code: 0, stderr: "", stdout: JSON.stringify(state.status) } : { code: 1, stderr: "Not signed in.", stdout: "" };
         }
         asks.push(asked.input);
-        return { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(state.reply) }) };
+        return state.onAsk(asks.length) || { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(state.reply) }) };
       }
     }
   });
@@ -416,7 +417,7 @@ describe("read --kind session: the session's one reading", () => {
     const files = { ...FILES, [VTT_FILE]: VTT };
     const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], verbatim_key_phrases: ["Your price is a message.", "As Jorund said, price it."], example_application: "As Jorund put it, a baker prices by the celebration." }, ...REPLY.frameworks.slice(1)] };
     const { t, found, asks } = await readSession({ files, reply });
-    const speakers = replaceSpeakers(VTT, "Sallie").text;
+    const speakers = replaceSpeakers(VTT, HOST).text;
     assert.match(speakers, /Participant 1: So Quillon asked/);
     assert.deepEqual(asks, [requestFor("session", PLAN, { duration: 26, speakers })]);
     assert.doesNotMatch(asks[0], /Jorund|Pell/);
@@ -438,8 +439,8 @@ describe("read --kind session: the session's one reading", () => {
   });
   it("tells her lines from the others' by the host this Mac's settings name", async () => {
     const files = { ...FILES, [VTT_FILE]: VTT };
-    const { asks, t } = await readSession({ files, settings: { host: "Sallie Ogden" } });
-    assert.deepEqual(asks, [requestFor("session", PLAN, { duration: 26, speakers: replaceSpeakers(VTT, "Sallie Ogden").text })]);
+    const { asks, t } = await readSession({ files, settings: { host: "Sallie Jane Ogden" } });
+    assert.deepEqual(asks, [requestFor("session", PLAN, { duration: 26, speakers: replaceSpeakers(VTT, "Sallie Jane Ogden").text })]);
     t.done();
   });
   it("checks the names a person gave the video before it was a session, and takes no spelling of the record as no one's", async () => {
@@ -737,7 +738,11 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
   it("runs the name check again on what she changed, and leaves out what it takes, saying so", async () => {
     const mac = await decided();
     const { t, found } = mac;
-    await on(t.ctx.deps, "principles", LABEL, "edit", "1", "--description", "Ask Quillon what the work is worth to him.");
+    // `edit` refuses such words (fix 2): a change that holds one only reaches the finish as the record holds it by another way.
+    const refused = await on(t.ctx.deps, "principles", LABEL, "edit", "1", "--description", "Ask Quillon what the work is worth to him.");
+    assert.equal(refused.code, 1);
+    const record = reread(found);
+    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, session: { ...record.session, edits: { principles: { 1: { description: "Ask Quillon what the work is worth to him." } } } } }));
     const r = await on(t.ctx.deps, "finish", LABEL);
     assert.equal(r.code, 0, r.text);
     assert.equal(r.said[0], "Taken out of the hand-off: Principle 1's description: it held a name brimm-video can see.");
@@ -771,8 +776,11 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
     const mac = await decided();
     const { t, found } = mac;
     const before = snapshot(found);
+    const brought = [];
     t.ctx.deps.isWhole = (path) => !path.endsWith(TEACHINGS_JSON);
+    t.ctx.deps.readAll = async (path) => brought.push(path);
     const coming = await on(t.ctx.deps, "finish", LABEL);
+    assert.deepEqual(brought, [join(found.folder, TEACHINGS_JSON)]);
     assert.deepEqual([coming.code, coming.said], [1, ["Dropbox is still bringing its teachings, or the words they are checked against, over to this Mac: say it again in a minute."]]);
     t.ctx.deps.isWhole = () => true;
     const record = reread(found);
@@ -815,5 +823,310 @@ describe("name, for a session: checked against the names brimm-video can see", (
     assert.ok(existsSync(join(mac.found.folder, "Pricing deep dive.principles.json")));
     assert.equal(reread(mac.found).reading.principles, "Pricing deep dive.principles.json");
     mac.t.done();
+  });
+});
+
+// --- Fix round 1 ---
+
+/** The made-up session read, and every item decided: principles 1 and 2 kept, 3 dropped; recurring 1 kept, 2 dropped; Reel
+    ideas 1 and 2 kept, 3 dropped. */
+async function decidedSession({ settings = { handoffVersion: 2 }, ...options } = {}) {
+  const mac = await readSession({ settings, ...options });
+  for (const argv of [["principles", LABEL, "keep", "1", "2"], ["principles", LABEL, "drop", "3"], ["principles", LABEL, "recurring", "keep", "1"], ["principles", LABEL, "recurring", "drop", "2"], ["ideas", LABEL, "keep", "1", "2"], ["ideas", LABEL, "drop", "3"]]) {
+    const r = await on(mac.t.ctx.deps, ...argv);
+    assert.equal(r.code, 0, `${argv.join(" ")}: ${r.text}`);
+  }
+  return mac;
+}
+/** Write the next record of the made-up session by hand, its newest with `over` laid on it. */
+const writeOver = (found, over) => {
+  const record = reread(found);
+  writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, ...over }));
+};
+const FILES_NAME = "That is the name of the video's file: give the session another name.";
+const EDIT_HOLDS = "Those words hold a name brimm-video can see in this session: say it another way.";
+const NAME_FILES_AT_FINISH = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
+const NAME_HOLDS_AT_FINISH = "This session's name holds a name brimm-video can see in it: give it another name first. Nothing was written.";
+/** The client's names in her own words: in lowercase, as a plural, a possessive, and joined by a dot. */
+const HER_FORMS = ["quillon's way", "Quillons way", "the brandvale way", "brandvale’s way", "ask.quillon", "MARSH first"];
+
+describe("fix 1: a session's name is never its file's", () => {
+  it("refuses at name the video's file name or stem, in any case or form, with the gate off too", async () => {
+    const mac = sessionMac({ taught: null });
+    const before = snapshot(mac.found);
+    for (const words of ["quillon marsh", "Quillon Marsh", "QUILLON MARSH", "quillon marsh.mp4", "Quillon Marsh.MP4", "quillon-marsh", "quillon_marsh", "QuillonMarsh"]) {
+      const r = await on(mac.t.ctx.deps, "name", LABEL, words);
+      assert.deepEqual([r.code, r.said], [1, [FILES_NAME]], words);
+    }
+    assert.deepEqual(snapshot(mac.found), before);
+    mac.t.done();
+  });
+  it("refuses at finish a name written by hand that is the file's, in any form, writing no hand-off and saying nothing of it", async () => {
+    for (const text of ["quillon marsh", "quillon marsh.mp4", "Quillon-Marsh"]) {
+      const mac = await decidedSession();
+      writeOver(mac.found, { name: { text, placeholder: false } });
+      const before = snapshot(mac.found);
+      const r = await on(mac.t.ctx.deps, "finish", SHORT);
+      assert.deepEqual([r.code, r.said], [1, [NAME_FILES_AT_FINISH]], text);
+      assert.deepEqual([snapshot(mac.found), existsSync(join(mac.found.folder, "final"))], [before, false], text);
+      mac.t.done();
+    }
+  });
+  it("refuses at finish a name written by hand that holds a name in her lowercase", async () => {
+    const mac = await decidedSession();
+    writeOver(mac.found, { name: { text: "quillon's pricing", placeholder: false } });
+    const r = await on(mac.t.ctx.deps, "finish", SHORT);
+    assert.equal(r.code, 1);
+    assert.ok(r.said.includes(NAME_HOLDS_AT_FINISH), r.text);
+    assert.doesNotMatch(r.text, SECRET);
+    assert.equal(existsSync(join(mac.found.folder, "final")), false);
+    mac.t.done();
+  });
+  it("writes the hand-off under the name it holds, and names its file by that same name", async () => {
+    const mac = await decidedSession();
+    await on(mac.t.ctx.deps, "name", LABEL, "Pricing deep dive");
+    const r = await on(mac.t.ctx.deps, "finish", "Pricing deep dive");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(mac.t.inFinal(mac.found), ["Pricing deep dive.brimm-ops.json"]);
+    assert.equal(JSON.parse(fileOf(mac.found, "final/Pricing deep dive.brimm-ops.json")).video.name, "Pricing deep dive");
+    mac.t.done();
+  });
+});
+
+describe("fix 2: her own words are checked whatever their case", () => {
+  it("refuses at name a name in lowercase, plural, possessive or dotted forms", async () => {
+    const mac = sessionMac();
+    for (const words of [...HER_FORMS, "jorund"]) {
+      const r = await on(mac.t.ctx.deps, "name", LABEL, words);
+      if (words === "jorund") assert.equal(r.code, 0, "no meeting transcript: no speaker to see");
+      else assert.deepEqual([r.code, r.said], [1, [NAME_HOLDS]], words);
+      if (r.code === 0) writeOver(mac.found, { name: { text: LABEL, placeholder: false } });
+    }
+    mac.t.done();
+  });
+  it("refuses at edit, for each field she may change of each list, her words holding a name in any of those forms, writing nothing", async () => {
+    const { t, found } = await readSession();
+    const before = snapshot(found);
+    const lists = [["principles", [], EDITS.principles], ["principles", ["recurring"], EDITS.recurringPrinciples], ["ideas", [], EDITS.reelIdeas]];
+    for (const [command, prefix, fields] of lists) {
+      for (const field of fields) {
+        for (const words of HER_FORMS) {
+          const r = await on(t.ctx.deps, command, LABEL, ...prefix, "edit", "1", `--${field}`, words);
+          assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS]], `${command} ${prefix} ${field} ${words}`);
+        }
+      }
+    }
+    assert.deepEqual(snapshot(found), before);
+    // Words that hold none are taken.
+    const ok = await on(t.ctx.deps, "principles", LABEL, "edit", "1", "--name", "Price what it changes");
+    assert.equal(ok.code, 0, ok.text);
+    t.done();
+  });
+  it("checks again at finish what is written of her changes, and refuses one that holds a name in her lowercase", async () => {
+    const mac = await decidedSession();
+    const session = reread(mac.found).session;
+    writeOver(mac.found, { session: { ...session, edits: { principles: { 1: { description: "ask quillon what it is worth" } } } } });
+    const before = snapshot(mac.found);
+    const r = await on(mac.t.ctx.deps, "finish", LABEL);
+    assert.deepEqual([r.code, r.said], [1, ["Principle 1's description, as you changed it, holds a name brimm-video can see: say it another way, or drop it."]]);
+    assert.deepEqual(snapshot(mac.found), before);
+    mac.t.done();
+  });
+  it("refuses at finish a kept item whose required field, as she changed it, the name check takes out there", async () => {
+    const mac = await decidedSession();
+    const session = reread(mac.found).session;
+    writeOver(mac.found, { session: { ...session, edits: { principles: { 2: { name: "Quillon's way" } } } } });
+    const r = await on(mac.t.ctx.deps, "finish", LABEL);
+    assert.deepEqual([r.code, r.said], [1, ["Principle 2's name held a name brimm-video took out: give it another name, or drop it."]]);
+    assert.equal(existsSync(join(mac.found.folder, "final")), false);
+    mac.t.done();
+  });
+});
+
+describe("fix 3 and 4: the backstop before each try", () => {
+  it("refuses when this Mac's settings cannot be read right before the call, asking nothing", async () => {
+    for (const change of [(home) => writeFileSync(settingsFile(home), '{"version": 1, "sessionTeachings": nu'), (home) => rmSync(settingsFile(home))]) {
+      const mac = sessionMac({ over: ASKED_OVER });
+      mac.state.onAuth = () => change(mac.t.home);
+      const r = await on(mac.t.ctx.deps, ...readArgs(1));
+      assert.equal(r.code, 1);
+      assert.deepEqual([calls(mac.t), readResult(mac.t.home, FOLDER, "read").failed], [[], [`This Mac's settings cannot be read now, so Claude did not read ${LABEL}: ask Jason.`]]);
+      mac.t.done();
+    }
+  });
+  it("reads the account again before the second try, and asks nothing more when it has changed", async () => {
+    const mac = sessionMac({ over: ASKED_OVER });
+    mac.state.onAsk = (n) => {
+      if (n > 1) return null;
+      mac.state.status = { ...STATUS, email: "jason@example.com" };
+      return { code: 1, stderr: "it stopped", stdout: "" };
+    };
+    const r = await on(mac.t.ctx.deps, ...readArgs(1));
+    assert.equal(r.code, 1);
+    assert.deepEqual([calls(mac.t).length, authCalls(mac.t).length], [1, 2]);
+    assert.deepEqual(readResult(mac.t.home, FOLDER, "read").failed, [OTHER_ACCOUNT]);
+    assert.equal(reread(mac.found).reading, undefined);
+    mac.t.done();
+  });
+});
+
+describe("fix 5: the organisation Jason recorded", () => {
+  it("is compared when he recorded one, whatever its case, and any is taken when he recorded the email alone", async () => {
+    for (const [cli, org, starts] of [["sallie@example.com (BRIMM)", "Another", false], ["sallie@example.com (BRIMM)", "brimm", true], ["Sallie@Example.com", "Another", true]]) {
+      const mac = sessionMac({ status: { ...STATUS, orgName: org }, taught: { ...TAUGHT, accounts: { cli, app: ACCOUNT } } });
+      const r = await on(mac.t.ctx.deps, "teachings", LABEL);
+      assert.equal(mac.t.started.length, starts ? 1 : 0, `${cli} / ${org}: ${r.text}`);
+      if (!starts) assert.deepEqual(r.said, [OTHER_ACCOUNT]);
+      mac.t.done();
+    }
+  });
+});
+
+describe("fix 6: a name she spelled is a name brimm-video can see", () => {
+  it("takes out what Claude wrote of it, and refuses her words holding it; the show's own spellings are no one's", async () => {
+    const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], example_application: "As Kestrell does with her shop, and as Sallie says." }, ...REPLY.frameworks.slice(1)] };
+    const { t, found } = await readSession({ reply, over: { spellings: [["kestrel", "Kestrell"], ["Sally", "Sallie"]] } });
+    const kept = JSON.parse(fileOf(found, TEACHINGS_JSON));
+    assert.equal("example_application" in kept.principles[0], false);
+    assert.equal(kept.principles[0].description, REPLY.frameworks[0].description);
+    const r = await on(t.ctx.deps, "principles", LABEL, "edit", "1", "--example_application", "As kestrel does.");
+    assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS]]);
+    t.done();
+  });
+});
+
+describe("fix 7: only the record decides", () => {
+  it("takes no `approved` written in the teachings file for her decision", async () => {
+    const mac = await readSession({ settings: { handoffVersion: 2 } });
+    const teachings = JSON.parse(fileOf(mac.found, TEACHINGS_JSON));
+    for (const key of ["principles", "recurringPrinciples", "reelIdeas"]) teachings[key] = teachings[key].map((item) => ({ ...item, approved: true }));
+    writeFileSync(join(mac.found.folder, TEACHINGS_JSON), JSON.stringify(teachings));
+    const listing = await on(mac.t.ctx.deps, "principles", LABEL);
+    assert.ok(listing.said.includes("Principle 1: Price the outcome (pricing). Not decided yet."), listing.text);
+    const r = await on(mac.t.ctx.deps, "finish", LABEL);
+    assert.equal(r.code, 1);
+    assert.ok(r.said.includes("Principle 1 is not decided yet: keep it or drop it."), r.text);
+    assert.equal(existsSync(join(mac.found.folder, "final")), false);
+    mac.t.done();
+  });
+});
+
+describe("fix 9: her answer of the transcript only, while the reading of her ask waits", () => {
+  it("is recorded, and the reading then asks Claude nothing", async () => {
+    const mac = sessionMac({ over: ASKED_OVER });
+    const { t } = mac;
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    let release;
+    const held = new Promise((done) => (release = done));
+    let whole = false;
+    t.ctx.deps.isWhole = (path) => whole || !path.endsWith(".cut-plan.json");
+    t.ctx.deps.readAll = async () => {
+      await held;
+      whole = true;
+    };
+    const reading = on(t.ctx.deps, ...readArgs(1));
+    await new Promise((done) => setTimeout(done, 50));
+    const no = await on(t.ctx.deps, "teachings", LABEL, "--transcript-only");
+    assert.deepEqual([no.code, no.said], [0, [TRANSCRIPT_ONLY]]);
+    release();
+    const r = await reading;
+    assert.equal(r.code, 1);
+    assert.deepEqual([calls(t), reread(mac.found).session.teachings], [[], "transcript only"]);
+    t.done();
+  });
+});
+
+describe("fix 10: a session renamed since its last hand-off", () => {
+  it("sets the earlier hand-off aside into history/ when it writes the next under the new name", async () => {
+    const mac = await decidedSession();
+    const { t, found } = mac;
+    await on(t.ctx.deps, "finish", LABEL);
+    const first = fileOf(found, HANDOFF);
+    await on(t.ctx.deps, "name", LABEL, "Pricing deep dive");
+    const r = await on(t.ctx.deps, "finish", "Pricing deep dive");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(t.inFinal(found), ["Pricing deep dive.brimm-ops.json"]);
+    const aside = readdirSync(join(found.folder, "history")).filter((name) => name.endsWith(`${LABEL}.brimm-ops.json`));
+    assert.equal(aside.length, 1);
+    assert.equal(readFileSync(join(found.folder, "history", aside[0]), "utf8"), first);
+    const record = reread(found);
+    assert.equal(HANDOFF in record.files, false);
+    assert.equal(record.files[`history/${aside[0]}`], Buffer.byteLength(first));
+    assert.deepEqual([record.finished.revision, record.finished.handoff], [2, "final/Pricing deep dive.brimm-ops.json"]);
+    assert.equal(episodeFault(record), "");
+    t.done();
+  });
+});
+
+describe("fix 11: her name by default, files read through, and the branches not tested yet", () => {
+  it("takes the host's full name as hers when this Mac's settings name none: a label of her first name and more is a participant", async () => {
+    const vtt = ["WEBVTT", "", "1", "00:00:00.000 --> 00:00:04.000", "Sallie's iPhone: Welcome back, everyone, to the group call.", ""].join("\n");
+    const { asks, t } = await readSession({ files: { ...FILES, [VTT_FILE]: vtt } });
+    const speakers = replaceSpeakers(vtt, HOST).text;
+    assert.match(speakers, /Participant 1: Welcome back/);
+    assert.deepEqual(asks, [requestFor("session", PLAN, { duration: 26, speakers })]);
+    t.done();
+  });
+  it("reads through the teachings, the plan or the meeting transcript that Dropbox has not brought yet, before principles, ideas, finish and name", async () => {
+    const mac = await decidedSession();
+    const { t, found } = mac;
+    const here = new Set();
+    const brought = [];
+    t.ctx.deps.isWhole = (path) => here.has(path) || ![TEACHINGS_JSON, `${STEM}.cut-plan.json`].some((rel) => path.endsWith(rel));
+    t.ctx.deps.readAll = async (path) => {
+      brought.push(path.slice(found.folder.length + 1));
+      here.add(path);
+    };
+    assert.equal((await on(t.ctx.deps, "principles", LABEL)).code, 0);
+    assert.deepEqual(brought, [TEACHINGS_JSON]);
+    here.clear();
+    brought.length = 0;
+    assert.equal((await on(t.ctx.deps, "name", LABEL, "Pricing deep dive")).code, 0);
+    assert.deepEqual(brought, [`${STEM}.cut-plan.json`]);
+    here.clear();
+    brought.length = 0;
+    const r = await on(t.ctx.deps, "finish", "Pricing deep dive");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(brought.sort(), [`${STEM}.cut-plan.json`, TEACHINGS_JSON].sort());
+    t.done();
+  });
+  it("refuses her decisions and her answer while another Mac has the session, and her decisions while a run is at work on it", async () => {
+    const { t, found } = await readSession();
+    writeOver(found, { editing: { by: "Sallie's laptop", since: MARKED } });
+    const before = snapshot(found);
+    const kept = await on(t.ctx.deps, "principles", LABEL, "keep", "1");
+    assert.deepEqual([kept.code, kept.said], [1, [`Sallie's laptop has ${LABEL} open, so nothing was decided. Say it again once it is let go there.`]]);
+    const only = await on(t.ctx.deps, "teachings", LABEL, "--transcript-only");
+    assert.deepEqual([only.code, only.said], [1, [`Sallie's laptop has ${LABEL} open, so her answer was not recorded. Say it again once it is let go there.`]]);
+    assert.deepEqual(snapshot(found), before);
+    writeOver(found, { editing: { by: "Mac Studio", since: MARKED } });
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    const lock = lockOf(t.home, FOLDER);
+    for (const [command, words] of [["finish", [1, [`finish is running for ${LABEL} (${SHORT}) already. Say it again when it has finished.`]]], ["read", [0, [`${LABEL}: principle 1 kept.`]]]]) {
+      const took = takeEpisodeLock(lock, command, () => true);
+      const r = await on(t.ctx.deps, "principles", LABEL, "keep", "1");
+      assert.deepEqual([r.code, r.said.slice(0, 1)], [words[0], words[1]], command);
+      releaseEpisodeLock(lock, took.text);
+    }
+    t.done();
+  });
+  it("says why the claim teachings makes did not hold, in its own words", async () => {
+    const cases = [
+      ["undone", (mac) => rmSync(recordFile(mac.found.folder, 2)), `Dropbox undid this Mac's claim on ${LABEL}. Say it again.`],
+      ["held", (mac) => writeOver(mac.found, { editing: { by: "Sallie's laptop", since: MARKED } }), `Sallie's laptop has ${LABEL} open, so its teachings were not asked for. Say it again once it is let go there.`],
+      ["changed", (mac) => writeOver(mac.found, { title: null }), `${LABEL} changed meanwhile: say it again.`]
+    ];
+    for (const [what, change, words] of cases) {
+      const mac = sessionMac();
+      const wait = mac.t.ctx.deps.wait;
+      mac.t.ctx.deps.wait = async (ms) => {
+        await wait(ms);
+        if (ms === CLAIM_WAIT_MS) change(mac);
+      };
+      const r = await on(mac.t.ctx.deps, "teachings", LABEL);
+      assert.deepEqual([r.code, r.said], [1, [words]], what);
+      assert.deepEqual(mac.t.started, [], what);
+      mac.t.done();
+    }
   });
 });
