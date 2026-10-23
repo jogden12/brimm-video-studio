@@ -3,7 +3,7 @@
 // the contract between the two: the page copies the fixtures, and refuses a session's hand-off for any key it does not know.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildHandoffV2, handoffFaultV2, suggestionsOnClock, VERSION_2 } from "../handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, suggestionsOnClock, onPictureOf, fromSuggestionOf, VERSION_2 } from "../handoff-v2.js";
 import { clockOfRanges } from "../clock.js";
 import { FORMAT, handoffText } from "../handoff.js";
 import { tidyTranscript } from "../shared/transcript.js";
@@ -580,5 +580,35 @@ describe("the captions the page reads", () => {
         assert.ok(lines.length >= 1 && lines.every((line) => /^\[\d+:\d{2}\] \S/.test(line)), lines.join(" / "));
       }
     }
+  });
+});
+
+describe("what a finish writes into version 2 from the record", () => {
+  const text = (id, at, lines) => ({ id, kind: "lower-third", at, for: 4, lines });
+  it("gives the lines of the main video's name titles, in the order they are on screen, as the words on its picture", () => {
+    const main = { texts: [text("t2", 31.5, ["Alex Hormozi"]), text("t1", 2, ["Sallie Ogden", "Founder, The BRIMM"]), text("t3", 31.5, ["Lisa Ogden", "Guest"])] };
+    assert.deepEqual(onPictureOf({ main }), ["Sallie Ogden", "Founder, The BRIMM", "Alex Hormozi", "Lisa Ogden", "Guest"]);
+    assert.deepEqual(main.texts.map((t) => t.id), ["t2", "t1", "t3"], "the record's own list is not changed");
+  });
+  it("gives none when the main video has no name title, and leaves out a line of no words", () => {
+    assert.deepEqual(onPictureOf({ main: { texts: [] } }), []);
+    assert.deepEqual(onPictureOf({ main: {} }), []);
+    assert.deepEqual(onPictureOf({}), []);
+    assert.deepEqual(onPictureOf({ main: { texts: [text("t1", 2, ["Sallie Ogden", "  "])] } }), ["Sallie Ogden"]);
+  });
+  it("puts them on a raw or short video's picture and on no finished video's or session's, and the check passes each", () => {
+    const main = { texts: [text("t1", 2, ["Sallie Ogden", "Founder, The BRIMM"])] };
+    for (const [made, kind, drawn] of [[RAW, "raw", true], [SHORT, "short video", true], [record({ kind: "episode" }), "raw", true], [FINISHED, "finished", false], [SESSION, "session", false]]) {
+      const r = { ...made, main };
+      const h = buildHandoffV2({ ...GIVEN, record: r, main: MAIN, onPicture: onPictureOf(r), reels: kind === "session" ? [AGREED] : [] });
+      assert.equal(h.video.kind, kind);
+      assert.deepEqual(h.main && h.main.onPicture, drawn ? ["Sallie Ogden", "Founder, The BRIMM"] : undefined, kind);
+      assert.equal(handoffFaultV2(h), "", kind);
+    }
+  });
+  it("takes a made Reel to come from the suggestion of its own number, unless the record says it came from none", () => {
+    assert.equal(fromSuggestionOf({ n: 2, status: "finished", title: "Know your costs" }), 2);
+    assert.equal(fromSuggestionOf({ n: 4, fromSuggestion: null }), null);
+    assert.equal(fromSuggestionOf({ n: 5, fromSuggestion: 5 }), 5);
   });
 });

@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode, freeLibrary, status, titleEpisode } from "../edit.js";
-import { episodeWork, fromFinalCutFolder, libraryFor } from "../settings.js";
+import { episodeWork, fromFinalCutFolder, libraryFor, writeSettings } from "../settings.js";
 import { resultFile, readResult } from "../detached.js";
-import { setup, episodeFor, reread, EDITED, PROJECT, FOLDER } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, EDITED, PROJECT, FOLDER, ID } from "./episodes.js";
 
 /** Final Cut's files at the end of the made-up edit: each part Shared, the main and Reel 1 exported after their Shares, and
     Reel 2 never exported. */
@@ -132,6 +132,16 @@ describe("finish, the part that looks and asks", () => {
     assert.deepEqual(busy.started, []);
     busy.done();
   });
+  it("with hand-off version 1, still asks for an approved title", async () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 1 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 1 };
+    sharedAll(t);
+    assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, title: null } }), { yes: true, noHandEdits: ["reel 2"] }), 1);
+    assert.match(t.said(), /Approve a title first\./);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
   it("lets a short video finish without a title, and with no Reels", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { ...EDITED, kind: "short video", title: null, reels: [] } });
@@ -148,6 +158,71 @@ describe("finish, the part that looks and asks", () => {
     assert.ok(existsSync(fromFinalCutFolder(t.home)));
     assert.match(t.said(), /The main video has not been Shared from Final Cut\./);
     assert.match(t.said(), /Looked in .*From Final Cut.* for: .*Pricing- what to charge- main v5 3fa9c1\.mov/s);
+    t.done();
+  });
+});
+
+describe("finish, the part that looks and asks, with hand-off version 2", () => {
+  /** A made-up root whose Mac's settings say version 2, with Final Cut's files of the made-up edit. */
+  const v2 = () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 2 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 2 };
+    sharedAll(t);
+    return t;
+  };
+  const PLACEHOLDER = { text: "Pricing talk", placeholder: true };
+  it("starts a finish with no approved title: titles live on the BRIMM Ops page", async () => {
+    for (const title of [null, { ...EDITED.title, approved: false }]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, title } }), { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+      assert.doesNotMatch(t.said(), /Approve a title/);
+      assert.equal(t.started.length, 1);
+      t.done();
+    }
+  });
+  it("refuses a placeholder name only for a raw video, an episode imported before the switch among them", async () => {
+    for (const kind of ["episode", "raw"]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER } }), { yes: true, noHandEdits: ["reel 2"] }), 1, kind);
+      assert.match(t.said(), /Give the episode its name first: it is still called "Pricing talk", from the video's file name\./, kind);
+      assert.deepEqual(t.started, [], kind);
+      t.done();
+    }
+    // A finished video's name is its file's, and a short video's is too: either finishes with it.
+    for (const [kind, more] of [["finished", {}], ["short video", { title: null, reels: [] }]]) {
+      const t = v2();
+      assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER, ...more } }), { yes: true, noHandEdits: ["reel 2"] }), 0, `${kind}: ${t.said()}`);
+      assert.doesNotMatch(t.said(), /Give the episode its name first/, kind);
+      assert.equal(t.started.length, 1, kind);
+      t.done();
+    }
+  });
+  it("refuses a new version whose earlier version is not on this Mac, or names it back, by its label or else its name, and writes nothing", async () => {
+    const FIRST = "e-20261010-7c1d2e";
+    const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+    const first = (t, record = {}) => episodeAs(t, { id: FIRST, name: "2026-10-10 Pricing talk, first cut (Mac Studio)", record: { kind: "raw", ...record } });
+    const missing = (who) => `${who} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`;
+    const cases = [
+      [() => {}, { label: LABEL }, missing(LABEL)],
+      [() => {}, {}, missing(EDITED.name.text)],
+      [(t) => first(t, { versionOf: ID }), { label: LABEL }, `${LABEL} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`]
+    ];
+    for (const [before, more, words] of cases) {
+      const t = v2();
+      before(t);
+      const found = episodeFor(t, { record: { ...EDITED, versionOf: FIRST, ...more } });
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, words);
+      assert.ok(t.said().split("\n").includes(words), t.said());
+      assert.deepEqual(t.started, []);
+      assert.equal(reread(found).rev, found.record.rev, "no claim was written");
+      t.done();
+    }
+    // Once it is here, the finish starts.
+    const t = v2();
+    first(t);
+    assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, versionOf: FIRST, label: LABEL } }), { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+    assert.equal(t.started.length, 1);
     t.done();
   });
 });

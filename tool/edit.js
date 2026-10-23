@@ -27,7 +27,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, kindOf as kindOfRecord } from "./episode.js";
 import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
@@ -39,12 +39,13 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, lastRevision } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, lastRevision, chainGap, chainGapWords, handoffIdOf, nextRevision, writesHandoffV2 } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
-import { spellingFault, withSpelling, respelledPart, respelledHandoff } from "./spelling.js";
+import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
+import { handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
@@ -1259,8 +1260,15 @@ export async function finishEpisode(ctx, found, answers = {}) {
     acceptRev(ctx.home, record.id, record.rev);
     stops.push(gone);
   }
-  if (record.name && record.name.placeholder) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
-  if (record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
+  // What the hand-off needs, in the version this Mac's settings say (spec 2026-10-22, section 8). Version 1 needs a name, and
+  // an approved title for all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished
+  // video's name is its file's); it is written under the video's first version's id, so a gap in the chain of its versions
+  // is refused here, before the claim is written, as the detached part refuses it before anything is copied.
+  const v2 = writesHandoffV2(ctx.settings);
+  if (record.name && record.name.placeholder && (!v2 || kindOfRecord(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
+  if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
+  const gap = v2 ? chainGap(ctx.root, record) : null;
+  if (gap) stops.push(chainGapWords(record, gap));
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
@@ -2257,6 +2265,8 @@ async function saveSpellings(ctx, found, spellings, done) {
     const srts = {};
     const writes = [];
     const held = {};
+    // The pairs each part's captions are spelled with now, by its key.
+    const spelledWith = {};
     for (const p of parts) {
       const was = { srt: readFileSync(join(found.folder, `${p.stem}.srt`), "utf8"), words: p.part.words ? readFileSync(join(found.folder, p.part.words), "utf8") : null };
       const sameWords = (made) => !made.words || JSON.stringify(JSON.parse(made.words).words) === JSON.stringify(JSON.parse(was.words).words);
@@ -2266,6 +2276,7 @@ async function saveSpellings(ctx, found, spellings, done) {
         return made.srt !== was.srt || !sameWords(made);
       });
       held[p.key] = [...p.held, ...changing];
+      spelledWith[p.key] = changing;
       const made = respelledPart(was, changing);
       srts[p.key] = made.srt;
       if (made.srt !== was.srt) writes.push([`${p.stem}.srt`, made.srt], [`${p.stem}.transcript.txt`, made.txt]);
@@ -2273,11 +2284,20 @@ async function saveSpellings(ctx, found, spellings, done) {
     }
     const toApply = [...new Map(parts.flatMap((p) => p.toApply).map(([h, m]) => [h, [h, m]])).values()];
     if (!writes.length) return save(ctx, found, { ...record, finished: withHeld(held) }, `${done} The final transcripts do not have ${listed(toApply.map(([h]) => `"${h}"`))}, so they are as they were.${keptNote}`);
-    // A revision is never used twice, even one a finish left in final/ without writing its record (finish.js lastRevision).
-    const revision = Math.max(finished.revision, lastRevision(join(found.folder, "final"), record.id)) + 1;
+    // The hand-off is made again as version 2 once this Mac's settings say so, and when it is version 2 already: version 1 is
+    // never written over it (spec 2026-10-22, section 8). Version 2 is under the video's first version's id, above every
+    // revision written for that id on this Mac (finish.js nextRevision), and only when the chain of the video's versions can be
+    // followed to its first: on a gap nothing is written, the spelling included. Version 1 is under the episode's own id, and a
+    // revision is never used twice, even one a finish left in final/ without writing its record (finish.js lastRevision).
+    const onFile = JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8"));
+    const v2 = writesHandoffV2(ctx.settings) || onFile.version === VERSION_2;
+    const gap = v2 ? chainGap(ctx.root, record) : null;
+    if (gap) return refuse(ctx, chainGapWords(record, gap));
+    const revision = v2 ? nextRevision(ctx.root, { folder: found.folder, record }) : Math.max(finished.revision, lastRevision(join(found.folder, "final"), record.id)) + 1;
     const at = localStamp(new Date(ctx.now()));
-    const handoff = respelledHandoff(JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8")), { record, srts, revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit });
-    const fault = handoffFault(handoff);
+    const given = { record, srts, revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit };
+    const handoff = v2 ? respelledHandoffV2(onFile, { ...given, id: handoffIdOf(ctx.root, record), spellings: spelledWith.main || [] }) : respelledHandoff(onFile, given);
+    const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) return refuse(ctx, `The hand-off could not be made again (${fault.replace(/\.$/, "")}). Nothing was changed.`);
     writes.push([finished.handoff, handoffText(handoff)]);
     // Nothing is put into final/ that the record could not then take: a change Dropbox took away is said first, as save says

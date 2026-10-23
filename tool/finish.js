@@ -14,6 +14,7 @@ import { firstWordsMatch } from "./parts.js";
 import { finalTranscript } from "./final-transcript.js";
 import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
+import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf } from "./episode.js";
 import { fileSafe } from "./names.js";
@@ -262,6 +263,19 @@ export function chainGap(root, record) {
   return walk(viewOf(root), record, null).gap;
 }
 
+/** Why a hand-off writer refuses a video whose chain has a gap (chainGap), in plain words, after which it writes nothing. The
+    video is named by its label, or by its name when it has none, never by a file's name. A missing episode is named by its id;
+    two that each say they are a version of the other, by the id of the earlier version this video names. */
+export function chainGapWords(record, gap) {
+  const who = record.label || record.name.text;
+  if (gap.reason === "loop") return `${who} and the video it names as its earlier version (${record.versionOf}) each say they are a version of the other: ask Jason. Nothing was written.`;
+  return `${who} is a new version of a video that is not on this Mac yet (${gap.id}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`;
+}
+
+/** Do this Mac's settings say the hand-off is written as version 2 (spec 2026-10-22, section 8)? Until they do, it is version 1,
+    as it has always been, title and all. */
+export const writesHandoffV2 = (settings) => Boolean(settings) && settings.handoffVersion === VERSION_2;
+
 /** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops
     page takes a new version as a later revision. */
 export function handoffIdOf(root, record) {
@@ -465,21 +479,35 @@ export async function finishNow(ctx, found, deps = {}) {
       }
     }
 
-    // The hand-off, from what each part is now. Its revision is one more than any before it, in the record or in final/.
+    // The hand-off, from what each part is now, in the version this Mac's settings say (spec 2026-10-22, section 8).
+    // - Version 2 is under the video's first version's id, which a new version keeps, and its revision is above every one
+    //   written for that id on this Mac, in any version's final/ or history/ (nextRevision). It is written only when the chain
+    //   of the video's versions can be followed to its first: on a gap, nothing is copied and the record is not written. It
+    //   has no title, a raw or short video's main video holds the words drawn on its picture, and each Reel the suggestion it
+    //   was made from. It holds no Reel suggestions: their times are on the raw video's clock, which a Final Cut finish does not
+    //   know (phase V's own finish maps them).
+    // - Version 1 is under the episode's own id, one revision more than any before it, in the record or in final/.
+    const v2 = writesHandoffV2(ctx.settings);
+    const gap = v2 ? chainGap(ctx.root, record) : null;
+    if (gap) {
+      failed.push(chainGapWords(record, gap));
+      return result();
+    }
     const main = parts.find((p) => p.key === "main");
     const mainWords = main.words || wordsOfCaptions(main.srt);
-    const revision = Math.max((record.finished && record.finished.revision) || 0, lastRevision(finalDir, record.id)) + 1;
+    const revision = v2 ? nextRevision(ctx.root, { folder: found.folder, record }) : Math.max((record.finished && record.finished.revision) || 0, lastRevision(finalDir, record.id)) + 1;
     const reels = parts.filter((p) => p.reel).sort((a, b) => a.reel - b.reel).map((p) => {
       const reel = (record.reels || []).find((r) => r.n === p.reel) || {};
       const title = String(reel.title || "").trim();
       // BRIMM Ops takes a Reel's title for the words in its picture, so one is never made up: the quick part asks for it.
       if (!title) failed.push(`Reel ${p.reel} has no title on screen. Say what it says, and finish again.`);
       const timed = Boolean(p.words && main.words);
-      return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, main.seconds, { spacing: timed }), srt: p.srt };
+      return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, main.seconds, { spacing: timed }), srt: p.srt, fromSuggestion: fromSuggestionOf({ ...reel, n: p.reel }) };
     });
     if (failed.length) return result();
-    const handoff = buildHandoff({ record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels });
-    const fault = handoffFault(handoff);
+    const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
+    const handoff = v2 ? buildHandoffV2({ ...given, id: handoffIdOf(ctx.root, record), onPicture: onPictureOf(record) }) : buildHandoff(given);
+    const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);
       return result();

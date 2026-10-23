@@ -106,6 +106,20 @@ export function buildHandoffV2({ record, revision, made, madeOn, commit, id, mai
   return out;
 }
 
+/** The words brimm-video draws on a video's main picture, as its record asks for them (`main.onPicture`): the lines of the main
+    video's name titles (`record.main.texts`), in the order they come on screen, and those of one asked for first when two
+    start together. A line of no words is left out. The record is not changed. buildHandoffV2 writes them only for a raw or
+    short video, since brimm-video does not draw on a finished video's picture or a session's. */
+export function onPictureOf(record) {
+  const texts = record && record.main && Array.isArray(record.main.texts) ? record.main.texts : [];
+  return [...texts].sort((a, b) => a.at - b.at).flatMap((t) => (Array.isArray(t.lines) ? t.lines : [])).filter(text);
+}
+
+/** The suggestion a made Reel was made from (a Reel's `fromSuggestion`), by the Reel as the record holds it: what the Reel
+    says, a suggestion's number or null, when it says; and otherwise its own number, since every Reel a record holds without
+    saying is one of Claude's suggestions, picked, which keeps the suggestion's number. */
+export const fromSuggestionOf = (reel) => (has(reel, "fromSuggestion") ? reel.fromSuggestion : reel.n);
+
 /** How many of a suggestion's words, in 100, the final video must keep for the suggestion to be kept (spec section 8). */
 const KEPT_IN_100 = 70;
 /** How many words `first` and `last` hold when the suggestion did not say. */
