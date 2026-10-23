@@ -1156,7 +1156,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   } catch (e) {
     const lost = putBack();
     const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(e.message || e.code || "a file could not be put in").replace(/\.$/, "");
-    return { why: `Nothing was written: ${why}.${lost.length ? ` ${capital(saidList([...new Set(lost)]))} could not be put back as it was. Tell Jason: the episode needs him.` : ""}` };
+    // Files that could not be put back are what matters then, as the Final Cut path says it: not that nothing was written.
+    if (lost.length) return { why: `${capital(why)}. ${capital(saidList([...new Set(lost)]))} could not be put back as it was. Tell Jason: the episode needs him.` };
+    return { why: `Nothing was written: ${why}.` };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

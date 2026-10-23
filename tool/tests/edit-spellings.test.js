@@ -656,6 +656,45 @@ describe("a later spell, when the video was answered again since its hand-off wa
   }
 });
 
+// ...and behind the gate: a session whose mark she cleared with her click on the dialog is no longer gated, so the gate lets spell
+// through for it, and cannotFinish is the only line left (M-1 of the merge's review), for a hand-off made from the import as for one
+// made in Final Cut.
+describe("a later spell, when the video was answered as a session whose mark she cleared since its hand-off was written", () => {
+  const SESSION_NAME = "Session, 2026-10-14";
+  const CLEARED = { marked: AT, on: "Mac Studio", teachings: null, cleared: { at: NEWER, on: "Mac Studio", to: "finished", confirmed: "dialog" } };
+  it("is refused in cannotFinish's words, by the session's name, and no spelling is kept, whatever this Mac hands off", async () => {
+    for (const version of [undefined, 1, 2]) {
+      const { t, found } = await readOf("finished", { version: 2 });
+      assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+      if (version !== 2) handoffVersion(t, version);
+      const now = reread(found);
+      writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, kind: "session", name: { text: SESSION_NAME, placeholder: false }, session: CLEARED, answer: { ...now.answer, at: NEWER } }));
+      t.calls.length = 0;
+      const before = tree(t);
+      for (const ask of [["add", "Ogdin", "Ogden"], ["add", "Ogdin", "Ogden", "pricing", "Pricing"]]) {
+        const r = await on(t.ctx.deps, "spell", FOLDER, ...ask);
+        assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`], `setting ${version}: ${ask.join(" ")}`);
+      }
+      assert.deepEqual(tree(t), before, `setting ${version}: the record as it was, and no spelling kept`);
+      assert.deepEqual(reread(found).spellings, []);
+      assert.deepEqual([t.calls, t.started], [[], []]);
+      t.done();
+    }
+  });
+  it("is refused for a drop of a spelling it holds too", async () => {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "1")).code, 0);
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, kind: "session", name: { text: SESSION_NAME, placeholder: false }, session: CLEARED, answer: { ...now.answer, at: NEWER } }));
+    const before = tree(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
+    assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]);
+    assert.deepEqual(tree(t), before);
+    assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden"]]);
+    t.done();
+  });
+});
+
 describe("a later spell, when the hand-off on file is gone or cannot be read", () => {
   /** The hand-off written by an answer of none, and then `spoil` done to it. */
   async function spoiled(spoil) {
@@ -945,7 +984,7 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     };
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
     assert.equal(r.code, 1, r.text);
-    assert.equal(r.text, "Nothing was written: this episode changed on the other Mac: open it again. The final captions could not be put back as it was. Tell Jason: the episode needs him.");
+    assert.equal(r.text, "This episode changed on the other Mac: open it again. The final captions could not be put back as it was. Tell Jason: the episode needs him.");
     assert.equal(text(found, `final/${HANDOFF}`), was, "what could be put back was");
     t.done();
   });
@@ -964,7 +1003,7 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     };
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
     assert.equal(r.code, 1, r.text);
-    assert.match(r.text, /^Nothing was written: this episode changed on the other Mac: open it again\. The final captions could not be put back as it was\. Tell Jason: the episode needs him\.$/);
+    assert.equal(r.text, "This episode changed on the other Mac: open it again. The final captions could not be put back as it was. Tell Jason: the episode needs him.");
     assert.equal(text(found, "final/Pricing talk.srt"), "the other Mac's captions", "not written over");
     assert.equal(text(found, `final/${HANDOFF}`), was);
     t.done();
@@ -1024,7 +1063,7 @@ describe("spell, while a reading or a finish is still at work", () => {
       t.done();
     }
   });
-  it("still refuses while a finish runs, and while a reading runs for a video that has no reading yet", async () => {
+  it("still refuses a spelling or an answer while a finish runs, and prints the card, which reads only", async () => {
     const { t, found } = await readOf("finished");
     const before = tree(t);
     const r = await on(lock(t, "finish"), "spell", FOLDER, "offers", "none");

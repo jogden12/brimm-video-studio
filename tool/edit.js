@@ -2684,6 +2684,10 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   // written at the first spell once its offers are answered, and made again from the captions at every one after, so that a
   // spelling dropped or changed is dropped or changed in it too. Which refusals apply is that function's.
   if (madeFromImport(record)) {
+    // A client or group session, and a video not yet answered, are refused as finish refuses them, whatever the hand-off on file
+    // was made as, before the spelling is kept (finish.js cannotFinish).
+    const notYet = cannotFinish(record);
+    if (notYet) return refuse(ctx, notYet);
     // Only while the video is the kind its hand-off was made as: answered again as another kind, the spelling is kept and the
     // hand-off waits for the new reading (`kind … --again` sets this one aside).
     if (importKind(record) === recordKind(record)) return importHandoff(ctx, found, record, done);
