@@ -28,7 +28,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, MARKER } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -262,6 +262,33 @@ function importLines(ctx, fits = () => true) {
   });
 }
 
+/** The drop folders of the Macs, each as { mac, folder }, this Mac's first and the others by name. This Mac's is the one its own
+    settings name (Unedited Video, or Drop once the switch names it). Another Mac's settings are on that Mac, so its folder is
+    found from what Dropbox shows of it, the marker the installer writes in it: Drop/<Mac> when that folder holds a marker that
+    names that Mac, else Unedited Video/<Mac>. The Macs are the folders in either parent. */
+function dropFolders(ctx) {
+  const inRoot = (parent) => {
+    try {
+      return readdirSync(join(ctx.root, parent)).filter((n) => !n.startsWith("."));
+    } catch (e) {
+      return [];
+    }
+  };
+  const marked = (folder, mac) => {
+    try {
+      return readFileSync(join(folder, MARKER), "utf8").split("\n")[0] === mac;
+    } catch (e) {
+      return false;
+    }
+  };
+  const macs = [...new Set([...inRoot("Unedited Video"), ...inRoot("Drop")])].sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
+  return macs.map((mac) => {
+    if (mac === ctx.machine) return { mac, folder: dropFolder(ctx.root, mac, ctx.settings.drop) };
+    const there = dropFolder(ctx.root, mac, "Drop");
+    return { mac, folder: marked(there, mac) ? there : dropFolder(ctx.root, mac) };
+  });
+}
+
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
     archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). */
@@ -294,23 +321,16 @@ export async function episodes(ctx) {
     }
   }
   // The videos in each Mac's drop folder.
-  const drops = join(ctx.root, "Unedited Video");
   const waiting = [];
-  let macs = [];
-  try {
-    macs = readdirSync(drops).filter((n) => !n.startsWith(".")).sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
-  } catch (e) {
-    // There are no drop folders yet.
-  }
-  for (const mac of macs) {
+  for (const { mac, folder } of dropFolders(ctx)) {
     let names = [];
     try {
-      names = readdirSync(join(drops, mac)).filter(isMedia).sort();
+      names = readdirSync(folder).filter(isMedia).sort();
     } catch (e) {
       continue;
     }
     for (const video of names) {
-      const found = ctx.stat(join(drops, mac, video));
+      const found = ctx.stat(join(folder, video));
       if (!found) continue;
       const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
@@ -977,7 +997,7 @@ export async function retry(ctx, rest) {
     say(HELP);
     return 2;
   }
-  const drop = dropFolder(ctx.root, ctx.machine);
+  const drop = dropFolder(ctx.root, ctx.machine, ctx.settings.drop);
   let videos = [];
   try {
     videos = readdirSync(drop).filter(isMedia).sort();
