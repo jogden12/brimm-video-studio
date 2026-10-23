@@ -124,6 +124,11 @@ describe("the record's layout 3", () => {
     for (const bad of [{ state: "maybe" }, { came: "carrier pigeon" }, { guess: 3 }, { seen: null }, { by: "" }, { on: 7 }, { at: "later" }, { private: "maybe" }, { private: true }]) {
       assert.match(episodeFault(withAnswer(bad)), /answer/, JSON.stringify(bad));
     }
+    // The episode the import found its words in, for her card to offer as "a new version of", or none: an id, or null.
+    for (const match of ["e-20261001-0a0b0c", null]) assert.equal(episodeFault(withAnswer({ match })), "", JSON.stringify(match));
+    for (const match of ["", "Talk", "e-20261001-0A0B0C", "e-2026101-0a0b0c", 4, ["e-20261001-0a0b0c"], {}]) {
+      assert.match(episodeFault(withAnswer({ match })), /answer/, JSON.stringify(match));
+    }
     assert.match(episodeFault({ ...made(), answer: "answered" }), /answer/);
     assert.match(episodeFault({ ...made(), label: 4 }), /label/);
     assert.match(episodeFault({ ...made(), fingerprint: ["a"] }), /fingerprint/);

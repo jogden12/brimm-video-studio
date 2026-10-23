@@ -167,12 +167,18 @@ const plainly = (text) => String(text || "").normalize("NFC").toLowerCase();
 /** Some things as they are said in a row: "a", "a and b", "a, b and c". */
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
 
+/** An episode whose record a newer brimm-video wrote, as it is named: by its short id alone, "an episode a newer brimm-video
+    wrote (3fa9c1)". Never by its folder, whose name may be a client's: that record may be a session or a video not yet
+    answered, and this brimm-video cannot read the label a newer one names it by. */
+const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
     fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
     renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
     whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
-    every command but `resolve` refuses it. */
+    every command but `resolve` refuses it. In the lists of episodes it says, one a newer brimm-video wrote is named by its
+    short id alone (newerName). */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
   const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
@@ -190,9 +196,10 @@ export function findEpisode(ctx, said) {
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
+  const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
   if (fits.length === 1) return fits[0];
-  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => e.name))}. Say which.` };
-  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map((e) => e.name))}.` : "There are no episodes yet." };
+  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
+  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
 }
 
 /** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
@@ -257,7 +264,7 @@ function importLines(ctx, fits = () => true) {
 
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
-    archived episode is left out. */
+    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). */
 export async function episodes(ctx) {
   const { say } = ctx;
   const shown = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) }))
@@ -273,8 +280,7 @@ export async function episodes(ctx) {
         continue;
       }
       if (read.newer) {
-        say(`  ${name}`);
-        say("    Written by a newer brimm-video: Jason updates this Mac before it is changed here.");
+        say(`  ${capital(newerName(r))}: Jason updates this Mac before it is changed here.`);
         continue;
       }
       const kind = r.kind === "short video" ? "a short video" : "an episode";
@@ -370,7 +376,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(`${found.name} was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac.`);
+    ctx.say(`That is ${newerName(read.record)}. Jason has a newer brimm-video. Ask him to update this Mac.`);
     return { code: newerEnds };
   }
   return { found, record: read.record };

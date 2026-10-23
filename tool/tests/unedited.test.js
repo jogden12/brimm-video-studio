@@ -18,10 +18,10 @@ import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
-import { writeSettings } from "../settings.js";
+import { seenFile, writeSettings } from "../settings.js";
 import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
-import { writePending } from "../filing.js";
-import { writeStatus } from "../importing.js";
+import { noteSeen, writePending } from "../filing.js";
+import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
 import { fingerprintOf } from "../versions.js";
@@ -2845,8 +2845,8 @@ describe("what the tool says of itself", () => {
 /** A test of the episode import: setup's folder and stand-ins, with this Mac's settings, BRIMM Video in the test's folder and
     this Mac's drop folder in it, a recording of two minutes, so that it makes an episode and not a short video, and a clone
     that copies and is listed in `clones`. `drop(name)` puts a video in the drop folder. Nothing is moved in an episode's
-    import, so the stand-in for a move fails the test. */
-function episodic(script = {}) {
+    import, so the stand-in for a move fails the test. The time is `start`, 10:00 on 13 Oct unless a test gives another. */
+function episodic({ start = "2026-10-13T10:00:00", ...script } = {}) {
   const t = setup({ probed: probed({ duration: "120.000000" }), ...script });
   const root = join(t.dir, "BRIMM Video");
   const drop = join(root, "Unedited Video", "Mac Studio");
@@ -2859,10 +2859,10 @@ function episodic(script = {}) {
     copyFileSync(from, to);
   };
   t.deps.commit = "abc1234";
-  t.deps.now = () => new Date("2026-10-13T10:00:00");
+  t.deps.now = () => new Date(start);
   // A clock of the test's own, which each wait moves on, so that the wait for a late check takes no time; and a Mac kept
   // awake by nothing.
-  let clock = Date.parse("2026-10-13T10:00:00");
+  let clock = Date.parse(start);
   t.deps.clock = () => clock;
   t.deps.wait = async (ms) => {
     t.waits.push(ms);
@@ -4620,15 +4620,14 @@ const listAll = (folder, under = "") => readdirSync(join(folder, under), { withF
 /** A test of the light import (spec 2026-10-22, section 1): the episode import's test (episodic), with this Mac's settings saying
     `import: "light"` when `light` is true, as depsFor makes `deps.light` of them, `import: "full"` when it is false, and
     nothing about it when it is null. Claude Code is on the Mac and would answer, so that a test sees it is not asked. The
-    clock says 15:00 on 20 Oct,
-    the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop folder of `machine`. */
+    clock says 15:00 on 20 Oct, the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop
+    folder of `machine`. */
 function episodeImport({ light = true, video = "Talk.mov", machine = "Mac Studio", ...script } = {}) {
-  const t = episodic({ claude: [answers(REPLY)], ...script });
+  const t = episodic({ claude: [answers(REPLY)], start: "2026-10-20T15:00:00", ...script });
   const drop = join(t.root, "Unedited Video", machine);
   mkdirSync(drop, { recursive: true });
   t.deps.settings = { ...t.deps.settings, machine, ...(light === null ? {} : { import: light ? "light" : "full" }) };
   if (light !== null) t.deps.light = light;
-  t.deps.now = () => new Date("2026-10-20T15:00:00");
   t.deps.today = () => "2026-10-20";
   const told = [];
   t.deps.progress = {
@@ -4654,7 +4653,7 @@ describe("the light import", () => {
       and the record. */
   const LIGHT = ["Talk.cut-plan.json", "Talk.cut-plan.txt", "Talk.mov", "Talk.rough-cut.srt", "Talk.rough-cut.transcript.txt", "Talk.srt", "Talk.transcript.txt", "Talk.words.json", "record/0001.json"];
   const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
-  const READY = `Ready on the Mac Studio: ${LABEL}. In Claude, say "what's waiting?"`;
+  const READY = `Ready: ${LABEL}. In Claude, say "what's waiting?"`;
   const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
   /** The record of an episode written again as she would have answered it: a finished video. */
   const answered = (t, name) => {
@@ -4677,11 +4676,11 @@ describe("the light import", () => {
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     const r = t.record();
-    assert.deepEqual([r.version, r.kind, r.answer, r.label], [3, null, { state: "needs your answer", guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera" }, LABEL]);
+    assert.deepEqual([r.version, r.kind, r.answer, r.label], [3, null, { state: "needs your answer", guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera", match: null }, LABEL]);
     const { words } = JSON.parse(readFileSync(join(t.episodeFolder(), "Talk.words.json"), "utf8"));
     assert.ok(r.fingerprint.length > 0);
     assert.equal(r.fingerprint, fingerprintOf(words));
-    assert.equal(r.versionOf ?? null, null);
+    assert.equal("versionOf" in r, false);
     assert.deepEqual([r.title, r.reels, r.video.file], [null, [], "Talk.mov"]);
     assert.deepEqual(r.files, Object.fromEntries(LIGHT.filter((n) => !n.startsWith("record/")).map((n) => [n, statSync(join(t.episodeFolder(), n)).size])));
     t.done();
@@ -4695,10 +4694,65 @@ describe("the light import", () => {
     assert.equal(t.record().label, LABEL);
     t.done();
   });
-  it("says \"Sallie's laptop\", and not \"the Sallie's laptop\", in the notice of her laptop", async () => {
+  it("puts its label in every status file of its import, from its start to its late check, and a full import puts none", async () => {
+    /** Every status the import wrote into Episodes/.importing, as each was cloned in. */
+    const statusesOf = (t) => t.clones.filter(([, to]) => to.includes("/.importing/")).map(([, , text]) => JSON.parse(text));
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    await uneditedFolder(t.drop, t.deps);
+    const light = statusesOf(t);
+    assert.ok(light.some((s) => s.step === "Reading the sound") && light.some((s) => /late check/.test(s.step)), light.map((s) => s.step).join(", "));
+    assert.deepEqual([...new Set(light.map((s) => s.label))], [LABEL]);
+    t.done();
+    // A late check that found a problem leaves its status for a person: it keeps the label.
+    const u = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    const srt = join(u.episodeFolder(), "Coaching call Jane Doe.rough-cut.srt");
+    let filed = false;
+    const clone = u.deps.clone;
+    u.deps.clone = (from, to) => (filed && to === srt ? writeFileSync(to, "1\n") : clone(from, to));
+    const wait = u.deps.wait;
+    u.deps.wait = async (ms) => {
+      if (ms === 60000 && !filed) {
+        filed = true;
+        writeFileSync(srt, "1\n");
+      }
+      return wait(ms);
+    };
+    await uneditedFolder(u.drop, u.deps);
+    const left = readStatuses(u.root).map((s) => s.status);
+    assert.deepEqual(left.map((s) => [Boolean(s.problem), s.label]), [[true, LABEL]]);
+    u.done();
+    const full = episodeImport({ light: false });
+    await uneditedFolder(full.drop, full.deps);
+    assert.ok(statusesOf(full).length > 0 && statusesOf(full).every((s) => !("label" in s)));
+    full.done();
+  });
+  it("names each video by the moment this Mac first saw it in the drop folder, so a queue of drops keeps their own times", async () => {
+    // This Mac saw Talk.mov at 14:52 and Talk two.mov at 14:57, as the import notes each video it finds, and imports both at 15:00.
+    const t = episodeImport();
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:52:00"));
+    t.put("Talk two.mov");
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:57:00"));
+    await uneditedFolder(t.drop, t.deps);
+    const labels = ["Video of 20 Oct, 14:52 (Mac Studio)", "Video of 20 Oct, 14:57 (Mac Studio)"];
+    assert.deepEqual([t.record("Talk.mov").label, t.record("Talk two.mov").label], labels);
+    assert.deepEqual([...t.notes].sort(), labels.map((label) => `Ready: ${label}. In Claude, say "what's waiting?"`));
+    t.done();
+    // When this Mac could not note when it saw the video, it is named by the moment its import began.
+    const u = episodeImport();
+    mkdirSync(seenFile(u.home), { recursive: true });
+    let clock = Date.parse("2026-10-20T14:40:00");
+    u.deps.clock = () => clock;
+    u.deps.wait = async (ms) => {
+      clock += ms;
+    };
+    await uneditedFolder(u.drop, u.deps);
+    assert.equal(u.record().label, LABEL);
+    u.done();
+  });
+  it("names the Mac in the notice once, by the label, which holds it", async () => {
     const t = episodeImport({ machine: "Sallie's laptop" });
     await uneditedFolder(t.drop, t.deps);
-    assert.deepEqual(t.notes, [`Ready on Sallie's laptop: Video of 20 Oct, 15:00 (Sallie's laptop). In Claude, say "what's waiting?"`]);
+    assert.deepEqual(t.notes, [`Ready: Video of 20 Oct, 15:00 (Sallie's laptop). In Claude, say "what's waiting?"`]);
     t.done();
   });
   it("tells the progress panel the light import's four steps, and no others", async () => {
@@ -4721,17 +4775,18 @@ describe("the light import", () => {
     assert.equal(readFileSync(join(t.episodeFolder(), "Talk.rough-cut.transcript.txt"), "utf8"), stampedText(captions));
     t.done();
   });
-  it("files a new drop of an answered video's words as a new version of it, and one of a video not yet answered as a video of its own", async () => {
+  it("files a new drop of an answered video's words with that episode as its match, and one of a video not yet answered with none", async () => {
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     t.put("Talk again.mov");
     await uneditedFolder(t.drop, t.deps);
-    assert.equal(t.record("Talk again.mov").versionOf ?? null, null);
+    assert.equal(t.record("Talk again.mov").answer.match, null);
     answered(t, "Talk.mov");
     t.put("Talk v2.mov");
     await uneditedFolder(t.drop, t.deps);
     const r = t.record("Talk v2.mov");
-    assert.deepEqual([r.versionOf, r.kind, r.answer.state], [t.record().id, null, "needs your answer"]);
+    // The match is only what her card offers first: the record is a version of the other only once she says so.
+    assert.deepEqual([r.answer.match, r.kind, r.answer.state, "versionOf" in r], [t.record().id, null, "needs your answer", false]);
     // Nothing is written into the old episode's folder.
     assert.equal(t.record().rev, 2);
     t.done();
@@ -4746,7 +4801,7 @@ describe("the light import", () => {
       else writeFileSync(words, "{");
       t.put("Talk v2.mov");
       await uneditedFolder(t.drop, t.deps);
-      assert.equal(t.record("Talk v2.mov").versionOf ?? null, null, how);
+      assert.equal(t.record("Talk v2.mov").answer.match, null, how);
       const said = how === "not whole" ? `${LABEL}: its words are not on this Mac, so it was not compared.` : `${LABEL}: its words could not be read, so it was not compared.`;
       assert.ok(t.logs.includes(said), t.logs.join("\n"));
       t.done();
@@ -4758,7 +4813,7 @@ describe("the light import", () => {
     const r = t.record();
     assert.deepEqual([r.kind, r.answer.state, r.label, r.fingerprint], [null, "needs your answer", LABEL, undefined]);
     // The rules made no plan, so they counted no retakes: there is no guess, and the line of what was seen says no count.
-    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera" });
+    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera", match: null });
     assert.deepEqual(listAll(t.episodeFolder()), ["Talk.cut-plan.txt", "Talk.mov", "Talk.srt", "Talk.transcript.txt", "record/0001.json"]);
     assert.deepEqual(t.notes, [READY]);
     t.done();
@@ -4767,7 +4822,7 @@ describe("the light import", () => {
     const t = episodeImport({ probe: "fail" });
     await uneditedFolder(t.drop, t.deps);
     const r = t.record();
-    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null }, LABEL]);
+    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null, match: null }, LABEL]);
     assert.deepEqual(t.notes, [READY]);
     t.done();
   });
@@ -4876,6 +4931,24 @@ describe("the light import", () => {
       assert.deepEqual([t.calls, t.guarded], [[], []]);
       t.done();
     }
+  });
+  it("says a newer brimm-video wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
+    const NEWER = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    const folder = t.episodeFolder();
+    const video = join(folder, "Talk.mov");
+    // The newer record is of a light episode, as this code would see it: no kind and an answer, so at layout 3.
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...t.record(), version: RECORD_VERSION + 1, rev: 2 }, null, 2) + "\n");
+    const before = listAll(folder);
+    t.calls.length = 0;
+    t.logs.length = 0;
+    assert.deepEqual(await videosFromPlan(video, t.deps), { ok: false, name: "Talk.mov", made: [], stopped: true, message: NEWER });
+    const out = join(t.dir, "out");
+    assert.equal((await videosFromPlan(video, { ...t.deps, outDir: out })).message, NEWER);
+    assert.deepEqual(t.logs, Array(2).fill(`Talk.mov: ${NEWER}. Nothing was made.`));
+    assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
+    t.done();
   });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });

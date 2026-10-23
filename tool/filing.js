@@ -86,14 +86,14 @@ export function commitOf(checkout) {
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others.
     The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
-    `answer` (her answer, waiting, with the guess), `label`, `fingerprint` and `versionOf` (the id of the episode it is a new
-    version of, or null), which go into the record as they are (newEpisode).
+    `answer` (her answer, waiting, with the guess and the episode whose words it matched, or null), `label` and
+    `fingerprint`, which go into the record as they are (newEpisode). An import never sets `versionOf`: her answer does.
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
     file is cloned in from the run's folder; and the first record is written last, by the rule, its work copy kept. Gives
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
     uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", versionOf = null }, deps) {
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "" }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -135,8 +135,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
     reels,
     answer,
     label,
-    fingerprint,
-    versionOf
+    fingerprint
   });
   const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
   log(`${video}: filed into Episodes as "${found.name}"${found.reused ? ", in the folder an import that stopped had made" : ""}.`);
@@ -151,9 +150,10 @@ const STATUS_EVERY_MS = 60 * 1000;
     also writes the import's status file in Episodes/.importing/ (importing.js): at the start, at each step, and once a minute
     while a step runs, by the timer `every`. `fail(why)` writes the status with why the import failed, and the status is left.
     `end` stops the timer and leaves the status: the late check takes it away. A status that cannot be written costs nothing
-    but itself: the log says so once, and the work goes on. */
-export function statusReporter(inner, { root, machine, video, bytes, importId = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
-  const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start" };
+    but itself: the log says so once, and the work goes on. A light import gives its video's `label`, which every status
+    carries. */
+export function statusReporter(inner, { root, machine, video, bytes, importId = "", label = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
+  const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start", ...(label ? { label } : {}) };
   let told = false;
   const write = (more = {}) => {
     try {
@@ -320,10 +320,13 @@ const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 /** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
 const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });
 
+/** The label of a light import's video, as its statuses carry it, from its late check: { label }, or nothing. */
+const labelOf = (pending) => (pending.label ? { label: pending.label } : {});
+
 /** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. */
 function waitingStatus(pending, deps, step) {
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())), ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
   } catch (e) {
     // The status costs nothing but itself, and the next minute's is written again.
   }
@@ -378,7 +381,7 @@ export function finishLate(pending, deps) {
     log(`${pending.video}: its late check could not be kept for the next run (${e.code || e.message}).`);
   }
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said }, textWriter({ work: join(pending.work, "status"), ...opts }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said, ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...opts }));
   } catch (e) {
     log(`${pending.video}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
   }

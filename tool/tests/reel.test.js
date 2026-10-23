@@ -1968,3 +1968,36 @@ describe("ask, what it refuses (from the review)", () => {
     p.t.done();
   });
 });
+
+describe("ask, and a video not yet answered or a session (Part L's review)", () => {
+  const AT = "2026-10-20T15:00:00-05:00";
+  /** The episode's record written again at layout 3, with `more` laid over it, as the switch's record holds it. */
+  const relayout = (found, more) => {
+    const at = join(found.folder, "record", "0001.json");
+    const record = JSON.parse(readFileSync(at, "utf8"));
+    writeFile(at, JSON.stringify({ ...record, version: 3, ...more }, null, 2) + "\n");
+  };
+  const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
+  const SESSION = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+  // Nothing of an unanswered video goes to Claude until she says what it is, and a session's words go only to its own reading.
+  it("refuses a video waiting for its answer, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
+    const r = await askedBoth(p);
+    const why = "This video is waiting for its answer: say what it is first.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  it("refuses a client or group session whose mark is not cleared, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION });
+    const r = await askedBoth(p);
+    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+});

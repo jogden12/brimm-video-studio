@@ -65,6 +65,10 @@ describe("an import's status file", () => {
   it("says why a video is held and not imported, when it is", () => {
     assert.equal(statusFault({ ...STATUS, seconds: null, step: "Held", held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }), "");
   });
+  it("names the video by the label of a light import, when it has one", () => {
+    assert.equal(statusFault({ ...STATUS, label: "Video of 20 Oct, 15:00 (Mac Studio)" }), "");
+    for (const label of ["", 3, null, ["Video"]]) assert.equal(statusFault({ ...STATUS, label }), "its label cannot be read", JSON.stringify(label));
+  });
   it("is not written when a field is missing or wrong, and says which", () => {
     const t = setup();
     const broken = [

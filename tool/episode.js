@@ -92,10 +92,15 @@ const isLayered = (x) => listOf(x.texts, isTextLayer) && listOf(x.graphics, isGr
     the layers a person asked for on it (phase 4). */
 const isReel = (c) => isObject(c) && Number.isInteger(c.n) && c.n >= 1 && REEL_STATUSES.includes(c.status) && isNumber(c.from) && isNumber(c.to) && c.from < c.to && typeof c.title === "string" && (c.pushed === undefined || (Array.isArray(c.pushed) && c.pushed.every(isPush))) && isLayered(c);
 
+/** An episode's id, as newId makes it. */
+const isId = (v) => typeof v === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(v);
 /** What the person said to the card about a video (layout 3): where it stands, what the import guessed, what it saw, how the
-    video came, and once answered, who answered, on which Mac, when, and whether it is a private session. How it came is null
-    when the import could not read the file's facts, and what was seen is then "". */
+    video came, the episode whose words the import found in it (`match`, an id, or null when none), and once answered, who
+    answered, on which Mac, when, and whether it is a private session. How it came is null when the import could not read the
+    file's facts, and what was seen is then "". The match is only what her card offers first: the record is a new version of
+    that episode (`versionOf`) once she says so, never by the import. */
 const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
+  && (a.match === undefined || a.match === null || isId(a.match))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
     when it was cleared, if it was: confirmed by her click on a dialog. */
@@ -141,14 +146,16 @@ export function localStamp(d = new Date()) {
 /** A moment from the record as a person reads it, to the minute: "2026-10-14 09:12". */
 export const shown = (at) => String(at || "").slice(0, 16).replace("T", " ");
 
-/** The record of a video the import has just made an episode of, with every field of version 1, from what the import knows:
-    the new `id`, this Mac's name as `machine`, the moment `at` (localStamp), the `video` as { file, bytes, seconds, created },
-    where `created` is the creation time ffprobe read from the file, or null; the `kind`, which is null for a video not yet
-    answered; the `writer`, { commit, on }; the `files` it copied in, each path from the episode's folder to its size; the
-    `title` Claude recommended, or null; and the Reel `reels` candidates Claude picked.
-    The fields of layout 3 are in the record only when the import gives them: the `answer` (the card's question, with the
-    guess and what the import saw), the `label` that names the video until it is answered, the `fingerprint` of its words, and
-    `versionOf`, the id of the episode it is a new version of. A record made without them is the record of version 1.
+/** The record of a video the import has just made an episode of, with every field of layout 1 and those of layout 3 it is
+    given (below), from what the import knows: the new `id`, this Mac's name as `machine`, the moment `at` (localStamp), the
+    `video` as { file, bytes, seconds, created }, where `created` is the creation time ffprobe read from the file, or null;
+    the `kind`, which is null for a video not yet answered; the `writer`, { commit, on }; the `files` it copied in, each path
+    from the episode's folder to its size; the `title` Claude recommended, or null; and the Reel `reels` candidates Claude
+    picked.
+    The fields of layout 3 are in the record only when they are given: the `answer` (the card's question, with the guess, what
+    the import saw, and the episode whose words it matched), the `label` that names the video until it is answered, the
+    `fingerprint` of its words, and `versionOf`, the id of the episode it is a new version of, which the import never gives:
+    her answer sets it. A record made without them is a record of layout 1.
     The video was recorded on the day its file says, when it says one, and otherwise on the day of the import. Its name is
     the video's own, without its ending, until a person gives it one. Its rev is 0 until writeEpisode first writes it. */
 export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null }) {

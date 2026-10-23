@@ -253,8 +253,15 @@ function localTime(d) {
   return `${local}${off < 0 ? "-" : "+"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
+/** What `set` refuses until it is built, by option and value, and why: the light import, until the question in her chat
+    exists (Part F), and the Drop folder, until the installer makes it (Part D). Those parts take these away. */
+const NOT_BUILT = [
+  ["--import", "light", "The light import needs the question in her chat, which is not built yet."],
+  ["--drop", "Drop", "The Drop folder is not built yet."]
+];
+
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
-    left, and said to be. */
+    left, and said to be. What is not built yet is refused (NOT_BUILT), and nothing is changed. */
 function set(home, rest, say) {
   const told = pairsOf(rest, Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option])));
   if (!told || !Object.keys(told).length) {
@@ -266,6 +273,13 @@ function set(home, rest, say) {
     values[option] = SETTABLE[option].read(said);
     if (values[option] === undefined) {
       say(`Not changed: ${option} takes ${SETTABLE[option].takes}.`);
+      return 1;
+    }
+  }
+  for (const [option, value] of Object.entries(values)) {
+    const refused = NOT_BUILT.find(([o, v]) => o === option && v === value);
+    if (refused) {
+      say(refused[2]);
       return 1;
     }
   }
