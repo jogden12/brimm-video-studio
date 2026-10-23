@@ -329,11 +329,15 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       assert.ok(row.includes(command), row);
       const before = row.slice(0, row.indexOf(command));
       for (const words of ["Before running it, tell her a dialog will open on her Mac", click, "Claude cannot press it", "Return presses Cancel"]) assert.ok(before.includes(words), `${start}: ${words}`);
-      assert.ok(row.slice(row.indexOf(command)).includes("then tell her only what it says"), start);
+      // edit.js says a dialog is open before it waits for her click, so Claude reads that line only once the dialog has closed
+      // (Ruling 27): it is never passed on, and she is told only how it ended.
+      assert.ok(row.slice(row.indexOf(command)).includes("Its line that a dialog is open is printed before it waits for her click, so once it has returned the dialog has closed: never pass that line on, and tell her only how it ended, from what it printed after that line"), start);
     }
     const agreed = rowOf('"The client agreed to Reel 2"');
     for (const words of ["types who agreed and when", "Never ask who agreed in the chat", "never repeat it or pass it into a command", "it goes in the dialog only"]) assert.ok(agreed.includes(words), words);
-    assert.ok(sectionOf(skill, "## A client or group session").includes("Never say a dialog is open, the mark cleared or the agreement noted unless edit.js says so."));
+    const sessions = sectionOf(skill, "## A client or group session");
+    assert.ok(sessions.includes("Never say a dialog is open once a command has returned, and never say the mark is cleared or the agreement noted unless edit.js says so after the dialog has closed."), sessions);
+    assert.doesNotMatch(sessions, /Never say a dialog is open, the mark cleared or the agreement noted unless/);
     assert.doesNotMatch(skill, /tell her a dialog is open/i);
   });
   it("says a hand-off was shown in Finder only when edit.js says it showed one (Ruling 23)", () => {
@@ -349,12 +353,24 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const command = row.indexOf('`kind "<video>" raw --private no --again`');
     assert.ok(asked >= 0 && command > asked, row);
     assert.ok(row.slice(0, asked).includes("Only for a video she has answered: one `episodes` lists as waiting for her answer gets the card instead"), row);
+    // A session is not asked the second question: kind would refuse it, and only the dialog clears its mark (Ruling 28).
+    assert.ok(row.slice(0, asked).includes('For a video `episodes` lists as a client or group session, go straight to "Clear the session mark", below, without asking again.'), row);
     assert.ok(row.slice(asked).includes('No: `kind "<video>" raw --private no --again`'), row);
     assert.ok(row.slice(asked).includes('Yes: as "It was a session after all", below'), row);
   });
-  it("shows her a session's principles and Reel ideas as brimm-video printed them, and names every field she may change (Ruling 25)", () => {
+  it("shows her a session's principles and Reel ideas as brimm-video printed them wherever they are shown, and names every field she may change (Ruling 25)", () => {
+    // The rule is the session section's own, so it holds wherever principles or ideas prints, and the rows that run them point
+    // to it: "Show me the principles" and "What did Claude find?", which the reading's notice sends her to.
+    const RULE = "Wherever `principles` or `ideas` prints, show her each item exactly as brimm-video printed it, field by field, example and key phrases first, never summarised or shortened, with its line about the names it took out.";
+    const prose = sectionOf(skill, "## A client or group session").split("\n").filter((line) => !line.startsWith("|"));
+    assert.ok(prose.some((line) => line.includes(RULE)), prose.join("\n"));
     const shown = rowOf('"Show me the principles" / "Show me the Reel ideas"');
-    for (const words of ["exactly as brimm-video printed it, field by field, example and key phrases first", "never summarised or shortened", "the names it took out"]) assert.ok(shown.includes(words), words);
+    const found = rowOf('"What did Claude find?"');
+    const session = found.slice(found.indexOf("a session,"));
+    assert.ok(found.indexOf("a session,") >= 0, found);
+    for (const [row, pointer] of [[shown, "as above"], [session, '"A client or group session"']]) for (const words of ["exactly as brimm-video printed it", "never summarised", pointer]) assert.ok(row.includes(words), `${row.slice(0, 40)}: ${words}`);
+    // The plain-words rule at the top makes room for it.
+    assert.ok(skill.includes("say what it did, in plain words, except a session's principles and Reel ideas, which are shown as printed (\"A client or group session\")."));
     // Every field sessions.js lets her change, of each list.
     const edits = rowOf('"Keep 1 and 3" / "Drop 2" / "Change 3"');
     for (const [list, fields] of Object.entries(EDITS)) for (const field of fields) assert.ok(edits.includes(`--${field}`), `${list}: --${field}`);
@@ -363,6 +379,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(rowOf('"Its teachings" / "Get the teachings of <label>"').includes("never say which account"));
     const sessions = sectionOf(skill, "## A client or group session");
     assert.ok(sessions.includes("call it only by its label, and never repeat anything the chat holds of it (its file's name, its suggestions, its spellings)"), sessions);
+    // Each "Once …" paragraph is one of its own.
+    assert.ok(sessions.includes("\n\nOnce a video is a session"), sessions);
     assert.ok(rowOf('"It was a session after all"').includes("From then on call it only by its label"));
   });
   it("keeps out of the chat a session's and an unanswered video's words, and who agreed to a Reel", () => {
