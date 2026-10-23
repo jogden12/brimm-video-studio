@@ -103,6 +103,12 @@ export function seenLine({ facts, plan }) {
   return `${seen}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
 }
 
+/** Whether a text is a line of what was seen, as seenLine makes it, on one line: "wide", "upright" or "sound only", the length, and
+    when there is a plan the retakes, "no retakes", "1 retake" or "<n> retakes". A record may hold any text as what was seen, as a
+    conflicted copy that was never checked does, so that a line printed from it into the chat is printed only in this shape: it
+    holds no line break, and no name of a file. Anything that is not text is not one. */
+export const isSeenLine = (text) => typeof text === "string" && /^(?:wide|upright|sound only), \d+(?::\d{2}){1,2}(?:, (?:no retakes|1 retake|\d+ retakes))?$/.test(text);
+
 /** The names a video's file goes by, which a line about it must not hold while it is named by its label: the file's own name,
     that name without its ending, and that in the file-safe form its episode's folder and projects are named with. Each of
     `files` is a file's name, or a path to it. */

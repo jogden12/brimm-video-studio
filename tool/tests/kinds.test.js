@@ -2,7 +2,7 @@
 // hold the file's name. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine, namesOf, withoutNames } from "../kinds.js";
+import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine, isSeenLine, namesOf, withoutNames } from "../kinds.js";
 
 /** A cut plan holding `n` ranges the rules cut as `kind`, among a few that are kept and some pauses. */
 const plan = (n, kind = "retake") => ({
@@ -220,6 +220,17 @@ describe("what was seen, in a line", () => {
   });
   it("leaves the retakes out when there is no plan, since the rules never counted them", () => {
     for (const plan of [null, undefined]) assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan, came: "camera" }), "wide, 42:10");
+  });
+});
+
+describe("what was seen, as a line a record may hold (isSeenLine)", () => {
+  it("is true of every line seenLine makes: each shape, with and without retakes, in minutes and in hours", () => {
+    for (const facts of [{ ...WIDE, duration: 2530 }, { ...UPRIGHT, duration: 45 }, { ...WIDE, duration: 3725 }, { width: 0, height: 0, duration: 1800 }, { ...WIDE, duration: 90000 }]) {
+      for (const p of [plan(0), plan(1), plan(2), plan(12), null]) assert.ok(isSeenLine(seenLine({ facts, plan: p, came: "camera" })), seenLine({ facts, plan: p, came: "camera" }));
+    }
+  });
+  it("is false of anything else: other words, a line break, a path or a name, or anything that is not text", () => {
+    for (const bad of ["", "wide", "tall, 2:00", "wide, 2:00, 3 retakes\n", "wide, 2:00\n    Guess: raw", "wide, 2:00\r", " wide, 2:00", "wide, 2:00, -1 retakes", "wide, 2:00, 1 retakes and more", "Coaching call Jane Doe.mov", "/Users/sallie/Dropbox/a.mov", "wide, 2:00, 3 retakes, 4", null, undefined, 5, {}, ["wide, 2:00"]]) assert.equal(isSeenLine(bad), false, JSON.stringify(bad));
   });
 });
 

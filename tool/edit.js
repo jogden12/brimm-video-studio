@@ -37,7 +37,7 @@ import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
-import { isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
+import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -492,29 +492,30 @@ const CAME_WORDS = { camera: "from a camera", phone: "from an iPhone", zoom: "as
 /** The tool's guess at what a video is, in the words of her card: the values kinds.js guessKind stores, which are "finished", "raw"
     and "clip" (never "short video"). */
 const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retakes", clip: "an iPhone clip" };
-/** The kind of the video her card's match names (episode.js kindOf), in the same words: a raw video of before the switch is raw. */
-const MATCH_WORDS = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip" };
 
 /** The lines of her card for the video not yet answered whose record is `named` (spec 2026-10-22, section 2, "The card"), below
-    its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen,
-    which kinds.js seenLine made with nothing of the file's name in it), how it came, the tool's guess, and the episode whose words
-    it found in the video, as "Maybe a new version of: <its name> (id <short id>), <its kind>". Each line is left out when its fact
-    is not given: no sight of it, no way it came, no guess, or a match that is none. The match (answer.match, an id) is looked for
-    among `others`, the episodes `episodes` lists, by their records alone (episodeAt's inForce), and is named as shownName names
-    it: by its label while it is not answered, and then with no kind said. The whole line is left out when no episode is known by that record, or when the one
-    that is is a session, whether by its kind or by a mark not cleared in any of its records (asSession), is archived, or is
-    one a newer brimm-video wrote: her card does not offer a session, and `kind --version-of` takes none of the others. */
+    its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen),
+    how it came, the tool's guess, and the episode whose words it found in the video, as "Maybe a new version of: <its name> (id
+    <short id>), <its kind>". Each line is left out when its fact is not given: no sight of it, or one not in the shape seenLine
+    makes on one line (isSeenLine: a record may hold any text there, and a line break would forge the card's lines), no way it
+    came, no guess, or a match that is none.
+    The match (answer.match, an id) is looked for among `others`, the episodes `episodes` lists, by their records alone (episodeAt's
+    inForce), and is offered only when `kind --version-of` would take it, so the whole line is left out unless the episode is
+    known by that record, is not the video itself, is not archived, was not written by a newer brimm-video, and has every record
+    it is known by, the one in force and each conflicted copy, answered and neither gated nor a session (gate.js gated, which
+    reads a video not answered or left alone, and a session not cleared). An episode with one record that is not is named by its
+    label in its own line, and would be given away by its name in this one. It is named as shownName names it, with its kind in
+    the words `kind` says (KIND_SAID). */
 function cardLines(named, others) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
   const lines = [];
-  if (typeof answer.seen === "string" && answer.seen !== "") lines.push(`    Seen: ${answer.seen}`);
+  if (isSeenLine(answer.seen)) lines.push(`    Seen: ${answer.seen}`);
   if (Object.hasOwn(CAME_WORDS, answer.came)) lines.push(`    Came: ${CAME_WORDS[answer.came]}`);
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
-  const match = typeof answer.match === "string" ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
-  if (match && !match.inForce.archived && !match.records.filter(recordShaped).some(asSession)) {
-    const kind = recordKind(match.inForce);
-    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)})${Object.hasOwn(MATCH_WORDS, kind) ? `, ${MATCH_WORDS[kind]}` : ""}`);
+  const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
+  if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")) {
+    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
   }
   return lines;
 }
