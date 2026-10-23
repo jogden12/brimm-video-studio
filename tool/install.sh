@@ -20,14 +20,14 @@
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
 #                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro and Claude Code's
 #                                    sign-in are here, and what Jason does by hand for any that is not
-# ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
+#   ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
 #                                    left as it is, for Jason to delete by hand once it is empty. A run with no --drop keeps the
 #                                    folder the settings name. It is refused, before anything is changed, while the old folder
 #                                    still holds a video, or an import of this Mac failed or found a problem: it says which,
 #                                    and to deal with each first. Run it with --print first
-# ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
+#   ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
 #                                    write the import (light or full) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
 #                                    --machine, --rules-only also writes readings off. These three options are for --machine only
@@ -121,6 +121,11 @@ if [[ -n "$switch_missing" ]]; then
     --import) say "Say which import after --import, as --import light or --import full." ;;
     --handoff) say "Say which version after --handoff, as --handoff 1 or --handoff 2." ;;
   esac
+  exit 2
+fi
+# --remove stops the watching and changes no settings: it takes none of them.
+if [[ ${#switch_options[@]} -gt 0 && "$mode" == "remove" ]]; then
+  say "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff."
   exit 2
 fi
 if [[ ${#switch_options[@]} -gt 0 && "$machined" != "yes" ]]; then

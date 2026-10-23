@@ -1074,6 +1074,26 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.ok(writeAt > text.indexOf('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), "the write, after the marker");
     assert.ok(text.includes('[[ -z "$rules_only" ]] || switch_args+=(--readings off)'), "--rules-only is written as readings off");
   });
+  it("prints every line of its help that shows a way to run it at the same indent, two spaces, as the first ones: none at the left edge", () => {
+    const r = ask("--print", "--help");
+    const shown = r.out.split("\n").filter((line) => /^ *\.\/install\.sh/.test(line));
+    assert.ok(shown.length >= 8, r.out);
+    for (const line of shown) assert.ok(line.startsWith("  ./install.sh"), `${line}\n---\n${r.out}`);
+    // The text that goes with each is set in the same column as theirs.
+    const columns = new Set(r.out.split("\n").filter((line) => /^ {20,}\S/.test(line)).map((line) => /^ */.exec(line)[0].length));
+    assert.deepEqual([...columns], [35], r.out);
+  });
+  it("refuses --drop, --import and --handoff with --remove, which changes no settings, plainly and before anything else", () => {
+    const d = box();
+    for (const args of [["--drop", "Drop"], ["--import", "full"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
+      const r = ask("--print", "--remove", ...args);
+      assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff.\n"], args.join(" "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    // --remove alone is as it was.
+    assert.equal(ask("--print", "--remove").status, 0);
+    d.done();
+  });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
     const r = ask("--print", "--help");
     const help = r.out.replace(/\s+/g, " ");
