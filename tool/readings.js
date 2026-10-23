@@ -6,7 +6,9 @@
 // What Claude is given is the words and the time each phrase starts, with the same guard lines as in notes.js. It is not given
 // what the rules decided, except for a raw video: the rules' cuts are not used for the other kinds. It is never given a session's
 // file name, and is asked to leave out of every field the client's name, business, industry, numbers and story.
-// Its reply is read as notes.js reads one: what is whole is read, and what could not be is named in plain words and never guessed at.
+// What comes from the recording is written plainly in the request: nothing in a phrase or in a transcript can open or close one of
+// its sections. Its reply is read as notes.js reads one: what is whole is read, and what could not be is named in plain words and
+// never guessed at.
 // Nothing here touches a disk, runs a program or asks Claude anything. It takes plain data and gives back plain data.
 import { notesRequest, readNotes, objectIn, asked, section, runsOf, oneLine, ASK, GUARD, DATA } from "./notes.js";
 import { plain, stamp, list } from "./shared/text.js";
@@ -15,6 +17,17 @@ import { REEL_MIN, REEL_MAX } from "./reframe.js";
 
 const KINDS = ["finished", "raw", "session", "short video"];
 const text = (v) => plain(v).trim();
+
+/** A text of the recording with the request's own section tags made plain: in any case, a tag in it has its angle brackets
+    written ‹ and ›, so that nothing said in the recording can open or close one of the sections, on a line of its own or not. */
+const untagged = (t) => t.replace(/<(\/?(?:recording|phrases|task))>/gi, "‹$1›");
+
+/** The meeting's own transcript for the request: each of its lines on one line, as a phrase is, and with its tags made plain.
+    Where a line ends is where \r\n, \r, \n, or the separators U+2028 and U+2029 say. An empty line stays empty. */
+const spoken = (speakers) => speakers.split(/\r\n|\r|\n|\u2028|\u2029/).map((line) => untagged(oneLine(line))).join("\n");
+
+/** Is there a transcript of the meeting to say who says what? It is text with something in it. */
+const hasSpeakers = (about) => Boolean(about) && typeof about.speakers === "string" && about.speakers.trim() !== "";
 
 /** How many Reel suggestions are asked for, and read, at most. The request says it in words. */
 const MAX_SUGGESTIONS = 8;
@@ -58,20 +71,21 @@ const ASKS = {
   session: {
     opening: `This is a recording of a private session that ${HOST}, founder of The BRIMM, held with a client or with a group. What is wanted from it is what she teaches, as general principles, and nothing about the people she teaches.`,
     // A session is shown no file name, as its name may be that of a client. `speakers` is the meeting's own transcript, with
-    // every speaker but her named "Participant 1", "Participant 2" and so on, and is shown as it is.
+    // every speaker but her named "Participant 1", "Participant 2" and so on, and is shown line by line as it is.
     recording: (about) => [
       `Length: ${stamp(Math.round(about.duration))}`,
-      ...(typeof about.speakers === "string" && about.speakers.trim()
-        ? [`Who says what, from the meeting's own transcript. ${HOST}'s lines carry her name; every other speaker is named "Participant 1", "Participant 2" and so on:`, about.speakers]
+      ...(hasSpeakers(about)
+        ? [`You are also given who says what, from the meeting's own transcript. ${HOST}'s lines carry her name; every other speaker is named "Participant 1", "Participant 2" and so on:`, spoken(about.speakers)]
         : ["There are no speaker labels for this recording, so who says what is not known."])
     ],
     task: [START, EVERY_FIELD, FRAMEWORKS, RECURRING, REEL_IDEAS]
   }
 };
 
-/** Nothing is asked or read for a kind that is none of the four. Whoever asks has made a mistake, which no reply can cause. */
+/** Nothing is asked or read for a kind that is none of the four. Whoever asks has made a mistake, which no reply can cause. The
+    message says what the kinds are and quotes nothing it was given. */
 function known(kind) {
-  if (!KINDS.includes(kind)) throw new Error(`"${String(kind)}" is not a kind of video to read. The kinds are ${KINDS.map((k) => `"${k}"`).join(", ")}.`);
+  if (!KINDS.includes(kind)) throw new Error(`That is not a kind of video to read: ${KINDS.slice(0, -1).join(", ")} or ${KINDS[KINDS.length - 1]}.`);
 }
 
 /** The whole text of one request to Claude about a video of this kind: "finished", "raw", "session" or "short video". `plan` is
@@ -79,8 +93,9 @@ function known(kind) {
     it is {duration, speakers}: no file name is ever shown, and `video`, when it is given, is not read. `speakers` is the text of
     the meeting's own transcript, or nothing when there is none.
     A raw video's request is notesRequest's, with what else is asked. The others show each phrase of the plan on a line of its own,
-    with its id, when it starts and its words, and not what the rules decided for it. What is asked comes last, after everything
-    that comes from the recording. Throws for any other kind. */
+    with its id, when it starts and its words, and not what the rules decided for it. A section tag in a phrase, or in the
+    transcript of a session, is written plainly (see untagged). What is asked comes last, after everything that comes from the
+    recording. Throws for any other kind. */
 export function requestFor(kind, plan, about) {
   known(kind);
   if (kind === "raw") return notesRequest(plan, about, RAW_TASK);
@@ -90,7 +105,7 @@ export function requestFor(kind, plan, about) {
   const shown = phrases.map((p, i) => {
     // As in notesRequest: Claude is shown which phrases have no pause before them, because a stretch is cut at a pause.
     const on = runs[i] !== i ? `, straight on from ${phrases[i - 1].id}` : "";
-    return `${p.id} | ${stamp(p.start)}${on} | ${oneLine(p.text)}`;
+    return `${p.id} | ${stamp(p.start)}${on} | ${untagged(oneLine(p.text))}`;
   });
   return [`${ask.opening}\n\n${GUARD}`, section("recording", ask.recording(about)), WHOLE, section("phrases", shown), DATA, section("task", [ask.task.join("\n")])].join("\n\n");
 }
@@ -130,6 +145,9 @@ function reading(reply, keys, empty, fill) {
   return read;
 }
 
+/** What readNotes says of a title in a reply that is not text, as it says it. */
+const TITLE_NOT_TEXT = '"title" in its reply is not text, so it was left out.';
+
 /** A spelling is {heard, spelled, why} and needs the first two: it is read without a reason. */
 const spelling = (s) => (text(s.heard) && text(s.spelled) ? { heard: text(s.heard), spelled: text(s.spelled), why: text(s.why) } : null);
 const badSpelling = (n) => `Spelling ${n} could not be read: it needs a "heard" and a "spelled".`;
@@ -149,8 +167,10 @@ const readShort = (reply) => reading(reply, ["spellings", "about"], () => ({ spe
   else read.about = oneLine(data.about);
 });
 
-const readSession = (reply) => reading(reply, ["frameworks", "recurring_principles", "reel_ideas"], () => ({ principles: [], recurringPrinciples: [], reelIdeas: [], spellings: [] }), (data, read, entries) => {
-  const framework = (f, n) => (text(f.name) ? { n, name: text(f.name), category: text(f.category), description: text(f.description), steps: texts(f.steps), red_flags: texts(f.red_flags), green_flags: texts(f.green_flags), decision_criteria: texts(f.decision_criteria), example_application: text(f.example_application), verbatim_key_phrases: texts(f.verbatim_key_phrases), source_context: text(f.source_context) } : null);
+const readSession = (reply, about) => reading(reply, ["frameworks", "recurring_principles", "reel_ideas"], () => ({ principles: [], recurringPrinciples: [], reelIdeas: [], spellings: [] }), (data, read, entries) => {
+  // Her own words are only known where the transcript says which lines are hers. Without it, whatever Claude gives as hers is not.
+  const hers = hasSpeakers(about);
+  const framework = (f, n) => (text(f.name) ? { n, name: text(f.name), category: text(f.category), description: text(f.description), steps: texts(f.steps), red_flags: texts(f.red_flags), green_flags: texts(f.green_flags), decision_criteria: texts(f.decision_criteria), example_application: text(f.example_application), verbatim_key_phrases: hers ? texts(f.verbatim_key_phrases) : [], source_context: text(f.source_context) } : null);
   // A Reel idea names the framework it shows by its place in the reply. Only a framework that was read is one it can show.
   const idea = (r, n) => {
     if (!text(r.idea) || !text(r.words) || typeof r.refilm !== "boolean" || (!r.refilm && !(text(r.from) && text(r.to)))) return null;
@@ -165,10 +185,10 @@ const readSession = (reply) => reading(reply, ["frameworks", "recurring_principl
 /** A raw video's reply is read by readNotes, which has the problems of everything it reads. Each clip it reads becomes a
     suggestion, with the point the reply gives for the clip at the same place in its list. The spellings are read from the
     object readNotes read. When readNotes could not read the reply at all, nothing more is said of it. There is no title: it is
-    not asked for. */
+    not asked for, so nothing is said of one that is not text. */
 function readRaw(reply) {
   const old = readNotes(reply);
-  const read = { decisions: old.decisions, notes: old.notes, graphics: old.graphics, suggestions: [], spellings: [], problems: old.problems };
+  const read = { decisions: old.decisions, notes: old.notes, graphics: old.graphics, suggestions: [], spellings: [], problems: old.problems.filter((problem) => problem !== TITLE_NOT_TEXT) };
   const data = typeof reply === "string" ? objectIn(reply).data : null;
   if (!asked(data)) return read;
   const clips = list(data.clips);
@@ -179,12 +199,15 @@ function readRaw(reply) {
 
 const READERS = { finished: readFinished, raw: readRaw, session: readSession, "short video": readShort };
 
-/** Claude's reply to the request for a video of this kind, read into what that kind asks for, with `problems` as well:
+/** Claude's reply to the request for a video of this kind, read into what that kind asks for, with `problems` as well. `about` is
+    what the request was given. Only a session looks at it: without the transcript of the meeting, `speakers`, no words are
+    hers, and the `verbatim_key_phrases` of every principle are empty, whatever the reply gives and with no problem said.
+    The things read are:
     - "finished": {suggestions, spellings}. A suggestion is {n, from, to, first, last, why, point}: the ids of its first phrase and
       its last, and the rest as texts, which may be empty. At most eight are read. A spelling is {heard, spelled, why}.
     - "raw": {decisions, notes, graphics, suggestions, spellings}. The first three are as readNotes reads them. A suggestion is a
       clip as readNotes reads it, {n, from, to, hook, why}, with its `point`. A reply's title is not read.
-    - "short video": {spellings, about}. `about` is one line on what the clip is.
+    - "short video": {spellings, about}: its `about` is one line on what the clip is.
     - "session": {principles, recurringPrinciples, reelIdeas, spellings}. A principle is {n, name, category, description, steps,
       red_flags, green_flags, decision_criteria, example_application, verbatim_key_phrases, source_context}. A recurring principle
       is {n, text}. A Reel idea is {n, from, to, idea, words, why, refilm, principle}: `principle` is the `n` of the principle it
@@ -194,7 +217,7 @@ const READERS = { finished: readFinished, raw: readRaw, session: readSession, "s
     part-way: what is whole is read. What was missing or in a form that could not be read is said in `problems`, in plain words,
     and left out. A reply that cannot be read at all gives empty lists and one problem. Nothing is thrown from here, whatever
     the reply is, but for a kind that is none of the four. */
-export function readReading(kind, reply) {
+export function readReading(kind, reply, about = {}) {
   known(kind);
-  return READERS[kind](reply);
+  return READERS[kind](reply, about);
 }
