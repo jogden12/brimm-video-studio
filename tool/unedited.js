@@ -1718,6 +1718,8 @@ export async function askAgain({ folder, record }, deps) {
 
 /** What --from-plan says when it is asked for a light episode, whose videos are made when it is read. */
 const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
+/** What --from-plan says when a newer brimm-video wrote the episode's record. */
+const NEWER_STOP = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
 
 /** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
     version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
@@ -1740,7 +1742,8 @@ const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made wh
     while another command is at work on the episode. The work holds the episode's lock, kept awake, and waits for the late
     check of what it put in before it ends.
     A light episode, one whose record is at layout 3, is never made again from its plan: it stops first of all, before anything
-    is read or made and with or without --out, saying it was imported lightly (LIGHT_REFUSAL). */
+    is read or made and with or without --out, saying it was imported lightly (LIGHT_REFUSAL). Before even that, an episode
+    whose record a newer brimm-video wrote stops in the same way, saying so (NEWER_STOP). */
 export async function videosFromPlan(file, deps) {
   const { log = () => {} } = deps;
   const name = basename(file);
@@ -1753,10 +1756,12 @@ export async function videosFromPlan(file, deps) {
   // whole-video rough cut and the upright version the light import leaves out, and its videos are made when it is read. It is
   // the record that says what an episode is: layout 3, which is a kind other than "episode" or "short video", an answer, and
   // the rest of the switch's fields. The refusal is the first thing, before the plan is read or anything is made, and it is
-  // the same with --out.
+  // the same with --out. A record a newer brimm-video wrote is refused first, in today's words: what it is cannot be read
+  // here, so it is never taken for a light episode, nor made from.
   const folder = dirname(file);
   if (existsSync(join(folder, RECORD_DIR))) {
-    const { record } = readEpisode(folder, { pastCopies: true });
+    const { record, newer } = readEpisode(folder, { pastCopies: true });
+    if (newer) return stop(NEWER_STOP);
     if (record && layoutOf(record) === 3) {
       log(`${name}: ${LIGHT_REFUSAL} Nothing was made.`);
       return { ok: false, name, made: [], stopped: true, message: LIGHT_REFUSAL };
@@ -1814,7 +1819,7 @@ export async function videosFromPlan(file, deps) {
   if (deps.outDir || !existsSync(join(folder, RECORD_DIR))) return remakeVideos(file, { out, plan, episode: false, stop }, deps);
   const read = readEpisode(folder);
   if (!read.record) return stop(`its episode's record cannot be read: ${read.why}`);
-  if (read.newer) return stop("its episode was written by a newer brimm-video. Ask Jason to update this Mac");
+  if (read.newer) return stop(NEWER_STOP);
   if (!deps.settings) return stop("this Mac has no settings for episodes, so nothing can be put into its episode");
   const home = deps.home || homedir();
   const held = undone(read.record, home) || heldText(read.record, deps.settings.machine) || importHolds({ root: deps.settings.root, home, machine: deps.settings.machine, record: read.record, now: deps.clock ? deps.clock() : Date.now() });

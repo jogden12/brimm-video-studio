@@ -4910,6 +4910,24 @@ describe("the light import", () => {
       t.done();
     }
   });
+  it("says a newer brimm-video wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
+    const NEWER = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    const folder = t.episodeFolder();
+    const video = join(folder, "Talk.mov");
+    // The newer record is of a light episode, as this code would see it: no kind and an answer, so at layout 3.
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...t.record(), version: RECORD_VERSION + 1, rev: 2 }, null, 2) + "\n");
+    const before = listAll(folder);
+    t.calls.length = 0;
+    t.logs.length = 0;
+    assert.deepEqual(await videosFromPlan(video, t.deps), { ok: false, name: "Talk.mov", made: [], stopped: true, message: NEWER });
+    const out = join(t.dir, "out");
+    assert.equal((await videosFromPlan(video, { ...t.deps, outDir: out })).message, NEWER);
+    assert.deepEqual(t.logs, Array(2).fill(`Talk.mov: ${NEWER}. Nothing was made.`));
+    assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
+    t.done();
+  });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });
     await uneditedFolder(t.drop, t.deps);
