@@ -1615,3 +1615,33 @@ describe("a hand-off of a video whose versions now lead to another id than the o
     t2.done();
   });
 });
+
+// The hand-offs read for a video's id are those of the folders of its versions, and of any folder whose record this Mac cannot
+// read yet (one Dropbox is still bringing over, which may be a version of it): not every folder in Episodes, whose finished
+// ones she may have made online-only, and which a read would bring back down.
+describe("the folders whose hand-offs are read for a video", () => {
+  it("are its versions' and those with no whole record, and no other video's", () => {
+    const t = setup();
+    const old = original(t);
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    const next = later(t, SECOND, ID);
+    lay(next.folder, "history/b.brimm-ops.json", handoffOf(2, ID, 4));
+    const v2 = { root: t.root, settings: { handoffVersion: 2 } };
+    assert.deepEqual([nextRevision(t.root, old), handoffTarget(v2, old).revision], [5, 5]);
+    // A folder with no record yet, and one whose record cannot be read, each holding a hand-off for the id: they still count.
+    const coming = join(t.root, "Episodes", "2026-10-21 Pricing talk, coming (Mac Studio)");
+    lay(coming, "final/c.brimm-ops.json", { ...handoffOf(2, ID, 6), suggestions: [{ ...V2.finished.suggestions[0], n: 8 }], reels: [] });
+    const broken = join(t.root, "Episodes", "2026-10-21 Pricing talk, broken (Mac Studio)");
+    mkdirSync(join(broken, "record"), { recursive: true });
+    writeFileSync(join(broken, "record", "1.json"), "{ not a record");
+    lay(broken, "history/d.brimm-ops.json", handoffOf(1, ID, 7));
+    assert.deepEqual([nextRevision(t.root, old), handoffTarget(v2, old).revision], [8, 8]);
+    assert.deepEqual(handoffTarget(v2, next).taken, [1, 2, 3, 8], "their numbers are taken too");
+    // Another video's folder holds a hand-off for the id (which only a link since moved could leave there): it is not read.
+    const other = episodeAs(t, { id: THIRD, name: "2026-10-22 Another talk (Mac Studio)", record: { kind: "finished" } });
+    lay(other.folder, "final/e.brimm-ops.json", { ...handoffOf(2, ID, 9), suggestions: [], reels: [{ ...V2.finished.reels[0], n: 9, fromSuggestion: null }] });
+    assert.deepEqual([nextRevision(t.root, old), handoffTarget(v2, old).revision, highestNumberOf(t.root, old.record)], [8, 8, 8]);
+    assert.deepEqual(handoffTarget(v2, next).taken, [1, 2, 3, 8]);
+    t.done();
+  });
+});

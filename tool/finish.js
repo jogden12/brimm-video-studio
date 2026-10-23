@@ -325,10 +325,10 @@ export function handoffIdOf(root, record) {
 /** The revision of the next hand-off of this video: one above the highest revision written for the hand-off's id (that of
     `handoffIdOf`) on this Mac, whichever version of the video wrote it. Revisions only rise: the page refuses a hand-off at or
     below what it holds, so an old version handed off again is above its new version's, and the other way round. That is, the
-    highest of every hand-off for the id in final/ and in history/ of every episode in Episodes, and of `finished.revision` in
-    the record, in every episode it is a version of and in every episode that is a version of it, directly or through others
-    (every one whose own chain ends at the id). The record's own folder is counted when `found.folder` is not given. `found` is
-    { folder, record }. This only reads. */
+    highest of `finished.revision` in the record, in every episode it is a version of and in every episode that is a version of
+    it, directly or through others (every one whose own chain ends at the id), and of every hand-off for the id in final/ and in
+    history/ of those episodes and of any episode whose record this Mac cannot read (setOf). The record's own folder is counted
+    when `found.folder` is not given. `found` is { folder, record }. This only reads. */
 export function nextRevision(root, found) {
   const view = viewOf(root);
   const walked = walk(view, found.record, found.folder);
@@ -338,13 +338,20 @@ export function nextRevision(root, found) {
 /** A video's versions on this Mac, for a chain already walked (`walked`, as walk gives it): `members`, every record whose own
     walk ends at the chain's first id, earlier versions and later ones alike, the chain's own records first, each as
     { folder, record } (a record may be there twice: once as the writer has it, once as its folder holds it); and `folders`, the
-    folders whose hand-offs are read for that id. */
+    folders whose hand-offs are read for that id: the members', and each folder in Episodes with no record this Mac can read
+    (one Dropbox is still bringing over may be a version of it). Every record is read, and no other folder's hand-offs: a hand-off
+    for the id lies only in a folder of the video's versions, since its id cannot move (handoffTarget), and the finished
+    folders of other videos, which she may have made online-only, are not brought back down by a finish or a spelling. */
 function setOf(view, { chain, first }) {
   const members = [...chain];
   const folders = new Set(chain.map((link) => link.folder).filter(Boolean));
   for (const one of view.all()) {
-    folders.add(one.folder);
-    if (one.record && walk(view, one.record, one.folder).first === first) members.push(one);
+    if (!one.record) {
+      folders.add(one.folder);
+    } else if (walk(view, one.record, one.folder).first === first) {
+      members.push(one);
+      folders.add(one.folder);
+    }
   }
   return { members, folders };
 }
