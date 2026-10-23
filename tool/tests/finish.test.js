@@ -1645,3 +1645,35 @@ describe("the folders whose hand-offs are read for a video", () => {
     t.done();
   });
 });
+
+// spell on a finished video spells its final transcripts and makes its hand-off again. A client or group session's, and a video
+// not yet answered, it refuses at once, as finish does (finish.js cannotFinish), before any file in final/ is named or read:
+// a second line behind the gate every command passes (Part F).
+describe("spell, for a finished video that is now a session or not answered", () => {
+  it("refuses it at once, by its label or else as 'This video', before any file in final/ is named or read, and writes nothing", async () => {
+    for (const version of [undefined, 1, 2]) {
+      for (const [what, kind, words] of NOT_YET) {
+        for (const [label, who] of [[LABEL, LABEL], [null, "This video"]]) {
+          const t = setup();
+          if (version) handoffVersion(t, version);
+          const found = await asked(t, { ...EDITED, ...(label ? { label } : {}) });
+          assert.equal((await finishNow(t.ctx, found)).ok, true);
+          // What the video is says so only now, as after her answer was given again, or the session was marked.
+          const now = reread(found);
+          writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, ...kind }));
+          // final/ goes, so that a spelling which looked in it would name what it did not find there.
+          rmSync(join(found.folder, "final"), { recursive: true });
+          const how = `${what}, setting ${version}, ${label ? "labelled" : "no label"}`;
+          const before = episodesTree(t);
+          const started = t.started.length;
+          const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+          assert.deepEqual([r.code, r.text], [1, words(who)], how);
+          assert.doesNotMatch(r.text, /final\/|Pricing|\.mp4|\.mov|\.srt/, `${how}: no file named`);
+          assert.deepEqual(episodesTree(t), before, `${how}: the record as it was, and no spelling kept`);
+          assert.deepEqual(t.started.slice(started), [], `${how}: nothing started, nothing brought over`);
+          t.done();
+        }
+      }
+    }
+  });
+});

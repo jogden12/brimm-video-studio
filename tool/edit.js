@@ -2247,6 +2247,11 @@ async function saveSpellings(ctx, found, spellings, done) {
   const record = { ...found.record, spellings };
   const finished = record.finished;
   if (!finished) return save(ctx, found, record, done);
+  // A client or group session, and a video not yet answered, are refused at once, as finish refuses them (finish.js
+  // cannotFinish), before any file in final/ is named or read, and nothing is written, the spelling included: none of a
+  // session's transcripts may be in the shared folder, and an unanswered video has no kind to hand off as.
+  const notYet = cannotFinish(record);
+  if (notYet) return refuse(ctx, notYet);
   const meantOf = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
   const parts = Object.entries(finished.parts || {}).map(([key, part]) => {
     const held = part.spellings || found.record.spellings || [];
