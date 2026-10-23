@@ -81,10 +81,12 @@ function today(setting) {
     commands that name a video or more than one episode, by those. Every command is here, so that one added later is pinned. */
 const TODAY_ASKED = {
   episodes: [[]],
-  // Commands of the switch, new with it: there is no output of today's to pin, and tests/edit-kind.test.js pins their words.
+  // Commands of the switch, new with it: there is no output of today's to pin, and tests/edit-kind.test.js pins their words. `read`
+  // is a detached run's alone, which `kind` starts: tests/reading.test.js pins it, and that without --now it is an unknown use.
   kind: [],
   leave: [],
   which: [],
+  read: [],
   open: [[FOLDER], [NAME], [], ["Pricing"], ["nothing fits this"]],
   push: [[FOLDER], [], [FOLDER, "reel", "2"]],
   bring: [["--now", FOLDER], []],
@@ -773,6 +775,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     kind: [[label, "finished", "--private", "no"], [label, "session", "--private", "yes"], [label, "raw", "--private", "no", "--again"], []],
     leave: [[label], []],
     which: [[label], []],
+    read: [["--now", LIGHT_FOLDER, "--kind", "finished", "--rev", "1"], ["--now", label, "--kind", "session", "--rev", "1"], [label], []],
     open: [[label], [], ["2026"], ["nothing fits this"]],
     push: [[label], [label, "reel", "1"], []],
     bring: [["--now", LIGHT_FOLDER], ["--now", label], []],

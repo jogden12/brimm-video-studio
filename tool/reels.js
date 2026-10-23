@@ -120,8 +120,10 @@ const listed = (path) => `file '${String(path).replace(/'/g, "'\\''")}'`;
       and given its own when it is whole.
     `video` is the raw video, `ranges` the candidate's stretches, `fps` and `duration` as previewStretches takes them, and
     `size` the picture's {width, height} as it is shown. Anything previewStretches refuses is refused, and so is a size that
-    cannot be read. */
-export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null }) {
+    cannot be read. `n` is the candidate's number: a candidate with no crops yet, which a reading suggested (reels.json
+    version 2), is refused first, in the words of every reader that needs crops (notMadeWords). */
+export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null, n }) {
+  if (n !== undefined && uncropped({ ranges })) throw new Error(notMadeWords(n));
   if (!(size && Number.isInteger(size.width) && size.width > 0 && Number.isInteger(size.height) && size.height > 0)) throw new Error(`A preview needs the size of the video's picture, and this one cannot be read: ${size && size.width} by ${size && size.height}`);
   const stretches = previewStretches({ ranges, fps, duration });
   const most = perPart(size);
@@ -183,10 +185,22 @@ export function reelCandidates({ clips, plan, facts, stills }) {
 export const REELS_FILE = "reels.json";
 export const previewPath = (n) => `previews/reel-${n}.mp4`;
 
-/** The layout of reels.json. It is raised only when its shape changes, and a reader refuses a higher one. */
-const REELS_VERSION = 1;
+/** The layout of reels.json. It is raised only when its shape changes, and a reader refuses a higher one. Version 2 (spec
+    2026-10-22, section 3, "reels.json version 2") adds the candidate a reading suggests: its stretches have no crops yet,
+    since no face is looked for until she asks to make it, it has no preview, and its `title` is "". A list that holds such a
+    candidate is written at version 2, so that a Mac that knows version 1 alone says a newer brimm-video wrote it, rather than
+    that a candidate cannot be read; any other list is written at version 1, as it always was. */
+export const REELS_VERSION = 2;
 
-/** reels.json, as it is written: the candidates of `video`, made by the import or by `ask` (`by`) at the moment `made`.
+/** Whether a candidate is one a reading suggested and nobody has made yet: a stretch of it has no crop. A candidate with no
+    stretch at all is not one: it has nothing to show, and says so in its own words. */
+export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candidate.ranges.some((range) => !(range && range.crop));
+
+/** What a command that needs a Reel's crops says of a candidate that is not made yet. */
+export const notMadeWords = (n) => `Reel ${n} is not made yet: say "make Reel ${n}" first.`;
+
+/** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment
+    `made`, at version 2 when a candidate has no crops (uncropped), and at version 1 otherwise.
     `none` says why there are no candidates, and is left out when there are some. `highest` is the highest number ever given
     to a Reel of this episode, kept so that asking Claude again never gives a number twice: a candidate that is let go takes
     its number out of every list. It is at least the highest number among the candidates. `cannotAsk` says why asking Claude
@@ -194,15 +208,17 @@ const REELS_VERSION = 1;
     left out when there are candidates. Whether Claude can be asked again otherwise is for the Mac that shows the list to
     say (edit.js reels). */
 export const reelsFile = ({ video, by, made, candidates, none = "", cannotAsk = "", rulesOnly = false, highest = 0 }) => ({
-  format: "brimm-video reels", version: REELS_VERSION, video, by, made,
+  format: "brimm-video reels", version: candidates.some(uncropped) ? REELS_VERSION : 1, video, by, made,
   highest: Math.max(highest, 0, ...candidates.map((c) => c.n)),
   ...(none && !candidates.length ? { none } : {}), ...(cannotAsk && !candidates.length ? { cannotAsk } : {}),
   ...(rulesOnly && !candidates.length ? { rulesOnly: true } : {}), candidates
 });
 
 /** reels.json as it was read: {reels}, or {why} it cannot be used. Only what the previews, the listing and a Reel's project
-    are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. */
-export function readReels(text) {
+    are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. A stretch at
+    version 2 may have no crop (a candidate a reading suggested, not made yet); at version 1 each has its own. `known` is the
+    newest version this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. */
+export function readReels(text, { known = REELS_VERSION } = {}) {
   let reels;
   try {
     reels = JSON.parse(text);
@@ -211,11 +227,11 @@ export function readReels(text) {
   }
   const not = { why: "it is not a list of Reel candidates this tool wrote" };
   if (!reels || reels.format !== "brimm-video reels" || !Number.isInteger(reels.version)) return not;
-  if (reels.version > REELS_VERSION) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
+  if (reels.version > known) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
   if (typeof reels.video !== "string" || !Array.isArray(reels.candidates)) return not;
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);
-  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start && isCrop(r.crop);
+  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start && (isCrop(r.crop) || (reels.version >= 2 && r.crop === undefined));
   // A preview is opened in QuickTime Player and brought over by Dropbox, so it may be in one place only: its own in previews/.
   const isPreview = (c) => c.preview === undefined || c.preview === null || c.preview === previewPath(c.n);
   const bad = reels.candidates.findIndex((c) => !c || !Number.isInteger(c.n) || c.n < 1 || !Array.isArray(c.ranges) || !c.ranges.every(isRange) || !isPreview(c));

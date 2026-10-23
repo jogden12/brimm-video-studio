@@ -43,7 +43,7 @@ import { startDetached, runDetached, runningCommand, readResult, takeEpisodeLock
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
-import { REELS_FILE, readReels, reelsText } from "./reels.js";
+import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
@@ -59,7 +59,8 @@ import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
-import { findPrograms, askAgain, askBlocked, clockAt, keptList } from "./unedited.js";
+import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
+import { readEpisodeNow, READ_KINDS } from "./reading.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -1459,6 +1460,8 @@ async function markReels(ctx, found, ns, status) {
     for (const n of ns) {
       const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
       if (candidate && !candidate.ranges.length) return refuse(ctx, `Reel ${n} has nothing to show: ${String(candidate.failed || "it has no stretch").replace(/\.$/, "")}.`);
+      // A candidate a reading suggested has no crops until it is made (reels.json version 2): its project cannot be written yet.
+      if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
     }
     // A change Dropbox took away is said before anything is written, as save says it.
     const gone = undone(found.record, ctx.home);
@@ -1500,12 +1503,20 @@ export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked")
 export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
 
 /** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
-    episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. */
+    episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. A Reel a
+    reading suggested and nobody has made yet (its candidate has no crops) is refused first: "make" it first. */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  // A Reel whose candidate has no crops yet, as a reading suggests it (reels.json version 2), is not made: there is nothing
+  // upright to show, whatever the record says of it.
+  if (!(record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) && existsSync(join(found.folder, REELS_FILE))) {
+    const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
+    const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
+    if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
+  }
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
   const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
@@ -2400,6 +2411,45 @@ async function ask(ctx, rest) {
   startDetached(ctx, { command: "ask", folder: found.name });
   ctx.say(`Started: Claude is asked for Reel candidates again. Say "how far is it?" to see how far it has got.`);
   return 0;
+}
+
+/** `read --now "<episode folder>" --kind <kind> --rev <rev>`: Claude's reading of the episode, the detached run `kind` starts once
+    she has said what it is (spec 2026-10-22, section 2), with the kind the answer stored ("short video" is one word here, with
+    its space) and the rev of the record that holds the answer. It is detached alone: it is in no help, and without --now, or
+    without a kind it reads or a rev, it prints the help and ends 2, as a command it does not know. The episode is found and
+    gated as every command's is (`read` runs for a session only once the training gate is on, and its run refuses it there);
+    one a newer brimm-video wrote is named by its short id, and nothing is asked or written. The work is reading.js
+    readEpisodeNow's, held under the episode's lock (runDetached), whose result names a gated video by its label alone. */
+async function read(ctx, rest) {
+  const { flags } = flagsOf(rest.slice(2), ["kind", "rev"]);
+  const kind = Array.isArray(flags.kind) && flags.kind.length === 1 ? flags.kind[0] : "";
+  const rev = Array.isArray(flags.rev) && flags.rev.length === 1 && /^\d+$/.test(flags.rev[0]) ? Number(flags.rev[0]) : NaN;
+  if (rest[0] !== "--now" || !rest[1] || !READ_KINDS.includes(kind) || !Number.isInteger(rev)) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const found = findEpisode(ctx, rest[1]);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || notRead(ctx, found, rest[1]));
+    if (found.gate) await leaveGateResult(ctx, found, "read");
+    return 1;
+  }
+  if (found.read.newer) {
+    ctx.say(newerWhy(found.read.record));
+    return 1;
+  }
+  const deps = {
+    run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, now: ctx.now,
+    log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
+    notify: ctx.deps.notify || banner, ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.progress ? { progress: ctx.deps.progress } : {}),
+    ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), kind, rev
+  };
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "read", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => readEpisodeNow(ctx, { name: found.name, folder: found.folder, record: found.read.record }, deps));
+  if (result.taking || result.running) {
+    ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
+    return 1;
+  }
+  return result.ok ? 0 : 1;
 }
 
 /** The timeline a command names after the episode: "main", the default, or "reel <n>", in any case; and the words left. */
@@ -3302,8 +3352,9 @@ export async function whichCommand(ctx, rest) {
   return 0;
 }
 
-/** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut };
+/** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` starts it), and is in no
+    help. */
+const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

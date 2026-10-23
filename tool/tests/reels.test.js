@@ -241,7 +241,8 @@ describe("reels.json", () => {
   it("is refused, with the reason, when it is not one this tool wrote or a candidate in it cannot be read", () => {
     assert.deepEqual(readReels("not json"), { why: "it is not JSON" });
     assert.deepEqual(readReels(JSON.stringify({ format: "something else", version: 1 })), { why: "it is not a list of Reel candidates this tool wrote" });
-    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 2, video: "a.mov", candidates: [] })), { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." });
+    // Version 2 is the reading's (a candidate with no crops yet): the next one up is a newer brimm-video's.
+    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] })), { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1 }] }] })), { why: "candidate 1 in it cannot be read" });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", highest: "three", candidates: [] })), { why: "it is not a list of Reel candidates this tool wrote" });
   });

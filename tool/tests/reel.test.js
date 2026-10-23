@@ -289,7 +289,7 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
   });
   it("says why, in one sentence, when the list cannot be read, as one a newer brimm-video wrote", async () => {
     const { t, found } = phase3();
-    writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 2 }));
+    writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
     assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
     assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.");
     assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac." });
@@ -476,7 +476,7 @@ describe("a Reel's timeline, decided for each Reel (from the review)", () => {
     await pickReels(t.ctx, found, [1]);
     const v0 = readFileSync(join(found.folder, "edit", "reel-1.v0.fcpxml"), "utf8");
     // The other Mac's newer brimm-video writes a reels.json this one cannot read, and the record with its size.
-    const unreadable = JSON.stringify({ format: "brimm-video reels", version: 2, video: "Pricing talk.mp4", candidates: [] });
+    const unreadable = JSON.stringify({ format: "brimm-video reels", version: 3, video: "Pricing talk.mp4", candidates: [] });
     writeFile(join(found.folder, "reels.json"), unreadable);
     const now = reread(found);
     writeFile(join(found.folder, "record", "0003.json"), JSON.stringify({ ...now, rev: 3, files: { ...now.files, "reels.json": unreadable.length } }, null, 2) + "\n");
@@ -624,7 +624,7 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
   it("writes nothing over a list that a newer brimm-video wrote while Claude was asked, and says why", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
-    const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 2 });
+    const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 3 });
     const asked = claudeSays([{ from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]);
     p.t.ctx.deps.run = ((run) => async (cmd, args, more) => {
       if (cmd === "CLAUDE") {
@@ -1810,7 +1810,7 @@ describe("ask, what it refuses (from the review)", () => {
     const p = askable();
     const reels = JSON.parse(readFileSync(join(p.found.folder, "reels.json"), "utf8"));
     rmSync(join(p.found.folder, "reels.json"));
-    writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 2 }));
+    writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 3 }));
     const r = await askedBoth(p);
     const why = "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);

@@ -49,7 +49,7 @@ const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTe
 
 /** What each command is given to name the made-up episode, as Claude runs it. `free` names none: it says it is held back. */
 const ASKED = {
-  kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER],
+  kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER], read: ["--now", FOLDER, "--kind", "finished", "--rev", "1"],
   open: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["pick", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"]
@@ -114,7 +114,7 @@ describe("the gate walks every command that names an episode", () => {
       const r = await on(t.ctx.deps, name, ...ASKED[name]);
       if (["kind", "leave", "which", "show", "release", "resolve", "name"].includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
       else {
-        const why = ["finish", "reel"].includes(name) ? TEACHINGS_OFF : NOT_FOR_SESSION;
+        const why = ["finish", "reel", "read"].includes(name) ? TEACHINGS_OFF : NOT_FOR_SESSION;
         assert.deepEqual([r.code, r.said], [1, [why]], name);
         assert.deepEqual([t.started, t.calls, reread(found).rev, filesIn(found)], [[], [], 1, before], name);
       }

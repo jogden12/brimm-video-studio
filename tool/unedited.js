@@ -103,8 +103,8 @@ const CLAUDE_ARGS = ["-p", "--model", CLAUDE_MODEL, "--tools", "", "--strict-mcp
 const CLAUDE_MS = 10 * 60 * 1000;
 /** How many times Claude is asked before the plan is left as the rules made it, and how long is waited between two tries. On
     2026-10-13 one call failed because the sign-in had run out and could not be refreshed, and the next one worked. */
-const CLAUDE_TRIES = 2;
-const AGAIN_MS = 3000;
+export const CLAUDE_TRIES = 2;
+export const AGAIN_MS = 3000;
 /** How much of what Claude Code prints is read. It prints its answer and nothing else, and a reply is a few thousand
     characters, so this is all of it. */
 const CLAUDE_PRINTED = 2000000;
@@ -181,7 +181,7 @@ function put(from, to, { say, move = renameSync, copy = copyFileSync }) {
     written. `done` is said of it when it is whole: it is put in place then, or, with `hold`, it is held in the run's folder,
     for the run to file it away with the video (see fileAway). `text` writes a text file whole there, and has it done. `put`
     puts a file in place now: where it belongs, or at `where`. `has` says whether a file was made, where it belongs or held. */
-function filesOf(work, { name, hold = false, log = () => {}, move, copy }) {
+export function filesOf(work, { name, hold = false, log = () => {}, move, copy }) {
   const folder = join(work, "made");
   mkdirSync(folder, { recursive: true });
   const at = (to) => join(folder, basename(to));
@@ -318,10 +318,15 @@ async function planFor({ facts, probe, told, untimed, silent, wav }, { run, tool
     wrong with it? A reply that finds the rules right and has nothing to add is whole, and is not one of these. */
 const nothingIn = (read) => !read.decisions.length && !read.notes && !read.graphics.length && !read.clips.length && read.problems.length > 0;
 
-/** Ask Claude once, through Claude Code, run in `folder`: {read}, its reply as readNotes read it, or {why} there is none. It
-    counts as no reply when Claude Code ran out of time, said it could not get an answer, ended badly, or printed something
-    that is not its answer, and when nothing could be read from what Claude wrote. */
-async function askOnce(request, folder, { run, tools }) {
+/** Ask Claude once, through Claude Code, run in `folder`, with the text `request` (the one Claude call: CLAUDE_ARGS, the
+    request on standard input, the reply read as data): {read}, its reply as `read` read it, or {why} there is none. It counts
+    as no reply when Claude Code ran out of time, said it could not get an answer, ended badly, or printed something that is not
+    its answer, and when nothing could be read from what Claude wrote (`nothing`, of what `read` gave). `read` is readNotes, and
+    `nothing` nothingIn, unless the caller gives others, as a reading does for its kind (reading.js).
+    With `quote` (as the import has it), why says what Claude Code last printed, and what could not be read of the reply.
+    Without it, why is in fixed words only, and holds nothing Claude Code or Claude wrote: a reading's log and result never
+    quote a reply (spec 2026-10-22, section 2). */
+export async function askOnce(request, folder, { run, tools }, { read: readAs = readNotes, nothing = nothingIn, quote = true } = {}) {
   mkdirSync(folder, { recursive: true });
   const ended = await run(tools.claude, CLAUDE_ARGS, { input: request, cwd: folder, limit: CLAUDE_MS, out: CLAUDE_PRINTED });
   if (ended.outOfTime) return { why: `it gave no answer in ${CLAUDE_MS / 60000} minutes` };
@@ -332,11 +337,12 @@ async function askOnce(request, folder, { run, tools }) {
     // It is not JSON, and the lines below say so.
   }
   // When Claude Code could not get an answer it says so in what it prints, and says why there, whatever it ends with.
-  if (told && told.is_error === true) return { why: `Claude Code gave an error (${lastLine(typeof told.result === "string" ? told.result : "")})` };
-  if (ended.code !== 0) return { why: `Claude Code stopped (${reasonOf(ended)})` };
+  if (told && told.is_error === true) return { why: quote ? `Claude Code gave an error (${lastLine(typeof told.result === "string" ? told.result : "")})` : "Claude Code gave an error" };
+  if (ended.code !== 0) return { why: `Claude Code stopped (${quote ? reasonOf(ended) : ended.signal ? `it was killed by ${ended.signal}` : `it ended with ${ended.code}`})` };
   if (!told || told.is_error !== false || typeof told.result !== "string") return { why: "what Claude Code printed could not be read" };
-  const read = readNotes(told.result);
-  return nothingIn(read) ? { why: read.problems.map(clause).join("; ") } : { read };
+  const got = readAs(told.result);
+  if (!nothing(got)) return { read: got };
+  return { why: quote ? got.problems.map(clause).join("; ") : "nothing in its reply could be read" };
 }
 
 /** Have Claude read the rules' plan of a video: {read}, its reply as readNotes read it, or {why} it could not be asked. Claude
@@ -365,7 +371,7 @@ async function askClaude(name, plan, facts, work, deps) {
 
 /** Make the rough cut of a video from the kept ranges of its plan. Resolves "" when it is made, or why it is not. It is
     written whole in the run's own folder and then put where it belongs, as every other file is. */
-async function roughCut(file, to, { plan, facts, spans, streams = null }, { run, tools, files, log = () => {}, progress = noProgress }) {
+export async function roughCut(file, to, { plan, facts, spans, streams = null }, { run, tools, files, log = () => {}, progress = noProgress }) {
   if (!facts.height) return "there is no picture in the file";
   if (!spans.length) return "the plan keeps nothing";
   log(`${basename(file)}: making the rough cut.`);
@@ -561,7 +567,7 @@ async function makePreviews(file, given, { facts, streams = null }, deps) {
     let steps = null;
     let why = "";
     try {
-      steps = previewSteps({ video: file, ranges: candidate.ranges, out: writing, fps: roughRate(facts), duration: facts.duration, work: dirname(writing), size: { width: facts.width, height: facts.height }, streams });
+      steps = previewSteps({ video: file, ranges: candidate.ranges, out: writing, fps: roughRate(facts), duration: facts.duration, work: dirname(writing), size: { width: facts.width, height: facts.height }, streams, n: candidate.n });
       for (const step of [...steps.parts, null, steps.join]) {
         // The list of the parts is written just before the join.
         if (!step) {
@@ -1237,7 +1243,8 @@ function sameBytes(a, b) {
     again and copies in again one that is not as it put it, but never one someone else changed since (ownLateCheck). Resolves {put,
     problems, notes}: `put` says the files and the record went in, `problems` what could not be done, each in plain words:
     none when all was, and `notes` each file someone else changed since, which was left as it is. `change` makes any other change to the
-    record, and `expectRev`, when given, is the rev the work was worked out from.
+    record, and `expectRev`, when given, is the rev the work was worked out from. `onPut`, when given, is called once the files and
+    the record are in, before the wait for the late check: a reading posts its notice then (reading.js).
     Nothing is put in when the episode cannot be gone on with as it is now: its record cannot be read, a newer brimm-video
     wrote it, Dropbox undid this Mac's last change to it (episode.js undone), or its rev is not `expectRev`. A change of this
     Mac's that Dropbox took away is so never written over in silence.
@@ -1245,7 +1252,7 @@ function sameBytes(a, b) {
     or the record cannot be written, every file put in so far is put back as it was (one that was not there is taken away
     again), and no record is written. What was put back has its late check too, after the same wait. One that cannot be put
     back is kept in BRIMM Video Work, in the episode's folder there, under "put back", and the problem says where. */
-async function intoEpisode(file, madeAt, work, deps, { change = (record) => record, expectRev } = {}) {
+export async function intoEpisode(file, madeAt, work, deps, { change = (record) => record, expectRev, onPut } = {}) {
   const { files, log = () => {} } = deps;
   const home = deps.home || homedir();
   const folder = dirname(file);
@@ -1574,6 +1581,7 @@ async function intoEpisode(file, madeAt, work, deps, { change = (record) => reco
     return { put: false, problems, notes, kept: keptNow };
   }
   log(`${basename(file)}: put into its episode. Its late check is in ${LATE_CHECK_MS / 60000} minutes.`);
+  if (onPut) await onPut();
   if (deps.progress) deps.progress.step("Waiting for the late check");
   await wait(LATE_CHECK_MS);
   problems.push(...ownLateCheck(entries).problems);
@@ -1597,25 +1605,35 @@ async function intoEpisode(file, madeAt, work, deps, { change = (record) => reco
     at once when told to "try it again" (edit.js retry). "" when none holds it. Nothing that puts files into the episode goes
     on meanwhile: the import's late check would meet files it did not put there, and put its own back over them. */
 export function importHolds({ root, home, machine, record, now = Date.now() }) {
+  return importHold({ root, home, machine, record, now }).why;
+}
+
+/** importHolds, with whether the hold clears by itself: { why, waits }. It `waits` while an import of the video is at work on
+    either Mac (its late check comes within that run), and while this Mac's own late check of it is still to come, at its time,
+    with no problem found yet. A hold that needs a person (an import that failed or stopped, a late check that found a problem,
+    or one this Mac owes past its time with no import at work to make it) does not. A raw reading waits only while it waits
+    (reading.js). { why: "" } when none holds it. */
+export function importHold({ root, home, machine, record, now = Date.now() }) {
   const video = record.video.file;
   const said = (text) => String(text).replace(/\.$/, "");
   const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
   const statuses = readStatuses(root, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
   const state = (want) => statuses.find((s) => importState(s, now) === want);
+  const held = (why, waits = false) => ({ why, waits });
   const running = state("running");
-  if (running) return `The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`;
+  if (running) return held(`The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`, true);
   const failed = state("failed");
-  if (failed) return `The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`;
+  if (failed) return held(`The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`);
   const problem = state("problem");
-  if (problem) return `The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`;
+  if (problem) return held(`The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`);
   const owed = readPendings(home).find((p) => p.id === record.id && (!machine || p.machine === machine) && resolve(String(p.root)) === resolve(root));
-  if (owed && owed.problem) return `The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`;
+  if (owed && owed.problem) return held(`The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`);
   // No import of the video is at work here (a running status would have said so), so none makes the check unless told to.
-  if (owed && dueAt(owed) > now) return `This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`;
-  if (owed) return `This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`;
+  if (owed && dueAt(owed) > now) return held(`This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`, true);
+  if (owed) return held(`This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`);
   const stopped = state("stopped");
-  if (stopped) return `The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`;
-  return "";
+  if (stopped) return held(`The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`);
+  return held("");
 }
 
 /** A moment, `ms`, as this Mac's clock shows it: "14:05". */
@@ -2149,8 +2167,9 @@ While it works, a small window in the top right corner of the screen shows how f
 and how long is left. Closing it changes nothing about the work.
 `;
 
-/** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. */
-const banner = (text) => {
+/** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. The import posts its notices
+    through it, and so does a reading (reading.js). */
+export const banner = (text) => {
   const child = spawn("/usr/bin/osascript", ["-e", `display notification ${JSON.stringify(text)} with title "BRIMM unedited video"`], { stdio: "ignore" });
   child.on("error", () => {});
 };

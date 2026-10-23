@@ -73,8 +73,9 @@ function sizeOf(path) {
     missing or cannot be read, or { old: true } for a Reel the import cut as a clip, before Reels had projects of their own,
     which is shown as it was, with nothing over it. A Reel is built on the project written when it was picked, so it shows
     the stretches it was picked with whatever reels.json says after (phase 3); a Reel picked before that is built on its
-    candidate. `extra` are more files it needs, its pictures. */
-export function piecesOf(found, part, ctx, extra = []) {
+    candidate. `extra` are more files it needs, its pictures. `given` is a cut plan to build it from in place of the one in the
+    episode's folder, as a reading has it before it puts it there (reading.js); its file is still one it needs. */
+export function piecesOf(found, part, ctx, extra = [], given = null) {
   const { record } = found;
   const target = targetOf(record, part);
   const name = record.video.file;
@@ -102,7 +103,7 @@ export function piecesOf(found, part, ctx, extra = []) {
   let plan;
   let words = [];
   try {
-    plan = JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
+    plan = given || JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
     // Each word from when it is said: after a pause, not in it (clock.js heardWords).
     if (hasWords) words = heardWords(JSON.parse(readFileSync(join(found.folder, wordsFile), "utf8")).words, plan.phrases);
   } catch (e) {
@@ -123,19 +124,21 @@ export function piecesOf(found, part, ctx, extra = []) {
 
 /** The stored timeline of a part, as text that names its media from the episode's edit/ folder and no library: { xml, told },
     where `told` is what the person is told of how it was built; { coming, bring }, the file Dropbox has not brought over yet
-    and the files to bring; or { why } there is none. `part` is "main" or { reel: n }. */
-export async function timelineFor(found, part, ctx) {
+    and the files to bring; or { why } there is none. `part` is "main" or { reel: n }. With `build`, it is built from the record
+    and the plan whatever is asked for on it, and never read from a stored timeline: a raw video's reading builds the main
+    video's version 0 so, from `plan`, the plan it read, before that plan is in the episode's folder (reading.js). */
+export async function timelineFor(found, part, ctx, { build = false, plan: given = null } = {}) {
   const { record } = found;
   const target = targetOf(record, part);
   if (!target) return { why: `There is no Reel ${part.reel}.` };
-  if (!layered(record, part)) {
+  if (!build && !layered(record, part)) {
     if (part !== "main") return { told: [], ...(await reelTimeline(found, target, ctx)) };
     const v0 = timelineFile({ part: "main", v: 0 });
     if (!ctx.isWhole(join(found.folder, v0))) return { coming: v0, bring: [v0] };
     return { xml: readFileSync(join(found.folder, v0), "utf8"), told: [] };
   }
   const pictures = [...new Set([...(target.graphics || []).map((g) => g.picture), ...(target.logo && record.brand && record.brand.logo ? [record.brand.logo] : [])])];
-  const read = piecesOf(found, part, ctx, pictures);
+  const read = piecesOf(found, part, ctx, pictures, given);
   if (read.old) {
     const asked = (record.spellings || []).length > 0 || ["texts", "graphics", "cuts"].some((k) => (target[k] || []).length) || Boolean(target.preset) || target.captions === false;
     return { told: asked ? [`Reel ${part.reel} was cut as a clip before Reels had projects of their own, so what was asked for on it is not shown. Change it by hand in Final Cut.`] : [], ...(await reelTimeline(found, target, ctx)) };
