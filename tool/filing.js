@@ -86,14 +86,14 @@ export function commitOf(checkout) {
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others.
     The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
-    `answer` (her answer, waiting, with the guess), `label`, `fingerprint` and `versionOf` (the id of the episode it is a new
-    version of, or null), which go into the record as they are (newEpisode).
+    `answer` (her answer, waiting, with the guess and the episode whose words it matched, or null), `label` and
+    `fingerprint`, which go into the record as they are (newEpisode). An import never sets `versionOf`: her answer does.
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
     file is cloned in from the run's folder; and the first record is written last, by the rule, its work copy kept. Gives
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
     uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", versionOf = null }, deps) {
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "" }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -135,8 +135,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
     reels,
     answer,
     label,
-    fingerprint,
-    versionOf
+    fingerprint
   });
   const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
   log(`${video}: filed into Episodes as "${found.name}"${found.reused ? ", in the folder an import that stopped had made" : ""}.`);

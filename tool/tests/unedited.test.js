@@ -4677,11 +4677,11 @@ describe("the light import", () => {
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     const r = t.record();
-    assert.deepEqual([r.version, r.kind, r.answer, r.label], [3, null, { state: "needs your answer", guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera" }, LABEL]);
+    assert.deepEqual([r.version, r.kind, r.answer, r.label], [3, null, { state: "needs your answer", guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera", match: null }, LABEL]);
     const { words } = JSON.parse(readFileSync(join(t.episodeFolder(), "Talk.words.json"), "utf8"));
     assert.ok(r.fingerprint.length > 0);
     assert.equal(r.fingerprint, fingerprintOf(words));
-    assert.equal(r.versionOf ?? null, null);
+    assert.equal("versionOf" in r, false);
     assert.deepEqual([r.title, r.reels, r.video.file], [null, [], "Talk.mov"]);
     assert.deepEqual(r.files, Object.fromEntries(LIGHT.filter((n) => !n.startsWith("record/")).map((n) => [n, statSync(join(t.episodeFolder(), n)).size])));
     t.done();
@@ -4721,17 +4721,18 @@ describe("the light import", () => {
     assert.equal(readFileSync(join(t.episodeFolder(), "Talk.rough-cut.transcript.txt"), "utf8"), stampedText(captions));
     t.done();
   });
-  it("files a new drop of an answered video's words as a new version of it, and one of a video not yet answered as a video of its own", async () => {
+  it("files a new drop of an answered video's words with that episode as its match, and one of a video not yet answered with none", async () => {
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     t.put("Talk again.mov");
     await uneditedFolder(t.drop, t.deps);
-    assert.equal(t.record("Talk again.mov").versionOf ?? null, null);
+    assert.equal(t.record("Talk again.mov").answer.match, null);
     answered(t, "Talk.mov");
     t.put("Talk v2.mov");
     await uneditedFolder(t.drop, t.deps);
     const r = t.record("Talk v2.mov");
-    assert.deepEqual([r.versionOf, r.kind, r.answer.state], [t.record().id, null, "needs your answer"]);
+    // The match is only what her card offers first: the record is a version of the other only once she says so.
+    assert.deepEqual([r.answer.match, r.kind, r.answer.state, "versionOf" in r], [t.record().id, null, "needs your answer", false]);
     // Nothing is written into the old episode's folder.
     assert.equal(t.record().rev, 2);
     t.done();
@@ -4746,7 +4747,7 @@ describe("the light import", () => {
       else writeFileSync(words, "{");
       t.put("Talk v2.mov");
       await uneditedFolder(t.drop, t.deps);
-      assert.equal(t.record("Talk v2.mov").versionOf ?? null, null, how);
+      assert.equal(t.record("Talk v2.mov").answer.match, null, how);
       const said = how === "not whole" ? `${LABEL}: its words are not on this Mac, so it was not compared.` : `${LABEL}: its words could not be read, so it was not compared.`;
       assert.ok(t.logs.includes(said), t.logs.join("\n"));
       t.done();
@@ -4758,7 +4759,7 @@ describe("the light import", () => {
     const r = t.record();
     assert.deepEqual([r.kind, r.answer.state, r.label, r.fingerprint], [null, "needs your answer", LABEL, undefined]);
     // The rules made no plan, so they counted no retakes: there is no guess, and the line of what was seen says no count.
-    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera" });
+    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "wide, 2:00", came: "camera", match: null });
     assert.deepEqual(listAll(t.episodeFolder()), ["Talk.cut-plan.txt", "Talk.mov", "Talk.srt", "Talk.transcript.txt", "record/0001.json"]);
     assert.deepEqual(t.notes, [READY]);
     t.done();
@@ -4767,7 +4768,7 @@ describe("the light import", () => {
     const t = episodeImport({ probe: "fail" });
     await uneditedFolder(t.drop, t.deps);
     const r = t.record();
-    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null }, LABEL]);
+    assert.deepEqual([r.kind, r.answer, r.label], [null, { state: "needs your answer", guess: null, seen: "", came: null, match: null }, LABEL]);
     assert.deepEqual(t.notes, [READY]);
     t.done();
   });
