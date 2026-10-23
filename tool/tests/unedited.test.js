@@ -18,9 +18,9 @@ import { fcpxml, checkFcpxml } from "../fcpxml.js";
 import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
-import { writeSettings } from "../settings.js";
+import { seenFile, writeSettings } from "../settings.js";
 import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
-import { writePending } from "../filing.js";
+import { noteSeen, writePending } from "../filing.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
@@ -2845,8 +2845,8 @@ describe("what the tool says of itself", () => {
 /** A test of the episode import: setup's folder and stand-ins, with this Mac's settings, BRIMM Video in the test's folder and
     this Mac's drop folder in it, a recording of two minutes, so that it makes an episode and not a short video, and a clone
     that copies and is listed in `clones`. `drop(name)` puts a video in the drop folder. Nothing is moved in an episode's
-    import, so the stand-in for a move fails the test. */
-function episodic(script = {}) {
+    import, so the stand-in for a move fails the test. The time is `start`, 10:00 on 13 Oct unless a test gives another. */
+function episodic({ start = "2026-10-13T10:00:00", ...script } = {}) {
   const t = setup({ probed: probed({ duration: "120.000000" }), ...script });
   const root = join(t.dir, "BRIMM Video");
   const drop = join(root, "Unedited Video", "Mac Studio");
@@ -2859,10 +2859,10 @@ function episodic(script = {}) {
     copyFileSync(from, to);
   };
   t.deps.commit = "abc1234";
-  t.deps.now = () => new Date("2026-10-13T10:00:00");
+  t.deps.now = () => new Date(start);
   // A clock of the test's own, which each wait moves on, so that the wait for a late check takes no time; and a Mac kept
   // awake by nothing.
-  let clock = Date.parse("2026-10-13T10:00:00");
+  let clock = Date.parse(start);
   t.deps.clock = () => clock;
   t.deps.wait = async (ms) => {
     t.waits.push(ms);
@@ -4623,12 +4623,11 @@ const listAll = (folder, under = "") => readdirSync(join(folder, under), { withF
     clock says 15:00 on 20 Oct,
     the progress panel's stand-in keeps what it is told (`told`), and `video` is put in the drop folder of `machine`. */
 function episodeImport({ light = true, video = "Talk.mov", machine = "Mac Studio", ...script } = {}) {
-  const t = episodic({ claude: [answers(REPLY)], ...script });
+  const t = episodic({ claude: [answers(REPLY)], start: "2026-10-20T15:00:00", ...script });
   const drop = join(t.root, "Unedited Video", machine);
   mkdirSync(drop, { recursive: true });
   t.deps.settings = { ...t.deps.settings, machine, ...(light === null ? {} : { import: light ? "light" : "full" }) };
   if (light !== null) t.deps.light = light;
-  t.deps.now = () => new Date("2026-10-20T15:00:00");
   t.deps.today = () => "2026-10-20";
   const told = [];
   t.deps.progress = {
@@ -4726,6 +4725,29 @@ describe("the light import", () => {
     await uneditedFolder(full.drop, full.deps);
     assert.ok(statusesOf(full).length > 0 && statusesOf(full).every((s) => !("label" in s)));
     full.done();
+  });
+  it("names each video by the moment this Mac first saw it in the drop folder, so a queue of drops keeps their own times", async () => {
+    // This Mac saw Talk.mov at 14:52 and Talk two.mov at 14:57, as the import notes each video it finds, and imports both at 15:00.
+    const t = episodeImport();
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:52:00"));
+    t.put("Talk two.mov");
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:57:00"));
+    await uneditedFolder(t.drop, t.deps);
+    const labels = ["Video of 20 Oct, 14:52 (Mac Studio)", "Video of 20 Oct, 14:57 (Mac Studio)"];
+    assert.deepEqual([t.record("Talk.mov").label, t.record("Talk two.mov").label], labels);
+    assert.deepEqual([...t.notes].sort(), labels.map((label) => `Ready: ${label}. In Claude, say "what's waiting?"`));
+    t.done();
+    // When this Mac could not note when it saw the video, it is named by the moment its import began.
+    const u = episodeImport();
+    mkdirSync(seenFile(u.home), { recursive: true });
+    let clock = Date.parse("2026-10-20T14:40:00");
+    u.deps.clock = () => clock;
+    u.deps.wait = async (ms) => {
+      clock += ms;
+    };
+    await uneditedFolder(u.drop, u.deps);
+    assert.equal(u.record().label, LABEL);
+    u.done();
   });
   it("names the Mac in the notice once, by the label, which holds it", async () => {
     const t = episodeImport({ machine: "Sallie's laptop" });

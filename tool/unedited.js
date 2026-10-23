@@ -60,7 +60,7 @@ import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, re
 import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf } from "./filing.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, seenLine } from "./kinds.js";
@@ -720,9 +720,13 @@ async function workOn(file, deps) {
   // transcript, the cut plan and its text, and the rough cut's captions, worked out from the plan; no Claude, no video made,
   // no Final Cut file, no reels.json and no notes. Its record waits for her answer. Her screen may be shared, so the progress
   // panel and every notice name the video by its label, made of the Mac and the moment it was dropped, and never by its file:
-  // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read.
+  // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read. The moment is when
+  // this Mac first saw the video in its drop folder (seen.json, filing.js noteSeen), so that a queue of drops keeps their own
+  // times; when that was not noted, it is the moment this import began.
   const light = Boolean(episode && deps.light);
-  const label = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(deps.now ? deps.now() : new Date()) }).short : "";
+  const noted = light && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
+  const dropped = noted && Number.isFinite(noted.at) ? new Date(noted.at) : deps.now ? deps.now() : new Date();
+  const label = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
   const shown = light ? label : name;
   const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
