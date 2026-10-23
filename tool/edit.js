@@ -29,11 +29,11 @@
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stamp } from "./shared/text.js";
+import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
@@ -114,6 +114,10 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         show or set the title on screen of a Reel: the words in its picture
   node edit.js reel pick|drop "<episode>" <n>…
                                         pick Reels to finish, or drop them
+  node edit.js reel "<label>" <n> --client-agreed
+                                        for a client or group session: notes, on a dialog on this Mac that only her click
+                                        answers, that the client agreed to a kept Reel idea being cut from it. Who agreed
+                                        stays on this Mac
   node edit.js reels "<episode>" [--no-play]
                                         list the Reel candidates, and play their previews in QuickTime Player
   node edit.js ask "<episode>"          ask Claude again for Reel candidates, detached. Picked Reels stay as they are
@@ -2340,8 +2344,11 @@ async function title(ctx, rest) {
   return titleEpisode(ctx, { ...got.found, record: got.record }, { words: flags.words ? flags.words.join(" ") : undefined, approve: Boolean(flags.approve), change: Boolean(flags.change), ...(reel ? { reel } : {}) });
 }
 
-/** `reel pick|drop "<episode>" <n>…`. */
+/** `reel pick|drop "<episode>" <n>…`, and `reel "<label>" <n> --client-agreed`, a client's agreement to a Reel cut from a session
+    (clientAgreed), which is those three words and no other: `<n>` is digits, and `reel pick 14 --client-agreed` is still a pick of
+    the episode "14". */
 async function reel(ctx, rest) {
+  if (rest.length === 3 && rest[0] !== "pick" && rest[0] !== "drop" && /^\d+$/.test(rest[1]) && rest[2] === "--client-agreed") return clientAgreed(ctx, rest[0], Number(rest[1]));
   const [what, said, ...numbers] = rest;
   if ((what !== "pick" && what !== "drop") || !said) {
     ctx.say(HELP);
@@ -2351,6 +2358,101 @@ async function reel(ctx, rest) {
   if (!got.found) return got.code;
   const ns = numbers.map(Number).filter((n) => Number.isInteger(n) && n > 0);
   return (what === "pick" ? pickReels : dropReels)(ctx, { ...got.found, record: got.record }, ns);
+}
+
+/** What is said when a client's agreement is refused or does not happen: it was not noted. */
+const NOT_NOTED = "Not noted:";
+const NOT_AGREED = "The Reel is not agreed.";
+const AGREEMENT_TIMED_OUT = `${NOT_NOTED} the dialog was not answered within a minute, so it was closed. ${NOT_AGREED}`;
+const NOTE_NOT_WRITTEN = `${NOT_NOTED} the note could not be written on this Mac. ${NOT_AGREED}`;
+const AGREEMENT_NOT_RECORDED = "The Reel is not agreed: the note of who agreed is on this Mac only. Say it again.";
+/** What a person types in the agreement dialog, made one line: each line break and tab one space. */
+const LINE_BREAKS = /[\r\n\t\v\f\u0085\u2028\u2029]/g;
+
+/** `reel "<label>" <n> --client-agreed`: she notes, on a dialog Claude cannot press, that the client agreed to Reel idea `n` of the
+    client or group session called `label` being cut from it (spec 2026-10-22, section 2). Before any dialog it refuses, writing
+    nothing, in this order: a video that is no session, or whose mark is cleared; then (`checks`) this Mac's training gate off or
+    lapsed; teachings Claude has not read, that Dropbox is still bringing, or that cannot be read; no such Reel idea; one to be
+    filmed again, which needs no agreement; one she has not kept; one agreed already, which it says and ends well; and the other
+    Mac's claim, or a run at work. Then it tells her to click, since Return presses Cancel, and shows the dialog (askHere, for
+    DIALOG_MS at most), which names the video by its label and asks who agreed and when. Only her click on "They agreed", with
+    something typed, goes on. Cancel, a dialog that gave no click, nothing typed and a dialog not answered in time each say so, in
+    a line of their own, and write nothing. Her click may come long after the record was read, so it is read again, and must be
+    the record she was asked about, and `checks` are made again (on this Mac's settings read again, for the gate). Then, in this
+    order: one line, with the time and the Reel, in agreements.txt in this Mac's work folder for the episode, a file only she can
+    read; and one write of the record, by the rule, holding that the agreement was noted and on which day. What she typed is in that
+    note and nowhere else: not in a line said, the tool log, the record, a result, a file of the episode or the hand-off. The log
+    says only that it was noted, by id and label. A note that cannot be written writes no record; a record that cannot be written
+    leaves the note, and says the Reel is not agreed. */
+async function clientAgreed(ctx, label, n) {
+  const got = episodeFor(ctx, [label], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: a client's agreement is noted only for a Reel cut from one.`);
+  // Why the agreement may not be noted on the record `rec` with `settings`: { why }, with `already` when it was agreed already.
+  const checks = async (rec, settings) => {
+    const gate = teachingsWhy(settings, ctx.now());
+    if (gate) return { why: gate };
+    let read = readTeachings(found.folder, rec, ctx.isWhole);
+    if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, rec, ctx.isWhole);
+    if (read.none) return { why: `${name} has no teachings yet: Claude has not read it.` };
+    if (read.coming) return { why: TEACHINGS_COMING };
+    if (read.why) return { why: `${name}'s teachings cannot be read (${read.why}).` };
+    const reelIdea = itemsOf(read.teachings, rec.session).reelIdeas.find((item) => item.n === n);
+    if (!reelIdea) return { why: `${name} has no Reel idea ${n}.` };
+    if (reelIdea.refilm === true) return { why: `Reel idea ${n} of ${name} is to be filmed again, not cut from the session: no client's agreement is needed.` };
+    if (reelIdea.approved !== true) return { why: `Reel idea ${n} of ${name} is not kept: keep it first.` };
+    const before = ((rec.session || {}).agreed || []).find((a) => a.n === n);
+    if (before) return { why: `Reel idea ${n} of ${name} was agreed already, on ${before.at}.`, already: true };
+    return { why: sessionBusy(ctx, found, rec, "nothing was noted") };
+  };
+  const first = await checks(record, ctx.settings);
+  if (first.already) {
+    ctx.say(first.why);
+    return 0;
+  }
+  if (first.why) return refuse(ctx, first.why);
+  ctx.say(`A dialog is open on this Mac for ${name}: type who agreed to Reel ${n} and when, then click "They agreed". Return presses Cancel.`);
+  const { answer, outOfTime } = await askHere(ctx, `${name}\n\nWho agreed to Reel ${n} being cut from this session, and when?`, { buttons: ["Cancel", "They agreed"], answer: true });
+  if (outOfTime) return refuse(ctx, AGREEMENT_TIMED_OUT);
+  if (!answer || answer.button !== "They agreed") {
+    const why = answer && answer.button === null && typeof answer.why === "string" ? answer.why : "";
+    return refuse(ctx, why ? `${NOT_NOTED} ${why} ${NOT_AGREED}` : `${NOT_NOTED} the Reel is not agreed.`);
+  }
+  const typed = (typeof answer.text === "string" ? answer.text : "").replace(LINE_BREAKS, " ").trim();
+  if (!typed) return refuse(ctx, `${NOT_NOTED} nothing was typed. ${NOT_AGREED}`);
+  const stop = (why) => refuse(ctx, `${NOT_NOTED} ${why}`);
+  // The record is read again, and must be the one she was asked about. This Mac's settings are read again too, unless a test
+  // gave them: Jason may have turned the training gate off meanwhile.
+  const now = readEpisode(found.folder);
+  if (!now.record) return stop(notRead(ctx, { ...found, read: now }));
+  if (now.newer) return stop(newerWhy(now.record));
+  if (now.record.rev !== record.rev) return stop(`${name} changed on the other Mac meanwhile. Say it again.`);
+  const again = await checks(now.record, ctx.deps.settings ? ctx.settings : readSettings(ctx.home).settings || {});
+  if (again.why) return stop(again.why);
+  // The note first, on this Mac's own disk and never in Dropbox, then the record.
+  const moment = new Date(ctx.now());
+  const when = localStamp(moment);
+  const day = localDay(moment);
+  try {
+    const folder = episodeWork(ctx.home, found.name);
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, "agreements.txt");
+    appendFileSync(file, "", { mode: 0o600 });
+    chmodSync(file, 0o600);
+    appendFileSync(file, `${when} Reel ${n}: ${typed}\n`);
+  } catch (e) {
+    return refuse(ctx, NOTE_NOT_WRITTEN);
+  }
+  const session = { ...now.record.session, agreed: [...((now.record.session || {}).agreed || []), { n, at: day }] };
+  if ((await save(ctx, { ...found, record: now.record }, { ...now.record, session }, "")) !== 0) {
+    ctx.say(AGREEMENT_NOT_RECORDED);
+    return 1;
+  }
+  ctx.say(`${name}: Reel ${n}'s agreement is noted, on ${day}. Who agreed is kept on this Mac only.`);
+  toolLog(ctx, `${when} ${now.record.id} (${name}): a client's agreement to Reel ${n} was noted by a click on this Mac's dialog.`, "the agreement");
+  return 0;
 }
 
 /** `reels "<episode>" [--no-play]`: the list of the episode's Reel candidates (reels.json, phase 3), and each preview that is
