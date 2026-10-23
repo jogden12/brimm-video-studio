@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { replaceSpeakers, visibleNames, namesSkipped, holdsName, NOT_NAMES, PUBLIC_NAMES } from "./sessions.js";
 import { SHOW, HOST } from "./shared/show.js";
+import { spellNames } from "./lib.js";
 import { teachingsOn, teachingsLapsed } from "./settings.js";
 import { TEACHINGS_OFF, TEACHINGS_LAPSED } from "./gate.js";
 import { recordFile, recordNumbers, kindOf, shownName } from "./episode.js";
@@ -92,6 +93,10 @@ export const meetingTranscripts = (record) => Object.keys((record && record.file
 /** The import's cut plan of a video, by its file's stem: the words a reading is made of. */
 export const planOf = (record) => `${basename(record.video.file, extname(record.video.file))}.cut-plan.json`;
 
+/** A session's label, as kinds.js sessionLabel makes it: "Session, 2026-10-22", and " (2)" after it for a second that day. It
+    holds no one's name. */
+export const SESSION_LABEL = /^Session, \d{4}-\d{2}-\d{2}(?: \(\d+\))?$/;
+
 /** A name as the name of a file is compared with one, whatever its case, its accents and its punctuation: its letters and
     figures alone, in lowercase. */
 const fileKey = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
@@ -100,23 +105,40 @@ const fileKey = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/gu
     "Quillon-Marsh.MP4" and "QuillonMarsh" are "Quillon Marsh.mp4"'s. A session's name is never its file's (spec 2, "The session
     mark"). */
 export function isFilesName(text, record) {
+  // A video named as its session's label is ("Session 2026-10-20.mp4"): the label is still the session's to have.
+  if (SESSION_LABEL.test(String(text ?? "").trim())) return false;
   const file = String((record && record.video && record.video.file) || "");
   const key = fileKey(text);
   return key !== "" && file !== "" && [file, basename(file, extname(file))].some((name) => fileKey(name) === key);
 }
 
-/** Whether words she gave, a session's name or what she changed of an item, hold one of `names`, read as hers and not as Claude's
-    prose: whatever their case, split at every mark that is not a letter or a figure ("quillon.marsh" is "quillon" and
-    "marsh"), and each word also without a plain plural or possessive ending ("s", "'s", "’s"), so that "quillon's", "Quillons"
-    and "brandvale’s" hold "Quillon" and "Brandvale". Claude's prose is held to sessions.js holdsName, which takes a word in
-    lowercase for a name only when the name was seen so: hers are held to it too, each word read as if written with a capital. */
-export function herWordsHold(text, names) {
-  if (typeof text !== "string") return false;
-  if (holdsName(text, names)) return true;
+/** A text's letters alone, in lowercase and without accents: what a name of several words is compared as when joined. */
+const lettersOf = (text) => String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}]+/gu, "");
+
+/** The first word of words she gave, a session's name or what she changed of an item, that is a name brimm-video can see, as
+    she wrote it ("quillon", "Quillon", "quillonmarsh"), or "" when none is. `hers` is sessionSeen's: her words are read as hers
+    and not as Claude's prose. They are split at every mark that is not a letter or a figure ("quillon.marsh" is "quillon" and
+    "marsh"; a mark no one sees, as a soft hyphen, splits nothing), and each word is also read without a plain plural or
+    possessive ending ("s", "'s", "’s", "s'"). A word is one of
+    `hers.strict` whatever its case (as if written with a capital), and one of `hers.lenient` only with its capital, as
+    sessions.js holdsName reads Claude's prose: those are the words the transcript writes with a capital mid-sentence and says in
+    lowercase too, which are ordinary words ("Reels" and "reels"). A name of several words (`hers.joined`, letters only) counts
+    joined, in any case ("quillonmarsh", "@QuillonMarsh"). */
+export function herWordsName(text, { strict = [], lenient = [], joined = [] } = {}) {
+  if (typeof text !== "string") return "";
   const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
-  const words = text.normalize("NFKC").split(/[^\p{L}\p{M}\p{N}'’]+/u).flatMap((w) => [w, ...w.split(/['’]/)]).filter(Boolean);
-  const forms = words.flatMap((w) => [w, w.replace(/['’]s$/i, ""), w.replace(/s$/i, "")]).filter((w) => /\p{L}/u.test(w));
-  return forms.some((w) => holdsName(capital(w), names));
+  const all = [...strict, ...lenient];
+  // A mark no one sees (a soft hyphen, a zero-width space) splits no word.
+  const tokens = text.normalize("NFKC").replace(/\p{Cf}/gu, "").split(/[^\p{L}\p{M}\p{N}'’]+/u).filter(Boolean);
+  for (const token of tokens) {
+    const bare = [token.replace(/['’]s$/i, ""), ...token.split(/['’]/), token];
+    const forms = [...new Set([...bare, ...bare.map((w) => w.replace(/s$/i, ""))])].filter((w) => /\p{L}/u.test(w));
+    const hit = forms.find((w) => holdsName(w, all) || holdsName(capital(w), strict));
+    if (hit) return hit;
+    if (joined.some((name) => lettersOf(token).includes(name))) return token.replace(/['’]s$/i, "");
+  }
+  // A joined name her words split at a mark of their own: "quillon.marsh" is caught above, word by word.
+  return joined.find((name) => lettersOf(text).includes(name)) || "";
 }
 
 /** The words of the record's spellings, both sides of each, as names: a spelling she gave may be a client's name, and none
@@ -125,7 +147,37 @@ export function herWordsHold(text, names) {
 function spellingNames(spellings) {
   const nobody = new Set([...NOT_NAMES, ...PUBLIC_NAMES, ...[SHOW, HOST, "The BRIMM"].flatMap((n) => n.toLowerCase().split(/[^\p{L}]+/u))]);
   const sides = list(spellings).flatMap((pair) => (Array.isArray(pair) ? pair.slice(0, 2) : []));
-  return sides.flatMap((side) => String(side ?? "").normalize("NFKC").match(/[\p{L}\p{M}]{2,}/gu) || []).filter((w) => !nobody.has(w.toLowerCase()));
+  // A side that is the show's own name as the transcriber hears it (lib.js spellNames: "Sally" is "Sallie") is no one's either.
+  return sides.flatMap((side) => String(side ?? "").normalize("NFKC").match(/[\p{L}\p{M}]{2,}/gu) || []).filter((w) => !nobody.has(w.toLowerCase()) && !nobody.has(spellNames(w).toLowerCase()));
+}
+
+/** The names a session's words are checked against when they are hers (herWordsName), from all of `names` (sessionSeen's):
+    { strict, lenient, joined }. A name the transcript writes with a capital mid-sentence and also says in lowercase (or its plain
+    plural or singular) is an ordinary word, `lenient`, unless a name of another place holds it too: a speaker brimm-video
+    replaced, the name of a file, a name she gave before, a spelling (`sources`, their texts). Every other name is `strict`.
+    `joined` is each run of two or more names side by side in one of `sources`, letters only, in lowercase ("quillonmarsh"). */
+function hersOf(names, { said, sources }) {
+  const lower = new Set((said.normalize("NFKC").match(/[\p{L}\p{M}'’]+/gu) || []).filter((w) => /^\p{Ll}/u.test(w)).map((w) => w.replace(/['’]s$/i, "").toLowerCase()));
+  const elsewhere = new Set(sources.flatMap((text) => String(text ?? "").normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}]+/gu) || []));
+  const ordinary = (name) => {
+    const n = name.toLowerCase();
+    return /^\p{Lu}/u.test(name) && !elsewhere.has(n) && [n, `${n}s`, n.replace(/s$/, "")].some((form) => lower.has(form));
+  };
+  const known = new Set(names.map((n) => n.toLowerCase()));
+  const joined = new Set();
+  for (const text of sources) {
+    const words = String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}]+/gu) || [];
+    let run = [];
+    for (const w of [...words, ""]) {
+      if (w && known.has(w.toLowerCase())) {
+        run.push(w);
+        continue;
+      }
+      for (let i = 0; i < run.length; i++) for (let j = i + 2; j <= run.length; j++) joined.add(lettersOf(run.slice(i, j).join("")));
+      run = [];
+    }
+  }
+  return { strict: names.filter((n) => !ordinary(n)), lenient: names.filter(ordinary), joined: [...joined] };
 }
 
 /** The files of the episode that the names brimm-video can see in a session are read from: its plan, and the meeting's own
@@ -158,6 +210,7 @@ function givenNames(folder, record) {
       dropped, a meeting transcript named for the meeting, names given before it was a session), and the words its plan's
       phrases write with a capital mid-sentence; and the words of the record's spellings, both sides (spellingNames). No spelling
       leaves a word out for a session;
+    - `hers` the same names as her own words are checked against them (hersOf, herWordsName);
     - `skipped` the line saying its capitalised words were not checked, or "" (namesSkipped);
     - `plan` the cut plan, read. */
 export function sessionSeen(folder, record, { host } = {}) {
@@ -182,8 +235,11 @@ export function sessionSeen(folder, record, { host } = {}) {
   const seen = visibleNames({ map: replaced.map, fileName, words, spellings: [] });
   const known = new Set(seen.map((n) => n.toLowerCase()));
   const spelled = spellingNames(record.spellings).filter((w) => !known.has(w.toLowerCase()) && Boolean(known.add(w.toLowerCase())));
+  const names = [...seen, ...spelled];
+  const sources = [...Object.keys(replaced.map), ...fileName, ...list(record.spellings).flatMap((pair) => (Array.isArray(pair) ? pair.slice(0, 2) : []))];
   return {
-    names: [...seen, ...spelled],
+    names,
+    hers: hersOf(names, { said: words, sources }),
     speakers: Object.keys(replaced.map).length ? replaced.text : undefined,
     skipped: namesSkipped(words),
     plan

@@ -585,7 +585,12 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
   const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home: ctx.home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);
-  if (!into.put) return { ok: false, made: [], failed: [...problems], next: AGAIN_TEACHINGS };
+  if (!into.put) {
+    // Her answer of the transcript only, given while Claude read it, is why: nothing it read is kept, as she asked.
+    const now_ = readEpisode(folder).record;
+    if (now_ && isObject(now_.session) && now_.session.teachings === "transcript only") return { ok: false, made: [], failed: [`You asked for the transcript only of ${name} while Claude read it, so nothing it read was kept.`], next: "" };
+    return { ok: false, made: [], failed: [...problems], next: AGAIN_TEACHINGS };
+  }
   log(`${named}: read.`);
   return { ok: !into.problems.length, made, failed: [...failed, ...problems], next: FOUND };
 }

@@ -123,7 +123,8 @@ const TRANSCRIPT_ONLY = `${LABEL}: its transcript stays on this Mac. Nothing goe
 const CHECK = "brimm-video took out the names it could see. Check these for anything about the client.";
 const FOR_HER = "(for you only: not sent to the page)";
 const V1_WAITS = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
-const NAME_HOLDS = "That name holds a name brimm-video can see in this session: give it another.";
+/** What `name` says of a session name holding `word`, a name brimm-video can see (fix round 2: the word that tripped it). */
+const NAME_HOLDS = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
 const STILL = `Claude is still reading ${LABEL}. A notice will come on this Mac when it is done: then say "what did Claude find?"`;
 
 const ANSWER = { state: "answered", guess: null, seen: "wide, 0:26", came: "camera", match: null, by: "Mac Studio", on: "Mac Studio", at: MARKED, private: "yes" };
@@ -804,9 +805,9 @@ describe("name, for a session: checked against the names brimm-video can see", (
   it("refuses a name that holds one, from the file, the words or a speaker, with the gate off too, and writes nothing", async () => {
     const mac = sessionMac({ taught: null, files: { ...FILES, [VTT_FILE]: VTT } });
     const before = snapshot(mac.found);
-    for (const words of ["Quillon pricing", "The Brandvale call", "Talk with Marsh", "Pell on pricing"]) {
+    for (const [words, word] of [["Quillon pricing", "Quillon"], ["The Brandvale call", "Brandvale"], ["Talk with Marsh", "Marsh"], ["Pell on pricing", "Pell"]]) {
       const r = await on(mac.t.ctx.deps, "name", LABEL, words);
-      assert.deepEqual([r.code, r.said], [1, [NAME_HOLDS]], words);
+      assert.deepEqual([r.code, r.said], [1, [NAME_HOLDS(word)]], words);
     }
     assert.deepEqual(snapshot(mac.found), before);
     mac.t.done();
@@ -844,11 +845,12 @@ const writeOver = (found, over) => {
   writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, ...over }));
 };
 const FILES_NAME = "That is the name of the video's file: give the session another name.";
-const EDIT_HOLDS = "Those words hold a name brimm-video can see in this session: say it another way.";
+const EDIT_HOLDS = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
 const NAME_FILES_AT_FINISH = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
-const NAME_HOLDS_AT_FINISH = "This session's name holds a name brimm-video can see in it: give it another name first. Nothing was written.";
-/** The client's names in her own words: in lowercase, as a plural, a possessive, and joined by a dot. */
-const HER_FORMS = ["quillon's way", "Quillons way", "the brandvale way", "brandvale’s way", "ask.quillon", "MARSH first"];
+const NAME_HOLDS_AT_FINISH = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
+/** The client's names in her own words: in lowercase, as a plural, a possessive, and joined by a dot; each with the word a
+    refusal names. */
+const HER_FORMS = [["quillon's way", "quillon"], ["Quillons way", "Quillon"], ["the brandvale way", "brandvale"], ["brandvale’s way", "brandvale"], ["ask.quillon", "quillon"], ["MARSH first", "MARSH"]];
 
 describe("fix 1: a session's name is never its file's", () => {
   it("refuses at name the video's file name or stem, in any case or form, with the gate off too", async () => {
@@ -877,8 +879,8 @@ describe("fix 1: a session's name is never its file's", () => {
     writeOver(mac.found, { name: { text: "quillon's pricing", placeholder: false } });
     const r = await on(mac.t.ctx.deps, "finish", SHORT);
     assert.equal(r.code, 1);
-    assert.ok(r.said.includes(NAME_HOLDS_AT_FINISH), r.text);
-    assert.doesNotMatch(r.text, SECRET);
+    // The refusal says back the word of hers that tripped it (fix round 2), and nothing else of the name.
+    assert.deepEqual(r.said, [NAME_HOLDS_AT_FINISH("quillon")]);
     assert.equal(existsSync(join(mac.found.folder, "final")), false);
     mac.t.done();
   });
@@ -896,10 +898,10 @@ describe("fix 1: a session's name is never its file's", () => {
 describe("fix 2: her own words are checked whatever their case", () => {
   it("refuses at name a name in lowercase, plural, possessive or dotted forms", async () => {
     const mac = sessionMac();
-    for (const words of [...HER_FORMS, "jorund"]) {
+    for (const [words, word] of [...HER_FORMS, ["jorund"]]) {
       const r = await on(mac.t.ctx.deps, "name", LABEL, words);
       if (words === "jorund") assert.equal(r.code, 0, "no meeting transcript: no speaker to see");
-      else assert.deepEqual([r.code, r.said], [1, [NAME_HOLDS]], words);
+      else assert.deepEqual([r.code, r.said], [1, [NAME_HOLDS(word)]], words);
       if (r.code === 0) writeOver(mac.found, { name: { text: LABEL, placeholder: false } });
     }
     mac.t.done();
@@ -910,9 +912,9 @@ describe("fix 2: her own words are checked whatever their case", () => {
     const lists = [["principles", [], EDITS.principles], ["principles", ["recurring"], EDITS.recurringPrinciples], ["ideas", [], EDITS.reelIdeas]];
     for (const [command, prefix, fields] of lists) {
       for (const field of fields) {
-        for (const words of HER_FORMS) {
+        for (const [words, word] of HER_FORMS) {
           const r = await on(t.ctx.deps, command, LABEL, ...prefix, "edit", "1", `--${field}`, words);
-          assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS]], `${command} ${prefix} ${field} ${words}`);
+          assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS(word)]], `${command} ${prefix} ${field} ${words}`);
         }
       }
     }
@@ -928,7 +930,7 @@ describe("fix 2: her own words are checked whatever their case", () => {
     writeOver(mac.found, { session: { ...session, edits: { principles: { 1: { description: "ask quillon what it is worth" } } } } });
     const before = snapshot(mac.found);
     const r = await on(mac.t.ctx.deps, "finish", LABEL);
-    assert.deepEqual([r.code, r.said], [1, ["Principle 1's description, as you changed it, holds a name brimm-video can see: say it another way, or drop it."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Principle 1's description, as you changed it, holds \"quillon\", a name brimm-video can see: say it another way, or drop it."]]);
     assert.deepEqual(snapshot(mac.found), before);
     mac.t.done();
   });
@@ -990,7 +992,7 @@ describe("fix 6: a name she spelled is a name brimm-video can see", () => {
     assert.equal("example_application" in kept.principles[0], false);
     assert.equal(kept.principles[0].description, REPLY.frameworks[0].description);
     const r = await on(t.ctx.deps, "principles", LABEL, "edit", "1", "--example_application", "As kestrel does.");
-    assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS]]);
+    assert.deepEqual([r.code, r.said], [1, [EDIT_HOLDS("kestrel")]]);
     t.done();
   });
 });
@@ -1128,5 +1130,141 @@ describe("fix 11: her name by default, files read through, and the branches not 
       assert.deepEqual(mac.t.started, [], what);
       mac.t.done();
     }
+  });
+});
+
+// --- Fix round 2 ---
+
+/** A session whose transcript says, as a real one does, ordinary words both with a capital mid-sentence and in lowercase, and the
+    client's name with a capital alone. */
+const SAID_BOTH_WAYS = [
+  { id: "p1", start: 0, end: 5, keep: true, text: "So we talked about it, and I post Reels on Instagram every week, and Stories too." },
+  { id: "p2", start: 5.5, end: 10, keep: true, text: "We went Live on Friday, and at Christmas we sell more." },
+  { id: "p3", start: 10.5, end: 15, keep: true, text: "The Reel format works, my Business coach said so, and we use a Price sheet." },
+  { id: "p4", start: 15.5, end: 26, keep: true, text: "So Quillon asked whether to film reels, post stories, go live, or make a reel about the price of your business." }
+];
+const BOTH_WAYS_FILES = { ...FILES, [`${STEM}.cut-plan.json`]: JSON.stringify({ ...PLAN, phrases: SAID_BOTH_WAYS }, null, 2) + "\n" };
+
+describe("fix round 2, 1: a word the transcript says in lowercase too is ordinary in her words", () => {
+  it("takes her ordinary words in lowercase, and refuses the client's name, never said in lowercase, in any case, saying the word", async () => {
+    const { t, found } = await readSession({ files: BOTH_WAYS_FILES });
+    for (const words of ["film three reels", "a reel about pricing", "post stories", "go live", "price sheet", "your business"]) {
+      const named = await on(t.ctx.deps, "name", LABEL, words);
+      assert.equal(named.code, 0, `${words}: ${named.text}`);
+      writeOver(found, { name: { text: LABEL, placeholder: false } });
+      const edited = await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words);
+      assert.equal(edited.code, 0, `${words}: ${edited.text}`);
+    }
+    for (const [words, word] of [["quillon's reels", "quillon"], ["Quillon pricing", "Quillon"], ["QUILLON live", "QUILLON"]]) {
+      assert.deepEqual((await on(t.ctx.deps, "name", LABEL, words)).said, [NAME_HOLDS(word)], words);
+      assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words)).said, [EDIT_HOLDS(word)], words);
+    }
+    // A word the transcript says with a capital alone counts in any case; one it says both ways only with its capital.
+    assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", "a christmas offer")).said, [EDIT_HOLDS("christmas")]);
+    assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", "Film Reels")).said, [EDIT_HOLDS("Reels")]);
+    t.done();
+  });
+});
+
+describe("fix round 2, 1 (and from its probe): a plural possessive, and marks no one sees", () => {
+  it("are read through: the quillons' shop, and a name with a soft hyphen or a zero-width space in it", async () => {
+    const { t } = await readSession();
+    for (const [words, word] of [["the quillons' shop", "quillon"], ["the quillons’ shop", "quillon"], ["ask quil\u00adlon", "quillon"], ["ask quil\u200blon", "quillon"]]) {
+      assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words)).said, [EDIT_HOLDS(word)], words);
+    }
+    t.done();
+  });
+});
+
+describe("fix round 2, 2: a name of several words, joined", () => {
+  it("is refused in her words, letters only and in any case", async () => {
+    const { t } = await readSession({ files: { ...FILES, [VTT_FILE]: VTT } });
+    for (const [words, word] of [["quillonmarsh", "quillonmarsh"], ["QUILLONMARSH", "QUILLONMARSH"], ["@quillonmarsh", "quillonmarsh"], ["quillonmarsh pricing", "quillonmarsh"], ["ask jorundpell", "jorundpell"], ["Jorund-Pell", "Jorund"]]) {
+      assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words)).said, [EDIT_HOLDS(word)], words);
+    }
+    assert.deepEqual((await on(t.ctx.deps, "name", LABEL, "quillonmarsh pricing")).said, [NAME_HOLDS("quillonmarsh")]);
+    t.done();
+  });
+});
+
+describe("fix round 2, 3: a spelling of the host's or the show's own name", () => {
+  it("makes no name of either side", async () => {
+    const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], description: "As Sally says, charge for what the work changes." }, ...REPLY.frameworks.slice(1)] };
+    const { t, found } = await readSession({ reply, over: { spellings: [["Sally", "Sallie"]] } });
+    assert.equal(JSON.parse(fileOf(found, TEACHINGS_JSON)).principles[0].description, "As Sally says, charge for what the work changes.");
+    assert.equal((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", "As Sally says, sally forth.")).code, 0);
+    t.done();
+  });
+});
+
+describe("fix round 2, 4: a name the session's files cannot be named from", () => {
+  it("is refused at name, writing nothing", async () => {
+    const mac = sessionMac();
+    const before = snapshot(mac.found);
+    for (const words of [".pricing notes", " .pricing", "..."]) {
+      const r = await on(mac.t.ctx.deps, "name", LABEL, words);
+      assert.deepEqual([r.code, r.said], [1, ["That name cannot name the session's files: give it another."]], words);
+    }
+    assert.deepEqual(snapshot(mac.found), before);
+    mac.t.done();
+  });
+});
+
+describe("fix round 2, 5: a video file named like the session's label", () => {
+  it("lets the label itself be its name: the finish writes the hand-off, and name gives the label back", async () => {
+    for (const file of ["Session 2026-10-20.mp4", "session_2026_10_20.mov"]) {
+      const stem = file.replace(/\.[^.]+$/, "");
+      const files = { [file]: "the recording", [`${stem}.cut-plan.json`]: JSON.stringify({ ...PLAN, video: file }, null, 2) + "\n" };
+      const mac = await decidedSession({ files, over: { video: { file, bytes: 13, seconds: 26, recorded: "2026-10-20", recordedFrom: "video" } } });
+      const r = await on(mac.t.ctx.deps, "finish", LABEL);
+      assert.equal(r.code, 0, `${file}: ${r.text}`);
+      assert.deepEqual(mac.t.inFinal(mac.found), [`${LABEL}.brimm-ops.json`]);
+      await on(mac.t.ctx.deps, "name", LABEL, "Pricing deep dive");
+      const back = await on(mac.t.ctx.deps, "name", "Pricing deep dive", LABEL);
+      assert.equal(back.code, 0, `${file}: ${back.text}`);
+      mac.t.done();
+    }
+  });
+});
+
+describe("fix round 2, 6: her answer of the transcript only, while Claude reads", () => {
+  it("is what the reading's result says, and nothing it read is kept", async () => {
+    const mac = sessionMac({ over: ASKED_OVER });
+    const { t, found } = mac;
+    let answered = null;
+    const run = t.ctx.deps.run;
+    t.ctx.deps.run = async (cmd, args, opts) => {
+      if (cmd === "CLAUDE" && !args.includes("auth")) answered = await on(t.ctx.deps, "teachings", LABEL, "--transcript-only");
+      return run(cmd, args, opts);
+    };
+    const r = await on(t.ctx.deps, ...readArgs(1));
+    assert.deepEqual([answered.code, r.code], [0, 1]);
+    const result = readResult(t.home, FOLDER, "read");
+    assert.deepEqual([result.made, result.failed, result.next], [[], [`You asked for the transcript only of ${LABEL} while Claude read it, so nothing it read was kept.`], ""]);
+    assert.deepEqual([reread(found).session.teachings, reread(found).reading], ["transcript only", undefined]);
+    for (const rel of [TEACHINGS_JSON, TEACHINGS_TXT, IDEAS_TXT]) assert.equal(existsSync(join(found.folder, rel)), false, rel);
+    t.done();
+  });
+});
+
+describe("fix round 2, 7: the earlier hand-off set aside, when the record cannot be written", () => {
+  it("takes its copy out of history/ again, and leaves the earlier hand-off in final/", async () => {
+    const mac = await decidedSession();
+    const { t, found } = mac;
+    await on(t.ctx.deps, "finish", LABEL);
+    const first = fileOf(found, HANDOFF);
+    await on(t.ctx.deps, "name", LABEL, "Pricing deep dive");
+    // The other Mac writes the next record while the new hand-off is put in.
+    const clone = t.ctx.deps.clone;
+    t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith("Pricing deep dive.brimm-ops.json")) writeOver(found, { title: null });
+    };
+    const r = await on(t.ctx.deps, "finish", "Pricing deep dive");
+    assert.deepEqual([r.code, r.said], [1, ["Nothing was written: this episode changed on the other Mac: open it again."]]);
+    assert.deepEqual(t.inFinal(found), [`${LABEL}.brimm-ops.json`]);
+    assert.equal(fileOf(found, HANDOFF), first);
+    assert.deepEqual(readdirSync(join(found.folder, "history")).filter((name) => name.endsWith(".brimm-ops.json")), []);
+    t.done();
   });
 });

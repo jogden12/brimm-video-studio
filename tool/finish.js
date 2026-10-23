@@ -26,7 +26,7 @@ import { runProgram } from "./run.js";
 import { commitOf } from "./filing.js";
 import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
-import { TEACHINGS_FORMAT, herWordsHold, isFilesName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
+import { TEACHINGS_FORMAT, SESSION_LABEL, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
 
 /** How often a finished video's size is looked at while Final Cut may still be writing it, and how many looks before the
     finish stops: ten minutes. */
@@ -1193,11 +1193,11 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
 
 // --- A client or group session's own hand-off (spec 2026-10-22, sections 3 and 8) ---
 
-/** A session's label, as kinds.js sessionLabel makes it: "Session, 2026-10-22", and " (2)" after it for a second that day. */
-const SESSION_LABEL = /^Session, \d{4}-\d{2}-\d{2}(?: \(\d+\))?$/;
-/** Why a session's hand-off is not written under the name it has, saying nothing of the name. */
+/** Why a session's hand-off is not written under the name it has: it is its video file's (saying nothing of it), it cannot name
+    the session's files, or it holds `word`, a name brimm-video can see, as she wrote it. */
 const SESSION_NAME_FILES = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
-const SESSION_NAME_HOLDS = "This session's name holds a name brimm-video can see in it: give it another name first. Nothing was written.";
+const SESSION_NAME_NO_FILE = "This session's name cannot name its files: give it another name first. Nothing was written.";
+const sessionNameHolds = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
 
 /** Write the hand-off of a client or group session, of what she approved of its teachings (edit.js finish, for a session): the
     principles she kept (without their source_context), the recurring principles she kept, and the Reel ideas she kept that are
@@ -1216,7 +1216,7 @@ const SESSION_NAME_HOLDS = "This session's name holds a name brimm-video can see
     - every item is decided (sessions.js undecided);
     - no kept item lacks what the page needs, which the name check took out: approvedSession, given the names brimm-video can see
       now (sessionSeen), refuses it; and her own words, the session's name (but its label) and what she changed of each item
-      written, hold none of them, read whatever their case (teachings.js herWordsHold);
+      written, hold none of them, read as hers (teachings.js herWordsName);
     - handoffTarget gives it an id and a revision (a session's own revision is not refused for being a session);
     - the hand-off is built (buildHandoffV2), and handoffFaultV2 and numbersTakenWords find nothing wrong with it.
     Resolves { waits }, { coming }, { why } (plain words, each line a reason, with the session named by its name, never a file's),
@@ -1230,7 +1230,8 @@ export async function finishSession(ctx, found, { host } = {}) {
   // The name the hand-off holds (buildHandoffV2 writes `name.text`) and names its file by is the name checked: never the video's
   // file's, in any form, which shownName would hide behind the label while the hand-off wrote it.
   const written = record.name.text;
-  if (written !== who || isFilesName(written, record)) return { why: SESSION_NAME_FILES };
+  if ((written !== who && !SESSION_LABEL.test(written)) || isFilesName(written, record)) return { why: SESSION_NAME_FILES };
+  if (!isTeachingsName(`${fileSafe(written)}.principles.json`)) return { why: SESSION_NAME_NO_FILE };
   const handoffRel = `final/${fileSafe(written)}.brimm-ops.json`;
   // The hand-off its last finish wrote under another name, as before she renamed it, is set aside into history/ (below).
   const earlier = record.finished && typeof record.finished.handoff === "string" ? record.finished.handoff : "";
@@ -1249,12 +1250,13 @@ export async function finishSession(ctx, found, { host } = {}) {
   const approved = approvedSession(items, seen.names);
   if (approved.why) return { why: approved.why };
   // Her own words, the name she gave it and what she changed of an item, are checked again on what is written, whatever their
-  // case (teachings.js herWordsHold): the check above is the one for Claude's prose. Its label holds no one's name.
-  if (!SESSION_LABEL.test(written) && herWordsHold(written, seen.names)) return { why: SESSION_NAME_HOLDS };
+  // case (teachings.js herWordsName): the check above is the one for Claude's prose. Its label holds no one's name.
+  const inName = SESSION_LABEL.test(written) ? "" : herWordsName(written, seen.hers);
+  if (inName) return { why: sessionNameHolds(inName) };
   const edits = (record.session && record.session.edits) || {};
   const writtenItems = { principles: approved.session.principles, recurringPrinciples: approved.session.recurringPrinciples, reelIdeas: approved.session.reelsToFilm };
   const hers = [["principles", "Principle"], ["recurringPrinciples", "Recurring principle"], ["reelIdeas", "Reel idea"]].flatMap(([key, label]) =>
-    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).filter((field) => herWordsHold(item[field], seen.names)).map((field) => `${label} ${item.n}'s ${field}, as you changed it, holds a name brimm-video can see: say it another way, or drop it.`)));
+    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name brimm-video can see: say it another way, or drop it.`)));
   if (hers.length) return { why: hers.join("\n") };
   const target = handoffTarget(ctx, { folder, record });
   if (target.refusal) return { why: target.refusal };

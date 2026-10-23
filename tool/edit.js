@@ -62,7 +62,7 @@ import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
 import { readEpisodeNow, accountOf, READ_KINDS } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
-import { ITEM_LISTS, CHECK_NAMES, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsHold, isFilesName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
+import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -3607,9 +3607,10 @@ export async function whichCommand(ctx, rest) {
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 /** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"), or that is
     its video file's name, and what an edit of hers says of words that hold one. */
-const NAME_HOLDS = "That name holds a name brimm-video can see in this session: give it another.";
+const nameHolds = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
 const FILES_NAME = "That is the name of the video's file: give the session another name.";
-const EDIT_HOLDS = "Those words hold a name brimm-video can see in this session: say it another way.";
+const NO_FILE_NAME = "That name cannot name the session's files: give it another.";
+const editHolds = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
 /** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
 const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
 /** What `finish` says of a session on a Mac that hands off version 1, which has no session kind. */
@@ -3652,7 +3653,7 @@ async function sessionNames(ctx, found) {
   const { record } = found;
   if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
   const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
-  return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names };
+  return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names, hers: seen.hers };
 }
 
 /** Why a session's record may not be written on by this Mac now, in plain words, or "": another Mac has it, or a run is at work
@@ -3815,8 +3816,8 @@ async function sessionItems(ctx, rest, command) {
   if (busy) return refuse(ctx, busy);
   const done = approve(items[key], asked, EDITS[key]);
   if (done.why) return refuse(ctx, done.why);
-  // What she changes is checked now, whatever its case, against the names brimm-video can see (teachings.js herWordsHold), and
-  // refused when it holds one: the finish checks it again.
+  // What she changes is checked now, as her words, against the names brimm-video can see (teachings.js herWordsName), and
+  // refused when it holds one, saying which: the finish checks it again.
   const changedTexts = done.items.flatMap((item) => {
     const before = items[key].find((one) => one.n === item.n);
     return EDITS[key].filter((field) => item[field] !== before[field]).map((field) => item[field]);
@@ -3824,7 +3825,8 @@ async function sessionItems(ctx, rest, command) {
   if (changedTexts.length) {
     const seen = await sessionNames(ctx, { ...found, record });
     if (seen.why) return refuse(ctx, seen.why);
-    if (changedTexts.some((text) => herWordsHold(text, seen.names))) return refuse(ctx, EDIT_HOLDS);
+    const word = changedTexts.map((text) => herWordsName(text, seen.hers)).find(Boolean);
+    if (word) return refuse(ctx, editHolds(word));
   }
   // Her decision of each item, and what she changed of one, by the item's number.
   const session = record.session;
@@ -3883,10 +3885,15 @@ async function sessionNameWhy(ctx, found, words) {
   const { record } = found;
   const text = oneLine(words);
   if (!text) return "";
+  // Its label is the session's own, and holds no one's name.
+  if (SESSION_LABEL.test(text)) return "";
   if (isFilesName(text, record)) return FILES_NAME;
+  // Its teachings files and its hand-off are named by it: a name that cannot name a file, as one that begins with a dot, is none.
+  if (!isTeachingsName(`${fileSafe(text)}.principles.json`)) return NO_FILE_NAME;
   const seen = await sessionNames(ctx, found);
   if (seen.why) return seen.why;
-  return herWordsHold(text, seen.names) ? NAME_HOLDS : "";
+  const word = herWordsName(text, seen.hers);
+  return word ? nameHolds(word) : "";
 }
 
 /** `finish "<session>"` for a client or group session: its own hand-off, of what she approved (finish.js finishSession), never the
