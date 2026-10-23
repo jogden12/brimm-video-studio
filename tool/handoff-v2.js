@@ -47,15 +47,16 @@ const suggestionOf = (given) => {
   return { ...out, ...pick(s, ["first", "last", "why", "point"]) };
 };
 
-/** A made Reel. Its place in the main is left out when it was not found, or when there is no main video; its suggestion is
-    null when it was made from times she gave; and a session's Reel carries the day the client's agreement was noted. */
+/** A made Reel. Its place in the main is left out when it was not found, or when there is no main video; and a session's Reel
+    carries the day the client's agreement was noted. Its `fromSuggestion` is given by the caller: the suggestion's number, which
+    the Reel takes, or null for a Reel made from times she gave, which has a fresh number. A missing one is not made null here:
+    the check refuses it. */
 const reelOf = (given, inSession) => {
   const r = given || {};
   return {
     ...pick(r, ["n", "title", "file", "seconds"]),
     ...(!inSession && r.inMain ? { inMain: pick(r.inMain, STRETCH) } : {}),
-    ...pick(r, ["srt"]),
-    fromSuggestion: r.fromSuggestion === undefined ? null : r.fromSuggestion,
+    ...pick(r, ["srt", "fromSuggestion"]),
     ...(inSession ? pick(r, ["clientAgreed"]) : {})
   };
 };
@@ -200,6 +201,8 @@ export function handoffFaultV2(h) {
 
   if (kind !== "short video") {
     if (!Array.isArray(h.reels)) return "Its Reels are not a list.";
+    /** The numbers of the suggestions that are listed, which only a Reel made from one may hold. */
+    const listed = new Set(Array.isArray(h.suggestions) ? h.suggestions.map((s) => s.n) : []);
     const seen = new Set();
     for (const r of h.reels) {
       if (!isObject(r) || !whole(r.n)) return "A Reel's number is not a whole number from 1.";
@@ -211,6 +214,14 @@ export function handoffFaultV2(h) {
       if (!text(r.file) || !seconds(r.seconds)) return `${which} has no file or no length.`;
       if (!captions(r.srt)) return `${which}'s captions cannot be read.`;
       if (!has(r, "fromSuggestion") || (r.fromSuggestion !== null && !whole(r.fromSuggestion))) return `${which}'s fromSuggestion is neither a suggestion's number nor null.`;
+      if (kind === "session") {
+        if (r.fromSuggestion !== null) return `${which}'s fromSuggestion is not null: a session has no suggestions.`;
+      } else if (r.fromSuggestion !== null) {
+        // A Reel made from a suggestion takes its number. The suggestion itself may be gone: a later reading may leave it out.
+        if (r.fromSuggestion !== r.n) return `${which} says it was made from suggestion ${r.fromSuggestion}, but a Reel made from a suggestion takes its number.`;
+      } else if (listed.has(r.n)) {
+        return `${which} says it was made from times she gave, but suggestion ${r.n} has its number: a Reel made from times she gave has a fresh number.`;
+      }
       if (kind === "session") {
         if (!has(r, "clientAgreed")) return `${which} has no clientAgreed: a session's Reel is made only once the client's agreement is noted, as a date.`;
         if (!day(r.clientAgreed)) return `${which}'s clientAgreed is not a date written like 2026-10-23: the day the agreement was noted, never who.`;

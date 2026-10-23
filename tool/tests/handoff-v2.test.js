@@ -128,15 +128,24 @@ describe("what the writer leaves out", () => {
     assert.equal("clientAgreed" in buildHandoffV2({ ...GIVEN, record: FINISHED, main: MAIN, reels: [{ ...REEL, clientAgreed: "2026-10-23" }] }).reels[0], false);
     assert.equal(buildHandoffV2({ ...GIVEN, record: FINISHED, main: MAIN, session: SESSION_BODY }).session, null);
   });
-  it("writes a Reel's place in the main only when it was found, and its suggestion as null when it came from times she gave", () => {
+  it("writes a Reel's place in the main only when it was found, and a Reel made from times she gave with its suggestion null", () => {
     const { inMain, fromSuggestion, ...bare } = REEL;
-    const h = buildHandoffV2({ ...GIVEN, record: FINISHED, main: MAIN, reels: [{ ...bare, inMain: null }, { ...bare, n: 3, title: "", fromSuggestion: undefined }, { ...REEL, n: 4 }] });
+    const h = buildHandoffV2({ ...GIVEN, record: FINISHED, main: MAIN, suggestions: [SUGGESTION], reels: [{ ...bare, n: 5, inMain: null, fromSuggestion: null }, { ...bare, n: 6, title: "", fromSuggestion: null }, REEL] });
     assert.equal("inMain" in h.reels[0], false);
     assert.equal(h.reels[0].fromSuggestion, null);
     assert.equal(h.reels[1].title, "");
-    assert.equal(h.reels[1].fromSuggestion, null);
     assert.deepEqual(h.reels[2].inMain, { start: 312.4, end: 354.5 });
+    assert.equal(h.reels[2].fromSuggestion, 2);
     assert.equal(handoffFaultV2(h), "");
+  });
+  it("does not turn a Reel's missing fromSuggestion into null: the key is left out, and the check refuses it", () => {
+    const { fromSuggestion, ...bare } = REEL;
+    const h = buildHandoffV2({ ...GIVEN, record: FINISHED, main: MAIN, reels: [bare] });
+    assert.equal("fromSuggestion" in h.reels[0], false);
+    assert.match(handoffFaultV2(h), /Reel 2.*fromSuggestion/);
+    const inSession = buildHandoffV2({ ...GIVEN, record: SESSION, reels: [{ ...AGREED, fromSuggestion: undefined }] });
+    assert.equal("fromSuggestion" in inSession.reels[0], false);
+    assert.match(handoffFaultV2(inSession), /Reel 3.*fromSuggestion/);
   });
   it("writes only the keys of the contract, whatever else the record's items carry", () => {
     const given = { ...GIVEN, record: SESSION, session: { principles: [{ ...PRINCIPLE, source_context: "A call with a client.", approved: true, status: "kept" }], recurringPrinciples: [{ n: 1, text: "Price is a message.", approved: true }], reelsToFilm: [{ ...SESSION_BODY.reelsToFilm[0], approved: true, times: [1, 2] }] }, reels: [{ ...AGREED, crops: [], status: "made", from: 1, to: 2 }] };
@@ -295,9 +304,33 @@ describe("handoffFaultV2, in plain words", () => {
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.recurringPrinciples.push({ n: 1, text: "Again." }); })), /recurring principle 1.*twice/i);
     assert.match(handoffFaultV2(changed(session, (h) => { h.session.reelsToFilm[1].n = 1; })), /Reel idea 1.*twice/i);
   });
-  it("lets a suggestion and a Reel hold the same number, and a Reel name a suggestion that is no longer there", () => {
-    assert.equal(handoffFaultV2(changed(finished, (h) => { h.reels[0].fromSuggestion = 7; })), "");
-    assert.equal(handoffFaultV2(changed(finished, (h) => { h.reels[0].fromSuggestion = null; })), "");
+  it("lets a Reel made from a suggestion take its number, even when that suggestion was later left out", () => {
+    // Suggestion 2 is listed, and Reel 2 is made from it.
+    assert.equal(handoffFaultV2(finished()), "");
+    // Reel 7 was made from suggestion 7, which a later reading left out: no suggestion 7 is listed.
+    assert.equal(handoffFaultV2(changed(finished, (h) => { h.reels[0].n = 7; h.reels[0].fromSuggestion = 7; })), "");
+    // Nothing is listed at all, as for a video whose suggestions were all left out.
+    assert.equal(handoffFaultV2(changed(finished, (h) => { delete h.suggestions; h.reels[0].n = 7; h.reels[0].fromSuggestion = 7; })), "");
+  });
+  it("lets a Reel made from times she gave have a fresh number and a null suggestion", () => {
+    assert.equal(handoffFaultV2(changed(finished, (h) => { h.reels[0].n = 5; h.reels[0].fromSuggestion = null; })), "");
+    assert.equal(handoffFaultV2(changed(raw, (h) => { h.reels[0].n = 5; h.reels[0].fromSuggestion = null; })), "");
+  });
+  it("refuses a Reel made from a suggestion whose number is not the suggestion's: it takes its number", () => {
+    const fault = handoffFaultV2(changed(finished, (h) => { h.reels[0].fromSuggestion = 3; }));
+    assert.match(fault, /Reel 2.*suggestion 3.*takes its number/);
+    assert.match(handoffFaultV2(changed(finished, (h) => { h.reels[0].n = 4; })), /Reel 4.*suggestion 2.*takes its number/);
+    // Even when the suggestion it names is listed.
+    assert.match(handoffFaultV2(changed(finished, (h) => { h.suggestions.push({ ...h.suggestions[0], n: 3 }); h.reels[0].fromSuggestion = 3; })), /Reel 2.*suggestion 3.*takes its number/);
+  });
+  it("refuses a Reel made from times she gave that holds a listed suggestion's number: its number must be fresh", () => {
+    const fault = handoffFaultV2(changed(finished, (h) => { h.reels[0].fromSuggestion = null; }));
+    assert.match(fault, /Reel 2.*suggestion 2.*fresh number/);
+    assert.match(handoffFaultV2(changed(raw, (h) => { h.reels[0].n = 1; h.reels[0].fromSuggestion = null; })), /Reel 1.*suggestion 1.*fresh number/);
+  });
+  it("refuses a number in a session Reel's fromSuggestion: a session has no suggestions", () => {
+    for (const number of [3, 1, 2]) assert.match(handoffFaultV2(changed(session, (h) => { h.reels[0].fromSuggestion = number; })), /Reel 3.*fromSuggestion.*not null.*no suggestions/, String(number));
+    assert.equal(handoffFaultV2(changed(session, (h) => { h.reels[0].fromSuggestion = null; })), "");
   });
   it("refuses a Reel whose suggestion is neither a number nor null, or is missing", () => {
     assert.match(handoffFaultV2(changed(finished, (h) => { h.reels[0].fromSuggestion = "2"; })), /Reel 2.*fromSuggestion/);
