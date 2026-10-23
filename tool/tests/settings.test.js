@@ -1011,6 +1011,22 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       for (const said of [...two, ...labelled]) assert.ok(!/Jane Doe|Acme/.test(said), said);
       t.done();
     });
+    it("under the light import counts a failed import or a late check's problem that has no label too, and does not name its video, whether the video is there or not", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4");
+      t.status("Coaching call Jane Doe.mp4", { failed: "the sound of Coaching call Jane Doe.mp4 could not be read" });
+      t.status("Sales call Acme Ltd.mov", { problem: "Sales call Acme Ltd.rough-cut.mp4 is short" });
+      t.status("Sales review Acme Ltd.mov", { failed: "ffprobe" });
+      t.status("Labelled.mov", { failed: "ffprobe", label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+      const said = await refused(t, "--drop", "Drop");
+      const gone = `, and its video is not in the old folder now: only its status file, in ${join(t.root, "Episodes", ".importing")}, holds this, and a person takes it away by hand`;
+      assert.deepEqual(said, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`, "  2 imports failed.", "  1 late check found a problem.", ADVICE]);
+      assert.ok(!/Jane|Doe|Acme|Coaching|Sales/.test(said.join("\n")), said.join("\n"));
+      // The video that is there with a status that is counted is not counted again as a video that waits.
+      assert.ok(!said.some((line) => /wait/.test(line)), said.join("\n"));
+      t.done();
+    });
     it("counts a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
       // The videos came under the light import whatever this run says of it, so they are not named; the full import is written
       // straight into the file, as the light import is, since set and write refuse the light one until it is built.

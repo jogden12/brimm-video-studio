@@ -18,10 +18,10 @@ import { dropFolder, importingFolder } from "./settings.js";
     files Finder keeps and the parts of a file still arriving are none), and an import of this Mac, in Episodes/.importing, that
     failed or whose late check found a problem. `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
-    episode that holds the video does too. A video that has none is counted and not named when `light` says the import is the
-    light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to reach a chat),
-    and is named by its file name when the import is today's. A status is named by its label, else by its video's file name,
-    and never by its own file's name; and what it says of why it failed is left out, as it may hold a file's name. */
+    episode that holds the video does too. A video, or a status, that has none is counted and not named when `light` says the
+    import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to
+    reach a chat), and is named by its video's file name when the import is today's. A status is never named by its own file's
+    name; and what it says of why it failed is left out, as it may hold a file's name. */
 export function heldInOld({ root, machine, old, light, now = Date.now() }) {
   const folder = dropFolder(root, machine, old);
   let videos = [];
@@ -34,13 +34,23 @@ export function heldInOld({ root, machine, old, light, now = Date.now() }) {
   const lines = new Set();
   const named = new Set();
   const trouble = mine.filter((s) => ["failed", "problem"].includes(importState(s, now))).sort((a, b) => a.video.localeCompare(b.video));
+  let failed = 0;
+  let problems = 0;
   for (const status of trouble) {
     named.add(status.video);
-    const what = importState(status, now) === "failed" ? "its import failed" : "it was copied in, but its late check found a problem";
+    const isFailed = importState(status, now) === "failed";
+    if (light && !status.label) {
+      if (isFailed) failed += 1;
+      else problems += 1;
+      continue;
+    }
+    const what = isFailed ? "its import failed" : "it was copied in, but its late check found a problem";
     // A failed import whose video has since been taken out of the folder cannot be tried again: only its status file holds it.
     const gone = videos.includes(status.video) ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
     lines.add(`  ${status.label || status.video}: ${what}${gone}.`);
   }
+  if (failed) lines.add(`  ${failed === 1 ? "1 import" : `${failed} imports`} failed.`);
+  if (problems) lines.add(`  ${problems === 1 ? "1 late check" : `${problems} late checks`} found a problem.`);
   let counted = 0;
   for (const video of videos.filter((v) => !named.has(v))) {
     const bytes = statSync(join(folder, video), { throwIfNoEntry: false })?.size;
