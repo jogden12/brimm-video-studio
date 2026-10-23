@@ -124,7 +124,7 @@ export function onPictureOf(record) {
 export const fromSuggestionOf = (reel) => (has(reel, "fromSuggestion") ? reel.fromSuggestion : reel.n);
 
 /** How many of a suggestion's words, in 100, the final video must keep for the suggestion to be kept (spec section 8). */
-const KEPT_IN_100 = 70;
+export const KEPT_IN_100 = 70;
 /** How many words `first` and `last` hold when the suggestion did not say. */
 const OPENING_WORDS = 4;
 /** A time to the hundredth of a second, as inMain (handoff.js) gives its times: a sum such as 4.35 * 100 comes to 434.99999…,

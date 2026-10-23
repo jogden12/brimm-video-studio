@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, keptSpans, framesASecond } from "../cuts.js";
-import { stretchesOf } from "../reframe.js";
+import { stretchesOf, fitReel } from "../reframe.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
 import { TOLD, PAUSES } from "./fixtures.js";
 import { PREVIEW, previewSteps, previewLimits, reelCandidates, REELS_FILE, previewPath, reelsFile, readReels, reelEntries, reelProject, REEL_FRAME, reelsText, mergeCandidates } from "../reels.js";
@@ -357,6 +357,175 @@ describe("the list of the Reel candidates", () => {
   });
   it("says why there are none, and how to ask again", () => {
     assert.equal(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude could not be asked (it timed out)" }), { reels: [] }), "There are no Reel candidates of talk.mov: Claude could not be asked (it timed out).\nSay \"ask Claude again for Reels\" to ask again.\n");
+  });
+});
+
+describe("the list of the Reel suggestions of a video of the switch (layout 3)", () => {
+  const made = "2026-10-22T09:00:00-05:00";
+  const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: made, private: "no" };
+  const RAW = { id: "e-20261022-4a7c10", kind: "raw", answer: ANSWERED, name: { text: "Pricing: what to charge?", placeholder: false }, reels: [] };
+  const NAME = "Pricing: what to charge?";
+  /** A minute of speech, a word every half second: "w0" ends at 0.5, "w1" at 1, and so on. */
+  const WORDS = Array.from({ length: 120 }, (_, i) => ({ w: `w${i}`, start: i / 2, end: (i + 1) / 2 }));
+  /** The first words of a stretch from `a` to `b`, and its last, as a suggestion holds them: four of each. */
+  const opens = (a) => Array.from({ length: 4 }, (_, i) => `w${a * 2 + i}`).join(" ");
+  const closes = (b) => Array.from({ length: 4 }, (_, i) => `w${b * 2 - 4 + i}`).join(" ");
+  /** A suggestion a reading made: its stretches have no crop, and it has no preview and no title. */
+  const suggestion = (n, ranges, over = {}) => {
+    const [start, end] = [ranges[0].start, ranges[ranges.length - 1].end];
+    const seconds = ranges.reduce((sum, r) => sum + r.end - r.start, 0);
+    return { n, start, end, ranges, seconds, fits: fitReel({ start: 0, end: seconds }), title: "", reason: `Reason ${n}.`, point: `Point ${n}.`, first: opens(start), last: closes(end), words: "", phrases: [], preview: null, ...over };
+  };
+  /** One kept on the clock (10 to 20), one cut (32 to 38), one with half its words cut (25 to 35), and one with 16 of its 18
+      words kept (22 to 31). */
+  const KEPT = suggestion(1, [{ start: 10, end: 20 }], { check: "It starts with no pause before it: check the first word." });
+  const CUT = suggestion(2, [{ start: 32, end: 38 }]);
+  const HALF = suggestion(3, [{ start: 25, end: 35 }]);
+  const MOST = suggestion(4, [{ start: 22, end: 31 }], { preview: "previews/reel-4.mp4" });
+  const reels = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [KEPT, CUT, HALF, MOST] });
+  /** The clock of a rough cut that begins at 5 s and leaves out 30 s to 40 s: the first piece is cut at its start. */
+  const CLOCK = [{ at: 0, from: 5, to: 30 }, { at: 25, from: 40, to: 60 }];
+  const NOW = { clock: CLOCK, words: WORDS, on: "main v1" };
+  const record = { ...RAW, reels: [{ n: 4, status: "picked" }] };
+
+  it("places each suggestion on the clock she is reading, in her video's name, with its first and last words as they are said there", () => {
+    assert.equal(reelsText(reels, record, "", NOW), [
+      `Reel suggestions of ${NAME}: 4, with times on main v1.`,
+      "",
+      "1. 0:05 to 0:15, 10 seconds. A candidate.",
+      "   Opens with: w20 w21 w22 w23",
+      "   Closes with: w36 w37 w38 w39",
+      "   Why: Reason 1.",
+      "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
+      "   It starts with no pause before it: check the first word.",
+      "",
+      "2. Cut now: its words were cut from main v1. A candidate.",
+      "   Opens with: w64 w65 w66 w67",
+      "   Closes with: w72 w73 w74 w75",
+      "   Why: Reason 2.",
+      "",
+      "3. Cut now: its words were cut from main v1. A candidate.",
+      "   Opens with: w50 w51 w52 w53",
+      "   Closes with: w66 w67 w68 w69",
+      "   Why: Reason 3.",
+      "",
+      "4. 0:17 to 0:25, 8 seconds. Picked.",
+      "   Opens with: w44 w45 w46 w47",
+      "   Closes with: w56 w57 w58 w59",
+      "   Why: Reason 4.",
+      "   It does not fit a Reel. It is 9 seconds long, and a Reel clip is at least 15 seconds.",
+      "   Preview: previews/reel-4.mp4",
+      ""
+    ].join("\n"));
+  });
+  it("never names the video's file, and says no preview was made only when a preview is wanted: never", () => {
+    const text = reelsText(reels, record, "", NOW);
+    assert.ok(!text.includes("IMG_4821"), text);
+    assert.ok(!text.includes("No preview"), text);
+    assert.ok(!text.includes("ask Claude again"), text);
+    for (const now of [null, { ...NOW, words: [] }]) {
+      const other = reelsText(reels, record, "", now);
+      assert.ok(!other.includes("IMG_4821") && !other.includes("No preview"), other);
+    }
+  });
+  it("names a video not yet answered by its label, as everything edit.js prints does", () => {
+    const waiting = { id: "e-20261022-4a7c10", kind: null, answer: { state: "needs your answer", guess: "raw", seen: "wide", came: "camera" }, label: "Video of 22 Oct, 09:00 (Mac Studio)", reels: [] };
+    assert.match(reelsText(reels, waiting, "", NOW), /^Reel suggestions of Video of 22 Oct, 09:00 \(Mac Studio\): 4, with times on main v1\.\n/);
+  });
+  it("places each by the time of its stretches when there are no words, kept when 70 in 100 of their seconds are on the clock", () => {
+    const both = suggestion(5, [{ start: 28, end: 31 }, { start: 50, end: 52 }]);
+    const list = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [KEPT, CUT, HALF, both] });
+    assert.equal(reelsText(list, RAW, "", { clock: CLOCK, words: [], on: "main v1" }), [
+      `Reel suggestions of ${NAME}: 4, with times on main v1.`,
+      "",
+      "1. 0:05 to 0:15, 10 seconds. A candidate.",
+      "   Opens with: w20 w21 w22 w23",
+      "   Closes with: w36 w37 w38 w39",
+      "   Why: Reason 1.",
+      "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
+      "   It starts with no pause before it: check the first word.",
+      "",
+      "2. Cut now: its words were cut from main v1. A candidate.",
+      "   Opens with: w64 w65 w66 w67",
+      "   Closes with: w72 w73 w74 w75",
+      "   Why: Reason 2.",
+      "",
+      "3. Cut now: its words were cut from main v1. A candidate.",
+      "   Opens with: w50 w51 w52 w53",
+      "   Closes with: w66 w67 w68 w69",
+      "   Why: Reason 3.",
+      "",
+      "5. 0:23 to 0:37, 4 seconds. A candidate.",
+      "   Opens with: w56 w57 w58 w59",
+      "   Closes with: w100 w101 w102 w103",
+      "   Why: Reason 5.",
+      "   It does not fit a Reel. It is 5 seconds long, and a Reel clip is at least 15 seconds.",
+      ""
+    ].join("\n"));
+  });
+  it("gives the recording's own times when there is no clock to place them on, whether it is not read or it could not be", () => {
+    const own = [
+      `Reel suggestions of ${NAME}: 4, with times on the recording's own clock.`,
+      "",
+      "1. 0:10 to 0:20, 10 seconds. A candidate.",
+      "   Opens with: w20 w21 w22 w23",
+      "   Closes with: w36 w37 w38 w39",
+      "   Why: Reason 1.",
+      "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
+      "   It starts with no pause before it: check the first word.",
+      "",
+      "2. 0:32 to 0:38, 6 seconds. A candidate.",
+      "   Opens with: w64 w65 w66 w67",
+      "   Closes with: w72 w73 w74 w75",
+      "   Why: Reason 2.",
+      "   It does not fit a Reel. It is 6 seconds long, and a Reel clip is at least 15 seconds.",
+      "",
+      "3. 0:25 to 0:35, 10 seconds. A candidate.",
+      "   Opens with: w50 w51 w52 w53",
+      "   Closes with: w66 w67 w68 w69",
+      "   Why: Reason 3.",
+      "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
+      "",
+      "4. 0:22 to 0:31, 9 seconds. Picked.",
+      "   Opens with: w44 w45 w46 w47",
+      "   Closes with: w58 w59 w60 w61",
+      "   Why: Reason 4.",
+      "   It does not fit a Reel. It is 9 seconds long, and a Reel clip is at least 15 seconds.",
+      "   Preview: previews/reel-4.mp4",
+      ""
+    ].join("\n");
+    for (const now of [null, { why: "edit/main.v2.fcpxml is not in the episode's folder." }, { coming: "edit/main.v2.fcpxml", bring: ["edit/main.v2.fcpxml"] }]) assert.equal(reelsText(reels, record, "", now), own, JSON.stringify(now));
+    assert.equal(reelsText(reels, record), own);
+  });
+  it("names a Reel of the record that reels.json does not hold, after the suggestions, as it always has", () => {
+    const text = reelsText(reels, { ...record, reels: [{ n: 1, status: "picked", files: ["talk.reel-1.mp4"] }, { n: 9, status: "candidate", files: [] }].map((r) => ({ ...r })) }, "", NOW);
+    assert.match(text, /\n3\. Cut now: .*\n/s);
+    assert.match(text, /\nReels the record lists that reels\.json does not hold yet: Reel 9, a candidate\.\n$/);
+    assert.ok(!text.includes("cut as clips"), text);
+  });
+  it("says a short video gets no Reels, in its name", () => {
+    const clip = { ...RAW, kind: "short video", name: { text: "Quick tip", placeholder: false } };
+    assert.equal(reelsText(reelsFile({ video: "IMG_4822.MOV", by: "read", made, candidates: [] }), clip, "", NOW), "Quick tip is a short video, and a short video gets no Reels.\n");
+    assert.equal(reelsText(reels, clip), "Quick tip is a short video, and a short video gets no Reels.\n");
+  });
+  it("says why there are none, in the video's name, and does not offer to ask Claude again or say why it cannot be asked", () => {
+    const none = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [], none: "Claude suggested no stretch that stands alone" });
+    assert.equal(reelsText(none, RAW, "Claude Code is not installed on this Mac, so Claude cannot be asked.", NOW), `There are no Reel suggestions of ${NAME}: Claude suggested no stretch that stands alone.\n`);
+    assert.equal(reelsText(none, RAW), `There are no Reel suggestions of ${NAME}: Claude suggested no stretch that stands alone.\n`);
+    assert.equal(reelsText(reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [] }), RAW, "", NOW), `There are no Reel suggestions of ${NAME}.\n`);
+  });
+  it("leaves the list of a video from before the switch (layout 1 or 2) as it always was, whatever clock it is given", () => {
+    const [one] = reelCandidates({ clips: CLIPS, plan: PLAN, facts: FACTS, stills: stillsWith(0.25) });
+    const old = reelsFile({ video: "talk.mov", by: "import", made, candidates: [{ ...one, preview: "previews/reel-1.mp4" }, { ...one, n: 3, preview: null, failed: "ffmpeg stopped (Cannot allocate memory)" }] });
+    const none = reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude was not asked" });
+    const clock = { clock: CLOCK, words: WORDS, on: "main v1" };
+    const records = [{ reels: [{ n: 1, status: "picked" }] }, { kind: "episode", reels: [] }, { id: "e-20261014-3fa9c1", kind: "episode", spellings: [["Sally", "Sallie"]], reels: [] }];
+    for (const r of records) {
+      for (const list of [old, none]) assert.equal(reelsText(list, r, "", clock), reelsText(list, r, ""), JSON.stringify(r));
+      assert.match(reelsText(old, r, "", clock), /^Reel candidates of talk\.mov: 2\.\n\n1\. 0:13 to 0:21, 5 seconds\. /, JSON.stringify(r));
+      assert.equal(reelsText(none, r, "", clock), 'There are no Reel candidates of talk.mov: Claude was not asked.\nSay "ask Claude again for Reels" to ask again.\n');
+    }
+    assert.equal(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [] }), { id: "e-20261014-3fa9c1", kind: "short video", reels: [] }, "", clock), "talk.mov is a short video, and a short video gets no Reels.\n");
   });
 });
 
