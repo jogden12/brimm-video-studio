@@ -25,6 +25,8 @@ import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
 import { commitOf } from "./filing.js";
 import { findPrograms } from "./unedited.js";
+import { approvedSession, undecided } from "./sessions.js";
+import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
 
 /** How often a finished video's size is looked at while Final Cut may still be writing it, and how many looks before the
     finish stops: ten minutes. */
@@ -205,6 +207,14 @@ const numbersOf = (h) => [h.suggestions, h.reels].flatMap((list) => (Array.isArr
 export function lastRevision(finalDir, id) {
   return highestRevision(handoffsBeside(finalDir), id);
 }
+/** The numbers of a session's items: those a session's hand-off gives (its `session`), and those its teachings file gives. */
+const sessionNumbersOf = (s) => (s !== null && typeof s === "object" ? ["principles", "recurringPrinciples", "reelsToFilm", "reelIdeas"].flatMap((key) => (Array.isArray(s[key]) ? s[key] : [])).map((item) => item && item.n).filter(Number.isInteger) : []);
+/** A session's teachings as its readings wrote them in an episode: the files in its folder, and each set aside into its history/,
+    at any depth, by every name that ends as a teachings file's does. One that cannot be read, or is not such a file, is passed
+    over. */
+const teachingsIn = (folder) => [...namesIn(folder, false, ".principles.json").map((name) => join(folder, name)), ...namesIn(join(folder, "history"), true, ".principles.json").map((name) => join(folder, "history", name))]
+  .map(readJson)
+  .filter((file) => file !== null && typeof file === "object" && file.format === TEACHINGS_FORMAT);
 /** An episode's lists of Reel candidates as they are read: its reels.json, and each one set aside into its history/, at any
     depth, by every name that ends as reels.json's does. One that cannot be read, or is not such a list, is passed over. */
 const reelsListsIn = (folder) => [join(folder, REELS_FILE), ...namesIn(join(folder, "history"), true, REELS_FILE).map((name) => join(folder, "history", name))]
@@ -433,12 +443,14 @@ function revisionIn({ members, folders }, first, handoffsAt = (folder) => handof
   return most + 1;
 }
 
-/** The highest number ever given to a suggestion or a Reel of a video, on this Mac, or 0 when none was: of every hand-off for
-    the video's id (handoffIdOf) in final/ and history/ of the folders of its versions (setOf), of the Reels each version's
-    record holds, and of each version's reels.json and those set aside into its history/ (their `highest`, and each candidate's
-    number). Numbers never repeat within a video, across asking again, a corrected kind and a new version (spec 2026-10-22,
-    section 8), so a new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it
-    is not given. This only reads. */
+/** The highest number ever given to a suggestion, a Reel or a session's item of a video, on this Mac, or 0 when none was: of
+    every hand-off for the video's id (handoffIdOf) in final/ and history/ of the folders of its versions (setOf), its session's
+    items too, of the Reels each version's record holds, of each version's reels.json and those set aside into its history/
+    (their `highest`, and each candidate's number), and of each version's teachings files, in its folder and set aside into its
+    history/ (the numbers of their principles, recurring principles and Reel ideas). Numbers never repeat within a video, across
+    asking again, asking for a session's teachings again, a corrected kind and a new version (spec 2026-10-22, section 8), so a
+    new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it is not given.
+    This only reads. */
 export function highestNumberOf(root, record, folder) {
   const view = viewOf(root);
   const walked = walk(view, record, folder || null);
@@ -447,26 +459,32 @@ export function highestNumberOf(root, record, folder) {
   const take = (n) => {
     if (Number.isInteger(n) && n > most) most = n;
   };
-  for (const at of folders) for (const h of handoffsBeside(join(at, "final"))) if (handoffFor(h, walked.first)) numbersOf(h).forEach(take);
+  for (const at of folders) for (const h of handoffsBeside(join(at, "final"))) if (handoffFor(h, walked.first)) [...numbersOf(h), ...sessionNumbersOf(h.session)].forEach(take);
   for (const { record: one } of members) for (const reel of Array.isArray(one.reels) ? one.reels : []) take(reel && reel.n);
   for (const at of new Set(members.map((one) => one.folder).filter(Boolean))) {
     for (const list of reelsListsIn(at)) {
       take(list.highest);
       for (const candidate of Array.isArray(list.candidates) ? list.candidates : []) take(candidate && candidate.n);
     }
+    for (const file of teachingsIn(at)) sessionNumbersOf(file).forEach(take);
   }
   return most;
 }
 
-/** Why a version 2 hand-off cannot be written because it gives a suggestion or a Reel a number again that another version of
-    the video gave already, in a hand-off for the same id (`taken`, as handoffTarget gives it), in plain words; or "" when it
-    gives none. A number is a suggestion's or a Reel's identity on the BRIMM Ops page, and never repeats within a video (spec
-    2026-10-22, section 8). Until a new version's reading numbers on from the highest ever given (highestNumberOf, Part F), such a
+/** Why a version 2 hand-off cannot be written because it gives a suggestion, a Reel, or a session's principle, recurring
+    principle or Reel idea a number again that another version of the video gave already, in a hand-off for the same id (`taken`,
+    as handoffTarget gives it), in plain words; or "" when it gives none. A number is an item's identity on the BRIMM Ops page,
+    and never repeats within a video (spec 2026-10-22, section 8). Until a new version's reading numbers on from the highest ever given (highestNumberOf, Part F), such a
     hand-off is refused, and nothing is written. The video is named as edit.js names it (episode.js shownName). */
 export function numbersTakenWords(record, handoff, taken) {
+  const items = (key, words) => (handoff.session && Array.isArray(handoff.session[key]) ? handoff.session[key] : []).map((item) => [item && item.n, `${words} ${item && item.n}`]);
   const again = [
     ...(Array.isArray(handoff.suggestions) ? handoff.suggestions : []).map((s) => [s.n, `suggestion ${s.n}`]),
-    ...(Array.isArray(handoff.reels) ? handoff.reels : []).map((r) => [r.n, `Reel ${r.n}`])
+    ...(Array.isArray(handoff.reels) ? handoff.reels : []).map((r) => [r.n, `Reel ${r.n}`]),
+    // A session's items too: a principle's, a recurring principle's and a Reel idea's number is its identity on the page.
+    ...items("principles", "principle"),
+    ...items("recurringPrinciples", "recurring principle"),
+    ...items("reelsToFilm", "Reel idea")
   ].filter(([n]) => taken.includes(n));
   if (!again.length) return "";
   const named = again.map(([, words]) => words);
@@ -488,7 +506,7 @@ const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "ses
       own final/ and history/ (lastRevision), as it has always been: nothing else in Episodes is read, nothing is refused, and
       no number is taken.
     - Version 2 is under the video's first version's id (handoffIdOf), one revision above every one written for that id on this
-      Mac (nextRevision). `taken` is the suggestion and Reel numbers that the hand-offs for that id in the other folders of
+      Mac (nextRevision). `taken` is the suggestion, Reel and session item numbers that the hand-offs for that id in the other folders of
       its versions give (their final/ and history/), in order, which this hand-off may not give again (numbersTakenWords): the
       writer's own folder is not among them, since its own earlier revisions give its numbers by right. `refusal` is why it
       cannot be written, in plain words, after which the writer writes nothing, or "".
@@ -528,7 +546,7 @@ export function handoffTarget({ root, settings }, { folder, record }) {
   const went = ownFolder ? handoffsAt(ownFolder).find((h) => h.version === VERSION_2 && h.video && isId(h.video.id) && h.video.id !== walked.first) : undefined;
   if (went) return refused(`${who} went to the BRIMM Ops page under ${went.video.id}, but its versions now lead to ${walked.first}: ask Jason. Nothing was written.`);
   const taken = new Set();
-  for (const at of set.folders) if (resolve(at) !== own) for (const h of handoffsAt(at)) if (handoffFor(h, walked.first)) numbersOf(h).forEach((n) => taken.add(n));
+  for (const at of set.folders) if (resolve(at) !== own) for (const h of handoffsAt(at)) if (handoffFor(h, walked.first)) [...numbersOf(h), ...sessionNumbersOf(h.session)].forEach((n) => taken.add(n));
   return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first, handoffsAt), taken: [...taken].sort((a, b) => a - b) };
 }
 
@@ -1171,4 +1189,175 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     }
   }
   return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same };
+}
+
+// --- A client or group session's own hand-off (spec 2026-10-22, sections 3 and 8) ---
+
+/** Why a session's hand-off is not written under the name it has: it is its video file's (saying nothing of it), it cannot name
+    the session's files, or it holds `word`, a name brimm-video can see, as she wrote it. */
+const SESSION_NAME_FILES = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
+const SESSION_NAME_NO_FILE = "This session's name cannot name its files: give it another name first. Nothing was written.";
+const SESSION_NAME_LONG = `This session's name is longer than ${SESSION_NAME_MOST} characters: give it a shorter one first. Nothing was written.`;
+const sessionNameHolds = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
+
+/** Write the hand-off of a client or group session, of what she approved of its teachings (edit.js finish, for a session): the
+    principles she kept (without their source_context), the recurring principles she kept, and the Reel ideas she kept that are
+    to be filmed again, each as she changed it, with the name check run again on it; never a transcript, a caption or a file's
+    name. Into final/<the session's name>.brimm-ops.json, and nothing else into final/; the hand-off its last finish wrote under
+    another name, before she renamed it, is set aside into history/ by the rule (copied whole and listed there by the record, and
+    taken out of final/ once the record is written); then the record says it is finished (the hand-off and its revision), the
+    claim this Mac holds is let go, and the hand-off is shown in Finder, through the program runner.
+    `found` is { folder, name, record }. Nothing is written unless all of this is well, in this order:
+    - it is a session (kind "session"): cannotFinish refuses one for the Final Cut finish, and this is its own;
+    - this Mac hands off version 2 (writesV2For), or { waits: true };
+    - the name the hand-off holds and names its file by (`name.text`, which buildHandoffV2 writes) is not the video's file's in
+      any form (teachings.js isFilesName): shownName hides such a name behind the label, and the hand-off would not;
+    - Claude has read its teachings (teachings.js sessionReading), and its teachings file, the files the names it can see are
+      read from (seenFrom) and the earlier hand-off it sets aside are whole on this Mac, or { coming: [path…] };
+    - every item is decided (sessions.js undecided);
+    - no kept item lacks what the page needs, which the name check took out: approvedSession, given the names brimm-video can see
+      now (sessionSeen), refuses it; and her own words, the session's name (but its label) and what she changed of each item
+      written, hold none of them, read as hers (teachings.js herWordsName);
+    - handoffTarget gives it an id and a revision (a session's own revision is not refused for being a session);
+    - the hand-off is built (buildHandoffV2), and handoffFaultV2 and numbersTakenWords find nothing wrong with it.
+    Resolves { waits }, { coming }, { why } (plain words, each line a reason, with the session named by its name, never a file's),
+    or { ok: true, revision, handoff, counts: { principles, recurringPrinciples, reelsToFilm }, dropped: [{ field, why }] }, where
+    `dropped` is what the name check took out of what is in the file, now. */
+export async function finishSession(ctx, found, { host } = {}) {
+  const { record, folder } = found;
+  const who = shownName(record);
+  if (kindOf(record) !== "session") return { why: `${who} is not a client or group session. Nothing was written.` };
+  if (!writesV2For(ctx.settings, folder, record)) return { waits: true };
+  // The name the hand-off holds (buildHandoffV2 writes `name.text`) and names its file by is the name checked: never the video's
+  // file's, in any form, which shownName would hide behind the label while the hand-off wrote it.
+  const written = record.name.text;
+  if ((written !== who && !SESSION_LABEL.test(written)) || isFilesName(written, record)) return { why: SESSION_NAME_FILES };
+  if (!isTeachingsName(`${fileSafe(written)}.principles.json`)) return { why: SESSION_NAME_NO_FILE };
+  if ([...written].length > SESSION_NAME_MOST) return { why: SESSION_NAME_LONG };
+  const handoffRel = `final/${fileSafe(written)}.brimm-ops.json`;
+  // The hand-off its last finish wrote under another name, as before she renamed it, is set aside into history/ (below).
+  const earlier = record.finished && typeof record.finished.handoff === "string" ? record.finished.handoff : "";
+  const prior = /^final\/[^/\\]+\.brimm-ops\.json$/.test(earlier) && earlier !== handoffRel && existsSync(join(folder, earlier)) ? earlier : "";
+  const whole = (path) => (ctx.isWhole || (() => true))(path);
+  const read = readTeachings(folder, record, whole);
+  if (read.none) return { why: `${who} has no teachings to hand off yet: Claude has not read it. Nothing was written.` };
+  const coming = [...(read.coming ? [read.coming] : []), ...[...seenFrom(record), ...(prior ? [prior] : [])].filter((rel) => !whole(join(folder, rel)))];
+  if (coming.length) return { coming };
+  if (read.why) return { why: `${who}'s teachings cannot be read (${read.why}). Nothing was written.` };
+  const items = itemsOf(read.teachings, record.session);
+  const open = undecided(items);
+  if (open.length) return { why: open.join("\n") };
+  const seen = sessionSeen(folder, record, { host });
+  if (seen.why) return { why: `${who}: ${seen.why}. Nothing was written.` };
+  const approved = approvedSession(items, seen.names);
+  if (approved.why) return { why: approved.why };
+  // Her own words, the name she gave it and what she changed of an item, are checked again on what is written, whatever their
+  // case (teachings.js herWordsName): the check above is the one for Claude's prose. Its label holds no one's name.
+  const inName = SESSION_LABEL.test(written) ? "" : herWordsName(written, seen.hers);
+  if (inName) return { why: sessionNameHolds(inName) };
+  const edits = (record.session && record.session.edits) || {};
+  const writtenItems = { principles: approved.session.principles, recurringPrinciples: approved.session.recurringPrinciples, reelIdeas: approved.session.reelsToFilm };
+  const hers = [["principles", "Principle"], ["recurringPrinciples", "Recurring principle"], ["reelIdeas", "Reel idea"]].flatMap(([key, label]) =>
+    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name brimm-video can see: say it another way, or drop it.`)));
+  if (hers.length) return { why: hers.join("\n") };
+  const target = handoffTarget(ctx, { folder, record });
+  if (target.refusal) return { why: target.refusal };
+  const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+  const at = localStamp(new Date(ctx.now()));
+  const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, reels: [], session: approved.session });
+  const fault = handoffFaultV2(handoff);
+  if (fault) return { why: `The hand-off could not be written: ${fault.replace(/\.$/, "")}. Nothing was written.` };
+  const again = numbersTakenWords(record, handoff, target.taken);
+  if (again) return { why: again };
+  const gone = undone(record, ctx.home);
+  if (gone) {
+    acceptRev(ctx.home, record.id, record.rev);
+    return { why: `${gone} Nothing was written.` };
+  }
+
+  const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
+  const work = join(runsFolder(ctx.home), `session-hand-off-${process.pid}-${ctx.now()}`);
+  const to = join(folder, handoffRel);
+  const finalDir = join(folder, "final");
+  const madeDir = !existsSync(finalDir);
+  const put = textWriter({ work, ...opts });
+  const ours = handoffText(handoff);
+  // The earlier hand-off is set aside by the rule: copied whole into history/ first, and taken out of final/ only once the
+  // record that no longer lists it is written.
+  const asideRel = prior ? `history/${at.replace(/:/g, "-")} ${basename(prior)}` : "";
+  let aside = null;
+  let was = null;
+  let wrote = false;
+  try {
+    mkdirSync(finalDir, { recursive: true });
+    const files = { ...record.files };
+    if (prior) {
+      mkdirSync(join(folder, "history"), { recursive: true });
+      const copy = readFileSync(join(folder, prior), "utf8");
+      aside = { to: join(folder, asideRel), text: copy };
+      files[asideRel] = put(aside.to, copy).bytes;
+      delete files[prior];
+    }
+    const there = existsSync(to);
+    was = there ? readFileSync(to, "utf8") : null;
+    const bytes = put(to, ours, { replace: there }).bytes;
+    wrote = true;
+    const next = {
+      ...record,
+      files: { ...files, [handoffRel]: bytes },
+      finished: { revision: target.revision, at, on: ctx.machine, handoff: handoffRel, parts: {} },
+      ...(record.editing && record.editing.by === ctx.machine ? { editing: null } : {})
+    };
+    writeEpisode(folder, next, { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
+  } catch (e) {
+    // What this call put in is put back as it was, and only while it is still this call's: another Mac's is left as it is. The
+    // copy set aside goes again: the hand-off it is of is still in final/.
+    if (aside) {
+      try {
+        if (existsSync(aside.to) && readFileSync(aside.to, "utf8") === aside.text) rmSync(aside.to, { force: true });
+      } catch (p) {
+        // A copy left in history/ is one the record does not list: it harms nothing.
+      }
+    }
+    let lost = false;
+    if (wrote) {
+      try {
+        const now = existsSync(to) ? readFileSync(to, "utf8") : null;
+        if (now === ours) {
+          if (was === null) rmSync(to, { force: true });
+          else put(to, was, { replace: true });
+        } else if (now !== was) lost = true;
+      } catch (p) {
+        lost = true;
+      }
+    }
+    if (madeDir) {
+      try {
+        rmdirSync(finalDir);
+      } catch (r) {
+        // It is not empty, or not there.
+      }
+    }
+    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(e.message || e.code || "the hand-off could not be put in").replace(/\.$/, "");
+    if (lost) return { why: `${capital(why)}. The hand-off could not be put back as it was. Tell Jason: the episode needs him.` };
+    return { why: `Nothing was written: ${why}.` };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  // The earlier hand-off, whole in history/ and listed there by the record, leaves final/.
+  if (prior) {
+    try {
+      rmSync(join(folder, prior), { force: true });
+    } catch (e) {
+      // It stays in final/ beside the new one, which is the higher revision, as the page takes it.
+    }
+  }
+  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off.
+  try {
+    await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", to]);
+  } catch (e) {
+    // The hand-off is in final/ all the same.
+  }
+  const counts = Object.fromEntries(Object.entries(approved.session).map(([key, items_]) => [key, items_.length]));
+  return { ok: true, revision: target.revision, handoff: handoffRel, counts, dropped: approved.dropped };
 }

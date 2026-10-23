@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, writeEpisode, recordFile, RECORD_VERSION } from "../episode.js";
+import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, writeEpisode, recordFile, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
 const REEL = { n: 2, status: "picked", from: 1, to: 9, title: "t", why: "", files: [], pushed: [] };
@@ -140,10 +141,30 @@ describe("the record's layout 3", () => {
       assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
     }
     assert.match(episodeFault({ ...made(), session: "yes" }), /session/);
+    // The keys she may change are sessions.js's own (F7 fix 11).
+    assert.deepEqual(SESSION_EDITS, EDITS);
+    // A session's teachings asked for, when, and her decisions and changes of what Claude read, item by item (F7).
+    const decided = { principles: { 1: "kept", 3: "dropped" }, recurringPrinciples: { 2: "kept" }, reelIdeas: { 4: "dropped" } };
+    const edits = { principles: { 1: { name: "Price the outcome", example_application: "A florist names her price." } }, recurringPrinciples: { 2: { text: "Decide once." } }, reelIdeas: { 4: { idea: "One number", words: "Every Monday.", why: "Short." } } };
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided, edits } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided: {}, edits: {} } }), "");
+    for (const bad of [
+      { asked: "later" }, { asked: 4 },
+      { decided: "all" }, { decided: { principles: { 1: "yes" } } }, { decided: { principles: { 0: "kept" } } }, { decided: { principles: { one: "kept" } } }, { decided: { ideas: { 1: "kept" } } }, { decided: { principles: [] } },
+      { edits: [] }, { edits: { principles: { 1: { steps: "x" } } } }, { edits: { principles: { 1: { name: "" } } } }, { edits: { recurringPrinciples: { 1: { name: "x" } } } },
+      { edits: { reelIdeas: { 1: { principle: "2" } } } }, { edits: { principles: { 1: "x" } } }, { edits: { principles: { x: { name: "a" } } } }, { edits: { other: { 1: { text: "a" } } } }
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
+    }
     for (const bad of [{ kind: "" }, { model: 1 }, { at: "later" }, { on: "" }, { account: null }, { outcome: "" }]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, ...bad } }), /reading/, JSON.stringify(bad));
     }
     assert.match(episodeFault({ ...made(), reading: "done" }), /reading/);
+    // A session's reading names its teachings file, in the episode's own folder (F7 fix 11).
+    assert.equal(episodeFault({ ...made(), reading: { ...READING, kind: "session", principles: "Session, 2026-10-22.principles.json" } }), "");
+    for (const principles of ["../x.principles.json", "/tmp/x.principles.json", "history/x.principles.json", "x.json", "", ".principles.json", 4]) {
+      assert.match(episodeFault({ ...made(), reading: { ...READING, kind: "session", principles } }), /reading/, JSON.stringify(principles));
+    }
   });
   it("is written as version 3 for an unanswered record, stays at 3, and is never written without a kind it needs", () => {
     const folder = mkdtempSync(join(tmpdir(), "layout-"));

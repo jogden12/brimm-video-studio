@@ -8,7 +8,7 @@ import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rename
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, finishFinished, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
+import { finishNow, finishFinished, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, numbersTakenWords, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { recordFile, recordText, acceptRev } from "../episode.js";
@@ -1951,6 +1951,43 @@ describe("the highest number ever given to a suggestion or a Reel of a video", (
     assert.deepEqual(all(), [9, 9, 9]);
     lay(newest.folder, "history/2026-10-22 09.00 reels.json", reelsList(0, [11]));
     assert.deepEqual(all(), [11, 11, 11]);
+    t.done();
+  });
+  it("counts a session's items too: those of its hand-offs, and those of its teachings, in its folder and set aside in history/", () => {
+    const t = setup();
+    const old = original(t);
+    const next = later(t, SECOND, ID);
+    const all = () => [old, next].map((found) => highestNumberOf(t.root, found.record));
+    /** A session's teachings as its reading writes them, its lists numbered so. */
+    const teachings = (principles, recurring, ideas) => ({ format: "brimm-video teachings", version: 1, principles: principles.map((n) => ({ n, name: "A principle" })), recurringPrinciples: recurring.map((n) => ({ n, text: "A point." })), reelIdeas: ideas.map((n) => ({ n, idea: "An idea", words: "Words.", refilm: true, principle: null })), dropped: [] });
+    lay(old.folder, "Session, 2026-10-22.principles.json", teachings([1, 2], [3], [4]));
+    assert.deepEqual(all(), [4, 4]);
+    lay(next.folder, "history/2026-10-22T10-00-00-05-00 Session, 2026-10-22.principles.json", teachings([5], [], []));
+    assert.deepEqual(all(), [5, 5]);
+    // A session's hand-off for the id: its principles, recurring principles and Reels to film.
+    const session = { ...V2.session, video: { ...V2.session.video, id: ID }, session: { principles: [{ ...V2.session.session.principles[0], n: 6 }], recurringPrinciples: [{ n: 8, text: "A point." }], reelsToFilm: [{ n: 7, idea: "An idea", words: "Words.", why: "", principle: null }] } };
+    lay(old.folder, "final/Session, 2026-10-22.brimm-ops.json", session);
+    assert.deepEqual(all(), [8, 8]);
+    // What is not a session's teachings is passed over.
+    lay(old.folder, "Other.principles.json", { format: "something else", principles: [{ n: 90 }] });
+    lay(old.folder, "Broken.principles.json", "{ not json");
+    assert.deepEqual(all(), [8, 8]);
+    t.done();
+  });
+  it("is what numbersTakenWords and handoffTarget's `taken` hold a session's items to as well (F7 fix 8)", () => {
+    // A session's hand-off giving principle 1, recurring principle 2 and Reel idea 3 again is refused, in plain words.
+    const record = { id: ID, kind: "session", name: { text: "Session, 2026-10-22", placeholder: false }, session: { marked: "2026-10-22T10:00:00-05:00", cleared: null } };
+    const handoff = { session: { principles: [{ n: 1 }, { n: 5 }], recurringPrinciples: [{ n: 2 }], reelsToFilm: [{ n: 3 }] } };
+    assert.equal(numbersTakenWords(record, handoff, [1, 2, 3]), "Session, 2026-10-22's hand-off would give principle 1, recurring principle 2 and Reel idea 3 again: another version of the video gave those numbers already, and a number is never given twice within a video. Ask Jason. Nothing was written.");
+    assert.equal(numbersTakenWords(record, handoff, [4, 6]), "");
+    // Another version's session hand-off under the id: its items' numbers are taken.
+    const t = setup();
+    const old = original(t);
+    const next = later(t, SECOND, ID);
+    const session = { ...V2.session, video: { ...V2.session.video, id: ID }, reels: [], session: { principles: [{ ...V2.session.session.principles[0], n: 6 }], recurringPrinciples: [{ n: 8, text: "A point." }], reelsToFilm: [{ n: 7, idea: "An idea", words: "Words.", why: "", principle: null }] } };
+    lay(old.folder, "final/Session, 2026-10-22.brimm-ops.json", session);
+    const v2 = { root: t.root, settings: { ...t.ctx.settings, handoffVersion: 2 } };
+    assert.deepEqual(handoffTarget(v2, next).taken, [6, 7, 8]);
     t.done();
   });
   it("takes nothing from another video, and passes over what cannot be read", () => {

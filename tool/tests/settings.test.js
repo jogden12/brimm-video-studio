@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed } from "../settings.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -254,6 +254,18 @@ describe("the switch's settings", () => {
     assert.equal(teachingsOn(s, at - 1), false);
     assert.equal(teachingsOn(s, at - 24 * 60 * 60 * 1000), false);
     assert.equal(teachingsOn(s, new Date(at - 1)), false);
+  });
+  it("say the teachings lapsed only once 90 days have passed since a whole setting turned them on", () => {
+    const s = { ...BASE, sessionTeachings: TEACHINGS };
+    const end = Date.parse("2026-10-22T20:00:00-04:00") + 90 * 24 * 60 * 60 * 1000;
+    assert.equal(teachingsLapsed(s, end - 1), false);
+    assert.equal(teachingsLapsed(s, end), true);
+    assert.equal(teachingsLapsed(s, new Date(end + 1)), true);
+    // Turned on later than now is off, not lapsed; and a setting that is off or not whole has nothing to lapse.
+    assert.equal(teachingsLapsed(s, Date.parse(TEACHINGS.at) - 1), false);
+    for (const off of [BASE, { ...BASE, sessionTeachings: null }, { ...BASE, sessionTeachings: { ...TEACHINGS, on: false } }, { ...BASE, sessionTeachings: { ...TEACHINGS, accounts: { cli: "a@b.c" } } }, undefined]) {
+      assert.equal(teachingsLapsed(off, end + 1), false, JSON.stringify(off));
+    }
   });
   it("have teachings from sessions off unless they are there, on, and whole", () => {
     const now = Date.parse("2026-10-23T09:00:00-04:00");

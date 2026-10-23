@@ -112,6 +112,14 @@ export function teachingsOn(s, now = Date.now()) {
   return age >= 0 && age < TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
 }
 
+/** Whether the teachings from sessions are off on this Mac because Jason's check has lapsed: the settings say, whole, that he
+    turned them on, and 90 days or more have passed since. Off for any other reason (never turned on, turned on later than now)
+    is not lapsed. `now` is as teachingsOn takes it. */
+export function teachingsLapsed(s, now = Date.now()) {
+  const t = s?.sessionTeachings;
+  return teachingsWhole(t) && Number(now) - Date.parse(t.at) >= TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
+}
+
 /** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words. Any field a later version of
     brimm-video adds is kept as it is. */
 export function readSettings(home) {

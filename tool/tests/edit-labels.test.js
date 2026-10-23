@@ -109,7 +109,11 @@ const TODAY_ASKED = {
   text: [[FOLDER], []],
   graphic: [[FOLDER], []],
   preset: [[FOLDER], []],
-  cut: [[FOLDER, "remove", "--words", "x"], []]
+  cut: [[FOLDER, "remove", "--words", "x"], []],
+  // A session's commands, new with the switch: tests/edit-session-mark.test.js pins their words.
+  teachings: [],
+  principles: [],
+  ideas: []
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -445,13 +449,14 @@ describe("a command the gate lets through, for a gated video", () => {
     t.done();
   });
   it("keeps every line of a scoped command free of the video's names: finish is refused at once for a session, and for a video marked one", async () => {
-    // With the training gate on, the gate lets finish through for either, and finish refuses it at once, by its label, before it
-    // looks in any folder for what Final Cut made (finish.js cannotFinish, which reads a mark by the gate's predicate).
+    // With the training gate on, the gate lets finish through for either. A session's own finish (F7) refuses it at once on a Mac
+    // that hands off version 1; a video of another kind marked one is refused at once, by its label, before finish looks in any
+    // folder for what Final Cut made (finish.js cannotFinish, which reads a mark by the gate's predicate).
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: SESSION_OVER });
     const refused = await on(t.ctx.deps, "finish", SESSION);
-    assert.deepEqual([refused.code, refused.said], [1, [`${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    assert.deepEqual([refused.code, refused.said], [1, ["A session's hand-off is written once this Mac hands off version 2: ask Jason."]]);
     const u = setup();
     writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(u, { over: MARKED_OVER });
@@ -798,7 +803,10 @@ describe("the walk: every command, for a video imported lightly from a file name
     text: [[label], []],
     graphic: [[label], []],
     preset: [[label], []],
-    cut: [[label, "remove", "--words", "x"], []]
+    cut: [[label, "remove", "--words", "x"], []],
+    teachings: [[label], [label, "--transcript-only"], []],
+    principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
+    ideas: [[label], [label, "edit", "1", "--words", "x"], []]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);
@@ -1175,12 +1183,16 @@ describe("the say filter's names (fix 7)", () => {
     }
   });
   it("leaves a path that is not the video's readable, and keeps the net on for a session whose name is its file's", async () => {
-    // A session whose name is its file's: finish refuses it at once (finish.js cannotFinish), by its label.
+    // A session whose name is its file's: its own finish (F7) refuses it at once on a Mac that hands off version 1, naming nothing;
+    // and under version 2 for that name, naming nothing either (F7 fix 1).
     const t = setup();
     writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(t, { over: { ...SESSION_OVER, name: { text: STEM, placeholder: true } } });
     const refused = await on(t.ctx.deps, "finish", LABEL);
-    assert.deepEqual([refused.code, refused.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    assert.deepEqual([refused.code, refused.said], [1, ["A session's hand-off is written once this Mac hands off version 2: ask Jason."]]);
+    writeSettings(t.home, { handoffVersion: 2 });
+    const unread = await on(t.ctx.deps, "finish", LABEL);
+    assert.deepEqual([unread.code, unread.said], [1, ["This session's name is the name of its video's file: give it another name first. Nothing was written."]]);
     // A video marked a session, not cleared, whose name is its file's: a command the gate keeps open that says a path of this Mac's
     // own, and the name of the file, says the path whole and the name as "the video".
     const u = setup();

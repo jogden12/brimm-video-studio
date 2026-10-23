@@ -35,7 +35,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
-import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
+import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -60,7 +60,9 @@ import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf }
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
-import { readEpisodeNow, READ_KINDS } from "./reading.js";
+import { readEpisodeNow, accountOf, READ_KINDS } from "./reading.js";
+import { approve, EDITS } from "./sessions.js";
+import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -82,6 +84,15 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         mark: it asks on a dialog on this Mac, and only her click clears it
   node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
   node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
+  node edit.js teachings "<session>" [--transcript-only]
+                                        her answer for a client or group session: its teachings, which Claude reads once,
+                                        detached, only once Jason has turned teachings on for this Mac; or with
+                                        --transcript-only, its transcript alone, and nothing goes to Claude
+  node edit.js principles "<session>" [recurring] [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]
+                                        the principles Claude read in a session, and what is decided of each: keep, drop or
+                                        change them; with recurring, the principles said more than once
+  node edit.js ideas "<session>" [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]
+                                        the Reel ideas Claude read in a session: keep, drop or change them
   node edit.js open "<episode>" [--take-over]
                                         check its files are here, bring over those that are not, claim it for this
                                         Mac, and show what is decided for it. Another Mac's claim refuses it, unless
@@ -236,8 +247,9 @@ function gateOf(ctx, e, records, said, inForce) {
   if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
   if (inForce && (lightImport(ctx.settings) || layoutOf(inForce) === 3) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const on = teachingsOn(ctx.settings, ctx.now());
+  const lapsed = teachingsLapsed(ctx.settings, ctx.now());
   for (const record of records.filter(recordShaped)) {
-    const why = gateFor(ctx.asked.command, record, { teachingsOn: on, said }, ctx.asked.words);
+    const why = gateFor(ctx.asked.command, record, { teachingsOn: on, lapsed, said }, ctx.asked.words);
     if (why) return refused(why);
   }
   return null;
@@ -1684,6 +1696,8 @@ async function finish(ctx, rest) {
   }
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
+  // A session's finish is its own: the hand-off of what she approved of its teachings.
+  if (taughtSession(got.record)) return finishSessionCommand(ctx, { ...got.found, record: got.record });
   const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
   return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [] });
 }
@@ -2299,12 +2313,18 @@ async function free(ctx) {
   return 1;
 }
 
-/** `name "<episode>" "<name>"`. */
+/** `name "<episode>" "<name>"`. For a client or group session, a name that holds a name brimm-video can see in it is refused
+    (sessionNameWhy). */
 async function name(ctx, rest) {
   const [said, ...words] = rest;
   const got = episodeFor(ctx, said ? [said] : [], { newerEnds: 1 });
   if (!got.found) return got.code;
-  return nameEpisode(ctx, { ...got.found, record: got.record }, words.join(" "));
+  const found = { ...got.found, record: got.record };
+  if (asSession(got.record)) {
+    const why = await sessionNameWhy(ctx, found, words.join(" "));
+    if (why) return refuse(ctx, why);
+  }
+  return nameEpisode(ctx, found, words.join(" "));
 }
 
 /** `title "<episode>" [reel <n>] [--words "<words>"] [--approve] [--change]`: the episode's title, or a Reel's. */
@@ -3529,36 +3549,13 @@ async function answerKind(ctx, found, plan, began) {
     const late = clearedAfterClick(ctx, found, record, plan, began);
     if (late) return refuse(ctx, late === TOO_LATE ? late : stop(late));
   }
-  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
-  // The claim, as open makes it. The record read again is the one the answer is written on.
+  // The claim, as open makes it. The record read again is the one the answer is written on. A clearing that stops here says first
+  // that nothing was cleared, and lets go of the claim it wrote when a record was written on top of it.
   let base = record;
   if (!record.editing || record.editing.by !== ctx.machine) {
-    if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return 1;
-    await wait(CLAIM_WAIT_MS);
-    const again = readEpisode(found.folder);
-    if (!again.record) {
-      say(stop(notRead(ctx, { ...found, read: again })));
-      return 1;
-    }
-    const undid = undone(again.record, ctx.home);
-    if (undid || !again.record.editing) {
-      say(stop(`Dropbox undid this Mac's claim on ${name}. Say your answer again.`));
-      if (undid) acceptRev(ctx.home, again.record.id, again.record.rev);
-      return 1;
-    }
-    if (again.record.editing.by !== ctx.machine) {
-      say(stop(beingAnswered(name, again.record.editing.by)));
-      return 1;
-    }
-    // Nothing is written on a claim but the answer: any record on top of it, even one that keeps the claim, is not the claim this
-    // command wrote.
-    if (again.record.rev !== record.rev + 1) {
-      if (plan.clearSession) await letGoClaimWritten(ctx, found, again.record);
-      say(stop(changedMeanwhile(name)));
-      return 1;
-    }
-    if (!(await (ctx.deps.online || online)())) say(OFFLINE);
-    base = again.record;
+    const claim = await claimAndWait(ctx, found, record, { again: "Say your answer again.", held: (by) => beingAnswered(name, by), changed: changedMeanwhile(name), said: stop, ...(plan.clearSession ? { onChanged: (on) => letGoClaimWritten(ctx, found, on) } : {}) });
+    if (!claim.record) return claim.code;
+    base = claim.record;
     const late = answerWhy(ctx, found, base, plan);
     if (late) {
       if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
@@ -3621,20 +3618,66 @@ async function answerKind(ctx, found, plan, began) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
     return 0;
   }
-  // The reading's result is the one this run left, not an older one: a reading that was done before is told apart by when it ended.
-  // It is waited for within the time this command has left of COMMAND_BUDGET_MS.
+  return waitForReading(ctx, found, name, previous, began);
+}
+
+/** Claim the episode `found`, whose record is `record`, for this Mac, as `open` does: the claim is written, Dropbox is given
+    CLAIM_WAIT_MS, and the record is read again. It must be the claim this command wrote, with no other record on top of it, even
+    one that keeps the claim. Resolves { record }, the record read again, or { code } once it has said why not: the record cannot
+    be read; Dropbox undid the claim (`again`, what she is to do, follows); another Mac's claim came across (`held`, given that
+    Mac); or a record was written on top of it (`changed`). It warns when this Mac seems to be offline. `kind` and `teachings`
+    claim a video so before they write on it. Each line it says goes through `said` first (kind's clearing says first that nothing
+    was cleared), and `onChanged`, when given, is waited for with the record on top before `changed` is said. */
+async function claimAndWait(ctx, found, record, { again, held, changed, said = (line) => line, onChanged = null }) {
+  const { say } = ctx;
+  const name = shownName(record);
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return { code: 1 };
+  await wait(CLAIM_WAIT_MS);
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    say(said(notRead(ctx, { ...found, read })));
+    return { code: 1 };
+  }
+  const undid = undone(read.record, ctx.home);
+  if (undid || !read.record.editing) {
+    say(said(`Dropbox undid this Mac's claim on ${name}. ${again}`));
+    if (undid) acceptRev(ctx.home, read.record.id, read.record.rev);
+    return { code: 1 };
+  }
+  if (read.record.editing.by !== ctx.machine) {
+    say(said(held(read.record.editing.by)));
+    return { code: 1 };
+  }
+  // Nothing is written on a claim but what the command writes next: any record on top of it, even one that keeps the claim, is
+  // not the claim this command wrote.
+  if (read.record.rev !== record.rev + 1) {
+    if (onChanged) await onChanged(read.record);
+    say(said(changed));
+    return { code: 1 };
+  }
+  if (!(await (ctx.deps.online || online)())) say(OFFLINE);
+  return { record: read.record };
+}
+
+/** Wait in the foreground for the reading just started of the episode `found` (named `name`), within READ_WAIT_MS and what this
+    command has left of COMMAND_BUDGET_MS from `began`, and say what it found as `status` says a result, or that a notice will
+    come. The reading's result is the one this run left, not `previous`, an older one: a reading that was done before is told apart
+    by when it ended. Resolves the command's code. */
+async function waitForReading(ctx, found, name, previous, began) {
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   const waitFrom = ctx.now();
   const budget = Math.min(READ_WAIT_MS, COMMAND_BUDGET_MS - (waitFrom - began));
   for (;;) {
     const result = readResult(ctx.home, found.name, "read");
     if (result && (!previous || result.ended !== previous.ended || result.started !== previous.started)) {
-      say(ranLine(ctx, name, result, (text) => text, result.next, result.early === true && runningCommand(ctx.home, found.name, ctx.alive) === "read"));
+      ctx.say(ranLine(ctx, name, result, (text) => text, result.next, result.early === true && runningCommand(ctx.home, found.name, ctx.alive) === "read"));
       return result.ok ? 0 : 1;
     }
     if (ctx.now() - waitFrom >= budget) break;
     await wait(READ_POLL_MS);
   }
-  say(`Claude is still reading ${name}. A notice will come on this Mac when it is done: then say "what did Claude find?"`);
+  ctx.say(`Claude is still reading ${name}. A notice will come on this Mac when it is done: then say "what did Claude find?"`);
   return 0;
 }
 
@@ -3695,9 +3738,326 @@ export async function whichCommand(ctx, rest) {
   return 0;
 }
 
-/** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` starts it), and is in no
-    help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut };
+// --- A client or group session's teachings (spec 2026-10-22, sections 2, 3 and 8) ---
+
+const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
+/** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"), or that is
+    its video file's name, and what an edit of hers says of words that hold one. */
+const nameHolds = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
+const FILES_NAME = "That is the name of the video's file: give the session another name.";
+const NO_FILE_NAME = "That name cannot name the session's files: give it another.";
+const NAME_TOO_LONG = `That name is longer than ${SESSION_NAME_MOST} characters: give a shorter one.`;
+const editHolds = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
+/** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
+const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
+/** What `finish` says of a session on a Mac that hands off version 1, which has no session kind. */
+const SESSION_V1 = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What is said while a session's teachings or the files its names are seen from are not whole on this Mac yet. */
+const TEACHINGS_COMING = "Dropbox is still bringing its teachings over to this Mac: say it again in a minute.";
+
+/** "1 thing", "2 things". */
+const counted = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Some items of one of a session's lists, by their numbers, as she reads of them: "principle 3", "Reel ideas 1 and 2". */
+const itemsSaid = (key, ns) => {
+  const [, one, many] = ITEM_LISTS.find(([k]) => k === key);
+  return `${ns.length === 1 ? one : many} ${listed(ns.map(String))}`;
+};
+
+/** Whether a record is held back as a session: of kind session, or of another kind with a session mark not cleared. A video not
+    yet answered is not one. */
+const asSession = (record) => recordKind(record) === "session" || (recordKind(record) !== null && gated(record));
+/** Whether a record is a client or group session whose teachings may be asked for, decided and handed off: of kind session, its
+    mark not cleared. One whose mark she cleared by her click on the dialog is read as the kind she answered with it (F8). */
+const taughtSession = (record) => recordKind(record) === "session" && gated(record);
+
+/** The files `rels` of the episode `found` that are still not whole on this Mac once each one that was not has been read through
+    (dropbox.js readThrough, as a reading reads its files), so that Dropbox brings it down: the gate refuses `bring` for a
+    session, and a file online-only on this Mac would otherwise never come. */
+async function broughtOver(ctx, found, rels) {
+  for (const rel of rels.filter((r) => !ctx.isWhole(join(found.folder, r)))) {
+    try {
+      await (ctx.deps.readAll || readThrough)(join(found.folder, rel));
+    } catch (e) {
+      // It is said by what is still not whole.
+    }
+  }
+  return rels.filter((r) => !ctx.isWhole(join(found.folder, r)));
+}
+
+/** The names brimm-video can see in the session `found` (teachings.js sessionSeen), once what they are seen from is whole on this
+    Mac, read through if need be: { names } or { why }, which fails closed. */
+async function sessionNames(ctx, found) {
+  const { record } = found;
+  if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
+  const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+  return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names, hers: seen.hers };
+}
+
+/** Why a session's record may not be written on by this Mac now, in plain words, or "": another Mac has it, or a run is at work
+    on it. A `read` whose reading of the teachings asked for is in the record already is only making its late check, which
+    replaces no record: it does not stop her decisions or the hand-off; and with `read`, no `read` at all stops what is written
+    (her answer of the transcript only, which the reading refuses before its call once it is in the record). `what` says what
+    was not done. */
+function sessionBusy(ctx, found, record, what, { read = false } = {}) {
+  const name = shownName(record);
+  const held = heldElsewhere(record, ctx.machine);
+  if (held) return `${held.by} has ${name} open, so ${what}. Say it again once it is let go there.`;
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (!running || (read && running === "read")) return "";
+  const reading = sessionReading(record);
+  const asked = record.session && Date.parse(record.session.asked);
+  if (running === "read" && reading && Date.parse(reading.at) >= asked) return "";
+  return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+}
+
+/** `teachings "<session>" [--transcript-only]`: her answer to "what do you want from it?" for a client or group session (spec 2,
+    "The session mark"). With --transcript-only, her answer that its transcript stays on this Mac is recorded, and nothing goes
+    to Claude: the gate lets that through with the training gate off. Otherwise the session's one reading is asked for, refused,
+    with nothing asked or written, in this order: a video that is not a session; this Mac's training gate off, or lapsed, 90
+    days or more after Jason turned it on (the gate says these first); the claude command on this Mac signed in to another
+    account than the one Jason checked, or none it can say (`claude auth status`, reading.js accountOf); and this Mac's readings
+    off. Then it holds the answer lock, claims the session as `kind` does (claimAndWait), records that its teachings were asked
+    for, and when (`session.teachings` "asked", `session.asked`), and starts the reading detached (`read --kind session --rev
+    <rev>`), which reads it once for this ask, and waits for it in the foreground as `kind` does. Asked again after a reading, it
+    is read again: the earlier teachings are set aside, and its items numbered on. */
+export async function teachingsCommand(ctx, rest) {
+  const began = ctx.now();
+  const { words, flags } = flagsOf(rest, []);
+  if (Object.keys(flags).some((flag) => flag !== "transcript-only")) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: teachings are read only from one.`);
+  if (flags["transcript-only"]) return transcriptOnly(ctx, found, record);
+  const gate = teachingsWhy(ctx.settings, ctx.now());
+  if (gate) return refuse(ctx, gate);
+  const tools = ctx.deps.tools || findPrograms();
+  if (!tools.claude) return refuse(ctx, "Claude Code is not installed on this Mac, so Claude cannot read it.");
+  const work = join(runsFolder(ctx.home), `teachings-${process.pid}-${ctx.now()}`);
+  let account = "";
+  try {
+    account = await accountOf({ run: ctx.deps.run || runProgram, tools }, join(work, "account"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  const other = accountWhy(account, ctx.settings);
+  if (other) return refuse(ctx, other);
+  if (ctx.settings.readings === false) return refuse(ctx, READINGS_OFF);
+  const lock = takeAnswerLock(ctx, found.name, "teachings");
+  if (!lock) return refuse(ctx, busyWhy(name));
+  try {
+    return await askTeachings(ctx, found, began);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** `teachings "<session>" --transcript-only`: her answer recorded, the session's record and nothing else. */
+async function transcriptOnly(ctx, found, record) {
+  const name = shownName(record);
+  const said = `${name}: its transcript stays on this Mac. Nothing goes to Claude.`;
+  // Her answer is recorded while the reading of an earlier ask still waits: that reading refuses, before it asks Claude anything,
+  // once the record no longer says her teachings are asked for.
+  const busy = sessionBusy(ctx, found, record, "her answer was not recorded", { read: true });
+  if (busy) return refuse(ctx, busy);
+  if (record.session && record.session.teachings === "transcript only") {
+    ctx.say(said);
+    return 0;
+  }
+  return save(ctx, { ...found, record }, { ...record, session: { ...record.session, teachings: "transcript only" } }, said);
+}
+
+/** What `teachings` does once it holds the answer lock of the session `found`: see teachingsCommand. */
+async function askTeachings(ctx, found, began) {
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    ctx.say(notRead(ctx, { ...found, read }));
+    return 1;
+  }
+  if (read.newer) {
+    ctx.say(newerWhy(read.record));
+    return 1;
+  }
+  const { record } = read;
+  const name = shownName(record);
+  const why = (r) => (!taughtSession(r) ? `${name} is not a client or group session: teachings are read only from one.` : sessionBusy(ctx, found, { ...r, reading: null }, "its teachings were not asked for"));
+  const first = why(record);
+  if (first) return refuse(ctx, first);
+  let base = record;
+  if (!record.editing || record.editing.by !== ctx.machine) {
+    const claim = await claimAndWait(ctx, found, record, { again: "Say it again.", held: (by) => `${by} has ${name} open, so its teachings were not asked for. Say it again once it is let go there.`, changed: `${name} changed meanwhile: say it again.` });
+    if (!claim.record) return claim.code;
+    base = claim.record;
+    const late = why(base);
+    if (late) return refuse(ctx, late);
+  }
+  const at = localStamp(new Date(ctx.now()));
+  if ((await save(ctx, { ...found, record: base }, { ...base, session: { ...base.session, teachings: "asked", asked: at } }, "")) !== 0) return 1;
+  // Right before the reading is started the record is the ask written, and nothing is at work on the episode.
+  const wrote = readEpisode(found.folder);
+  if (!wrote.record || wrote.record.rev !== base.rev + 1 || recordKind(wrote.record) !== "session") {
+    ctx.say(`${name} changed meanwhile: say it again.`);
+    return 1;
+  }
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) {
+    ctx.say(`${name}: its teachings are asked for, but ${running} is running for it, so Claude's reading was not started. Say it again when it has finished.`);
+    return 1;
+  }
+  const previous = readResult(ctx.home, found.name, "read");
+  startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", "session", "--rev", String(wrote.record.rev)] });
+  return waitForReading(ctx, found, name, previous, began);
+}
+
+/** `principles "<session>" [recurring] [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]` and `ideas "<session>" [keep … |
+    drop … | edit …]`: what Claude read in a client or group session, for her to decide item by item (spec 3, "Client or group
+    session"). With no words, each item as she reads it (teachings.js: a principle's example and key phrases first, its
+    source_context marked as hers only), with the line that brimm-video took out the names it could see, what it took out (by
+    field and why, never the name), and what she has decided of each. With words, sessions.js approve keeps, drops or changes
+    the items named, of the principles, the recurring principles (`recurring`) or the Reel ideas, and only the keys she may
+    change (EDITS); her decision of each, and what she changed, go into the record in one write (`session.decided`,
+    `session.edits`): the record alone marks an item approved, and only her command writes it (spec 8). Refused, writing nothing,
+    for a video that is not a session, before Claude has read its teachings, while another Mac has it or a run is at work on it,
+    and for what approve cannot do. */
+async function principles(ctx, rest) {
+  return sessionItems(ctx, rest, "principles");
+}
+async function ideas(ctx, rest) {
+  return sessionItems(ctx, rest, "ideas");
+}
+
+async function sessionItems(ctx, rest, command) {
+  const [said, ...words] = rest;
+  const got = episodeFor(ctx, said ? [said] : [], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: it has no ${command === "ideas" ? "Reel ideas" : "principles"} of its own.`);
+  const gate = teachingsWhy(ctx.settings, ctx.now());
+  if (gate) return refuse(ctx, gate);
+  let read = readTeachings(found.folder, record, ctx.isWhole);
+  if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, record, ctx.isWhole);
+  if (read.none) return refuse(ctx, `${name} has no teachings yet: Claude has not read it.`);
+  if (read.coming) return refuse(ctx, TEACHINGS_COMING);
+  if (read.why) return refuse(ctx, `${name}'s teachings cannot be read (${read.why}).`);
+  const items = itemsOf(read.teachings, record.session);
+  const recurring = command === "principles" && String(words[0] || "").toLowerCase() === "recurring";
+  const key = command === "ideas" ? "reelIdeas" : recurring ? "recurringPrinciples" : "principles";
+  const asked = recurring ? words.slice(1) : words;
+  if (!asked.length) return sayItems(ctx, name, record, read.teachings, items, command);
+  const busy = sessionBusy(ctx, found, record, "nothing was decided");
+  if (busy) return refuse(ctx, busy);
+  const done = approve(items[key], asked, EDITS[key]);
+  if (done.why) return refuse(ctx, done.why);
+  // What she changes is checked now, as her words, against the names brimm-video can see (teachings.js herWordsName), and
+  // refused when it holds one, saying which: the finish checks it again.
+  const changedTexts = done.items.flatMap((item) => {
+    const before = items[key].find((one) => one.n === item.n);
+    return EDITS[key].filter((field) => item[field] !== before[field]).map((field) => item[field]);
+  });
+  if (changedTexts.length) {
+    const seen = await sessionNames(ctx, { ...found, record });
+    if (seen.why) return refuse(ctx, seen.why);
+    const word = changedTexts.map((text) => herWordsName(text, seen.hers)).find(Boolean);
+    if (word) return refuse(ctx, editHolds(word));
+  }
+  // Her decision of each item, and what she changed of one, by the item's number.
+  const session = record.session;
+  const decided = { ...(session.decided || {}), [key]: { ...((session.decided || {})[key] || {}) } };
+  const edits = { ...(session.edits || {}) };
+  for (const item of done.items) {
+    const before = items[key].find((one) => one.n === item.n);
+    if (typeof item.approved === "boolean") decided[key][String(item.n)] = item.approved ? "kept" : "dropped";
+    const changed = EDITS[key].filter((field) => item[field] !== before[field]);
+    if (changed.length) edits[key] = { ...(edits[key] || {}), [String(item.n)]: { ...((edits[key] || {})[String(item.n)] || {}), ...Object.fromEntries(changed.map((field) => [field, item[field]])) } };
+  }
+  const next = { ...session, decided, ...(Object.keys(edits).length ? { edits } : {}) };
+  if ((await save(ctx, { ...found, record }, { ...record, session: next }, "")) !== 0) return 1;
+  const verb = asked[0].toLowerCase();
+  const end = asked.findIndex((w) => w.startsWith("--"));
+  const ns = [...new Set(asked.slice(1, end === -1 ? undefined : end).flatMap((w) => w.split(",")).map((w) => w.trim()).filter(Boolean).map(Number))];
+  ctx.say(`${name}: ${itemsSaid(key, ns)} ${verb === "keep" ? "kept" : verb === "drop" ? "dropped" : "changed and kept"}.`);
+  // What is still to decide, of every list, as the items stand now.
+  const now = itemsOf(read.teachings, next);
+  const open = ITEM_LISTS.map(([k]) => [k, now[k].filter((item) => typeof item.approved !== "boolean").map((item) => item.n)]).filter(([, left]) => left.length);
+  ctx.say(open.length ? `Still to decide: ${open.map(([k, left]) => itemsSaid(k, left)).join("; ")}.` : "Every item is decided: finish it to write its hand-off.");
+  return 0;
+}
+
+/** Say a session's items as she reads them (see principles): the principles and recurring principles, or the Reel ideas. */
+function sayItems(ctx, name, record, teachings, items, command) {
+  const session = record.session || {};
+  const status = (key, item) => {
+    const decided = ((session.decided || {})[key] || {})[String(item.n)];
+    const changed = Boolean(((session.edits || {})[key] || {})[String(item.n)]);
+    return decided === "kept" ? (changed ? "Kept, as you changed it." : "Kept.") : decided === "dropped" ? "Dropped." : "Not decided yet.";
+  };
+  const day = String(teachings.made || (sessionReading(record) || {}).at || "").slice(0, 10);
+  const skipped = teachings.skipped ? [teachings.skipped] : [];
+  const lines = command === "ideas"
+    ? [
+        `${name}: ${counted(items.reelIdeas.length, "Reel idea")}, from Claude's reading of ${day}.`, CHECK_NAMES, ...takenLines(teachings.dropped, ["Reel idea"]), ...skipped,
+        ...(items.reelIdeas.length ? items.reelIdeas.flatMap((r) => ideaLines(r, status("reelIdeas", r))) : ["Claude found no Reel ideas in it."]),
+        'Say keep, drop or edit, then the numbers: keep 1 3, drop 2, edit 3 --words "…".'
+      ]
+    : [
+        `${name}: ${counted(items.principles.length, "principle")} and ${counted(items.recurringPrinciples.length, "recurring principle")}, from Claude's reading of ${day}.`, CHECK_NAMES,
+        ...takenLines(teachings.dropped, ["Principle", "Recurring principle"]), ...skipped,
+        ...(items.principles.length ? items.principles.flatMap((p) => principleLines(p, status("principles", p))) : ["Claude found no principles in it."]),
+        ...items.recurringPrinciples.map((r) => recurringLine(r, status("recurringPrinciples", r))),
+        'Say keep, drop or edit, then the numbers: keep 1 3, drop 2, edit 3 --name "…". For a recurring principle, say recurring first: recurring keep 1.'
+      ];
+  for (const line of lines) ctx.say(line);
+  return 0;
+}
+
+/** Why the name `words` cannot be given to the session `found`, in plain words, or "": it holds a name brimm-video can see in
+    the session (sessions.js holdsName, against teachings.js sessionSeen), or what that is seen from is not whole on this Mac,
+    or cannot be read, which fails closed (spec 8, "A session's name"). */
+async function sessionNameWhy(ctx, found, words) {
+  const { record } = found;
+  const text = oneLine(words);
+  if (!text) return "";
+  // Its label is the session's own, and holds no one's name.
+  if (SESSION_LABEL.test(text)) return "";
+  if ([...text].length > SESSION_NAME_MOST) return NAME_TOO_LONG;
+  if (isFilesName(text, record)) return FILES_NAME;
+  // Its teachings files and its hand-off are named by it: a name that cannot name a file, as one that begins with a dot, is none.
+  if (!isTeachingsName(`${fileSafe(text)}.principles.json`)) return NO_FILE_NAME;
+  const seen = await sessionNames(ctx, found);
+  if (seen.why) return seen.why;
+  const word = herWordsName(text, seen.hers);
+  return word ? nameHolds(word) : "";
+}
+
+/** `finish "<session>"` for a client or group session: its own hand-off, of what she approved (finish.js finishSession), never the
+    Final Cut finish, which cannotFinish refuses for one. Refused while another Mac has it or a run is at work on it. */
+async function finishSessionCommand(ctx, found) {
+  const { record } = found;
+  const name = shownName(record);
+  const busy = sessionBusy(ctx, found, record, "its hand-off was not written");
+  if (busy) return refuse(ctx, busy);
+  let done = await finishSession(ctx, found, { host: ctx.settings.host });
+  if (done.coming && !(await broughtOver(ctx, found, done.coming)).length) done = await finishSession(ctx, found, { host: ctx.settings.host });
+  if (done.waits) return refuse(ctx, SESSION_V1);
+  if (done.coming) return refuse(ctx, "Dropbox is still bringing its teachings, or the words they are checked against, over to this Mac: say it again in a minute.");
+  if (done.why) {
+    for (const line of done.why.split("\n")) ctx.say(line);
+    return 1;
+  }
+  for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);
+  const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
+  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film. It is shown in Finder: drop it on the BRIMM Ops page.`);
+  return 0;
+}
+
+/** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
+    and is in no help. */
+const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

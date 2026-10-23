@@ -2,7 +2,7 @@
 // Claude call", and section 3): `kind` starts it detached as `read --now <folder> --kind <kind> --rev <rev>`, and the run asks
 // Claude once with that kind's request, then writes what it read by the rule. A finished video gets Reel suggestions and
 // spellings; a raw one gets cut decisions, notes, graphic ideas, Reel suggestions and spellings, and its rough cut rendered as
-// version 0; an iPhone clip gets spellings and a line on what it is. A session is read only for its teachings (a later step).
+// version 0; an iPhone clip gets spellings and a line on what it is. A session is read only for its teachings (F7's own tests).
 // Then reels.json at version 2, whose candidates have no crops yet, and the readers that need crops, which refuse one.
 // Nothing here runs a real program or touches Dropbox: each test has a root and a home of its own, and Claude, ffprobe, ffmpeg,
 // QuickTime Player and the notice are stand-ins.
@@ -399,12 +399,14 @@ describe("read refuses, asking Claude nothing and writing nothing", () => {
     assert.doesNotMatch(JSON.stringify(result), /Pricing talk/);
     t.done();
   });
-  it("a session, which is read only for its teachings, in a later step, and whose files are never named", async () => {
+  it("a session, which is read only for its teachings, and whose files are never named", async () => {
     const session = sessionLabel("2026-10-14");
     const { t, found } = reading("finished", { over: { kind: "session", name: { text: session, placeholder: false }, session: { marked: AT, on: "Mac Studio", teachings: "asked", cleared: null }, editing: null } });
     const deps = { ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTeachings: { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: ACCOUNT, app: ACCOUNT } } } };
-    for (const kind of ["session", "finished"]) {
-      const result = await refused(t, found, readArgs(kind), SESSION_LATER, deps);
+    // Read as another kind, it is refused as a session; read as a session (F7, tests/edit-session-mark.test.js), only for an ask
+    // its record says when it was made.
+    for (const [kind, words] of [["finished", SESSION_LATER], ["session", `${session}'s teachings were not asked for, so Claude did not read it. Nothing was changed.`]]) {
+      const result = await refused(t, found, readArgs(kind), words, deps);
       assert.doesNotMatch(JSON.stringify(result), /Pricing talk/);
     }
     t.done();
@@ -882,7 +884,7 @@ describe("fix 10 and fix 11", () => {
     const { t, asks } = reading("finished");
     const r = await on(t.ctx.deps, ...readArgs("session"));
     assert.equal(r.code, 1);
-    assert.deepEqual([asks.length, readResult(t.home, FOLDER, "read").failed], [0, [SESSION_LATER]]);
+    assert.deepEqual([asks.length, readResult(t.home, FOLDER, "read").failed], [0, [`${NAME} is no longer answered as a client or group session, so Claude did not read it. Nothing was changed.`]]);
     t.done();
   });
 });
