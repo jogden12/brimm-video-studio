@@ -4654,7 +4654,7 @@ describe("the light import", () => {
       and the record. */
   const LIGHT = ["Talk.cut-plan.json", "Talk.cut-plan.txt", "Talk.mov", "Talk.rough-cut.srt", "Talk.rough-cut.transcript.txt", "Talk.srt", "Talk.transcript.txt", "Talk.words.json", "record/0001.json"];
   const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
-  const READY = `Ready on the Mac Studio: ${LABEL}. In Claude, say "what's waiting?"`;
+  const READY = `Ready: ${LABEL}. In Claude, say "what's waiting?"`;
   const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
   /** The record of an episode written again as she would have answered it: a finished video. */
   const answered = (t, name) => {
@@ -4727,10 +4727,10 @@ describe("the light import", () => {
     assert.ok(statusesOf(full).length > 0 && statusesOf(full).every((s) => !("label" in s)));
     full.done();
   });
-  it("says \"Sallie's laptop\", and not \"the Sallie's laptop\", in the notice of her laptop", async () => {
+  it("names the Mac in the notice once, by the label, which holds it", async () => {
     const t = episodeImport({ machine: "Sallie's laptop" });
     await uneditedFolder(t.drop, t.deps);
-    assert.deepEqual(t.notes, [`Ready on Sallie's laptop: Video of 20 Oct, 15:00 (Sallie's laptop). In Claude, say "what's waiting?"`]);
+    assert.deepEqual(t.notes, [`Ready: Video of 20 Oct, 15:00 (Sallie's laptop). In Claude, say "what's waiting?"`]);
     t.done();
   });
   it("tells the progress panel the light import's four steps, and no others", async () => {

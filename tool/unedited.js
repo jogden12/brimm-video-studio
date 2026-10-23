@@ -63,7 +63,7 @@ import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS }
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
-import { cameFrom, guessKind, labelFor, seenLine, spokenMac } from "./kinds.js";
+import { cameFrom, guessKind, labelFor, seenLine } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { readStatuses, importState } from "./importing.js";
@@ -1072,7 +1072,8 @@ async function workOn(file, deps) {
         progress.fail(why);
         log(`${name}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
-      if (filed && light) notify(`Ready on ${spokenMac(episode.machine)}: ${label}. In Claude, say "what's waiting?"`);
+      // The label names the Mac it was dropped on, so the notice does not say it again.
+      if (filed && light) notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
       else if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
       else notify(`${shown} could not be put into Episodes. It stays in the drop folder; see the log.`);
       finished = !missing.length;
