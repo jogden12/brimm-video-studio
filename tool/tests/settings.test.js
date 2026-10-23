@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, SETTABLE, WRITTEN } from "../settings.js";
+import { newEpisode, recordFile, recordText } from "../episode.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -463,22 +464,35 @@ describe("node settings.js set and sessions", () => {
     unchanged(t);
     t.done();
   });
-  it("set refuses the light import until her chat's question is built, and the Drop folder until it is, changes nothing, and ends with 1", () => {
-    // Parts F and D take these refusals away.
+  it("set refuses the light import until her chat's question is built, changes nothing, and ends with 1", () => {
+    // Part F takes this refusal away. The Drop folder is built: the installer makes it (Part D).
     const t = mac();
     const LIGHT = "The light import needs the question in her chat, which is not built yet.";
-    const DROP = "The Drop folder is not built yet.";
     for (const [argv, said] of [
       [["--import", "light"], LIGHT],
-      [["--drop", "Drop"], DROP],
       [["--readings", "off", "--import", "light"], LIGHT],
-      [["--drop", "Drop", "--handoff", "2"], DROP]
+      // A refused setting changes none of the others told with it, the drop folder among them.
+      [["--drop", "Drop", "--import", "light"], LIGHT]
     ]) {
       t.said.length = 0;
       assert.equal(t.run("set", ...argv), 1, argv.join(" "));
       assert.deepEqual(t.said, [said], argv.join(" "));
     }
     unchanged(t);
+    t.done();
+  });
+  it("set changes the drop folder to Drop, and back, now that the installer makes it, and says what changed", () => {
+    const t = mac();
+    assert.equal(t.run("set", "--drop", "Drop"), 0);
+    assert.deepEqual(t.said, ["The drop folder is now Drop (it was Unedited Video).", `Written: ${settingsFile(t.home)}`]);
+    assert.equal(readSettings(t.home).settings.drop, "Drop");
+    t.said.length = 0;
+    assert.equal(t.run("set", "--drop", "Drop"), 0);
+    assert.deepEqual(t.said, ["The drop folder is Drop already."]);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--drop", "Unedited Video", "--handoff", "2"), 0);
+    assert.deepEqual(t.said, ["The drop folder is now Unedited Video (it was Drop).", "The hand-off version is now 2 (it was 1).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, drop: "Unedited Video", handoffVersion: 2 });
     t.done();
   });
   it("set says how it is used, changes nothing, and ends with 2, when it is asked wrongly", () => {
@@ -704,5 +718,390 @@ describe("node settings.js marker", () => {
     assert.equal(t.marked(t.drop), 2);
     assert.equal(t.marked(), 2);
     t.done();
+  });
+});
+
+describe("node settings.js write and plan, with the settings of the switch", () => {
+  const AT = new Date("2026-10-23T10:00:00-04:00");
+  const LIGHT = "The light import needs the question in her chat, which is not built yet.";
+  const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
+  /** A Mac with settings, `held` over them, whose BRIMM Video is a folder of its own in the test's home folder, with Episodes and
+      its status files. `told` is what install.sh tells write and plan of this Mac. `drop(name)` is its drop folder in `name`'s
+      parent, made; `video(folder, name)` puts a video there; `status(video, more, machine)` is a status file of an import, as one
+      writes it; `episode(folder, video, label)` is an episode that holds a video. */
+  function mac(held = {}) {
+    const t = setup();
+    const root = join(t.home, "BRIMM Video");
+    mkdirSync(join(root, "Episodes", ".importing"), { recursive: true });
+    writeSettings(t.home, { machine: "Mac Studio", root, checkout: CHECKOUT, ...held });
+    const run = async (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT });
+    const folder = (parent = "Unedited Video", machine = "Mac Studio") => {
+      mkdirSync(join(root, parent, machine), { recursive: true });
+      return join(root, parent, machine);
+    };
+    const status = (video, more = {}, machine = "Mac Studio") => writeFileSync(join(root, "Episodes", ".importing", `${video} (${machine}) 1.json`), JSON.stringify({ version: 1, machine, pid: 4242, video, bytes: 5, seconds: 120, step: "Making the rough cut", at: AT.toISOString(), ...more }));
+    const episode = (name, video, bytes, label) => {
+      const path = join(root, "Episodes", name);
+      mkdirSync(join(path, "record"), { recursive: true });
+      const record = { ...newEpisode({ id: "e-20261022-000001", machine: "Mac Studio", at: "2026-10-22T10:00:00-04:00", video: { file: video, bytes, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" }, label }), rev: 1 };
+      writeFileSync(recordFile(path, 1), recordText(record));
+    };
+    const told = ["--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT];
+    return { ...t, root, run, folder, status, episode, told, file: settingsFile(t.home), held: () => readFileSync(settingsFile(t.home), "utf8") };
+  }
+  const put = (folder, name, bytes = "video") => writeFileSync(join(folder, name), bytes);
+
+  it("plan says the settings it would write, whole, as JSON, with the switch's settings and every field it keeps, and writes nothing", async () => {
+    const t = mac({ import: "light", readings: false, handoffVersion: 2, later: { x: 1 } });
+    const before = t.held();
+    assert.equal(await t.run("plan", ...t.told, "--drop", "Drop"), 0);
+    assert.equal(t.said.length, 1);
+    assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: t.root, checkout: CHECKOUT, import: "light", readings: false, handoffVersion: 2, later: { x: 1 }, drop: "Drop" });
+    assert.equal(t.held(), before);
+    // It is what write then writes, to the letter.
+    const planned = t.said[0];
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 0);
+    assert.deepEqual(t.said, [`Written: ${t.file}`]);
+    assert.equal(t.held(), `${planned}\n`);
+    t.done();
+  });
+  it("plan gives the settings of a Mac with no settings as they would be written, with what is told and nothing more", async () => {
+    const t = setup();
+    const run = async (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT });
+    const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT];
+    assert.equal(await run("plan", ...told), 0);
+    assert.equal(t.said[0], JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT }, null, 2));
+    t.said.length = 0;
+    assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "full", "--drop", "Unedited Video"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "full", drop: "Unedited Video" });
+    assert.equal(existsSync(settingsFile(t.home)), false);
+    t.done();
+  });
+  it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
+    const t = mac({ import: "full", readings: false, later: { x: 1 } });
+    assert.equal(await t.run("write", ...t.told, "--handoff", "2", "--drop", "Drop"), 0);
+    assert.deepEqual(t.said, [`Written: ${t.file}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: t.root, checkout: CHECKOUT, import: "full", readings: false, later: { x: 1 }, handoffVersion: 2, drop: "Drop" });
+    // Told off, readings are off; not told, they are as the file has them, on or off: never turned on by a run that names nothing.
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told, "--readings", "on"), 0);
+    assert.equal(readSettings(t.home).settings.readings, true);
+    assert.equal(await t.run("write", ...t.told), 0);
+    assert.equal(readSettings(t.home).settings.readings, true);
+    t.done();
+  });
+  it("write and plan refuse the light import as set does, until her chat's question is built, by the same words, and write nothing", async () => {
+    const t = mac();
+    const before = t.held();
+    for (const command of ["plan", "write"]) {
+      for (const more of [["--import", "light"], ["--drop", "Drop", "--import", "light", "--readings", "off"]]) {
+        t.said.length = 0;
+        assert.equal(await t.run(command, ...t.told, ...more), 1, `${command} ${more.join(" ")}`);
+        assert.deepEqual(t.said, [LIGHT]);
+        assert.equal(t.held(), before);
+      }
+    }
+    // The same on a Mac that has no settings yet: nothing is made.
+    const none = setup();
+    assert.equal(await settingsMain(["write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT, "--import", "light"], { home: none.home, say: (line) => none.said.push(line) }), 1);
+    assert.deepEqual(none.said, [LIGHT]);
+    assert.equal(existsSync(settingsFile(none.home)), false);
+    none.done();
+    t.done();
+  });
+  it("write and plan refuse a value that will not do, naming the option and what it takes, and write nothing", async () => {
+    const t = mac();
+    const before = t.held();
+    for (const command of ["plan", "write"]) {
+      for (const [more, said] of [
+        [["--drop", "Elsewhere"], 'Not written: --drop takes Drop or "Unedited Video".'],
+        [["--import", "heavy"], "Not written: --import takes light or full."],
+        [["--handoff", "3"], "Not written: --handoff takes 1 or 2."],
+        [["--readings", "maybe"], "Not written: --readings takes on or off."]
+      ]) {
+        t.said.length = 0;
+        assert.equal(await t.run(command, ...t.told, ...more), 1, `${command} ${more.join(" ")}`);
+        assert.deepEqual(t.said, [said]);
+        assert.equal(t.held(), before);
+      }
+    }
+    t.done();
+  });
+  it("write and plan say how they are used, and write nothing, when asked wrongly: an option with no value, or one they do not know", async () => {
+    const t = mac();
+    const before = t.held();
+    for (const command of ["plan", "write"]) {
+      for (const more of [["--drop"], ["--import", "full", "--handoff"], ["--rules-only"], ["--clone", "x"], ["--drop", "Drop", "Drop"]]) {
+        t.said.length = 0;
+        assert.equal(await t.run(command, ...t.told, ...more), 2, `${command} ${more.join(" ")}`);
+        assert.equal(t.said.length, 1);
+        assert.match(t.said[0], /^This Mac's settings for episodes/);
+      }
+      t.said.length = 0;
+      assert.equal(await t.run(command, "--machine", "Mac Studio", "--root", t.root, "--drop", "Drop"), 2, command);
+    }
+    assert.equal(t.held(), before);
+    t.done();
+  });
+  it("write and plan stop, and say why, when the settings in the file will not do and what is told does not mend them", async () => {
+    const t = mac();
+    writeFileSync(t.file, t.held().replace('"version": 1', '"version": 1, "import": "ligth"'));
+    const before = t.held();
+    for (const command of ["plan", "write"]) {
+      t.said.length = 0;
+      assert.equal(await t.run(command, ...t.told, "--drop", "Drop"), 1, command);
+      assert.deepEqual(t.said, ['This Mac\'s settings could not be written (the import must be "full" or "light").']);
+      assert.equal(t.held(), before);
+    }
+    // What is told mends it.
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told, "--import", "full"), 0);
+    assert.equal(readSettings(t.home).settings.import, "full");
+    t.done();
+  });
+
+  describe("when the drop folder changes, the old one", () => {
+    const OLD = (t) => join(t.root, "Unedited Video", "Mac Studio");
+    const HEAD = "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:";
+    /** What both commands say of the same Mac with the same folders, and that neither wrote anything. */
+    const refused = async (t, ...more) => {
+      const before = t.held();
+      const said = [];
+      for (const command of ["plan", "write"]) {
+        t.said.length = 0;
+        assert.equal(await t.run(command, ...t.told, ...more), 1, command);
+        said.push([...t.said]);
+        assert.equal(t.held(), before, command);
+      }
+      assert.deepEqual(said[0], said[1]);
+      return said[0];
+    };
+    const allowed = async (t, ...more) => {
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, ...more), 0, t.said.join("\n"));
+      assert.equal(JSON.parse(t.said[0]).drop, more[more.indexOf("--drop") + 1]);
+    };
+    it("is no hindrance when it is empty, or holds only the marker and Finder's files, or does not exist", async () => {
+      const t = mac();
+      await allowed(t, "--drop", "Drop");
+      const old = t.folder();
+      for (const name of [".brimm-watched-by", ".DS_Store", "Icon\r", "notes.txt", "Talk.mov.part", "Talk.mov.download"]) put(old, name);
+      await allowed(t, "--drop", "Drop");
+      t.done();
+    });
+    it("refuses while it holds a video, and names the video by its file name when the import is today's, and says what to do", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov");
+      put(old, "Budget.MP4");
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Budget.MP4: waits in ${old}.`, `  Talk.mov: waits in ${old}.`, ADVICE]);
+      // Once it is taken out, the switch goes through, and write writes.
+      rmSync(join(old, "Talk.mov"));
+      rmSync(join(old, "Budget.MP4"));
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 0);
+      assert.equal(readSettings(t.home).settings.drop, "Drop");
+      t.done();
+    });
+    it("is not looked at when the drop folder does not change, whatever it holds", async () => {
+      const t = mac();
+      put(t.folder(), "Talk.mov");
+      // Not told, told what it is already, and told Unedited Video when the file says none: it stays as it is.
+      await t.run("plan", ...t.told);
+      assert.equal(JSON.parse(t.said.at(-1)).drop, undefined);
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Unedited Video"), 0);
+      assert.deepEqual(t.said, [`Written: ${t.file}`]);
+      put(t.folder("Drop"), "Early.mov");
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 1);
+      t.said.length = 0;
+      rmSync(join(OLD(t), "Talk.mov"));
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 0);
+      // On Drop already, told Drop again: the old folder is not looked at though it holds a video.
+      put(t.folder(), "Stray.mov");
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 0);
+      assert.equal(await t.run("write", ...t.told), 0);
+      t.done();
+    });
+    it("does not hinder the switch because the new folder holds videos", async () => {
+      const t = mac();
+      put(t.folder("Drop"), "Early.mov");
+      await allowed(t, "--drop", "Drop");
+      t.done();
+    });
+    it("is Drop when the switch goes back to Unedited Video: that one is looked at then", async () => {
+      const t = mac({ drop: "Drop" });
+      put(t.folder("Drop"), "Talk.mov");
+      put(t.folder(), "Old.mov");
+      assert.deepEqual(await refused(t, "--drop", "Unedited Video"), [`Not written: the drop folder would change from Drop to Unedited Video, and work is not finished in the old one:`, `  Talk.mov: waits in ${t.folder("Drop")}.`, ADVICE]);
+      t.done();
+    });
+    it("is the Unedited Video folder of a Mac with no settings file too, which a first run with --drop looks at", async () => {
+      const t = setup();
+      const root = join(t.home, "BRIMM Video");
+      mkdirSync(join(root, "Unedited Video", "Mac Studio"), { recursive: true });
+      put(join(root, "Unedited Video", "Mac Studio"), "Talk.mov");
+      const argv = ["write", "--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT, "--drop", "Drop"];
+      assert.equal(await settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT }), 1);
+      assert.equal(t.said[0], HEAD);
+      assert.equal(existsSync(settingsFile(t.home)), false);
+      t.done();
+    });
+    it("refuses while an import of this Mac failed or its late check found a problem, naming it by its video's file name, and by its label when it has one, and never by the status file's name", async () => {
+      const t = mac();
+      t.status("Talk.mov", { failed: "the transcriber stopped on Talk.mov" });
+      t.status("Budget.mov", { problem: "Budget.rough-cut.mp4 is short" });
+      t.status("Light.mov", { failed: "the sound could not be read", label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+      const gone = join(t.root, "Episodes", ".importing");
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [
+        HEAD,
+        `  Budget.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
+        `  Video of 22 Oct, 10:40 (Mac Studio): its import failed, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
+        `  Talk.mov: its import failed, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
+        ADVICE
+      ]);
+      // What a status says of why, which may hold a file's name, and the status files' own names are not said.
+      assert.ok(!said.join("\n").includes("transcriber") && !said.join("\n").includes("(Mac Studio) 1.json") && !said.join("\n").includes("Light.mov"), said.join("\n"));
+      t.done();
+    });
+    it("names a video that is there once, whether it is waiting or its import failed, and says what to do for it", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov");
+      t.status("Talk.mov", { failed: "the transcriber stopped" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  Talk.mov: its import failed.", ADVICE]);
+      t.done();
+    });
+    it("leaves alone what is not this Mac's, or is not trouble: another Mac's failed import, an import at work, one that stopped, a video held on purpose", async () => {
+      const t = mac();
+      t.status("Theirs.mov", { failed: "the sound could not be read" }, "Sallie's laptop");
+      t.status("Mine.mov", {}, "Mac Studio");
+      t.status("Stopped.mov", { at: new Date(AT.getTime() - 30 * 60000).toISOString() });
+      t.status("Zoom.mp4", { held: "a Zoom download, which waits for its other files" });
+      await allowed(t, "--drop", "Drop");
+      t.done();
+    });
+    it("names a waiting video by the label of this Mac's status for it, or of the episode that holds it", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      put(old, "Budget.mov", "123456");
+      t.status("Talk.mov", { bytes: 5, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, "Video of 21 Oct, 09:00 (Mac Studio)");
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Video of 21 Oct, 09:00 (Mac Studio): waits in ${old}.`, `  Video of 20 Oct, 15:00 (Mac Studio): waits in ${old}.`, ADVICE]);
+      t.done();
+    });
+    it("under the light import counts a waiting video that has no label, and does not name it: its name may be a client's", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4");
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  1 video waits in ${old}.`, ADVICE]);
+      put(old, "Sales call Acme Ltd.mov");
+      const two = await refused(t, "--drop", "Drop");
+      assert.deepEqual(two, [HEAD, `  2 videos wait in ${old}.`, ADVICE]);
+      // With a label, by the label: from this Mac's status, or from the episode that holds the video.
+      t.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)" });
+      put(old, "Coaching call Jane Doe.mp4", "12345");
+      t.episode("2026-10-22 Sales call (Mac Studio)", "Sales call Acme Ltd.mov", 5, "Video of 22 Oct, 11:00 (Mac Studio)");
+      put(old, "Sales call Acme Ltd.mov", "12345");
+      const labelled = await refused(t, "--drop", "Drop");
+      assert.deepEqual(labelled, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.`, `  Video of 22 Oct, 11:00 (Mac Studio): waits in ${old}.`, ADVICE]);
+      for (const said of [...two, ...labelled]) assert.ok(!/Jane Doe|Acme/.test(said), said);
+      t.done();
+    });
+    it("counts a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
+      // The videos came under the light import whatever this run says of it, so they are not named; the full import is written
+      // straight into the file, as the light import is, since set and write refuse the light one until it is built.
+      const t = mac({ import: "light" });
+      put(t.folder(), "Coaching call Jane Doe.mp4");
+      const said = await refused(t, "--drop", "Drop", "--import", "full");
+      assert.ok(!said.join("\n").includes("Jane Doe"), said.join("\n"));
+      assert.equal(said[1], `  1 video waits in ${t.folder()}.`);
+      t.done();
+    });
+  });
+
+  it("is looked at by the installer's write and plan alone: set changes the drop folder as the plain change of one setting it is", async () => {
+    // set stays the plain change of one setting; only the installer's write and plan look at the old folder.
+    const t = mac();
+    put(t.folder(), "Talk.mov");
+    assert.equal(await t.run("set", "--drop", "Drop"), 0);
+    assert.equal(readSettings(t.home).settings.drop, "Drop");
+    t.done();
+  });
+});
+
+describe("what set, sessions, show and studio say when this Mac's settings cannot be used", () => {
+  const PLAIN = (t) => `This Mac has no settings for episodes (${settingsFile(t.home)}). Jason runs install.sh --machine on it.`;
+  /** What each of the four says, with the settings file as it is, and how it ended. */
+  const said = (t) => ["set --readings off", "sessions --teachings off", "show", "studio --node /opt/homebrew/bin/node"].map((line) => {
+    t.said.length = 0;
+    const code = settingsMain(line.split(" "), { home: t.home, say: (l) => t.said.push(l), now: new Date("2026-10-23T10:00:00-04:00") });
+    return [code, t.said.join("\n")];
+  });
+  it("is what install.sh --machine does, when there are none, or the file is not JSON: it makes them, or mends the file", () => {
+    const t = setup();
+    for (const [code, text] of said(t)) assert.deepEqual([code, text], [2, PLAIN(t)]);
+    mkdirSync(dirname(settingsFile(t.home)), { recursive: true });
+    writeFileSync(settingsFile(t.home), "{ not json");
+    for (const [code, text] of said(t)) assert.deepEqual([code, text], [2, `This Mac's settings could not be read (${settingsFile(t.home)}: it is not JSON). Jason runs install.sh --machine on it.`]);
+    t.done();
+  });
+  it("is, when a setting in the file is wrong, to put it right by hand, or with the installer's option for it when it has one", () => {
+    const t = setup();
+    writeSettings(t.home, t.given);
+    writeFileSync(settingsFile(t.home), readFileSync(settingsFile(t.home), "utf8").replace('"version": 1', '"version": 1, "import": "ligth"'));
+    for (const [code, text] of said(t)) {
+      assert.equal(code, 2);
+      assert.equal(text, `This Mac's settings could not be read (${settingsFile(t.home)}: the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it with --import, --handoff or --drop when it is one of those.`);
+    }
+    t.done();
+  });
+  it("is, when the file cannot be read at all, to put the file right by hand: the installer does not mend that", () => {
+    const t = setup();
+    mkdirSync(settingsFile(t.home), { recursive: true });
+    for (const [code, text] of said(t)) {
+      assert.equal(code, 2);
+      assert.equal(text, `This Mac's settings could not be read (${settingsFile(t.home)}: EISDIR). Jason puts that file right by hand.`);
+    }
+    t.done();
+  });
+});
+
+describe("what --help says of write, plan and set", () => {
+  /** Each command's own part of the help: its line, and the lines after it up to the next command's. */
+  const HELP_OF = (command) => {
+    const t = setup();
+    settingsMain(["--help"], { home: t.home, say: (line) => t.said.push(line) });
+    t.done();
+    const blocks = t.said[0].split(/\n(?=  node settings\.js )/).filter((b) => b.startsWith("  node settings.js "));
+    return blocks.filter((b) => b.startsWith(`  node settings.js ${command} `) || b.startsWith(`  node settings.js ${command}\n`)).join("\n");
+  };
+  it("names each option set takes, and each that write and plan take, and no option that none of them takes", () => {
+    const options = (text) => [...new Set(text.match(/--[a-z-]+/g) || [])].sort();
+    const written = [...Object.keys(WRITTEN), ...Object.keys(SETTABLE)].sort();
+    assert.deepEqual(options(HELP_OF("set")), Object.keys(SETTABLE).sort());
+    assert.deepEqual(options(HELP_OF("write")), written);
+    assert.deepEqual(options(HELP_OF("plan")), written);
+    // Each value an option takes, as set refuses it, is in the line that names the option.
+    for (const [option, { takes }] of Object.entries(SETTABLE)) {
+      const values = takes.replace(/ or /g, "|");
+      for (const command of ["set", "write", "plan"]) assert.ok(HELP_OF(command).includes(`[${option} ${values}]`), `${command}: ${option} ${values}`);
+    }
+  });
+  it("says what plan and write do beyond set: plan writes nothing, and write looks at the old drop folder first", () => {
+    const help = HELP_OF("plan").replace(/\s+/g, " ");
+    assert.ok(help.includes("Nothing is written."), help);
+    const write = HELP_OF("write").replace(/\s+/g, " ");
+    assert.ok(write.includes("old drop folder"), write);
+  });
+  it("is as the header of settings.js says, for each of the three: the line that names the command and its options is the same", () => {
+    const top = readFileSync(SETTINGS, "utf8").split("\n").filter((l) => l.startsWith("//   node settings.js ")).map((l) => l.slice(3));
+    for (const command of ["write", "plan", "set"]) {
+      const help = HELP_OF(command).split("\n")[0];
+      assert.ok(top.includes(help), `${help}\n---\n${top.join("\n")}`);
+    }
   });
 });

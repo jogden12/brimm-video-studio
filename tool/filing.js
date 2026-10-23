@@ -224,21 +224,28 @@ export function heldBy({ root, video, bytes, now = Date.now() }) {
   return "";
 }
 
-/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size.
-    "" when none does. */
-export function episodeHolding({ root, video, bytes }) {
+/** The episode that holds the video `video`, of `bytes` bytes, as { name, record }: the first, by its folder's name, whose whole
+    record names the video at that size. null when none does. */
+export function holdingEpisode({ root, video, bytes }) {
   const episodes = episodesFolder(root);
   let names = [];
   try {
     names = readdirSync(episodes).filter((n) => !n.startsWith("."));
   } catch (e) {
-    return "";
+    return null;
   }
   for (const name of names.sort()) {
     const { record } = readEpisode(join(episodes, name));
-    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return `already imported as ${name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return { name, record };
   }
-  return "";
+  return null;
+}
+
+/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size.
+    "" when none does. */
+export function episodeHolding({ root, video, bytes }) {
+  const held = holdingEpisode({ root, video, bytes });
+  return held ? `already imported as ${held.name}. It stays in the drop folder until its late check passes, or for a person to delete.` : "";
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,

@@ -6,9 +6,16 @@
 // The settings are kept in Application Support, on this Mac's own disk. install.sh --machine writes them, through this
 // file's command line, and edit.js and the import read them. A write keeps every setting it does not write. Besides those three,
 // the switch to the light import has settings of its own, all optional: what is absent is today's way (import "full", readings
-// on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions).
+// on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions). install.sh --machine writes them as it is
+// told (--import, --handoff, --drop, and --rules-only as readings off): `plan` says what `write` would write, and refuses what
+// `write` would, before the installer changes anything. A switch of the drop folder is refused while the old folder still holds
+// work. That look is switch.js's, which reads the status files and the episodes, and this file reaches it by a dynamic import:
+// importing.js and filing.js import this file, and a static import here would make the three a cycle.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+//   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
 //   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
@@ -112,19 +119,31 @@ export function teachingsOn(s, now = Date.now()) {
   return age >= 0 && age < TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
 }
 
-/** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words. Any field a later version of
-    brimm-video adds is kept as it is. */
-export function readSettings(home) {
+/** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words, and {mend}, what Jason does
+    about it, as a sentence. Any field a later version of brimm-video adds is kept as it is. install.sh --machine makes
+    settings that are not there and mends a file that is not JSON; it mends a setting that is wrong only when it is told that
+    one, with --import, --handoff or --drop; and nothing else in the file. */
+function usable(home) {
   const file = settingsFile(home);
+  const installer = "Jason runs install.sh --machine on it.";
   let s;
   try {
     s = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
-    if (e.code === "ENOENT") return { why: `This Mac has no settings for episodes (${file}).` };
-    return { why: `This Mac's settings could not be read (${file}: ${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}).` };
+    if (e.code === "ENOENT") return { why: `This Mac has no settings for episodes (${file}).`, mend: installer };
+    if (e instanceof SyntaxError) return { why: `This Mac's settings could not be read (${file}: it is not JSON).`, mend: installer };
+    return { why: `This Mac's settings could not be read (${file}: ${e.code || e.message}).`, mend: "Jason puts that file right by hand." };
   }
   const fault = settingsFault(s);
-  return fault ? { why: `This Mac's settings could not be read (${file}: ${fault}).` } : { settings: s };
+  return fault
+    ? { why: `This Mac's settings could not be read (${file}: ${fault}).`, mend: "Jason puts that setting right by hand, or runs install.sh --machine on it with --import, --handoff or --drop when it is one of those." }
+    : { settings: s };
+}
+
+/** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words. */
+export function readSettings(home) {
+  const { mend, ...got } = usable(home);
+  return got;
 }
 
 /** What the settings file holds, as the object it is: {} when there is no file, or what is in it is not JSON, or is JSON that is
@@ -139,6 +158,16 @@ function heldIn(file) {
   }
 }
 
+/** The settings after a write of `fields` over `held`, what the file holds: { settings, fault }, where `fault` is what is wrong
+    with them, in plain words, "" when nothing is. A field given as undefined is not given. */
+function afterWrite(held, fields) {
+  const given = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+  const merged = { ...held, ...given };
+  // The first four in their place, whatever order they were given in; everything else after them.
+  const settings = { version: 1, machine: merged.machine, root: merged.root, checkout: merged.checkout, ...merged };
+  return { settings, fault: settingsFault(settings) };
+}
+
 /** Write this Mac's settings: the ones the file holds, with the fields given put over them, so that a write keeps every field it
     does not write, those a later version of brimm-video adds as well. A field given as undefined is not given. Only a file
     that is not there, or is not JSON, starts from the fields given alone, and then the Mac, the path and the checkout must all
@@ -147,11 +176,7 @@ function heldIn(file) {
     name first, then under their own: they are on this Mac's own disk, not in Dropbox, so the rename is safe. Gives back the
     file's path. A value that will not do throws, in plain words, and nothing is written. */
 export function writeSettings(home, fields) {
-  const given = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
-  const merged = { ...heldIn(settingsFile(home)), ...given };
-  // The first four in their place, whatever order they were given in; everything else after them.
-  const s = { version: 1, machine: merged.machine, root: merged.root, checkout: merged.checkout, ...merged };
-  const fault = settingsFault(s);
+  const { settings: s, fault } = afterWrite(heldIn(settingsFile(home)), fields);
   if (fault) throw new Error(fault);
   const file = settingsFile(home);
   const writing = `${file}.writing`;
@@ -169,7 +194,16 @@ export function writeSettings(home, fields) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
-                               write them, as install.sh --machine does, and say where. Any other setting is kept
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+                               write them, as install.sh --machine does, and say where. The settings of the switch that it
+                               is told are written with them, as set reads them, and any setting it is not told is kept.
+                               It refuses what set refuses, and a switch of the drop folder while the old drop folder
+                               still holds a video, or an import of this Mac that failed or found a problem: it names
+                               each, and says what to do first
+  node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+                               say what write would write, whole, as JSON, or why it would refuse it.
+                               Nothing is written. install.sh asks this before it changes anything
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept
@@ -188,8 +222,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                CLAUDE.md, its settings that let Claude run only edit.js, run with that node, its skill and
                                Pictures/`;
 
-/** The options `write` is told the settings by, and the setting each one names. */
-const WRITTEN = { "--machine": "machine", "--root": "root", "--checkout": "checkout" };
+/** The options `write` and `plan` are told the settings every Mac has by, and the setting each one names. They are told the
+    settings of the switch as `set` is, by SETTABLE's options. */
+export const WRITTEN = { "--machine": "machine", "--root": "root", "--checkout": "checkout" };
 
 /** What a command is told, by the name `options` gives each option: null when it is told an option it does not know, or one
     with no value after it. */
@@ -202,30 +237,100 @@ function pairsOf(rest, options) {
   return told;
 }
 
-/** `write`: the settings it is told, written and checked. */
-function write(home, rest, say) {
-  const told = pairsOf(rest, WRITTEN);
-  if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) {
-    say(HELP);
-    return 2;
+/** Each option of SETTABLE as `set` has it, by the name `pairsOf` gives what it is told. */
+const OF_SET = () => Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option]));
+
+/** What `write` and `plan` are told, as the fields of the settings: { fields }, or { code, said } when it is asked wrongly (2),
+    or refused (1): what `set` refuses it refuses by the same code (notBuilt), and a value that will not do by the same readers. */
+function fieldsToldBy(rest) {
+  const told = pairsOf(rest, { ...WRITTEN, ...OF_SET() });
+  if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) return { code: 2, said: HELP };
+  const values = {};
+  for (const option of Object.keys(SETTABLE).filter((o) => told[o] !== undefined)) {
+    values[option] = SETTABLE[option].read(told[option]);
+    if (values[option] === undefined) return { code: 1, said: `Not written: ${option} takes ${SETTABLE[option].takes}.` };
   }
-  const fault = settingsFault({ version: 1, ...told });
-  if (fault) {
-    say(`Not written: ${fault}.`);
-    return 1;
-  }
+  const refused = notBuilt(values);
+  if (refused) return { code: 1, said: refused };
+  const fields = { machine: told.machine, root: told.root, checkout: told.checkout };
+  const fault = settingsFault({ version: 1, ...fields });
+  if (fault) return { code: 1, said: `Not written: ${fault}.` };
+  for (const [option, value] of Object.entries(values)) fields[SETTABLE[option].field] = value;
+  return { fields };
+}
+
+/** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
+    refuses by. It refuses what is not built, a value that will not do, and settings that would not do once written, and
+    when the drop folder changes, a drop folder that still holds work (switch.js), which it looks at by a dynamic import: so it
+    gives back a promise then, and the result itself when it needs no such look. `now` is a time, for the status files. */
+function planned(home, rest, now) {
+  const told = fieldsToldBy(rest);
+  if (!told.fields) return { code: told.code, said: [told.said] };
+  let held;
   try {
-    say(`Written: ${writeSettings(home, told)}`);
-    return 0;
+    held = heldIn(settingsFile(home));
   } catch (e) {
-    say(`This Mac's settings could not be written (${e.code || e.message}).`);
-    return 1;
+    return { code: 1, said: [`This Mac's settings could not be written (${e.code || e.message}).`] };
   }
+  const { settings, fault } = afterWrite(held, told.fields);
+  if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}).`] };
+  // The drop folder is Unedited Video until the file says Drop.
+  const from = held.drop === "Drop" ? "Drop" : "Unedited Video";
+  const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
+  if (from === to) return { settings, fields: told.fields };
+  const light = lightImport(held) || lightImport(settings);
+  return import("./switch.js").then(({ heldInOld }) => {
+    const lines = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, now: Number(now) });
+    if (!lines.length) return { settings, fields: told.fields };
+    return {
+      code: 1,
+      said: [
+        `Not written: the drop folder would change from ${from} to ${to}, and work is not finished in the old one:`,
+        ...lines,
+        "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."
+      ]
+    };
+  }, (e) => ({ code: 1, said: [`The old drop folder could not be looked at (${e.code || e.message}), so nothing was written.`] }));
+}
+
+/** Gives `next(result)`, after the result when it is a promise of one: a command that needs no look at the old drop folder
+    ends at once, so that it ends with a number, as the others do. */
+const afterwards = (result, next) => (typeof result.then === "function" ? result.then(next) : next(result));
+
+/** `write`: the settings it is told, checked (planned) and then written. Gives the number it ends with, or a promise of it when
+    the drop folder changes. */
+function write(home, rest, say, now) {
+  return afterwards(planned(home, rest, now), (result) => {
+    if (!result.fields) {
+      for (const line of result.said) say(line);
+      return result.code;
+    }
+    try {
+      say(`Written: ${writeSettings(home, result.fields)}`);
+      return 0;
+    } catch (e) {
+      say(`This Mac's settings could not be written (${e.code || e.message}).`);
+      return 1;
+    }
+  });
+}
+
+/** `plan`: the settings `write` would write, whole, as JSON, and nothing written; or the lines `write` would refuse by. Gives the
+    number it ends with, or a promise of it when the drop folder changes. */
+function plan(home, rest, say, now) {
+  return afterwards(planned(home, rest, now), (result) => {
+    if (!result.fields) {
+      for (const line of result.said) say(line);
+      return result.code;
+    }
+    say(JSON.stringify(result.settings, null, 2));
+    return 0;
+  });
 }
 
 /** The settings `set` changes, by option: the setting it names; what it takes, in words; how its value is read (undefined when
     it will not do); how that is said; what the setting is while the file does not say; and how a line about it is worded. */
-const SETTABLE = {
+export const SETTABLE = {
   "--import": {
     field: "import", takes: "light or full", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
     otherwise: "full", subject: "The import", be: "is", was: "it was"
@@ -253,17 +358,23 @@ function localTime(d) {
   return `${local}${off < 0 ? "-" : "+"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
-/** What `set` refuses until it is built, by option and value, and why: the light import, until the question in her chat
-    exists (Part F), and the Drop folder, until the installer makes it (Part D). Those parts take these away. */
-const NOT_BUILT = [
-  ["--import", "light", "The light import needs the question in her chat, which is not built yet."],
-  ["--drop", "Drop", "The Drop folder is not built yet."]
-];
+/** What `set`, `write` and `plan` refuse until it is built, by option and value, and why: the light import, until the question in
+    her chat exists (Part F), which takes this away. */
+const NOT_BUILT = [["--import", "light", "The light import needs the question in her chat, which is not built yet."]];
+
+/** Why the first of the values `values`, by option, is refused as not built yet, in plain words: "" when none is. */
+function notBuilt(values) {
+  for (const [option, value] of Object.entries(values)) {
+    const refused = NOT_BUILT.find(([o, v]) => o === option && v === value);
+    if (refused) return refused[2];
+  }
+  return "";
+}
 
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
     left, and said to be. What is not built yet is refused (NOT_BUILT), and nothing is changed. */
 function set(home, rest, say) {
-  const told = pairsOf(rest, Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option])));
+  const told = pairsOf(rest, OF_SET());
   if (!told || !Object.keys(told).length) {
     say(HELP);
     return 2;
@@ -276,16 +387,14 @@ function set(home, rest, say) {
       return 1;
     }
   }
-  for (const [option, value] of Object.entries(values)) {
-    const refused = NOT_BUILT.find(([o, v]) => o === option && v === value);
-    if (refused) {
-      say(refused[2]);
-      return 1;
-    }
+  const refused = notBuilt(values);
+  if (refused) {
+    say(refused);
+    return 1;
   }
-  const got = readSettings(home);
+  const got = usable(home);
   if (got.why) {
-    say(`${got.why} Jason runs install.sh --machine on it.`);
+    say(`${got.why} ${got.mend}`);
     return 2;
   }
   const changes = {};
@@ -325,9 +434,9 @@ function sessions(home, rest, say, now) {
     say("Not changed: teachings need both accounts, the one the claude command is signed in to and the one the Code tab shows.");
     return 1;
   }
-  const got = readSettings(home);
+  const got = usable(home);
   if (got.why) {
-    say(`${got.why} Jason runs install.sh --machine on it.`);
+    say(`${got.why} ${got.mend}`);
     return 2;
   }
   if (off && !got.settings.sessionTeachings) {
@@ -356,9 +465,9 @@ function sessions(home, rest, say, now) {
 /** `show`: the settings, with the folders found from them, or why there are none. The settings of the switch are said when
     the file has them. */
 function show(home, say, now) {
-  const got = readSettings(home);
+  const got = usable(home);
   if (got.why) {
-    say(`${got.why} Jason runs install.sh --machine on it.`);
+    say(`${got.why} ${got.mend}`);
     return 2;
   }
   const s = got.settings;
@@ -387,9 +496,9 @@ function studio(home, rest, say) {
     say(HELP);
     return 2;
   }
-  const got = readSettings(home);
+  const got = usable(home);
   if (got.why) {
-    say(`${got.why} Jason runs install.sh --machine on it.`);
+    say(`${got.why} ${got.mend}`);
     return 2;
   }
   try {
@@ -435,15 +544,17 @@ function mark(rest, say, clone) {
 }
 
 /** What `node settings.js` does. Ends with 0 when it did what it was asked, 1 when it refused or could not, and 2 when it
-    was asked wrongly or this Mac has no settings to show. The home folder is the one HOME names, as for the launch agent and
-    in a shell, and the Mac's own word for it when HOME names none. */
+    was asked wrongly or this Mac has no settings to show; or gives a promise of that number, for `write` and `plan` when they
+    change the drop folder, which makes them look at the old folder (switch.js). The home folder is the one HOME names, as for the
+    launch agent and in a shell, and the Mac's own word for it when HOME names none. */
 export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date() } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
     return 0;
   }
-  if (command === "write") return write(home, rest, say);
+  if (command === "write") return write(home, rest, say, now);
+  if (command === "plan") return plan(home, rest, say, now);
   if (command === "set") return set(home, rest, say);
   if (command === "sessions") return sessions(home, rest, say, now);
   if (command === "show" && !rest.length) return show(home, say, now);
@@ -453,4 +564,8 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   return 2;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = settingsMain(process.argv.slice(2));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  Promise.resolve(settingsMain(process.argv.slice(2))).then((code) => {
+    process.exitCode = code;
+  });
+}
