@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords, linksOf, handedOff } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2996,14 +2996,17 @@ function lateCheckAt(ctx, record) {
       facts the import could not read, until she has answered it;
     - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
       videos have is not taken for either); a session not cleared is a version of only by a session;
-    - and, read from Episodes each time it is asked (finish.js linksOf), for that target: it is not already a version of this video,
-      directly or through others ("cannot be a version of"); and for an answer that is not a session, none of the versions of the
-      video it starts from, earlier, later or beside it, is a session not cleared (the gate's predicate, as finish.js reads one);
+    - and, read from Episodes each time it is asked (finish.js linksOf), for that target, which is looked up again and checked as
+      at first on a later call (it may be archived, unanswered or a session by then): it is not already a version of this video,
+      directly or through others ("cannot be a version of"); its chain can be followed to its first (chainGapWords); and for an
+      answer that is not a session, none of the versions of the video it starts from, earlier, later or beside it, and none of
+      this video's own later versions, is a session not cleared (the gate's predicate, in the record or any conflicted copy of
+      it); the version a handed-off video keeps is checked the same way;
     - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
       since, which a new answer that is not one cannot be a version of;
     - and a video that is not itself handed off, but that the chain of one handed off passes through, is given no other version
-      (--version-of naming another video, or --again with none, which clears the one it has): that would move the id the handed-off
-      video went to the page under;
+      (--version-of naming another video, or --again with none, which clears the one it has, as the walk follows it): that would
+      move the id the handed-off video went to the page under, and is said of that video, the later one;
     - the other Mac's claim, and a detached run at work on the episode. */
 function answerWhy(ctx, found, record, plan) {
   const name = shownName(record);
@@ -3015,6 +3018,9 @@ function answerWhy(ctx, found, record, plan) {
   const came = answer ? answer.came : undefined;
   const maybe = came === "zoom" || came === "sound" || isZoomName(record.video.file) || (Boolean(answer) && came === null && answer.state !== "answered");
   if (maybe && stored !== "session" && !plan.notASession) return ASK_IF_SESSION;
+  // A target looked up by an earlier call is looked up again, and the same checks are made of it as Episodes holds it now: it may
+  // have been archived, answered no more, or marked a session while the claim waited. Its spellings are then the ones it holds now.
+  const earlier = Boolean(plan.target);
   if (plan.versionOf && !plan.target) {
     const id = plan.versionOf;
     const named = recordsHere(ctx).filter((e) => e.record.id === id || String(e.record.id).slice(-6) === id).filter((e) => recordKind(e.record) !== null && !e.record.archived);
@@ -3028,11 +3034,23 @@ function answerWhy(ctx, found, record, plan) {
   }
   // What links the target to this video, and to a session, as Episodes holds it now: one reading, each time this is asked.
   const links = linksOf(ctx.root);
+  // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it.
+  const sessionAmong = (members) => members.some((one) => links.holdsSession(one));
+  if (plan.target && earlier) {
+    const now = links.find(plan.target.record.id);
+    if (!now || recordKind(now.record) === null || now.record.archived) return `No answered video on this Mac has the id ${plan.versionOf}.`;
+    if (stored !== "session" && gated(now.record)) return SESSION_TARGET;
+    plan.target = { ...plan.target, record: now.record };
+  }
   if (plan.target) {
     const target = (links.find(plan.target.record.id) || plan.target).record;
     const targetName = shownName(target);
     if (links.chainOf(target).some((link) => link.record.id === record.id)) return `${name} cannot be a version of ${targetName}: ${targetName} is already a version of it.`;
-    if (stored !== "session" && links.setOf(links.firstOf(target)).members.some((one) => recordKind(one.record) !== null && gated(one.record))) return sessionSet(name);
+    // A chain that loops or runs to an episode not on this Mac cannot be read to its first, and what it holds is not known.
+    const gap = links.gapOf(target);
+    if (gap) return chainGapWords(target, gap);
+    // The video joins the versions of the target's first, and so do its own later versions, if it has any.
+    if (stored !== "session" && (sessionAmong(links.setOf(links.firstOf(target)).members) || sessionAmong(links.throughOf(record.id).filter((one) => one.record.id !== record.id)))) return sessionSet(name);
   }
   // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8).
   if (handedOff(found.folder, record)) {
@@ -3044,12 +3062,15 @@ function answerWhy(ctx, found, record, plan) {
     if (!plan.target && record.versionOf && stored !== "session") {
       const kept = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
       if (kept && gated(kept.record)) return SESSION_TARGET;
+      // The version it keeps is checked as a target is: no session among the versions of the video it starts from.
+      if (sessionAmong(links.setOf(links.firstOf(record, found.folder)).members)) return sessionSet(name);
     }
-  } else if ((plan.target ? plan.target.record.id : null) !== (record.versionOf || null)) {
+  } else if ((plan.target ? plan.target.record.id : null) !== (recordKind(record) !== null ? record.versionOf || null : null)) {
     // So does every video that the chain of a handed-off video passes through, though it is not handed off itself: another version
-    // for it, or none, moves the id that later video went to the page under. Only a link that changes is refused.
+    // for it, or none, moves the id that later video went to the page under. Only a link that changes is refused, the link the
+    // walk follows (the link of an unanswered video is not followed).
     const through = links.handedOffThrough(record.id).find((one) => one.record.id !== record.id);
-    if (through) return `${name} has already gone to the BRIMM Ops page as a version of ${shownName(through.record)}: ask Jason.`;
+    if (through) return `${shownName(through.record)} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
   }
   const held = heldElsewhere(record, ctx.machine);
   if (held) return beingAnswered(name, held.by);

@@ -1010,6 +1010,97 @@ describe("linksOf: a video's links, from one reading of Episodes", () => {
     assert.deepEqual(idsOf(linksOf(t.root).handedOffThrough(SECOND)), [SECOND]);
     t.done();
   });
+  it("gives every episode whose chain passes through an id, itself included, whether handed off or not; handedOffThrough is those that were", () => {
+    const t = setup();
+    const { middle, newest, apart } = versions(t);
+    const links = () => linksOf(t.root);
+    assert.deepEqual(idsOf(links().throughOf(ID)), [ID, SECOND, THIRD].sort());
+    assert.deepEqual(idsOf(links().throughOf(SECOND)), [SECOND, THIRD].sort());
+    assert.deepEqual(idsOf(links().throughOf(THIRD)), [THIRD]);
+    assert.deepEqual(idsOf(links().throughOf(apart.record.id)), [apart.record.id]);
+    assert.deepEqual(links().throughOf("e-20269999-ffffff"), []);
+    assert.deepEqual(links().throughOf(SECOND).find((one) => one.record.id === THIRD), { folder: newest.folder, record: newest.record });
+    // Only the ones handed off are handedOffThrough's.
+    handOff(middle, SECOND);
+    assert.deepEqual(idsOf(links().handedOffThrough(ID)), [SECOND]);
+    assert.deepEqual(links().handedOffThrough(ID), links().throughOf(ID).filter((one) => handedOff(one.folder, one.record)));
+    // An unanswered record's chain is itself.
+    const waiting = { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" }, versionOf: ID };
+    later(t, "e-20261023-0a0a0a", ID, waiting);
+    assert.deepEqual(idsOf(links().throughOf(ID)), [ID, SECOND, THIRD].sort(), "an unanswered record with a versionOf is not on the chain");
+    t.done();
+  });
+  it("gives the gap in a record's chain, as chainGap does: a loop, an episode not on this Mac, or none", () => {
+    const t = setup();
+    original(t, { versionOf: SECOND });
+    const two = later(t, SECOND, ID);
+    assert.deepEqual(linksOf(t.root).gapOf(two.record), chainGap(t.root, two.record));
+    assert.deepEqual(linksOf(t.root).gapOf(two.record, two.folder), { id: SECOND, reason: "loop" });
+    const lone = episodeAs(t, { id: THIRD, name: "2026-10-22 Pricing talk, apart (Mac Studio)", record: { kind: "finished", versionOf: "e-20261001-aaaaaa" } });
+    assert.deepEqual(linksOf(t.root).gapOf(lone.record), { id: "e-20261001-aaaaaa", reason: "missing" });
+    assert.equal(linksOf(t.root).gapOf(episodeAs(t, { id: "e-20261023-0b0b0b", name: "2026-10-23 Whole (Mac Studio)", record: { kind: "finished" } }).record), null);
+    t.done();
+  });
+  describe("holdsSession: a member, or any conflicted copy of its record, that is a session not cleared", () => {
+    const MARK = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
+    const CLEARED = { ...MARK, cleared: { at: "2026-10-22T11:00:00-05:00", on: "Mac Studio", to: "finished", confirmed: "dialog" } };
+    /** A conflicted copy of the episode's first record, holding `over` on it. */
+    const copyOf = (found, over, name = "record/0001 (Sallie's laptop's conflicted copy 2026-10-20).json") => writeFileSync(join(found.folder, name), recordText({ ...found.record, ...over }));
+    const held = (t, found) => linksOf(t.root).holdsSession(linksOf(t.root).find(found.record.id));
+    it("is true for a session by its kind, and by its mark of another kind, and false for one cleared by her click, and for any other video", () => {
+      for (const [what, over, want] of [["its kind, no mark", { kind: "session" }, true], ["its kind, a mark", { kind: "session", session: MARK }, true], ["its mark, another kind", { kind: "short video", session: MARK }, true], ["a mark cleared by her click", { kind: "finished", session: CLEARED }, false], ["no mark", { kind: "raw" }, false]]) {
+        const t = setup();
+        const found = original(t, over);
+        assert.equal(held(t, found), want, what);
+        t.done();
+      }
+    });
+    it("is false for a video not yet answered, which is not a session", () => {
+      const t = setup();
+      const found = original(t, { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } });
+      assert.equal(held(t, found), false);
+      t.done();
+    });
+    it("is true when a conflicted copy of its record holds the mark, as the gate holds a video by any of its copies, and false for a copy that is none", () => {
+      const t = setup();
+      const found = original(t);
+      assert.equal(held(t, found), false);
+      copyOf(found, { kind: "raw" }, "record/0001 (Sallie's laptop's conflicted copy 2026-10-19).json");
+      assert.equal(held(t, found), false, "a copy that is not a session");
+      copyOf(found, { kind: "finished", session: MARK });
+      assert.equal(held(t, found), true);
+      // A conflicted copy of another file of the episode says nothing of the record.
+      const u = setup();
+      const other = original(u);
+      writeFileSync(join(other.folder, "Pricing talk (Sallie's conflicted copy 2026-10-20).txt"), "a note");
+      assert.equal(held(u, other), false);
+      t.done();
+      u.done();
+    });
+    it("reads a copy once, however often it is asked", () => {
+      const t = setup();
+      const found = original(t);
+      copyOf(found, { kind: "raw" });
+      const real = fs.readFileSync;
+      const reads = [];
+      fs.readFileSync = (path, ...rest) => {
+        if (String(path).includes("conflicted copy")) reads.push(String(path));
+        return real(path, ...rest);
+      };
+      syncBuiltinESMExports();
+      try {
+        const links = linksOf(t.root);
+        const one = links.find(ID);
+        links.holdsSession(one);
+        links.holdsSession(one);
+        assert.equal(reads.length, 1);
+      } finally {
+        fs.readFileSync = real;
+        syncBuiltinESMExports();
+      }
+      t.done();
+    });
+  });
   it("reads each record once for all of them, and writes and calls nothing", () => {
     const t = setup();
     const { old, middle, newest } = versions(t);
@@ -1087,6 +1178,28 @@ describe("handedOff: a video that went to the BRIMM Ops page", () => {
       writeFileSync(join(there.folder, rel), "x");
       assert.equal(handedOff(there.folder, there.record), false, rel);
       u.done();
+    }
+    t.done();
+  });
+  it("is true, as a doubt, when final/ or history/ cannot be read, and false only when they are not there", () => {
+    const t = setup();
+    const found = original(t);
+    // Not there at all, or a file where the folder should be: no hand-off.
+    assert.equal(handedOff(found.folder, found.record), false);
+    writeFileSync(join(found.folder, "final"), "a file");
+    assert.equal(handedOff(found.folder, found.record), false, "ENOTDIR");
+    rmSync(join(found.folder, "final"));
+    mkdirSync(join(found.folder, "history", "2026-10-20 15-00", "final"), { recursive: true });
+    writeFileSync(join(found.folder, "history", "2026-10-20 15-00", "final", "Talk.srt"), "x");
+    assert.equal(handedOff(found.folder, found.record), false, "readable, and no hand-off in it");
+    for (const dir of ["history", "final"]) {
+      mkdirSync(join(found.folder, dir), { recursive: true });
+      chmodSync(join(found.folder, dir), 0o000);
+      try {
+        assert.equal(handedOff(found.folder, found.record), true, `${dir}/ cannot be read`);
+      } finally {
+        chmodSync(join(found.folder, dir), 0o755);
+      }
     }
     t.done();
   });
@@ -1702,6 +1815,26 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
           assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], how);
           t.done();
         }
+      }
+    }
+  });
+  it("is refused too when the session's mark is only in a conflicted copy of the record of an earlier or a later version, as the gate holds such a video", async () => {
+    for (const earlier of [true, false]) {
+      for (const [what, as] of SESSIONS) {
+        const t = setup();
+        const how = `${earlier ? "earlier" : "later"}: ${what}`;
+        handoffVersion(t, 2);
+        const first = earlier ? firstCut(t) : null;
+        const found = await asked(t, { ...EDITED, ...(earlier ? { versionOf: FIRST } : {}), label: LABEL, ...OPEN });
+        const other = earlier ? first : later(t, SECOND, ID);
+        writeFileSync(join(other.folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-20).json"), recordText({ ...other.record, ...as }));
+        const before = episodesTree(t);
+        const target = handoffTarget({ root: t.root, settings: t.ctx.settings }, found);
+        assert.equal(target.refusal, refusedAs(SHOWN), how);
+        const result = await finishNow(t.ctx, found);
+        assert.deepEqual([result.ok, result.failed], [false, [refusedAs(SHOWN)]], how);
+        assert.deepEqual(episodesTree(t), before, `${how}: nothing in final/, and every record as it was`);
+        t.done();
       }
     }
   });

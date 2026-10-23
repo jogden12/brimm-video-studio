@@ -16,7 +16,7 @@ import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
-import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf } from "./episode.js";
 import { gated } from "./gate.js";
 import { REELS_FILE } from "./reels.js";
 import { fileSafe } from "./names.js";
@@ -182,14 +182,15 @@ const handoffsBeside = (finalDir) => [[finalDir, false], [join(dirname(finalDir)
 const handoffFor = (h, id) => [h.episode, h.video].some((who) => who && who.id === id);
 /** Whether the episode in `folder` has been handed off to the BRIMM Ops page: its record says it was finished, or a hand-off (a
     .brimm-ops.json) is in its final/ or in its history/, at any depth, where a hand-off set aside is kept. A hand-off is known by
-    its file's name alone, even one that cannot be read, since a doubt here is the safe side. */
+    its file's name alone, even one that cannot be read. And a final/ or a history/ that cannot be read is a doubt, and a doubt
+    here is the safe side: it counts as handed off, unless the folder is not there (ENOENT) or is no folder (ENOTDIR). */
 export function handedOff(folder, record) {
   if (record.finished) return true;
   return ["final", "history"].some((dir) => {
     try {
       return readdirSync(join(folder, dir), { recursive: true }).some((n) => String(n).endsWith(".brimm-ops.json"));
     } catch (e) {
-      return false;
+      return !["ENOENT", "ENOTDIR"].includes(e && e.code);
     }
   });
 }
@@ -225,12 +226,21 @@ function episodesIn(root) {
   });
 }
 
+/** The conflicted copies Dropbox has kept of an episode's records, as they are read: each a record's object, past any that cannot
+    be read. [] when there are none. A copy is only read, as edit.js's findEpisode reads them for the gate. */
+const recordCopiesIn = (folder) => conflictedCopies(folder)
+  .filter((path) => /^record\/\d{4}\.json$/.test(conflictedOf(path)))
+  .map((path) => readJson(join(folder, path)))
+  .filter((copy) => copy !== null && typeof copy === "object" && !Array.isArray(copy));
+
 /** What is in Episodes for the length of one call: read once, the first time it is asked for, and not again, so that a call
     which follows no link reads none. `all()` is every folder as episodesIn gives them; `find(id)` is the first one whose
-    record has that id, or undefined. */
+    record has that id, or undefined; `copiesOf(folder)` is the conflicted copies of that folder's records (recordCopiesIn),
+    read the first time they are asked for. */
 function viewOf(root) {
   let all = null;
   let byId = null;
+  const copies = new Map();
   const view = {
     all: () => (all = all || episodesIn(root)),
     find: (id) => {
@@ -239,6 +249,11 @@ function viewOf(root) {
         for (const one of view.all()) if (one.record && !byId.has(one.record.id)) byId.set(one.record.id, one);
       }
       return byId.get(id);
+    },
+    copiesOf: (folder) => {
+      if (!folder) return [];
+      if (!copies.has(folder)) copies.set(folder, recordCopiesIn(folder));
+      return copies.get(folder);
     }
   };
   return view;
@@ -272,19 +287,29 @@ export function chainOf(root, record, folder) {
   return linksOf(root).chainOf(record, folder);
 }
 
+/** Whether a record is a client or group session whose mark is not cleared, as the gate reads one (gate.js gated), a video not yet
+    answered not being a session. */
+const heldSession = (record) => kindOf(record) !== null && gated(record);
+
 /** A video's links, read from Episodes once for the length of a call: the one small, read-only helper over the walk and the set
     that edit.js reads them through when she answers what a video is (`kind`), so that no walk is copied there. Episodes are read
     only when a link is first followed, and no record is read again by a second question. Nothing is written. It gives:
     - `find(id)`: the episode whose record has that id, as { folder, record }, or undefined; as Episodes holds it now;
     - `chainOf(record, folder)`: the record's versions, newest first (chainOf), the folder found by the id when it is not given;
     - `firstOf(record, folder)`: the id its chain starts from, which is the id of its hand-off (handoffIdOf);
+    - `gapOf(record, folder)`: why that chain cannot be followed to its first, or null (chainGap);
     - `setOf(first)`: the versions of the video that starts at the id `first`, { members, folders } as the hand-off writers
       read them (setOf below): every record whose own walk ends at the id, and the folders whose hand-offs are read for it;
-    - `handedOffThrough(id)`: every episode, as { folder, record }, in the order of Episodes' folders, that was handed off to the
-      BRIMM Ops page (handedOff) and whose chain passes through the record with that id, the episode of that id itself included
-      when it was. A link that is moved changes the id such an episode went to the page under. */
+    - `throughOf(id)`: every episode, as { folder, record }, in the order of Episodes' folders, whose chain passes through the
+      record with that id: its later versions, the episode of that id itself included;
+    - `handedOffThrough(id)`: those of them that were handed off to the BRIMM Ops page (handedOff). A link that is moved changes
+      the id such an episode went to the page under;
+    - `holdsSession(one)`: whether an episode, as { folder, record }, is a client or group session whose mark is not cleared, by
+      the gate's predicate (a video not yet answered is none), its record or any conflicted copy of its records: the gate holds a
+      video by any of them. */
 export function linksOf(root) {
   const view = viewOf(root);
+  const through = (id) => view.all().filter((one) => one.record && walk(view, one.record, one.folder).chain.some((link) => link.record.id === id));
   return {
     find: (id) => view.find(id),
     chainOf: (record, folder) => {
@@ -296,8 +321,11 @@ export function linksOf(root) {
       return chain;
     },
     firstOf: (record, folder) => walk(view, record, folder || null).first,
+    gapOf: (record, folder) => walk(view, record, folder || null).gap,
     setOf: (first) => setOf(view, { chain: [], first }),
-    handedOffThrough: (id) => view.all().filter((one) => one.record && walk(view, one.record, one.folder).chain.some((link) => link.record.id === id) && handedOff(one.folder, one.record))
+    throughOf: through,
+    handedOffThrough: (id) => through(id).filter((one) => handedOff(one.folder, one.record)),
+    holdsSession: (one) => [one.record, ...view.copiesOf(one.folder)].some(heldSession)
   };
 }
 
@@ -448,7 +476,8 @@ export function numbersTakenWords(record, handoff, taken) {
 }
 
 /** Is a record a client or group session whose mark is not cleared? One is known by its kind or by its mark, as `ask` knows one
-    (unedited.js askBlocked), and a session with no mark at all is not cleared either. */
+    (unedited.js askBlocked), and a session with no mark at all is not cleared either. handoffTarget asks it of each version's
+    record and of each conflicted copy of its records (the view's copiesOf), as the gate holds a video by any of them. */
 const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "session" || Boolean(record.session)) && !(record.session && record.session.cleared);
 
 /** Where the next hand-off of a video goes, as every hand-off writer asks it (finishEpisode, finishNow, saveSpellings, and
@@ -466,7 +495,8 @@ const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "ses
       The first of these that applies:
       - a gap in the chain of the video's versions (chainGapWords);
       - for a video that is not a session, any version of it, earlier or later (every record whose walk ends at the id), that
-        is a client or group session whose mark is not cleared (spec 2026-10-22, sections 2 and 8): the page redacts a
+        is a client or group session whose mark is not cleared, in its record or in a conflicted copy of it (spec 2026-10-22,
+        sections 2 and 8): the page redacts a
         session's words by the id, and this hand-off, under the same id and above the session's revision, would bring them
         back. A session's own hand-off (Part F's empty session revision) is the session's, and is not refused for it. The
         video is named as edit.js names it (episode.js shownName), never by a file's name.
@@ -483,7 +513,7 @@ export function handoffTarget({ root, settings }, { folder, record }) {
   if (walked.gap) return refused(chainGapWords(record, walked.gap));
   const set = setOf(view, walked);
   const who = shownName(record);
-  if (kindOf(record) !== "session" && set.members.some((one) => unclearedSession(one.record))) return refused(`${who} is a version of a client or group session: ask Jason. Nothing was written.`);
+  if (kindOf(record) !== "session" && set.members.some((one) => [one.record, ...view.copiesOf(one.folder)].some(unclearedSession))) return refused(`${who} is a version of a client or group session: ask Jason. Nothing was written.`);
   // Each folder's hand-offs are read once, for the id it went under, the revision and the numbers taken.
   const read = new Map();
   const handoffsAt = (at) => {
