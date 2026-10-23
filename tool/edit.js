@@ -3239,7 +3239,8 @@ export const DIALOG_MS = 60000;
 const NOT_CLEARED = "Not cleared:";
 const DIALOG_TIMED_OUT = `${NOT_CLEARED} the dialog was not answered within a minute, so it was closed. The session mark stays.`;
 const TOO_LATE = `${NOT_CLEARED} the dialog was open too long for this to finish in time. Say it again, and click within a minute.`;
-const LOG_NOT_WRITTEN = "The log on this Mac could not be written: the record holds the clearing.";
+/** What is said when this Mac's tool log cannot be written: the record holds what the line would have said (`holds`). */
+const logNotWritten = (holds) => `The log on this Mac could not be written: the record holds ${holds}.`;
 /** Why `--clear-session` has nothing to clear on the video `name`: it is no session, or its mark was cleared already. */
 const noMarkToClear = (name) => `${name} has no session mark to clear.`;
 /** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
@@ -3457,24 +3458,31 @@ export async function kindCommand(ctx, rest) {
   }
 }
 
-/** Ask her, on a dialog Claude cannot press, to clear the session mark of the video called `label`, and say whether she did: true
-    only for her click on "Clear it". The dialog and the line before it name the video by its label, so that two dialogs, or a
-    label misread, cannot clear another. Cancel, Escape and a dialog that could not be shown or read are not a click (askDialog
-    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. So is a
-    dialog not answered within DIALOG_MS: it is run with that limit, which kills osascript and so closes the dialog, and when the
-    run says it was out of time nothing it printed counts, whatever askDialog made of it. Every ending says a line of its own,
-    after the first: the skill that tells her a dialog is about to open never passes that line on. She is told first to click,
-    since Return presses Cancel. The dialog is shown by this Mac's own `run`, as every program edit.js runs is: no flag or setting
-    stands in for it. */
-async function clickedClear(ctx, label) {
-  ctx.say(`A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`);
+/** Show the dialog `text` with `options` (dialog.js askDialog's) and wait for her, for DIALOG_MS at most: { answer, outOfTime }. The
+    dialog is shown by this Mac's own `run`, as every program edit.js runs is: no flag or setting stands in for it. It is run
+    with that limit, which kills osascript and so closes the dialog, and when the run says it was out of time `outOfTime` is true
+    and nothing it printed counts, whatever `answer` makes of it. A person who never answers must not hold the command until
+    Claude Code ends it. */
+async function askHere(ctx, text, options) {
   let outOfTime = false;
   const run = async (cmd, args, opts) => {
     const done = await (ctx.deps.run || runProgram)(cmd, args, { ...opts, limit: DIALOG_MS });
     if (done && done.outOfTime === true) outOfTime = true;
     return done;
   };
-  const answer = await askDialog(`${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"], run });
+  const answer = await askDialog(text, { ...options, run });
+  return { answer, outOfTime };
+}
+
+/** Ask her, on a dialog Claude cannot press, to clear the session mark of the video called `label`, and say whether she did: true
+    only for her click on "Clear it". The dialog and the line before it name the video by its label, so that two dialogs, or a
+    label misread, cannot clear another. Cancel, Escape and a dialog that could not be shown or read are not a click (askDialog
+    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. So is a
+    dialog not answered within DIALOG_MS, which askHere closes. Every ending says a line of its own, after the first: the skill
+    that tells her a dialog is about to open never passes that line on. She is told first to click, since Return presses Cancel. */
+async function clickedClear(ctx, label) {
+  ctx.say(`A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`);
+  const { answer, outOfTime } = await askHere(ctx, `${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"] });
   if (outOfTime) {
     ctx.say(DIALOG_TIMED_OUT);
     return false;
@@ -3503,14 +3511,15 @@ function clearedAfterClick(ctx, found, record, plan, began) {
 
 /** Add `line` to this Mac's tool log, ~/Library/Logs/brimm-video.log, the file detached runs write to (spawnDetached); its folder
     is made when it is missing. A line names an episode by its id and its label, never by its file, and quotes no word of it. A log
-    that cannot be written does not fail the command (the record holds what the line says as well): she is told so, once. */
-function toolLog(ctx, line) {
+    that cannot be written does not fail the command (the record holds what the line says as well, `holds` says what): she is
+    told so, once. */
+function toolLog(ctx, line, holds = "the clearing") {
   const file = join(ctx.home, "Library", "Logs", "brimm-video.log");
   try {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${line}\n`, { flag: "a" });
   } catch (e) {
-    ctx.say(LOG_NOT_WRITTEN);
+    ctx.say(logNotWritten(holds));
   }
 }
 
