@@ -19,6 +19,10 @@
 //   node edit.js finish "<episode>"       gather what Final Cut Shared and exported, ask what it must, and then, detached,
 //                                         transcribe again, copy into final/ and write the hand-off for BRIMM Ops
 //
+// Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
+// episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
+// commands run, and every other is refused before it reads a word.
+//
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
@@ -28,7 +32,8 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { readSettings, teachingsOn, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { UNSCOPED, gateFor } from "./gate.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -172,13 +177,35 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     answered, and this brimm-video cannot read the label a newer one names it by. */
 const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
 
+/** Whether the gate (gate.js) refuses the command editMain is running (`ctx.asked`, with its words) for the episode `e`, whose
+    records are `records`: { why }, in the gate's words, or null when it may run. The records are all that findEpisode knows
+    of an episode, and all that is read here. A conflicted episode is refused when any one of them refuses, so that a copy
+    not answered, or a session's, is not got round by the record in force. A conflicted copy that says no kind at all is not
+    a record, only a file by the name of one (as `{}`), and is not asked. A record of a layout newer than this code is
+    refused for every command that names an episode, in the words episodeFor has always used for it, with `newer: true`, so
+    that episodeFor ends the command with the code that command gives such a record. A command that names no episode
+    (UNSCOPED), and a call with no command on ctx, are not gated. */
+function gateOf(ctx, e, records) {
+  if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
+  if (e.read.newer) return { why: `That is ${newerName(e.read.record)}. Jason has a newer brimm-video. Ask him to update this Mac.`, newer: true };
+  const on = teachingsOn(ctx.settings, ctx.now());
+  for (const record of records.filter((r) => Object.hasOwn(r, "kind"))) {
+    const why = gateFor(ctx.asked.command, record, { teachingsOn: on }, ctx.asked.words);
+    if (why) return { why };
+  }
+  return null;
+}
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
     fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
     renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
     whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
     every command but `resolve` refuses it. In the lists of episodes it says, one a newer brimm-video wrote is named by its
-    short id alone (newerName). */
+    short id alone (newerName).
+    When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
+    gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
+    read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
   const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
@@ -197,7 +224,7 @@ export function findEpisode(ctx, said) {
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
   const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
-  if (fits.length === 1) return fits[0];
+  if (fits.length === 1) return gateOf(ctx, fits[0], known(fits[0])) || fits[0];
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
   return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
 }
@@ -368,7 +395,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
   const found = findEpisode(ctx, said);
   if (found.why) {
     ctx.say(found.why);
-    return { code: 1 };
+    return { code: found.newer ? newerEnds : 1 };
   }
   const { read } = found;
   if (!read.record) {
@@ -2584,9 +2611,9 @@ export async function editMain(argv, deps = {}) {
     say(HELP);
     return 0;
   }
-  const ctx = contextFor({ ...deps, say });
-  if (ctx.why) {
-    say(ctx.why);
+  const made = contextFor({ ...deps, say });
+  if (made.why) {
+    say(made.why);
     return 2;
   }
   const run = COMMANDS[command];
@@ -2594,7 +2621,9 @@ export async function editMain(argv, deps = {}) {
     say(HELP);
     return 2;
   }
-  return run(ctx, rest);
+  // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
+  // before the command goes on: the folder a detached run is given by `--now` is found by it too.
+  return run({ ...made, asked: { command, words: rest } }, rest);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -580,6 +580,7 @@ describe("ask, when something fails half-way (from the review)", () => {
 import { writeStatus } from "../importing.js";
 import { writePending } from "../filing.js";
 import { acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
+import { askBlocked } from "../unedited.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
 const askedBoth = async (p) => {
@@ -588,7 +589,7 @@ const askedBoth = async (p) => {
   const before = existsSync(join(p.found.folder, "reels.json")) ? readFileSync(join(p.found.folder, "reels.json"), "utf8") : null;
   const now = await editMain(["ask", "--now", FOLDER], p.t.ctx.deps);
   const after = existsSync(join(p.found.folder, "reels.json")) ? readFileSync(join(p.found.folder, "reels.json"), "utf8") : null;
-  return { quick, started, now, failed: readResult(p.t.home, FOLDER, "ask").failed, claude: p.t.calls.filter((c) => c.cmd === "CLAUDE").length, kept: before === after, rev: reread(p.found).rev };
+  return { quick, started, now, failed: (readResult(p.t.home, FOLDER, "ask") || {}).failed, claude: p.t.calls.filter((c) => c.cmd === "CLAUDE").length, kept: before === after, rev: reread(p.found).rev };
 };
 
 describe("ask, and a video with a sound ffmpeg cannot read beside one it can, as an iPhone's (main #17)", () => {
@@ -1980,24 +1981,36 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
   const SESSION = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
   // Nothing of an unanswered video goes to Claude until she says what it is, and a session's words go only to its own reading.
+  // edit.js's gate (gate.js) refuses first, in findEpisode, in both parts: the detached part is refused before it takes the
+  // episode's lock, so it leaves no result. askBlocked's own refusals stand behind it, for askAgain's other callers.
+  const UNANSWERED = { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" };
+  const MARKED = { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION };
   it("refuses a video waiting for its answer, both parts, and asks nothing", async () => {
     const p = askable();
-    relayout(p.found, { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
+    relayout(p.found, UNANSWERED);
     const r = await askedBoth(p);
     const why = "This video is waiting for its answer: say what it is first.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
-    assert.ok(p.t.said().includes(why), p.t.said());
-    assert.deepEqual(r.failed, [why]);
+    assert.equal(p.t.said(), `${why}\n${why}`);
+    assert.equal(r.failed, undefined, "the gate ends the detached part before it leaves a result");
     p.t.done();
   });
   it("refuses a client or group session whose mark is not cleared, both parts, and asks nothing", async () => {
     const p = askable();
-    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION });
+    relayout(p.found, MARKED);
     const r = await askedBoth(p);
-    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    const why = "This is a client or group session: that is not done for one.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
-    assert.ok(p.t.said().includes(why), p.t.said());
-    assert.deepEqual(r.failed, [why]);
+    assert.equal(p.t.said(), `${why}\n${why}`);
+    assert.equal(r.failed, undefined, "the gate ends the detached part before it leaves a result");
     p.t.done();
+  });
+  it("has askBlocked, which askAgain goes by, refuse both on its own as well", () => {
+    for (const [more, why] of [[UNANSWERED, "This video is waiting for its answer: say what it is first."], [MARKED, "This is a client or group session: Claude reads it only for its teachings."]]) {
+      const p = askable();
+      relayout(p.found, more);
+      assert.deepEqual(askBlocked({ folder: p.found.folder, record: reread(p.found), root: p.t.root, home: p.t.home, machine: "Mac Studio", now: p.t.now() }), { why });
+      p.t.done();
+    }
   });
 });
