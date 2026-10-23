@@ -4803,6 +4803,90 @@ describe("the light import", () => {
     assert.deepEqual(t.notes, [READY, `Dropbox lost a file of ${LABEL}. The video stays in the drop folder; see the log.`]);
     t.done();
   });
+  /** A recording as Zoom names it, and what the import says of it, until phase Z teaches it Zoom's downloads. */
+  const ZOOM = "GMT20261013-142933_Recording_gvo_1280x720.mp4";
+  const ZOOM_HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  it("holds a Zoom download in the drop folder until phase Z: not imported, where it is, its status and the log say why, and the other videos are imported", async () => {
+    const t = episodeImport({ video: ZOOM });
+    t.put("audio1449382767.m4a");
+    t.put("Talk.mov");
+    const results = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(results.filter((r) => r.held).map((r) => [r.ok, r.name, r.held]).sort(), [[true, ZOOM, ZOOM_HELD], [true, "audio1449382767.m4a", ZOOM_HELD]]);
+    // Talk.mov is imported lightly, and its raw video taken out of the drop folder by its late check; the held ones stay.
+    assert.deepEqual(readdirSync(t.episodes).filter((n) => n !== ".importing"), ["2026-10-20 Talk (Mac Studio)"]);
+    assert.deepEqual(listAll(t.drop), [ZOOM, "audio1449382767.m4a"]);
+    assert.equal(t.calls.filter((c) => c.cmd === "FFPROBE").length, 1);
+    const importing = join(t.episodes, ".importing");
+    const statuses = readdirSync(importing).map((n) => JSON.parse(readFileSync(join(importing, n), "utf8")));
+    assert.deepEqual(statuses.map((s) => [s.video, s.machine, s.held]).sort(), [[ZOOM, "Mac Studio", ZOOM_HELD], ["audio1449382767.m4a", "Mac Studio", ZOOM_HELD]]);
+    // The Mac looked in the folder each minute of the late check's wait, and said it once.
+    assert.ok(t.waits.length > 3, t.waits.join(", "));
+    for (const name of [ZOOM, "audio1449382767.m4a"]) assert.equal(t.logs.filter((line) => line === `${name}: ${ZOOM_HELD}`).length, 1, t.logs.join("\n"));
+    assert.deepEqual(t.notes, [READY]);
+    t.done();
+  });
+  it("imports a Zoom download as any video when the setting is off or absent", async () => {
+    for (const light of [false, null]) {
+      const t = episodeImport({ light, video: ZOOM });
+      const [r] = await uneditedFolder(t.drop, t.deps);
+      assert.deepEqual([r.ok, r.held, r.folder], [true, undefined, `2026-10-20 ${basename(ZOOM, ".mp4")} (Mac Studio)`], String(light));
+      assert.equal(t.calls.filter((c) => c.cmd === "CLAUDE").length, 1, String(light));
+      assert.ok(!t.logs.some((line) => line.includes(ZOOM_HELD)), String(light));
+      t.done();
+    }
+  });
+  it("keeps the full run for a Zoom download given alone, or in a folder that is not this Mac's drop folder, whatever the setting", async () => {
+    const t = setup({ claude: [answers(REPLY)] });
+    t.deps.light = true;
+    t.deps.settings = { version: 1, machine: "Mac Studio", root: join(t.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
+    const one = await uneditedFile(t.video(ZOOM), t.deps);
+    t.video("audio1449382767.m4a");
+    const [folder] = await uneditedFolder(t.dir, t.deps);
+    assert.deepEqual([one.ok, folder.ok, folder.held, folder.folder], [true, true, undefined, "2026-10-13"]);
+    assert.equal(t.asks.length, 2);
+    assert.ok(t.names().includes(`${basename(ZOOM, ".mp4")}.fcpxml`) && t.inside("2026-10-13").includes("audio1449382767.fcpxml"), t.names().join(", "));
+    assert.ok(!existsSync(join(t.dir, "BRIMM Video")), "no status was written");
+    assert.ok(!t.logs.some((line) => line.includes(ZOOM_HELD)));
+    t.done();
+  });
+  it("refuses --from-plan of a light episode, answered or not, before it reads or writes anything, and exits as it does on any refusal", async () => {
+    const MESSAGE = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
+    for (const answer of [false, true]) {
+      const t = episodeImport();
+      await uneditedFolder(t.drop, t.deps);
+      if (answer) answered(t, "Talk.mov");
+      const folder = t.episodeFolder();
+      const video = join(folder, "Talk.mov");
+      // Not even its cut plan is read: with it gone, the refusal is the same.
+      rmSync(join(folder, "Talk.cut-plan.json"));
+      const before = [listAll(folder), t.record().rev];
+      t.calls.length = 0;
+      t.clones.length = 0;
+      t.logs.length = 0;
+      const r = await videosFromPlan(video, t.deps);
+      assert.deepEqual(r, { ok: false, name: "Talk.mov", made: [], stopped: true, message: MESSAGE }, String(answer));
+      assert.deepEqual(t.logs, [`Talk.mov: ${MESSAGE} Nothing was made.`], String(answer));
+      assert.deepEqual([t.calls, t.guarded, t.clones.length, listAll(folder), t.record().rev], [[], [], 0, ...before], String(answer));
+      // With --out it is the same, and nothing is made there.
+      const out = join(t.dir, "out");
+      assert.equal((await videosFromPlan(video, { ...t.deps, outDir: out })).message, MESSAGE);
+      assert.equal(existsSync(out), false);
+      // The run ends as it does when any other refusal stops it.
+      assert.equal(await doAsked({ file: video, folders: [], out: "", fromPlan: true }, t.deps), 2);
+      assert.deepEqual([t.calls, t.guarded], [[], []]);
+      t.done();
+    }
+  });
+  it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
+    const t = episodeImport({ light: false });
+    await uneditedFolder(t.drop, t.deps);
+    t.deps.light = true;
+    t.deps.settings = { ...t.deps.settings, import: "light" };
+    const r = await videosFromPlan(join(t.episodeFolder(), "Talk.mov"), t.deps);
+    assert.deepEqual([r.ok, r.stopped, r.message], [true, undefined, ""]);
+    assert.ok(r.made.includes("Talk.rough-cut.mp4"), r.made.join(", "));
+    t.done();
+  });
   it("is today's import with the setting off or absent: Claude asked, the rough cut, the Final Cut file, reels.json and today's notice", async () => {
     for (const light of [false, null]) {
       const t = episodeImport({ light });

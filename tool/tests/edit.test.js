@@ -568,6 +568,43 @@ describe("node edit.js bring, status and retry", () => {
     assert.deepEqual([r.code, r.said, t.started], [1, ["Talk.mov is being imported now, at Making the rough cut. The panel shows how far it is."], []]);
     t.done();
   });
+  // A Zoom download in a light drop folder is held, until phase Z: its status says why (importing.js, held).
+  const ZOOM = "GMT20261013-142933_Recording_gvo_1280x720.mp4";
+  const HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  it("episodes says why a held video waits in the drop folder, and neither it nor status lists it as an import", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "video");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null }, 600);
+    // How long it has waited is from when it came into the folder, which a test cannot set: so the clock is set from it.
+    t.deps.now = () => statSync(join(drop(t), ZOOM)).ctimeMs + 2 * 3600000;
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes(`Waiting in the drop folders:\n  ${ZOOM}, in Mac Studio's, for 2 hours: ${HELD}`), r.text);
+    assert.ok(!r.text.includes("Imports:") && !r.text.includes("being imported") && !r.text.includes("stopped on"), r.text);
+    const s = await t.run("status");
+    assert.ok(!s.text.includes(ZOOM) && !s.text.includes("being imported"), s.text);
+    t.done();
+  });
+  it("retry says a held video is held, and why, and does nothing: trying again would hold it again", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "video");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null, bytes: 5 }, 600);
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", ZOOM);
+    assert.deepEqual([r.code, r.said, kicked, t.started], [1, [`${ZOOM} is held: ${HELD}`], 0, []]);
+    assert.equal(readdirSync(join(t.episodes, ".importing")).length, 1);
+    t.done();
+  });
+  it("retry takes away the status of a held video that is another file now, and asks the launch agent to look", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "another recording");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null, bytes: 5 }, 600);
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", ZOOM);
+    assert.deepEqual([r.code, kicked, readdirSync(join(t.episodes, ".importing"))], [0, 1, []]);
+    t.done();
+  });
   it("retry names the videos in the drop folder when it cannot find the one said", async () => {
     const t = setup();
     writeFileSync(join(drop(t), "Talk.mov"), "video");

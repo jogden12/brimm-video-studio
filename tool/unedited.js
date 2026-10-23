@@ -39,7 +39,10 @@
 // When this Mac's settings say `import: "light"` (settings.js), a video in its drop folder is imported lightly (spec
 // 2026-10-22, section 1): its transcript, words, cut plan and cut log, and the rough cut's captions worked out from the plan,
 // and nothing more. Claude is not asked, no video is made, and there is no Final Cut file, reels.json or notes: the episode's
-// record waits for her to say what the video is, and until then the video is named by its label, never by its file.
+// record waits for her to say what the video is, and until then the video is named by its label, never by its file. Until
+// the import takes Zoom's downloads (phase Z), a file named as Zoom names them is left where it is, with a status that says
+// so (filing.js), and --from-plan refuses an episode imported lightly. A watched folder that is not this Mac's drop folder, and
+// the one file given on the command line, keep the full run whatever the setting says.
 import { mainProject } from "./projects.js";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -59,7 +62,7 @@ import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
-import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
+import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, seenLine, spokenMac } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
@@ -1704,6 +1707,9 @@ export async function askAgain({ folder, record }, deps) {
   }
 }
 
+/** What --from-plan says when it is asked for a light episode, whose videos are made when it is read. */
+const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
+
 /** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
     version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
     as made. They are made as a run makes them today, from the plan's facts, its ranges and each clip's ranges as they are,
@@ -1723,7 +1729,9 @@ export async function askAgain({ folder, record }, deps) {
     the same way when the record cannot be read (a conflicted copy, or an import not finished), when this Mac has no settings
     for episodes, when Dropbox undid this Mac's last change to it, while the import still holds the video (importHolds), and
     while another command is at work on the episode. The work holds the episode's lock, kept awake, and waits for the late
-    check of what it put in before it ends. */
+    check of what it put in before it ends.
+    A light episode, one whose record is at layout 3, is never made again from its plan: it stops first of all, before anything
+    is read or made and with or without --out, saying it was imported lightly (LIGHT_REFUSAL). */
 export async function videosFromPlan(file, deps) {
   const { log = () => {} } = deps;
   const name = basename(file);
@@ -1732,6 +1740,19 @@ export async function videosFromPlan(file, deps) {
     log(`${name}: ${why}. Nothing was made.`);
     return { ok: false, name, made: [], stopped: true, message: why };
   };
+  // A light episode is never made again from its plan (spec 2026-10-22, "Who else keeps the heavy path"): that would make the
+  // whole-video rough cut and the upright version the light import leaves out, and its videos are made when it is read. It is
+  // the record that says what an episode is: layout 3, which is a kind other than "episode" or "short video", an answer, and
+  // the rest of the switch's fields. The refusal is the first thing, before the plan is read or anything is made, and it is
+  // the same with --out.
+  const folder = dirname(file);
+  if (existsSync(join(folder, RECORD_DIR))) {
+    const { record } = readEpisode(folder, { pastCopies: true });
+    if (record && layoutOf(record) === 3) {
+      log(`${name}: ${LIGHT_REFUSAL} Nothing was made.`);
+      return { ok: false, name, made: [], stopped: true, message: LIGHT_REFUSAL };
+    }
+  }
   // Videos written straight into an episode's folder would skip the claim, the lock and the rule: --out anywhere in one, or in
   // Episodes itself, is refused.
   if (deps.outDir) {
@@ -1781,7 +1802,6 @@ export async function videosFromPlan(file, deps) {
   // A video in an episode's folder, which has a record/ whatever its record says: what is made of it goes into the folder by
   // the rule (dropbox.js), never by a move, and only when the episode can be gone on with. The work holds the episode's lock,
   // as a detached command of edit.js does, so that no other works on the episode meanwhile.
-  const folder = dirname(file);
   if (deps.outDir || !existsSync(join(folder, RECORD_DIR))) return remakeVideos(file, { out, plan, episode: false, stop }, deps);
   const read = readEpisode(folder);
   if (!read.record) return stop(`its episode's record cannot be read: ${read.why}`);
@@ -2033,7 +2053,8 @@ An episode, made of a video in this Mac's drop folder, gets Reel candidates in p
 small upright preview of each in previews/. --from-plan of an episode's video makes the previews again, and puts every
 file into the episode by the rule. See the README, "Reel candidates". With this Mac's settings saying import light, a video
 in the drop folder is imported lightly instead: its transcript, cut plan and the rough cut's captions, and nothing else.
-Claude is not asked, and no video is made, until its person says what it is.
+Claude is not asked, and no video is made, until its person says what it is. A Zoom download is not imported yet: it is
+left in the folder, and its status says to put it in BRIMM VIDEO Transfer. --from-plan refuses an episode imported lightly.
 
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
