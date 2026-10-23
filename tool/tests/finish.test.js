@@ -2152,6 +2152,18 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", "Talk.brimm-ops.json")] }]);
     t.done();
   });
+  it("writes the record it is found with when it is given no other: finishFinished(ctx, found)", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = video(t, {});
+    writeFileSync(recordFile(found.folder, found.record.rev + 1), recordText({ ...found.record, rev: found.record.rev + 1, spellings: [["Sallie", "Sally"]] }));
+    const now = { ...found, record: reread(found) };
+    const done = await finishFinished(t.ctx, now);
+    assert.deepEqual([done.ok, done.revision], [true, 1]);
+    assert.deepEqual(reread(found).finished.parts.main.spellings, [["Sallie", "Sally"]]);
+    assert.match(readFileSync(join(found.folder, "final", "Talk.srt"), "utf8"), /Thank you so much, Sally\./);
+    t.done();
+  });
   it("is the same for an iPhone clip, whose hand-off holds no suggestions and no Reels", async () => {
     const t = setup();
     handoffVersion(t, 2);

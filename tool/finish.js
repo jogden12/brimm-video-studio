@@ -986,8 +986,8 @@ export function suggestionsFrom({ candidates, dropped = [], seconds, spellings =
     When the record already says the hand-off was made so, it is made again as the next revision, the same file, from the import's
     captions again, so that a spelling dropped or changed is dropped or changed in the final transcripts as well; a hand-off
     that would come out as it is stays as it is, and only the record is written.
-    `found` is { folder, name, record } as the commands have it, and `record` the record to write: `found.record` with what the
-    command changed (its spellings, the answer to the offers). Before anything is looked at, cannotFinish refuses a session and a
+    `found` is { folder, name, record } as the commands have it, and `record` the record to write, `found.record` when it is not
+    given: `found.record` with what the command changed (its spellings, the answer to the offers). Before anything is looked at, cannotFinish refuses a session and a
     video not yet answered; then handoffTarget says where it goes (and whether it is written at all), the hand-off is built and
     checked (handoffFaultV2), and numbersTakenWords is asked. Nothing is written, in final/ or the record, unless all of that
     is well. Resolves one of:
@@ -996,7 +996,7 @@ export function suggestionsFrom({ candidates, dropped = [], seconds, spellings =
     - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first.
     - { ok: true, revision, handoff, left, same }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
       says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written. */
-export async function finishFinished(ctx, found, { record }) {
+export async function finishFinished(ctx, found, { record = found.record } = {}) {
   const who = shownName(record);
   const refused = cannotFinish(record);
   if (refused) return { why: refused };
