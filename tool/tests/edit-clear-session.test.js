@@ -31,9 +31,17 @@ const SESSION = { version: 3, kind: "session", answer: ANSWERED, session: MARK, 
 const secret = /pricing/i;
 
 // The words a person reads, and the dialog's.
-const CLICK = 'A dialog is open on this Mac: click "Clear it" to clear the session mark, or Cancel.';
+/** What she is told as the dialog opens: it names the video by its label. */
+const CLICK = (label = SESSION_NAME) => `A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`;
 const NOT_CLEARED = "Not cleared: the session mark stays.";
-const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+/** The spec's sentence, word for word; the dialog's text is the label on a line of its own, a blank line, and this. */
+const SENTENCE = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+const DIALOG = (label = SESSION_NAME) => `${label}\n\n${SENTENCE}`;
+const TOO_LONG = "Not cleared: the dialog was open too long for this to finish in time. Say it again, and click within a minute.";
+const LOG_FAILED = "The log on this Mac could not be written: the record holds the clearing.";
+const UNREADABLE_MARK = (label) => `${label}'s session mark cannot be read: ask Jason.`;
+const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
+const RUNNING = /^Not cleared: read is running for .* already\. Say it again when it has finished\.$/;
 const WITH_SESSION = "A session mark is cleared by answering what the video really is: finished, raw or clip.";
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 const NO_MARK = (name) => `${name} has no session mark to clear.`;
@@ -104,7 +112,7 @@ function unchanged(t, found, before, why = "") {
 }
 
 describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
-  it("tells her to click, shows one dialog with her words and the buttons Cancel and Clear it, before anything is written", async () => {
+  it("tells her to click, shows one dialog that names the video and has her words and the buttons Cancel and Clear it, before anything is written", async () => {
     const t = setup();
     const found = sessionOf(t);
     const d = dialogs(t, found, CLEAR_IT);
@@ -113,31 +121,35 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
     assert.equal(d.asked.length, 1);
     const [call] = d.asked;
     assert.deepEqual([call.cmd, call.args.length, call.args[0]], [OSASCRIPT, 2, "-e"]);
-    assert.equal(call.args[1], dialogScript(CLEAR_DIALOG, { buttons: ["Cancel", "Clear it"] }));
-    // The script holds her words and the two buttons, and Cancel is the default button: a stray Return cancels.
-    assert.ok(call.args[1].includes(`"${CLEAR_DIALOG}"`), call.args[1]);
+    assert.equal(call.args[1], dialogScript(DIALOG(), { buttons: ["Cancel", "Clear it"] }));
+    // The script holds the video's label on a line of its own, a blank line, the spec's sentence word for word, and the two buttons,
+    // and Cancel is the default button: a stray Return cancels. It names no file, which is a client's.
+    assert.ok(call.args[1].includes(`"${SESSION_NAME}\n\n${SENTENCE}"`), call.args[1]);
     assert.ok(call.args[1].includes('buttons {"Cancel", "Clear it"} default button 1'), call.args[1]);
-    // It said to click before the dialog opened, and the record was as she found it: no claim, no wait.
-    assert.deepEqual([call.saidBefore, call.revBefore, call.waitsBefore], [[CLICK], 1, []]);
+    assert.doesNotMatch(call.args[1], secret);
+    // It said to click, naming the video, before the dialog opened, and the record was as she found it: no claim, no wait.
+    assert.deepEqual([call.saidBefore, call.revBefore, call.waitsBefore], [[CLICK()], 1, []]);
     t.done();
   });
   it("writes nothing when she clicks Cancel, or the answer is not her click on Clear it: no claim, no log, no reading", async () => {
+    // What she is then told: for Cancel the mark stays, and for a dialog that gave no click, why, in dialog.js's words.
+    const READ = "Not cleared: The dialog's answer could not be read. The session mark stays.";
     const answers = [
-      ["Cancel", CANCELED],
-      ["Escape, which ends the script as Cancel does", { code: 1, stdout: "", stderr: "0:62: execution error: User canceled. (-128)\n" }],
-      ["a reply that is no button", UNREADABLE],
-      ["Cancel printed as a button", { code: 0, stdout: "button returned:Cancel\n", stderr: "" }],
-      ["a button that was not shown", { code: 0, stdout: "button returned:Clear\n", stderr: "" }],
-      ["osascript ended with an error", { code: 2, stdout: "", stderr: "not allowed to send keystrokes" }],
-      ["osascript not starting", () => { throw new Error("spawn /usr/bin/osascript ENOENT"); }]
+      ["Cancel", CANCELED, NOT_CLEARED],
+      ["Escape, which ends the script as Cancel does", { code: 1, stdout: "", stderr: "0:62: execution error: User canceled. (-128)\n" }, NOT_CLEARED],
+      ["a reply that is no button", UNREADABLE, READ],
+      ["Cancel printed as a button", { code: 0, stdout: "button returned:Cancel\n", stderr: "" }, NOT_CLEARED],
+      ["a button that was not shown", { code: 0, stdout: "button returned:Clear\n", stderr: "" }, READ],
+      ["osascript ended with an error", { code: 2, stdout: "", stderr: "not allowed to send keystrokes" }, "Not cleared: The dialog could not be shown (osascript ended with code 2). The session mark stays."],
+      ["osascript not starting", () => { throw new Error("spawn /usr/bin/osascript ENOENT"); }, "Not cleared: The dialog could not be shown. The session mark stays."]
     ];
-    for (const [what, answer] of answers) {
+    for (const [what, answer, told] of answers) {
       const t = setup();
       const found = sessionOf(t);
       const before = recordsOf(found);
       const d = dialogs(t, found, answer);
       const r = await d.ask(...clearing("raw"));
-      assert.deepEqual([r.code, r.said], [1, [CLICK, NOT_CLEARED]], what);
+      assert.deepEqual([r.code, r.said], [1, [CLICK(), told]], what);
       assert.equal(d.asked.length, 1, what);
       unchanged(t, found, before, what);
       assert.deepEqual([reread(found).rev, gated(reread(found)), reread(found).session.cleared], [1, true, null], what);
@@ -167,7 +179,7 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
       assert.deepEqual(readdirSync(join(found.folder, "record")), ["0001.json", "0002.json", "0003.json"], word);
       // The reading is started as for any answer, under the kind, and its result is said.
       assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", kept, "--rev", "3"]], word);
-      assert.deepEqual(r.said, [CLICK, CLEARED(SESSION_NAME, said), `${SESSION_NAME}: read ended 0 minutes ago. Made: notes.txt.`], word);
+      assert.deepEqual(r.said, [CLICK(), CLEARED(SESSION_NAME, said), `${SESSION_NAME}: read ended 0 minutes ago. Made: notes.txt.`], word);
       assert.doesNotMatch(r.text, secret, word);
       t.done();
     }
@@ -178,7 +190,7 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
     const found = sessionOf(t, { editing: { by: "Mac Studio", since } });
     const d = dialogs(t, found, CLEAR_IT);
     const r = await d.ask(...clearing("finished"));
-    assert.deepEqual(r.said.slice(0, 2), [CLICK, CLEARED(SESSION_NAME, "finished by your editor")]);
+    assert.deepEqual(r.said.slice(0, 2), [CLICK(), CLEARED(SESSION_NAME, "finished by your editor")]);
     const record = reread(found);
     assert.deepEqual([record.rev, record.kind, record.editing.since, record.session.cleared.to, t.waits.includes(CLAIM_WAIT_MS)], [2, "finished", since, "finished", false]);
     t.done();
@@ -188,7 +200,7 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
     const found = sessionOf(t);
     const d = dialogs(t, found, CLEAR_IT, { settings: { ...t.ctx.settings, readings: false } });
     const r = await d.ask(...clearing("raw"));
-    assert.deepEqual([r.code, r.said], [0, [CLICK, CLEARED(SESSION_NAME, "raw with retakes"), `${SESSION_NAME}: answered. Readings are off on this Mac: ask Jason.`]]);
+    assert.deepEqual([r.code, r.said], [0, [CLICK(), CLEARED(SESSION_NAME, "raw with retakes"), `${SESSION_NAME}: answered. Readings are off on this Mac: ask Jason.`]]);
     assert.deepEqual([reread(found).kind, gated(reread(found)), t.started], ["raw", false, []]);
     t.done();
   });
@@ -222,6 +234,9 @@ describe("kind --clear-session: the log", () => {
     const r = await dialogs(t, found, CLEAR_IT).ask(...clearing("raw"));
     assert.equal(r.code, 0, r.text);
     assert.equal(gated(reread(found)), false);
+    // She is told, once, and it does not fail the command.
+    assert.deepEqual(r.said.slice(0, 3), [CLICK(), CLEARED(SESSION_NAME, "raw with retakes"), LOG_FAILED]);
+    assert.equal(r.said.filter((line) => line === LOG_FAILED).length, 1);
     t.done();
   });
 });
@@ -265,6 +280,16 @@ describe("kind --clear-session: refused before any dialog", () => {
       t.done();
     }
   });
+  it("refuses a session whose mark cannot be read, which would show the dialog and then fail at the write", async () => {
+    // A record of kind session with no mark at all, or a null one, is a session not cleared to the gate, and has no mark to clear.
+    for (const over of [{ session: undefined }, { session: null }]) {
+      const t = setup();
+      const found = sessionOf(t, over);
+      assert.equal(gated(reread(found)), true);
+      await refused(t, found, clearing("raw"), [UNREADABLE_MARK(SESSION_NAME)], JSON.stringify(over));
+      t.done();
+    }
+  });
   it("refuses a video the other Mac has, and a detached run at work on it, in today's words", async () => {
     const t = setup();
     const found = sessionOf(t, { editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } });
@@ -282,10 +307,10 @@ describe("kind --clear-session: refused before any dialog", () => {
     assert.doesNotMatch(r.text, secret);
     u.done();
   });
-  it("still asks whether it is a session, as a video from Zoom is, until her click says it is not", async () => {
+  it("clears a session that came from Zoom without asking whether it is one", async () => {
     const t = setup();
     const found = sessionOf(t, { answer: { ...ANSWERED, came: "zoom" } });
-    // Her click says it is not one, so the question is met; without --clear-session the mark stays.
+    // Her click says it is not one, so the question is not asked; without --clear-session the mark stays.
     const stays = dialogs(t, found, CLEAR_IT);
     const kept = await stays.ask("kind", SESSION_NAME, "raw", "--private", "no", "--again");
     assert.deepEqual([kept.code, kept.said, stays.asked.length], [1, [MARK_STAYS], 0]);
@@ -373,7 +398,8 @@ describe("kind --clear-session: the versions around the video", () => {
 
 describe("kind --clear-session: the mark cleared meanwhile", () => {
   const clearedBy = (mark, on) => ({ ...mark, cleared: { at: AFTER_CLAIM, on, to: "raw", confirmed: "dialog" } });
-  it("is refused after the claim, with no second clearing written, when the record read again shows the mark cleared", async () => {
+  const CHANGED = `Not cleared: ${SESSION_NAME} changed meanwhile: say your answer again.`;
+  it("is refused after the claim, and the claim let go, when the record read again shows the mark cleared", async () => {
     const t = setup();
     const found = sessionOf(t);
     // While the claim waits, the other Mac's clearing is what the slot of this Mac's claim holds, with the claim on it.
@@ -383,31 +409,128 @@ describe("kind --clear-session: the mark cleared meanwhile", () => {
     });
     const d = dialogs(t, found, CLEAR_IT);
     const r = await d.ask(...clearing("raw"));
-    assert.deepEqual([r.code, r.said], [1, [CLICK, NO_MARK(SESSION_NAME)]]);
-    assert.deepEqual(readdirSync(join(found.folder, "record")), ["0001.json", "0002.json"]);
-    assert.deepEqual([reread(found).session.cleared.on, t.started, existsSync(logOf(t)), d.asked.length], ["Sallie's laptop", [], false, 1]);
+    assert.deepEqual([r.code, r.said], [1, [CLICK(), `Not cleared: ${NO_MARK(SESSION_NAME)}`]]);
+    // No second clearing is written. This Mac's claim is let go again, in one write, and the other Mac's clearing stands.
+    assert.deepEqual(readdirSync(join(found.folder, "record")), ["0001.json", "0002.json", "0003.json"]);
+    assert.deepEqual([reread(found).session.cleared.on, reread(found).editing, t.started, existsSync(logOf(t)), d.asked.length], ["Sallie's laptop", null, [], false, 1]);
     t.done();
   });
-  it("writes nothing when the other Mac cleared it while the dialog was open: the claim finds a newer record", async () => {
+  it("writes nothing when the other Mac cleared it while the dialog was open: the record is not the one she was asked about", async () => {
+    for (const editing of [null, { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" }]) {
+      const t = setup();
+      const found = sessionOf(t, { editing });
+      const d = dialogs(t, found, CLEAR_IT, {
+        during: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, kind: "raw", session: clearedBy(MARK, "Sallie's laptop"), writer: { commit: "c709b57", on: "Sallie's laptop" } }))
+      });
+      const r = await d.ask(...clearing("raw"));
+      assert.deepEqual([r.code, r.said], [1, [CLICK(), CHANGED]], String(editing));
+      assert.deepEqual([readdirSync(join(found.folder, "record")), reread(found).session.cleared.on, t.started, t.waits, existsSync(logOf(t))], [["0001.json", "0002.json"], "Sallie's laptop", [], [], false], String(editing));
+      t.done();
+    }
+  });
+});
+
+describe("kind --clear-session: what changed while the dialog was open (the claim held or not)", () => {
+  const HELD = { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" };
+  const ELSEWHERE = "e-20261011-bbbbbb";
+  it("is refused, before the claim or the write, when a detached run starts on the episode meanwhile", async () => {
+    for (const editing of [null, HELD]) {
+      const t = setup();
+      const found = sessionOf(t, { editing });
+      const before = recordsOf(found);
+      const d = dialogs(t, found, CLEAR_IT, {
+        alive: (pid) => pid === 4242,
+        during: () => {
+          mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+          writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "read" }));
+        }
+      });
+      const r = await d.ask(...clearing("raw"));
+      assert.equal(r.code, 1, String(editing));
+      assert.equal(r.said[0], CLICK());
+      assert.match(r.said[1], RUNNING, String(editing));
+      assert.equal(r.said.length, 2);
+      assert.doesNotMatch(r.text, secret);
+      assert.deepEqual([recordsOf(found), gated(reread(found)), t.started, t.waits, existsSync(logOf(t))], [before, true, [], [], false], String(editing));
+      t.done();
+    }
+  });
+  it("is refused when the video it is a new version of is marked a session meanwhile, and nothing is copied or cleared", async () => {
+    for (const editing of [null, HELD]) {
+      const t = setup();
+      const found = sessionOf(t, { editing });
+      const target = episodeAs(t, { id: ELSEWHERE, name: "2026-10-11 Elsewhere (Mac Studio)", record: { version: 3, kind: "finished", answer: { ...ANSWERED, private: "no" }, name: { text: "Elsewhere", placeholder: false }, label: "Video of 11 Oct", spellings: [["Sally", "Sallie"]] } });
+      const before = recordsOf(found);
+      const d = dialogs(t, found, CLEAR_IT, {
+        during: () => writeFileSync(recordFile(target.folder, 2), recordText({ ...reread(target), rev: 2, kind: "session", answer: ANSWERED, session: MARK }))
+      });
+      const r = await d.ask(...clearing("raw", "--version-of", ELSEWHERE));
+      assert.deepEqual([r.code, r.said], [1, [CLICK(), `Not cleared: ${SESSION_TARGET}`]], String(editing));
+      assert.deepEqual([recordsOf(found), gated(reread(found)), reread(found).spellings, t.started, t.waits, existsSync(logOf(t))], [before, true, [], [], [], false], String(editing));
+      t.done();
+    }
+  });
+  it("is refused, before the claim is written, when she clicked too late for the claim's wait to finish within the command's time", async () => {
     const t = setup();
     const found = sessionOf(t);
-    const d = dialogs(t, found, CLEAR_IT, {
-      during: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, kind: "raw", session: clearedBy(MARK, "Sallie's laptop"), writer: { commit: "c709b57", on: "Sallie's laptop" } }))
-    });
+    const before = recordsOf(found);
+    // The command began at the clock's start; the dialog stays open 85 seconds, and the claim would wait 20 more.
+    const d = dialogs(t, found, CLEAR_IT, { during: () => t.ctx.deps.wait(85000) });
     const r = await d.ask(...clearing("raw"));
-    assert.deepEqual([r.code, r.said], [1, [CLICK, "Nothing was written: this episode changed on the other Mac: open it again."]]);
-    assert.deepEqual([readdirSync(join(found.folder, "record")), reread(found).session.cleared.on, t.started, t.waits, existsSync(logOf(t))], [["0001.json", "0002.json"], "Sallie's laptop", [], [], false]);
+    assert.deepEqual([r.code, r.said], [1, [CLICK(), TOO_LONG]]);
+    assert.deepEqual([recordsOf(found), gated(reread(found)), t.started, t.waits, existsSync(logOf(t)), existsSync(answerLock(t))], [before, true, [], [85000], false, false]);
     t.done();
   });
-  it("writes nothing when the other Mac cleared it while the dialog was open and this Mac had the claim already", async () => {
+  it("clears all the same when she clicks as late as 80 seconds in, which is the last the claim's wait fits", async () => {
     const t = setup();
-    const found = sessionOf(t, { editing: { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" } });
-    const d = dialogs(t, found, CLEAR_IT, {
-      during: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, kind: "raw", session: clearedBy(MARK, "Sallie's laptop"), writer: { commit: "c709b57", on: "Sallie's laptop" } }))
-    });
+    const found = sessionOf(t);
+    const d = dialogs(t, found, CLEAR_IT, { during: () => t.ctx.deps.wait(80000) });
     const r = await d.ask(...clearing("raw"));
-    assert.deepEqual([r.code, r.said], [1, [CLICK, "Nothing was written: this episode changed on the other Mac: open it again."]]);
-    assert.deepEqual([readdirSync(join(found.folder, "record")), t.started, existsSync(logOf(t))], [["0001.json", "0002.json"], [], false]);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([gated(reread(found)), t.waits.filter((ms) => ms === CLAIM_WAIT_MS).length], [false, 1]);
+    t.done();
+  });
+  it("does not refuse a late click when this Mac holds the claim already: there is no claim to wait for", async () => {
+    const t = setup();
+    const found = sessionOf(t, { editing: HELD });
+    const d = dialogs(t, found, CLEAR_IT, { during: () => t.ctx.deps.wait(85000) });
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([reread(found).kind, gated(reread(found)), t.waits.includes(CLAIM_WAIT_MS)], ["raw", false, false]);
+    t.done();
+  });
+});
+
+describe("kind --clear-session: a refusal after her click", () => {
+  it("lets this Mac's claim go again and says it was not cleared, when a detached run starts during the claim's wait", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    duringWaits(t, CLAIM_WAIT_MS, () => {
+      mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+      writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "read" }));
+    });
+    const d = dialogs(t, found, CLEAR_IT, { alive: (pid) => pid === 4242 });
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 1);
+    assert.equal(r.said[0], CLICK());
+    assert.match(r.said[r.said.length - 1], RUNNING);
+    assert.doesNotMatch(r.text, secret);
+    // The record is the session it was, nobody has it, and the claim was one write and the letting go of it another.
+    const record = reread(found);
+    assert.deepEqual([record.kind, gated(record), record.editing, record.session.cleared, record.rev], ["session", true, null, null, 3]);
+    assert.deepEqual([t.started, existsSync(logOf(t)), existsSync(answerLock(t))], [[], false, false]);
+    t.done();
+  });
+  it("says it was not cleared when the other Mac took the video during the claim wait, and leaves the claim that is not this Mac's", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    duringWaits(t, CLAIM_WAIT_MS, () => {
+      const mine = reread(found);
+      writeFileSync(recordFile(found.folder, mine.rev + 1), recordText({ ...mine, rev: mine.rev + 1, editing: { by: "Sallie's laptop", since: "2026-10-20T15:00:10-05:00" }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    });
+    const r = await dialogs(t, found, CLEAR_IT).ask(...clearing("raw"));
+    assert.deepEqual(r.said.slice(1), [`Not cleared: ${SESSION_NAME} is being answered on Sallie's laptop. Nothing was changed.`]);
+    assert.deepEqual([r.code, reread(found).editing.by, gated(reread(found))], [1, "Sallie's laptop", true]);
     t.done();
   });
 });
