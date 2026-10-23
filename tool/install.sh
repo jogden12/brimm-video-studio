@@ -23,7 +23,8 @@
 #   ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
-#                                    left as it is, for Jason to delete by hand once it is empty. A run with no --drop keeps the
+#                                    left as it is: it holds no video, since the switch is refused while it does, and Jason
+#                                    deletes it by hand so that none is dropped there by habit. A run with no --drop keeps the
 #                                    folder the settings name. It is refused, before anything is changed, while the old folder
 #                                    still holds a video, or an import of this Mac failed or found a problem: it says which,
 #                                    and to deal with each first. Run it with --print first
@@ -419,7 +420,7 @@ if [[ -n "$machine" ]]; then
   say "  Its marker there, $marker, saying:  $machine"
   # When the drop folder is switched, the one it was is no longer watched, and is left as it is: nothing in Dropbox is deleted.
   if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
-    say "  The old drop folder:  $root/$old_drop_name/$machine, no longer watched once this is done, and left as it is, for Jason to delete by hand once it is empty"
+    say "  The old drop folder:  $root/$old_drop_name/$machine, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported"
   fi
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
@@ -639,7 +640,7 @@ if [[ -n "$machine" ]]; then
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
   say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
   if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
-    say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. Delete it by hand once it is empty."
+    say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. It holds no video. Jason deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
   fi
   if [[ -n "$studio_why" ]]; then
     say "Her folder for Claude was not written: $studio_why."

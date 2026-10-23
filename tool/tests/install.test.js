@@ -865,7 +865,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     for (const line of [
       `  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio`,
       `  Its marker there, ${d.root}/Drop/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
-      `  The old drop folder:  ${old}, no longer watched once this is done, and left as it is, for Jason to delete by hand once it is empty`,
+      `  The old drop folder:  ${old}, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported`,
       `  Once, in Finder:  Control-click ${d.root}/Drop/Mac Studio and choose Make available offline, so that a video dropped there from another device is brought down at once`
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
     assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), handoffVersion: 2, drop: "Drop" });
@@ -873,6 +873,13 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     changedNothing(r);
     assert.deepEqual(d.held(), before);
     d.done();
+  });
+  it("says at its end that the old folder holds no video and that Jason deletes it, so that none is dropped there by habit: its closing lines, read, not run", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    const said = closing.replace(/"\n +say "/g, " ");
+    assert.ok(said.includes('say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. It holds no video. Jason deletes it by hand, so that no video is dropped there by habit: a video there is never imported."'), said);
+    assert.ok(!text.includes("once it is empty"), "no word of waiting for it to be empty: the switch is refused while it is not");
   });
   it("says nothing of an old folder when the drop folder is not switched, or the old folder is not there", () => {
     const d = box();
