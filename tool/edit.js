@@ -34,7 +34,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
@@ -66,19 +66,22 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
+import { askDialog } from "./dialog.js";
 
 const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>] [--not-a-session] [--again]
+                     [--clear-session]
                                         her answer to what a video is: both answers are needed, and they must agree (a
                                         session with yes, anything else with no). The video is claimed for this Mac, the
                                         answer is recorded, and Claude reads it, detached, unless it is a session: that is
                                         marked, named by its label, and read only when its teachings are asked for. An
                                         answered video is answered again only with --again; --version-of names the video
                                         this is a new version of; --not-a-session says a Zoom download or sound alone is
-                                        none
+                                        none; --clear-session, with --again and what the video really is, clears a session
+                                        mark: it asks on a dialog on this Mac, and only her click clears it
   node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
   node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
   node edit.js teachings "<session>" [--transcript-only]
@@ -2411,7 +2414,15 @@ async function reels(ctx, rest) {
   // While a file is still coming, ask can be asked: it brings it.
   const blocked = askRefusal(ctx, found, record);
   // A listing changes nothing, so a refusal's "Nothing was changed." is not said here.
-  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, "")));
+  // A video she has answered the card of is listed with its times on the clock she is reading, or on the recording's own when that
+  // cannot be read now: a file is not whole yet, the read fails, or the version's file holds no clip. Nothing is brought from here.
+  let now = null;
+  try {
+    now = isAnswered(record) ? clockFor({ ...found, record }, "main", ctx) : null;
+  } catch (e) {
+    now = null;
+  }
+  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, ""), now && now.clock && now.clock.length ? now : null));
   if (flags["no-play"]) return 0;
   const previews = read.reels.candidates.filter((c) => c.preview).map((c) => c.preview);
   const coming = previews.filter((rel) => !ctx.isWhole(join(found.folder, rel)));
@@ -3253,6 +3264,23 @@ const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a 
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
+/** What `--clear-session` is refused in when the answer given is a session: a mark is cleared by saying what the video really is. */
+const CLEAR_BY_KIND = "A session mark is cleared by answering what the video really is: finished, raw or clip.";
+/** The sentence of the dialog that clears a session mark: its words are hers to read, and only her click on "Clear it" clears the
+    mark. The dialog opens with the video's label on a line of its own and a blank line (clickedClear), so that she knows which. */
+const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+/** How long the dialog that clears a session mark stays open, in milliseconds: then it is closed and nothing is cleared. A person
+    who never answers must not hold the command until Claude Code ends it, with the video claimed. */
+export const DIALOG_MS = 60000;
+/** What is said first when a clearing is refused or does not happen: the mark was not cleared. */
+const NOT_CLEARED = "Not cleared:";
+const DIALOG_TIMED_OUT = `${NOT_CLEARED} the dialog was not answered within a minute, so it was closed. The session mark stays.`;
+const TOO_LATE = `${NOT_CLEARED} the dialog was open too long for this to finish in time. Say it again, and click within a minute.`;
+const LOG_NOT_WRITTEN = "The log on this Mac could not be written: the record holds the clearing.";
+/** Why `--clear-session` has nothing to clear on the video `name`: it is no session, or its mark was cleared already. */
+const noMarkToClear = (name) => `${name} has no session mark to clear.`;
+/** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
+const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
 /** Why a video that is not a session cannot be a version of a video one of whose versions is (the whole set of versions, not only
     the one named): `name` is the video being answered. */
 const sessionSet = (name) => `${name} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
@@ -3302,14 +3330,17 @@ function lateCheckAt(ctx, record) {
   return working ? now + LATE_CHECK_MS : null;
 }
 
-/** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, versionOf, target }) when its record
-    is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and `plan.target`,
-    the video this is a new version of, is looked for the first time it is asked. In this order:
-    - an answered video, without --again; a session not cleared, answered as anything but a session (by her click on a dialog
-      alone, which is another command), or as one;
+/** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, clearSession, versionOf, target })
+    when its record is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and
+    `plan.target`, the video this is a new version of, is looked for the first time it is asked. In this order:
+    - an answered video, without --again; a session not cleared, answered as anything but a session (which only --clear-session
+      does, by her click on a dialog), or as one; and, with --clear-session, a video that has no session mark to clear (no session,
+      or one whose mark is cleared already) or whose mark cannot be read. What the other Mac cleared after the record was read is
+      met by the checks made again once she has clicked and once the claim has waited: a record written meanwhile is not the one she
+      was asked about, and a clearing that reached the slot of this Mac's claim is met here, by "no session mark to clear";
     - a video that may be a session, answered as anything else without --not-a-session: one the import saw came from Zoom or is
       sound alone, a Zoom download by its file's name (a record from before the switch has no answer to say so), and one whose
-      facts the import could not read, until she has answered it;
+      facts the import could not read, until she has answered it (her click on the dialog says it is not one);
     - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
       videos have is not taken for either); a session not cleared is a version of only by a session;
     - and, read from Episodes each time it is asked (finish.js linksOf), for that target, which is looked up again and checked as
@@ -3317,7 +3348,8 @@ function lateCheckAt(ctx, record) {
       directly or through others ("cannot be a version of"); its chain can be followed to its first (chainGapWords); and for an
       answer that is not a session, none of the versions of the video it starts from, earlier, later or beside it, and none of
       this video's own later versions, is a session not cleared (the gate's predicate, in the record or any conflicted copy of
-      it); the version a handed-off video keeps is checked the same way;
+      it); the version a handed-off video keeps is checked the same way. With --clear-session this video is left out of those
+      sets: it is the session being cleared, and any other session in them still refuses;
     - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
       since, which a new answer that is not one cannot be a version of;
     - and a video that is not itself handed off, but that the chain of one handed off passes through, is given no other version
@@ -3329,11 +3361,16 @@ function answerWhy(ctx, found, record, plan) {
   const { stored } = plan;
   const was = recordKind(record);
   if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
-  if (was !== null && gated(record)) return stored === "session" ? `${name} is a client or group session already.` : MARK_STAYS;
+  // A video that has a kind and is gated is a session whose mark is not cleared. With --clear-session it has to be one, with a mark to
+  // clear; without it, such a video can be answered only as a session (which it is) and never as another kind.
+  if (plan.clearSession) {
+    if (was === null || !gated(record)) return noMarkToClear(name);
+    if (!record.session || typeof record.session !== "object" || Array.isArray(record.session)) return markUnreadable(name);
+  } else if (was !== null && gated(record)) return stored === "session" ? `${name} is a client or group session already.` : MARK_STAYS;
   const answer = record.answer;
   const came = answer ? answer.came : undefined;
   const maybe = came === "zoom" || came === "sound" || isZoomName(record.video.file) || (Boolean(answer) && came === null && answer.state !== "answered");
-  if (maybe && stored !== "session" && !plan.notASession) return ASK_IF_SESSION;
+  if (maybe && stored !== "session" && !plan.notASession && !plan.clearSession) return ASK_IF_SESSION;
   // A target looked up by an earlier call is looked up again, and the same checks are made of it as Episodes holds it now: it may
   // have been archived, answered no more, or marked a session while the claim waited. Its spellings are then the ones it holds now.
   const earlier = Boolean(plan.target);
@@ -3350,8 +3387,9 @@ function answerWhy(ctx, found, record, plan) {
   }
   // What links the target to this video, and to a session, as Episodes holds it now: one reading, each time this is asked.
   const links = linksOf(ctx.root);
-  // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it.
-  const sessionAmong = (members) => members.some((one) => links.holdsSession(one));
+  // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
+  // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
+  const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
   if (plan.target && earlier) {
     const now = links.find(plan.target.record.id);
     if (!now || recordKind(now.record) === null || now.record.archived) return `No answered video on this Mac has the id ${plan.versionOf}.`;
@@ -3395,22 +3433,31 @@ function answerWhy(ctx, found, record, plan) {
   return "";
 }
 
-/** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>] [--not-a-session] [--again]`: her answer to
-    "what is this video?" (spec 2026-10-22, section 2). Both answers are needed, and they agree: a session with yes, anything
-    else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it, and in
-    order (answerWhy says why not):
+/** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>] [--not-a-session] [--again] [--clear-session]`:
+    her answer to "what is this video?" (spec 2026-10-22, section 2). Both answers are needed, and they agree: a session with yes,
+    anything else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it,
+    and in order (answerWhy says why not):
     - the checks of answerWhy, which read the record and the Macs, and refuse an answered video, a session not cleared, a video
       that may be a session, a --version-of that names no video it can or a video that is already a version of this one, or
       one whose versions hold a session not cleared (unless this is one), a video already handed off that would be given
       another version, and one that the chain of a handed-off video passes through (the same), the other Mac's claim, and a
       run at work;
+    - with --clear-session, which clears a session mark by saying what the video really is (never "session"), a dialog on this
+      Mac, which Claude cannot press, naming the video: the video is claimed and written only if she clicks "Clear it", and Cancel,
+      or any answer but that click, or none within DIALOG_MS, writes nothing (clickedClear). Her click may come long after the
+      record was read, so the record is read again and the checks of answerWhy are made again before anything is written, and a
+      click so late that the claim's wait would not finish within the command's time (COMMAND_BUDGET_MS) clears nothing
+      (clearedAfterClick). Any refusal after her click says first that it was not cleared, and lets this Mac's claim go again if
+      it had written one;
     - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
       so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
       the checks are made again on it, right before the answer is written;
     - the answer is one write: its kind, who answered, where and when, whether it is private, the video it is a version of (and
       that video's spellings, which she confirmed there), and for a session its mark and its name, which is its label, so that
       nothing made from the name holds a client's. The claim stays on the record, so that the reading runs under it, except a
-      session's, which is let go in the same write: no reading runs under it, and the other Mac must not be kept from it;
+      session's, which is let go in the same write: no reading runs under it, and the other Mac must not be kept from it. A
+      mark cleared is the same write: the session mark as it was with `cleared` on it ({ at, on, to, confirmed: "dialog" }),
+      and then one line in this Mac's tool log (toolLog);
     - the reading is started detached (`read`, given the kind and the rev the answer's record holds, so that its run can refuse
       a record that no longer says them), for every kind but a session, whose reading starts with its teachings, unless this
       Mac's settings say readings are off: the answer is kept, since the gate runs on it. The record is read once more first, and
@@ -3428,6 +3475,8 @@ export async function kindCommand(ctx, rest) {
     say(BOTH_ANSWERS);
     return 2;
   }
+  const clearSession = Boolean(flags["clear-session"]);
+  if (clearSession && asked === "session") return refuse(ctx, CLEAR_BY_KIND);
   if ((asked === "session") !== (given === "yes")) return refuse(ctx, ANSWERS_DISAGREE);
   const versionOf = flags["version-of"];
   if (versionOf && (versionOf.length !== 1 || !versionOf[0].trim())) {
@@ -3439,16 +3488,83 @@ export async function kindCommand(ctx, rest) {
   const lock = takeAnswerLock(ctx, got.found.name, "kind");
   if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
   try {
-    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), versionOf: versionOf ? versionOf[0].trim() : "", target: null }, began);
+    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), clearSession, versionOf: versionOf ? versionOf[0].trim() : "", target: null }, began);
   } finally {
     releaseEpisodeLock(lock.file, lock.text);
   }
+}
+
+/** Ask her, on a dialog Claude cannot press, to clear the session mark of the video called `label`, and say whether she did: true
+    only for her click on "Clear it". The dialog and the line before it name the video by its label, so that two dialogs, or a
+    label misread, cannot clear another. Cancel, Escape and a dialog that could not be shown or read are not a click (askDialog
+    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. So is a
+    dialog not answered within DIALOG_MS: it is run with that limit, which kills osascript and so closes the dialog, and when the
+    run says it was out of time nothing it printed counts, whatever askDialog made of it. Every ending says a line of its own,
+    after the first: the skill that tells her a dialog is about to open never passes that line on. She is told first to click,
+    since Return presses Cancel. The dialog is shown by this Mac's own `run`, as every program edit.js runs is: no flag or setting
+    stands in for it. */
+async function clickedClear(ctx, label) {
+  ctx.say(`A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`);
+  let outOfTime = false;
+  const run = async (cmd, args, opts) => {
+    const done = await (ctx.deps.run || runProgram)(cmd, args, { ...opts, limit: DIALOG_MS });
+    if (done && done.outOfTime === true) outOfTime = true;
+    return done;
+  };
+  const answer = await askDialog(`${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"], run });
+  if (outOfTime) {
+    ctx.say(DIALOG_TIMED_OUT);
+    return false;
+  }
+  if (answer && answer.button === "Clear it") return true;
+  const why = answer && answer.button === null && typeof answer.why === "string" ? answer.why : "";
+  ctx.say(why ? `${NOT_CLEARED} ${why} The session mark stays.` : `${NOT_CLEARED} the session mark stays.`);
+  return false;
+}
+
+/** Why a clearing may not go on once she has clicked "Clear it" on the record `record` that she was asked about, in plain words,
+    or "": the record is read again, and must still be that one (a record written meanwhile, by the other Mac or by this one, is
+    not the one she was asked about), and the checks of answerWhy are made again on it, since a run may have started, or a video
+    this one is to be a version of may have been marked a session, while the dialog was open. A click so late that the claim's wait
+    could not finish within the command's time (`began` is when it began) clears nothing, when this Mac must still claim. */
+function clearedAfterClick(ctx, found, record, plan, began) {
+  const now = readEpisode(found.folder);
+  if (!now.record) return notRead(ctx, { ...found, read: now });
+  if (now.newer) return newerWhy(now.record);
+  if (now.record.rev !== record.rev) return changedMeanwhile(shownName(record));
+  const why = answerWhy(ctx, found, now.record, plan);
+  if (why) return why;
+  const holds = record.editing && record.editing.by === ctx.machine;
+  return !holds && ctx.now() - began + CLAIM_WAIT_MS > COMMAND_BUDGET_MS ? TOO_LATE : "";
+}
+
+/** Add `line` to this Mac's tool log, ~/Library/Logs/brimm-video.log, the file detached runs write to (spawnDetached); its folder
+    is made when it is missing. A line names an episode by its id and its label, never by its file, and quotes no word of it. A log
+    that cannot be written does not fail the command (the record holds what the line says as well): she is told so, once. */
+function toolLog(ctx, line) {
+  const file = join(ctx.home, "Library", "Logs", "brimm-video.log");
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${line}\n`, { flag: "a" });
+  } catch (e) {
+    ctx.say(LOG_NOT_WRITTEN);
+  }
+}
+
+/** Let go the claim this command wrote, when it must stop after her click: `claim` is the record as it stands, and the claim is let
+    go only while it is this Mac's, in one write by the rule (as `kind` lets go a session's, `editing: null`), so that a clearing
+    that did not happen leaves the session as it was, and nobody holding it. A write that fails says why, as every write does. */
+async function letGoClaimWritten(ctx, found, claim) {
+  if (!claim.editing || claim.editing.by !== ctx.machine) return;
+  await save(ctx, { ...found, record: claim }, { ...claim, editing: null }, "");
 }
 
 /** What `kind` does once it holds the answer lock of the episode `found`: see kindCommand. */
 async function answerKind(ctx, found, plan, began) {
   const { say } = ctx;
   const { stored, given } = plan;
+  // Once she has clicked "Clear it", whatever stops the clearing says first that nothing was cleared.
+  const stop = (why) => (plan.clearSession ? `${NOT_CLEARED} ${why}` : why);
   const read = readEpisode(found.folder);
   if (!read.record) {
     say(notRead(ctx, { ...found, read }));
@@ -3462,18 +3578,31 @@ async function answerKind(ctx, found, plan, began) {
   const name = shownName(record);
   const why = answerWhy(ctx, found, record, plan);
   if (why) return refuse(ctx, why);
-  // The claim, as open makes it. The record read again is the one the answer is written on.
+  // A session mark is cleared only by her click: asked after the checks and before the claim, so that Cancel writes nothing at all.
+  // Her click may come long after the record was read: it is read again and checked again before the claim, or, when this Mac has
+  // the claim already, before the write.
+  if (plan.clearSession) {
+    if (!(await clickedClear(ctx, name))) return 1;
+    const late = clearedAfterClick(ctx, found, record, plan, began);
+    if (late) return refuse(ctx, late === TOO_LATE ? late : stop(late));
+  }
+  // The claim, as open makes it. The record read again is the one the answer is written on. A clearing that stops here says first
+  // that nothing was cleared, and lets go of the claim it wrote when a record was written on top of it.
   let base = record;
   if (!record.editing || record.editing.by !== ctx.machine) {
-    const claim = await claimAndWait(ctx, found, record, { again: "Say your answer again.", held: (by) => beingAnswered(name, by), changed: changedMeanwhile(name) });
+    const claim = await claimAndWait(ctx, found, record, { again: "Say your answer again.", held: (by) => beingAnswered(name, by), changed: changedMeanwhile(name), said: stop, ...(plan.clearSession ? { onChanged: (on) => letGoClaimWritten(ctx, found, on) } : {}) });
     if (!claim.record) return claim.code;
     base = claim.record;
     const late = answerWhy(ctx, found, base, plan);
-    if (late) return refuse(ctx, late);
+    if (late) {
+      if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
+      return refuse(ctx, stop(late));
+    }
   }
   const at = localStamp(new Date(ctx.now()));
   const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
   const next = { ...base, kind: stored, answer };
+  if (plan.clearSession) next.session = { ...base.session, cleared: { at, on: ctx.machine, to: stored, confirmed: "dialog" } };
   if (!handedOff(found.folder, base)) {
     next.versionOf = plan.target ? plan.target.record.id : null;
     if (plan.target) {
@@ -3493,6 +3622,11 @@ async function answerKind(ctx, found, plan, began) {
     hideNames(ctx, episodeAt(ctx, found.name));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     return 0;
+  }
+  if (plan.clearSession) {
+    const becomes = KIND_SAID[stored];
+    say(`${name}: the session mark is cleared, by your click. It is now ${becomes}.`);
+    toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
   }
   // Answered as anything else, its names are no longer kept from the chat: it is named by its folder and its files as any episode is.
   if (ctx.hidden) {
@@ -3529,8 +3663,9 @@ async function answerKind(ctx, found, plan, began) {
     one that keeps the claim. Resolves { record }, the record read again, or { code } once it has said why not: the record cannot
     be read; Dropbox undid the claim (`again`, what she is to do, follows); another Mac's claim came across (`held`, given that
     Mac); or a record was written on top of it (`changed`). It warns when this Mac seems to be offline. `kind` and `teachings`
-    claim a video so before they write on it. */
-async function claimAndWait(ctx, found, record, { again, held, changed }) {
+    claim a video so before they write on it. Each line it says goes through `said` first (kind's clearing says first that nothing
+    was cleared), and `onChanged`, when given, is waited for with the record on top before `changed` is said. */
+async function claimAndWait(ctx, found, record, { again, held, changed, said = (line) => line, onChanged = null }) {
   const { say } = ctx;
   const name = shownName(record);
   const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
@@ -3538,23 +3673,24 @@ async function claimAndWait(ctx, found, record, { again, held, changed }) {
   await wait(CLAIM_WAIT_MS);
   const read = readEpisode(found.folder);
   if (!read.record) {
-    say(notRead(ctx, { ...found, read }));
+    say(said(notRead(ctx, { ...found, read })));
     return { code: 1 };
   }
   const undid = undone(read.record, ctx.home);
   if (undid || !read.record.editing) {
-    say(`Dropbox undid this Mac's claim on ${name}. ${again}`);
+    say(said(`Dropbox undid this Mac's claim on ${name}. ${again}`));
     if (undid) acceptRev(ctx.home, read.record.id, read.record.rev);
     return { code: 1 };
   }
   if (read.record.editing.by !== ctx.machine) {
-    say(held(read.record.editing.by));
+    say(said(held(read.record.editing.by)));
     return { code: 1 };
   }
   // Nothing is written on a claim but what the command writes next: any record on top of it, even one that keeps the claim, is
   // not the claim this command wrote.
   if (read.record.rev !== record.rev + 1) {
-    say(changed);
+    if (onChanged) await onChanged(read.record);
+    say(said(changed));
     return { code: 1 };
   }
   if (!(await (ctx.deps.online || online)())) say(OFFLINE);
