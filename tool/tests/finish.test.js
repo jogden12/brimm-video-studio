@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, expectedWords, lastRevision, chainOf, chainGap, nextRevision, handoffIdOf } from "../finish.js";
+import { finishNow, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, writesV2For } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { recordFile, recordText } from "../episode.js";
@@ -16,7 +16,7 @@ import { runsFolder, writeSettings } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { fromFinalCutFolder } from "../settings.js";
 import { tidyTranscript } from "../shared/transcript.js";
-import { setup, episodeFor, episodeAs, reread, listAll, EDITED, NAME, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, listAll, EDITED, NAME, NOT_YET, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
@@ -1054,6 +1054,164 @@ describe("finish, with hand-off version 2", () => {
     assert.deepEqual(result.failed, [`${LABEL} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`]);
     assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, "no file name");
     assert.deepEqual(episodesTree(t), before, "nothing in final/, and the record as it was");
+    t.done();
+  });
+});
+
+describe("finish, again, once the setting says 1 after a finish that wrote version 2", () => {
+  it("writes version 2 again under the same id, at the next revision, and asks for no approved title", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    // A new version of FIRST, whose final/ holds revision 3: the page holds its hand-off under FIRST's id.
+    const first = firstCut(t);
+    lay(first.folder, "final/Pricing talk, first cut.brimm-ops.json", handoffOf(2, FIRST, 3));
+    const found = await asked(t, { ...EDITED, title: null, versionOf: FIRST, label: LABEL });
+    assert.equal((await finishNow(t.ctx, found)).ok, true);
+    assert.deepEqual([handoffIn(found).version, handoffIn(found).video.id, handoffIn(found).revision], [2, FIRST, 4]);
+    // The setting goes back to 1, and Reel 1 is Shared again.
+    handoffVersion(t, 1);
+    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 9500);
+    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 0, t.said());
+    assert.doesNotMatch(t.said(), /Approve a title/);
+    const result = await finishNow(t.ctx, { ...found, record: reread(found) });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const handoff = handoffIn(found);
+    assert.deepEqual([handoff.version, handoff.video.id, handoff.revision, handoffFaultV2(handoff), "episode" in handoff], [2, FIRST, 5, "", false]);
+    assert.equal(reread(found).finished.revision, 5);
+    t.done();
+  });
+  it("still writes version 1 over a version 1 hand-off, under the episode's own id", async () => {
+    const t = setup();
+    handoffVersion(t, 1);
+    const found = await asked(t);
+    assert.equal((await finishNow(t.ctx, found)).ok, true);
+    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 9500);
+    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 0, t.said());
+    assert.equal((await finishNow(t.ctx, { ...found, record: reread(found) })).ok, true);
+    const handoff = handoffIn(found);
+    assert.deepEqual([handoff.version, handoff.episode.id, handoff.revision, handoffFault(handoff)], [1, ID, 2, ""]);
+    t.done();
+  });
+});
+
+describe("finish, with a loop in the chain that does not run back through the video", () => {
+  it("names the circle by the id that is seen again, not the video's own, and writes nothing", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const SECOND_ID = "e-20261012-5b2e77";
+    // This video, C, is a new version of A, which is a version of B, which is a version of A: the circle is A and B.
+    const a = firstCut(t);
+    episodeAs(t, { id: SECOND_ID, name: "2026-10-12 Pricing talk, second cut (Mac Studio)", record: { kind: "raw", versionOf: FIRST } });
+    const found = await asked(t, { ...EDITED, versionOf: FIRST, label: LABEL, ...OPEN });
+    // A comes to say it is a version of B only after finish was asked.
+    writeFileSync(recordFile(a.folder, 2), recordText({ ...a.record, rev: 2, versionOf: SECOND_ID }));
+    const before = episodesTree(t);
+    const result = await finishNow(t.ctx, found);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.failed, [`${LABEL} is a new version of a video whose earlier versions name each other as earlier versions, in a circle (${FIRST}): ask Jason. Nothing was written.`]);
+    assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, "no file name");
+    assert.deepEqual(episodesTree(t), before, "nothing in final/, and the record as it was");
+    t.done();
+  });
+  it("is worded for the video itself only when the circle runs back through it", () => {
+    const record = { id: ID, label: LABEL, name: { text: "Pricing talk" }, versionOf: FIRST };
+    assert.equal(chainGapWords(record, { id: ID, reason: "loop" }), `${LABEL} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`);
+    assert.equal(chainGapWords(record, { id: FIRST, reason: "loop" }), `${LABEL} is a new version of a video whose earlier versions name each other as earlier versions, in a circle (${FIRST}): ask Jason. Nothing was written.`);
+    assert.equal(chainGapWords(record, { id: "e-20261012-5b2e77", reason: "loop" }), `${LABEL} is a new version of a video whose earlier versions name each other as earlier versions, in a circle (e-20261012-5b2e77): ask Jason. Nothing was written.`);
+  });
+});
+
+describe("finish, with hand-off version 1, or with no setting", () => {
+  it("does not look for a new version's earlier version, writes version 1 under the episode's own id at its own next revision, and spell remakes it as version 1", async () => {
+    for (const version of [undefined, 1]) {
+      const t = setup();
+      if (version) handoffVersion(t, version);
+      // The earlier version is not in Episodes at all, and the record is answered (an episode is a raw video, as version 1
+      // knows it): version 2 would refuse it.
+      const found = await asked(t, { ...EDITED, versionOf: FIRST, label: LABEL });
+      assert.equal(chainGap(t.root, reread(found))?.reason, "missing", "the chain has a gap, which version 1 never asks about");
+      const result = await finishNow(t.ctx, found);
+      assert.equal(result.ok, true, `setting ${version}: ${result.failed.join(" ")}`);
+      const handoff = handoffIn(found);
+      assert.deepEqual([handoff.version, handoff.episode.id, handoff.revision, handoffFault(handoff)], [1, ID, 1, ""], `setting ${version}`);
+      assert.equal(reread(found).finished.revision, 1);
+      const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+      assert.equal(r.code, 0, r.text);
+      assert.doesNotMatch(r.text, /not on this Mac yet/);
+      const again = handoffIn(found);
+      assert.deepEqual([again.version, again.episode.id, again.revision, handoffFault(again)], [1, ID, 2, ""], `setting ${version}`);
+      assert.match(again.main.srt, /Thank you so much, Sally\./);
+      t.done();
+    }
+  });
+});
+
+describe("finish, for a session and for a video not yet answered", () => {
+  it("refuses it before anything is waited for, taken, transcribed or copied, by its label or else as 'This video', and leaves final/ and the record as they were", async () => {
+    for (const version of [undefined, 1, 2]) {
+      for (const [what, kind, words] of NOT_YET) {
+        for (const [label, who] of [[LABEL, LABEL], [undefined, "This video"]]) {
+          const t = setup();
+          if (version) handoffVersion(t, version);
+          const found = await asked(t, { ...EDITED, ...(label ? { label } : {}), ...OPEN });
+          // What the video is says so only now, as when her answer, or her mark, comes after finish was asked.
+          writeFileSync(recordFile(found.folder, found.record.rev), recordText({ ...reread(found), ...kind }));
+          const how = `${what}, setting ${version}, ${label ? "labelled" : "no label"}`;
+          const before = episodesTree(t);
+          const result = await finishNow(t.ctx, found);
+          assert.equal(result.ok, false, how);
+          assert.deepEqual(result.failed, [words(who)], how);
+          assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, `${how}: no file name`);
+          assert.deepEqual(t.inFinal(found), [], how);
+          assert.deepEqual(episodesTree(t), before, `${how}: the record as it was`);
+          assert.deepEqual(t.calls, [], `${how}: no program was run`);
+          assert.deepEqual(t.clones, [], how);
+          assert.deepEqual(t.opened, [], how);
+          assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, `${how}: From Final Cut keeps every file`);
+          t.done();
+        }
+      }
+    }
+  });
+});
+
+describe("the hand-off version a finish writes for a video", () => {
+  const V1_FILE = JSON.stringify(V1);
+  const V2_FILE = JSON.stringify(V2.finished);
+  const ON_FILE = "final/a.brimm-ops.json";
+  /** A record whose last finish wrote the hand-off at ON_FILE, in a folder where `text` is that file (none when null). */
+  const named = (text) => {
+    const t = setup();
+    const folder = join(t.dir, "an episode");
+    mkdirSync(join(folder, "final"), { recursive: true });
+    if (text !== null) writeFileSync(join(folder, ON_FILE), text);
+    return { t, folder, record: { finished: { revision: 1, at: "2026-10-20T15:20:00-05:00", on: "Mac Studio", handoff: ON_FILE, parts: {} } } };
+  };
+  it("is 2 when the settings say 2, whatever is on file or not", () => {
+    for (const text of [V1_FILE, V2_FILE, "not json", null]) {
+      const { t, folder, record } = named(text);
+      assert.equal(writesV2For({ handoffVersion: 2 }, folder, record), true);
+      assert.equal(writesV2For({ handoffVersion: 2 }, folder, { finished: null }), true);
+      t.done();
+    }
+  });
+  it("is 2 with the setting at 1 or none when the hand-off the record names is on file and is version 2", () => {
+    const { t, folder, record } = named(V2_FILE);
+    for (const settings of [{ handoffVersion: 1 }, {}, undefined]) assert.equal(writesV2For(settings, folder, record), true);
+    t.done();
+  });
+  it("is 1 with the setting at 1 or none when that hand-off is version 1, is not there, or cannot be read, and when the record has no finish", () => {
+    for (const text of [V1_FILE, null, "{ not json", "null", "7"]) {
+      const { t, folder, record } = named(text);
+      for (const settings of [{ handoffVersion: 1 }, {}, undefined]) assert.equal(writesV2For(settings, folder, record), false, `${text} ${JSON.stringify(settings)}`);
+      t.done();
+    }
+    const { t, folder } = named(V2_FILE);
+    assert.equal(writesV2For({ handoffVersion: 1 }, folder, { finished: null }), false, "a hand-off in the folder that no finish of the record named is not looked at");
+    assert.equal(writesV2For({ handoffVersion: 1 }, folder, {}), false);
+    assert.equal(writesV2For({ handoffVersion: 1 }, folder, { finished: { handoff: "" } }), false);
     t.done();
   });
 });

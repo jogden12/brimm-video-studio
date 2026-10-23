@@ -149,6 +149,14 @@ export const EDITED = {
   ]
 };
 
+/** What the Final Cut finish refuses for now, in either version of the hand-off: a client or group session, whose own finish
+    comes with its teachings, and a video not yet answered, which has no kind to finish as. Each as [what it is, the record's
+    own fields, the refusal as a function of how the video is named]. */
+export const NOT_YET = [
+  ["a client or group session", { kind: "session" }, (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`],
+  ["a video not yet answered", { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } }, (who) => `${who} is not answered yet: say what it is first. Nothing was written.`]
+];
+
 /** The files the import put in the episode folder: the raw video, its cut plan, and the two clips it cut. */
 const IMPORTED = {
   "Pricing talk.mp4": "the raw video",

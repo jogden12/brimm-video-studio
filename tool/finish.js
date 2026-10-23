@@ -264,17 +264,47 @@ export function chainGap(root, record) {
 }
 
 /** Why a hand-off writer refuses a video whose chain has a gap (chainGap), in plain words, after which it writes nothing. The
-    video is named by its label, or by its name when it has none, never by a file's name. A missing episode is named by its id;
-    two that each say they are a version of the other, by the id of the earlier version this video names. */
+    video is named by its label, or by its name when it has none, never by a file's name. A missing episode is named by its id.
+    A loop that runs back through this video (`gap.id` is its own) is said of the video and the earlier version it names, as two
+    that each say they are a version of the other; any other loop, where the earlier versions name each other and this video is
+    not one of them, is said of the circle, by the id that is seen again. */
 export function chainGapWords(record, gap) {
   const who = record.label || record.name.text;
-  if (gap.reason === "loop") return `${who} and the video it names as its earlier version (${record.versionOf}) each say they are a version of the other: ask Jason. Nothing was written.`;
+  if (gap.reason === "loop" && gap.id === record.id) return `${who} and the video it names as its earlier version (${record.versionOf}) each say they are a version of the other: ask Jason. Nothing was written.`;
+  if (gap.reason === "loop") return `${who} is a new version of a video whose earlier versions name each other as earlier versions, in a circle (${gap.id}): ask Jason. Nothing was written.`;
   return `${who} is a new version of a video that is not on this Mac yet (${gap.id}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`;
+}
+
+/** Why the Final Cut finish cannot finish a record yet, in plain words, or "" when it can: a client or group session, whose own
+    finish comes with its teachings (the hand-off writer refuses any transcript of a session, and none of one may be in the
+    shared folder, spec 2026-10-22, section 2), and a video not yet answered, which has no kind to finish as. It is the same in
+    both versions of the hand-off, and is asked before any folder is looked in, any claim is taken, or anything is made, so
+    that nothing of such a video is read, printed or copied. The video is named by its label, else "This video", never by its
+    name or a file's. */
+export function cannotFinish(record) {
+  const who = record.label || "This video";
+  const kind = kindOf(record);
+  if (kind === "session") return `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  if (kind === null) return `${who} is not answered yet: say what it is first. Nothing was written.`;
+  return "";
 }
 
 /** Do this Mac's settings say the hand-off is written as version 2 (spec 2026-10-22, section 8)? Until they do, it is version 1,
     as it has always been, title and all. */
 export const writesHandoffV2 = (settings) => Boolean(settings) && settings.handoffVersion === VERSION_2;
+
+/** Is the next hand-off of this video written as version 2? Yes when this Mac's settings say so, and also when the hand-off its
+    last finish wrote (`record.finished.handoff`, a path from the episode's `folder`) is on file and is version 2 already: a
+    version 1 hand-off is never written over a version 2 one, as with the setting back at 1 after a rollback, or the two Macs not
+    both switched yet, since a new version's version 1 hand-off would move the BRIMM Ops page's id for the video from its first
+    version's to its own. A hand-off that is not there, or cannot be read, is not looked at: the setting decides. This only reads. */
+export function writesV2For(settings, folder, record) {
+  if (writesHandoffV2(settings)) return true;
+  const named = record && record.finished && record.finished.handoff;
+  if (!folder || typeof named !== "string" || named === "") return false;
+  const onFile = readJson(join(folder, named));
+  return Boolean(onFile) && onFile.version === VERSION_2;
+}
 
 /** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops
     page takes a new version as a later revision. */
@@ -378,6 +408,14 @@ export async function finishNow(ctx, found, deps = {}) {
     const record = read.record;
     if (record.rev !== asked.rev) {
       failed.push("The episode changed since finish was asked. Say finish again.");
+      return result();
+    }
+    // A session, and a video not yet answered, are not finished here, in either version of the hand-off: nothing is waited for,
+    // taken, transcribed or copied, and nothing is said of the video but its label (the quick part refuses it first; this is
+    // for one whose record says so only since finish was asked).
+    const refused = cannotFinish(record);
+    if (refused) {
+      failed.push(refused);
       return result();
     }
     progress.begin(record.name.text);
@@ -487,7 +525,8 @@ export async function finishNow(ctx, found, deps = {}) {
     //   was made from. It holds no Reel suggestions: their times are on the raw video's clock, which a Final Cut finish does not
     //   know (phase V's own finish maps them).
     // - Version 1 is under the episode's own id, one revision more than any before it, in the record or in final/.
-    const v2 = writesHandoffV2(ctx.settings);
+    // A video already handed off as version 2 is handed off as version 2 again, whatever the setting says now (writesV2For).
+    const v2 = writesV2For(ctx.settings, found.folder, record);
     const gap = v2 ? chainGap(ctx.root, record) : null;
     if (gap) {
       failed.push(chainGapWords(record, gap));

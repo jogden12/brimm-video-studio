@@ -39,13 +39,13 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, lastRevision, chainGap, chainGapWords, handoffIdOf, nextRevision, writesHandoffV2 } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, lastRevision, chainGap, chainGapWords, cannotFinish, handoffIdOf, nextRevision, writesV2For } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
-import { handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
+import { handoffFaultV2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
@@ -1254,17 +1254,23 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 export async function finishEpisode(ctx, found, answers = {}) {
   const { record } = found;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
+  // A client or group session, and a video not yet answered, are not finished here, in either version of the hand-off: refused at
+  // once, before any folder is looked in, so that no part line, no "Looked in" line and no file name is printed, and before any
+  // claim is written.
+  const notYet = cannotFinish(record);
+  if (notYet) return refuse(ctx, notYet);
   const stops = [];
   const gone = undone(record, ctx.home);
   if (gone) {
     acceptRev(ctx.home, record.id, record.rev);
     stops.push(gone);
   }
-  // What the hand-off needs, in the version this Mac's settings say (spec 2026-10-22, section 8). Version 1 needs a name, and
-  // an approved title for all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished
-  // video's name is its file's); it is written under the video's first version's id, so a gap in the chain of its versions
-  // is refused here, before the claim is written, as the detached part refuses it before anything is copied.
-  const v2 = writesHandoffV2(ctx.settings);
+  // What the hand-off needs, in the version it will be written in (spec 2026-10-22, section 8): the one this Mac's settings say,
+  // or version 2 when the hand-off on file is version 2 already (writesV2For). Version 1 needs a name, and an approved title for
+  // all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished video's name is its file's);
+  // it is written under the video's first version's id, so a gap in the chain of its versions is refused here, before the claim
+  // is written, as the detached part refuses it before anything is copied.
+  const v2 = writesV2For(ctx.settings, found.folder, record);
   if (record.name && record.name.placeholder && (!v2 || kindOfRecord(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
   const gap = v2 ? chainGap(ctx.root, record) : null;
@@ -2285,12 +2291,13 @@ async function saveSpellings(ctx, found, spellings, done) {
     const toApply = [...new Map(parts.flatMap((p) => p.toApply).map(([h, m]) => [h, [h, m]])).values()];
     if (!writes.length) return save(ctx, found, { ...record, finished: withHeld(held) }, `${done} The final transcripts do not have ${listed(toApply.map(([h]) => `"${h}"`))}, so they are as they were.${keptNote}`);
     // The hand-off is made again as version 2 once this Mac's settings say so, and when it is version 2 already: version 1 is
-    // never written over it (spec 2026-10-22, section 8). Version 2 is under the video's first version's id, above every
-    // revision written for that id on this Mac (finish.js nextRevision), and only when the chain of the video's versions can be
-    // followed to its first: on a gap nothing is written, the spelling included. Version 1 is under the episode's own id, and a
-    // revision is never used twice, even one a finish left in final/ without writing its record (finish.js lastRevision).
+    // never written over it (spec 2026-10-22, section 8; finish.js writesV2For, which a finish asks too). Version 2 is under the
+    // video's first version's id, above every revision written for that id on this Mac (finish.js nextRevision), and only when
+    // the chain of the video's versions can be followed to its first: on a gap nothing is written, the spelling included.
+    // Version 1 is under the episode's own id, and a revision is never used twice, even one a finish left in final/ without
+    // writing its record (finish.js lastRevision).
     const onFile = JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8"));
-    const v2 = writesHandoffV2(ctx.settings) || onFile.version === VERSION_2;
+    const v2 = writesV2For(ctx.settings, found.folder, record);
     const gap = v2 ? chainGap(ctx.root, record) : null;
     if (gap) return refuse(ctx, chainGapWords(record, gap));
     const revision = v2 ? nextRevision(ctx.root, { folder: found.folder, record }) : Math.max(finished.revision, lastRevision(join(found.folder, "final"), record.id)) + 1;

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { editMain, finishEpisode, freeLibrary, status, titleEpisode } from "../edit.js";
 import { episodeWork, fromFinalCutFolder, libraryFor, writeSettings } from "../settings.js";
 import { resultFile, readResult } from "../detached.js";
-import { setup, episodeFor, episodeAs, reread, EDITED, PROJECT, FOLDER, ID } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, EDITED, NOT_YET, PROJECT, FOLDER, ID } from "./episodes.js";
 
 /** Final Cut's files at the end of the made-up edit: each part Shared, the main and Reel 1 exported after their Shares, and
     Reel 2 never exported. */
@@ -224,6 +224,106 @@ describe("finish, the part that looks and asks, with hand-off version 2", () => 
     assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, versionOf: FIRST, label: LABEL } }), { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
     assert.equal(t.started.length, 1);
     t.done();
+  });
+});
+
+// A video already handed off as version 2 is handed off as version 2 again, whatever the setting says now (a rollback, or the two
+// Macs not both switched yet): a version 1 hand-off written over it would move the BRIMM Ops page's id for the video. So the
+// quick part asks for what version 2 needs, and refuses what version 2 refuses, by the hand-off on file.
+describe("finish, the part that looks and asks, for a video already handed off as version 2, with the setting at 1", () => {
+  const FIRST = "e-20261010-7c1d2e";
+  const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+  const ON_FILE = "final/Pricing- what to charge-.brimm-ops.json";
+  const FIXTURES = { 1: "handoff-v1", 2: "handoff-v2-finished" };
+  /** The made-up edit finished before, its hand-off of `version` on file in final/ (none when `version` is not given), the
+      setting at 1, and Final Cut's files in From Final Cut. */
+  const handedOff = (version, more = {}, text = null) => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 1 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 1 };
+    sharedAll(t);
+    const finished = { revision: 1, at: "2026-10-20T15:20:00-05:00", on: "Mac Studio", handoff: ON_FILE, parts: {} };
+    const found = episodeFor(t, { record: { ...EDITED, title: null, finished, ...more } });
+    if (version || text !== null) {
+      mkdirSync(join(found.folder, "final"), { recursive: true });
+      writeFileSync(join(found.folder, ON_FILE), text !== null ? text : readFileSync(new URL(`./fixtures/${FIXTURES[version]}.json`, import.meta.url), "utf8"));
+    }
+    return { t, found };
+  };
+  it("asks for no approved title, since the hand-off it will write is version 2", async () => {
+    const { t, found } = handedOff(2);
+    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+    assert.doesNotMatch(t.said(), /Approve a title/);
+    assert.equal(t.started.length, 1);
+    t.done();
+  });
+  it("refuses a new version whose earlier version is not on this Mac, by its label, as version 2 does", async () => {
+    const { t, found } = handedOff(2, { versionOf: FIRST, label: LABEL });
+    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1);
+    assert.ok(t.said().split("\n").includes(`${LABEL} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`), t.said());
+    assert.deepEqual(t.started, []);
+    assert.equal(reread(found).rev, found.record.rev, "no claim was written");
+    t.done();
+  });
+  it("still asks for an approved title when the hand-off on file is version 1, is not there, or cannot be read", async () => {
+    for (const [version, text] of [[1, null], [null, null], [null, "{ not a hand-off"]]) {
+      const { t, found } = handedOff(version, {}, text);
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, `${version} ${text}`);
+      assert.match(t.said(), /Approve a title first\./);
+      assert.deepEqual(t.started, []);
+      t.done();
+    }
+  });
+});
+
+// Version 1 is under the episode's own id, so it never asks whether the chain of the video's versions can be followed: with the
+// setting at 1 or none, an answered new version whose earlier version is not on this Mac finishes as it always has.
+describe("finish, the part that looks and asks, with hand-off version 1", () => {
+  it("does not look for the earlier version of a new version, with the setting at 1 or with none", async () => {
+    for (const version of [undefined, 1]) {
+      const t = setup();
+      if (version) {
+        writeSettings(t.home, { handoffVersion: version });
+        t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
+      }
+      sharedAll(t);
+      const found = episodeFor(t, { record: { ...EDITED, versionOf: "e-20261010-7c1d2e", label: "Video of 14 Oct, 09:12 (Mac Studio)" } });
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, `setting ${version}: ${t.said()}`);
+      assert.doesNotMatch(t.said(), /not on this Mac yet|each say they are a version of the other/);
+      assert.equal(t.started.length, 1);
+      t.done();
+    }
+  });
+});
+
+// A client or group session's own finish comes with its teachings, and a video not yet answered has no kind to finish as. Until
+// then the Final Cut finish would copy a session's main video and its transcripts into final/, in Dropbox, which no session's
+// transcript may ever be in (spec 2026-10-22, section 2). So it refuses them at once, in either version of the hand-off, before it
+// looks in any folder: no part line, no "Looked in" line and no file name is printed, and no claim is written.
+describe("finish, the part that looks and asks, for a session and for a video not yet answered", () => {
+  it("refuses it at once, by its label or else as 'This video', and prints no file name, no part line and no folder it looked in", async () => {
+    for (const version of [undefined, 1, 2]) {
+      for (const [what, kind, words] of NOT_YET) {
+        for (const [label, who] of [["Video of 14 Oct, 09:12 (Mac Studio)", "Video of 14 Oct, 09:12 (Mac Studio)"], [undefined, "This video"]]) {
+          const t = setup();
+          if (version) {
+            writeSettings(t.home, { handoffVersion: version });
+            t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
+          }
+          // Every Share of the made-up edit is in From Final Cut, so that a finish which looked would say what it found.
+          sharedAll(t);
+          const found = episodeFor(t, { record: { ...EDITED, ...kind, ...(label ? { label } : {}) } });
+          const how = `${what}, setting ${version}, ${label ? "labelled" : "no label"}`;
+          assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, how);
+          assert.deepEqual(t.said().split("\n"), [words(who)], how);
+          assert.doesNotMatch(t.said(), /Pricing|\.mp4|\.mov|Looked in/, how);
+          assert.deepEqual(t.started, [], how);
+          assert.equal(reread(found).rev, found.record.rev, `${how}: no claim was written`);
+          assert.equal(existsSync(join(episodeWork(t.home, FOLDER), "finish.asked.json")), false, how);
+          t.done();
+        }
+      }
+    }
   });
 });
 
