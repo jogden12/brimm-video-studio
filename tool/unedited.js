@@ -731,10 +731,11 @@ async function workOn(file, deps) {
   // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
   // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
   const files = filesOf(work, { name, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
-  // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see.
+  // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see. A light
+  // import's status carries the video's label, for the commands to name it by in place of its file (Part F).
   if (episode) {
     const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
-    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
+    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, files, progress };
   const fail = (why) => {

@@ -150,9 +150,10 @@ const STATUS_EVERY_MS = 60 * 1000;
     also writes the import's status file in Episodes/.importing/ (importing.js): at the start, at each step, and once a minute
     while a step runs, by the timer `every`. `fail(why)` writes the status with why the import failed, and the status is left.
     `end` stops the timer and leaves the status: the late check takes it away. A status that cannot be written costs nothing
-    but itself: the log says so once, and the work goes on. */
-export function statusReporter(inner, { root, machine, video, bytes, importId = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
-  const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start" };
+    but itself: the log says so once, and the work goes on. A light import gives its video's `label`, which every status
+    carries. */
+export function statusReporter(inner, { root, machine, video, bytes, importId = "", label = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
+  const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start", ...(label ? { label } : {}) };
   let told = false;
   const write = (more = {}) => {
     try {
@@ -319,10 +320,13 @@ const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 /** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
 const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });
 
+/** The label of a light import's video, as its statuses carry it, from its late check: { label }, or nothing. */
+const labelOf = (pending) => (pending.label ? { label: pending.label } : {});
+
 /** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. */
 function waitingStatus(pending, deps, step) {
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())), ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
   } catch (e) {
     // The status costs nothing but itself, and the next minute's is written again.
   }
@@ -377,7 +381,7 @@ export function finishLate(pending, deps) {
     log(`${pending.video}: its late check could not be kept for the next run (${e.code || e.message}).`);
   }
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said }, textWriter({ work: join(pending.work, "status"), ...opts }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said, ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...opts }));
   } catch (e) {
     log(`${pending.video}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
   }

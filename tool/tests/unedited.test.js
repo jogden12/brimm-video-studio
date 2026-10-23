@@ -21,7 +21,7 @@ import { progressFolder, noProgress } from "../progress.js";
 import { writeSettings } from "../settings.js";
 import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
 import { writePending } from "../filing.js";
-import { writeStatus } from "../importing.js";
+import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
 import { fingerprintOf } from "../versions.js";
@@ -4694,6 +4694,38 @@ describe("the light import", () => {
     assert.ok(!JSON.stringify([t.notes, t.told]).includes("Jane"), JSON.stringify(t.told));
     assert.equal(t.record().label, LABEL);
     t.done();
+  });
+  it("puts its label in every status file of its import, from its start to its late check, and a full import puts none", async () => {
+    /** Every status the import wrote into Episodes/.importing, as each was cloned in. */
+    const statusesOf = (t) => t.clones.filter(([, to]) => to.includes("/.importing/")).map(([, , text]) => JSON.parse(text));
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    await uneditedFolder(t.drop, t.deps);
+    const light = statusesOf(t);
+    assert.ok(light.some((s) => s.step === "Reading the sound") && light.some((s) => /late check/.test(s.step)), light.map((s) => s.step).join(", "));
+    assert.deepEqual([...new Set(light.map((s) => s.label))], [LABEL]);
+    t.done();
+    // A late check that found a problem leaves its status for a person: it keeps the label.
+    const u = episodeImport({ video: "Coaching call Jane Doe.mov" });
+    const srt = join(u.episodeFolder(), "Coaching call Jane Doe.rough-cut.srt");
+    let filed = false;
+    const clone = u.deps.clone;
+    u.deps.clone = (from, to) => (filed && to === srt ? writeFileSync(to, "1\n") : clone(from, to));
+    const wait = u.deps.wait;
+    u.deps.wait = async (ms) => {
+      if (ms === 60000 && !filed) {
+        filed = true;
+        writeFileSync(srt, "1\n");
+      }
+      return wait(ms);
+    };
+    await uneditedFolder(u.drop, u.deps);
+    const left = readStatuses(u.root).map((s) => s.status);
+    assert.deepEqual(left.map((s) => [Boolean(s.problem), s.label]), [[true, LABEL]]);
+    u.done();
+    const full = episodeImport({ light: false });
+    await uneditedFolder(full.drop, full.deps);
+    assert.ok(statusesOf(full).length > 0 && statusesOf(full).every((s) => !("label" in s)));
+    full.done();
   });
   it("says \"Sallie's laptop\", and not \"the Sallie's laptop\", in the notice of her laptop", async () => {
     const t = episodeImport({ machine: "Sallie's laptop" });

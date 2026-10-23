@@ -66,7 +66,8 @@ function namesIn(root) {
     seconds, step, at }, where `pid` is the run that wrote it, on its Mac, `video` is the file's name, `seconds` is null until
     ffprobe has read the length, and `at` is when it was written (localStamp). `failed`, why the import failed,
     `problem`, what the late check found wrong, and `held`, why the video is left in the drop folder and not imported, are
-    there only when they apply. */
+    there only when they apply, and so is `label`, the name of a light import's video until she answers (kinds.js labelFor),
+    which a command shows in place of the file's name. */
 export function statusFault(s) {
   if (s === null || typeof s !== "object" || Array.isArray(s)) return "it is not an import's status";
   if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this brimm-video reads version 1`;
@@ -81,7 +82,8 @@ export function statusFault(s) {
     [typeof s.at === "string" && Number.isFinite(Date.parse(s.at)), "when it was written cannot be read"],
     [s.failed === undefined || (typeof s.failed === "string" && s.failed !== ""), "why the import failed cannot be read"],
     [s.problem === undefined || (typeof s.problem === "string" && s.problem !== ""), "the problem it found cannot be read"],
-    [s.held === undefined || (typeof s.held === "string" && s.held !== ""), "why the video is held cannot be read"]
+    [s.held === undefined || (typeof s.held === "string" && s.held !== ""), "why the video is held cannot be read"],
+    [s.label === undefined || (typeof s.label === "string" && s.label !== ""), "its label cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";
