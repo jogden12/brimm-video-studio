@@ -108,10 +108,6 @@ const ALLOWED = [
   [`${EDIT} name "Pricing talk" ''`, ["name", "Pricing talk", ""]]
 ];
 
-/** F7's commands, built on f-core's branch (claude/switch-f-core-4dce2a) and not yet in this branch's edit.js, which her skill
-    names already: a session's teachings, its principles and its Reel ideas. They are accepted beside COMMAND_NAMES, and stay
-    harmless once F7 is merged here, where f-core takes this list out. */
-const F7_COMMANDS = ["teachings", "principles", "ideas"];
 /** The command lines a skill's text runs: every backticked span that starts with a lowercase word. Flags start with - and are
     not among them. */
 const commandsIn = (text) => [...text.matchAll(/`([a-z][^`]*)`/g)].map((m) => m[1]);
@@ -167,9 +163,9 @@ describe("her folder's settings", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const given = commandsIn(skill);
     assert.ok(given.length >= 10, given.join(" "));
-    for (const span of given) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]) || F7_COMMANDS.includes(span.split(" ")[0]), `the skill runs "${span}", which edit.js does not have`);
-    // The skill names each of F7's commands, so the list is not kept for nothing.
-    for (const command of F7_COMMANDS) assert.ok(given.some((span) => span.split(" ")[0] === command), `the skill does not run ${command}`);
+    for (const span of given) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `the skill runs "${span}", which edit.js does not have`);
+    // A session's commands are among them: its teachings, its principles and its Reel ideas.
+    for (const command of ["teachings", "principles", "ideas"]) assert.ok(given.some((span) => span.split(" ")[0] === command), `the skill does not run ${command}`);
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
     assert.ok(skill.split("\n").length < 160, "the skill is short");
   });
