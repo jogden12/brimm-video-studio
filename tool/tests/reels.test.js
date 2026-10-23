@@ -418,7 +418,7 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
       ""
     ].join("\n"));
   });
-  it("never names the video's file, and says no preview was made only when a preview is wanted: never", () => {
+  it("never names the video's file, says no preview was made, or offers to ask Claude again", () => {
     const text = reelsText(reels, record, "", NOW);
     assert.ok(!text.includes("IMG_4821"), text);
     assert.ok(!text.includes("No preview"), text);

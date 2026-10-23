@@ -210,7 +210,7 @@ const clipsOf = (n) => [{ at: 0, from: n, to: n + 3, notes: [] }, { at: 3, from:
 const push = (v, at, on = "Mac Studio") => ({ v, at, on, file: `edit/main.v${v}.${on === "Mac Studio" ? "studio" : "laptop"}.fcpxml`, project: `p${v}` });
 const render = (v, at, on = "Mac Studio", opened = AT) => ({ v, how: "render", at, on, file: `edit/main.v${v}.fcpxml`, ...(opened ? { opened } : {}) });
 /** The episode with the main video's versions as listed, each one's stored file written as its `n` says: [version, n]. */
-const withPushed = (found, t, pushed, files = []) => {
+const withPushed = (found, pushed, files = []) => {
   mkdirSync(join(found.folder, "edit"), { recursive: true });
   for (const [entry, n] of files) writeFileSync(join(found.folder, entry.file), stored(n));
   return { ...found, record: { ...found.record, main: { ...found.record.main, pushed } } };
@@ -219,8 +219,9 @@ const digest = (x) => createHash("sha1").update(JSON.stringify(x)).digest("hex")
 
 describe("clockFor, for a video that keeps all of it (a finished video, a session, an answered clip)", () => {
   const WHOLE = [{ at: 0, from: 0, to: 23.423 }];
+  const WHAT = { finished: "a finished video", session: "a session", "short video": "an answered iPhone clip" };
   for (const kind of ["finished", "session", "short video"]) {
-    it(`reads a ${kind}'s times on the video's own clock, whatever its plan cut, and needs neither the video nor its captions here`, () => {
+    it(`reads the times of ${WHAT[kind]} on the video's own clock, whatever its plan cut, and needs neither the video nor its captions here`, () => {
       const { t, found } = episode(LAYOUT_3[kind]);
       const planText = readFileSync(join(found.folder, PLAN_FILE), "utf8");
       // The plan cuts silences and a retake, as a raw video's does.
@@ -299,7 +300,7 @@ describe("clockFor, for a raw video's versions", () => {
   it("reads the rough cut's own stored clock once it is rendered and opened here: main v0", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const rough = render(0, AT);
-    const read = clockFor(withPushed(found, t, [rough]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [rough]), "main", t.ctx);
     assert.equal(read.on, "main v0");
     assert.deepEqual(read.clock, clockOf(EPISODE.files["edit/main.v0.fcpxml"]));
     assert.equal("elsewhere" in read, false);
@@ -308,18 +309,18 @@ describe("clockFor, for a raw video's versions", () => {
   it("needs neither the video nor its captions on this Mac to read a time of a layout-3 video, and still needs its plan and words", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     t.ctx.isWhole = (path) => !path.endsWith(".mp4") && !path.endsWith(".srt");
-    const read = clockFor(withPushed(found, t, [render(0, AT)]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [render(0, AT)]), "main", t.ctx);
     assert.deepEqual([read.on, read.coming], ["main v0", undefined]);
     assert.deepEqual(read.need, [PLAN_FILE, "Pricing talk.words.json"]);
     t.ctx.isWhole = (path) => !path.endsWith(".words.json");
-    assert.deepEqual(clockFor(withPushed(found, t, [render(0, AT)]), "main", t.ctx), { coming: "Pricing talk.words.json", bring: ["Pricing talk.words.json"] });
+    assert.deepEqual(clockFor(withPushed(found, [render(0, AT)]), "main", t.ctx), { coming: "Pricing talk.words.json", bring: ["Pricing talk.words.json"] });
     t.done();
   });
   it("does not count a render of the other Mac as this Mac's clock, and says there is a newer one there", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const one = push(1, "2026-10-20T10:00:00-05:00");
     const elsewhere = render(2, "2026-10-20T11:00:00-05:00", "Sallie's laptop");
-    const read = clockFor(withPushed(found, t, [one, elsewhere], [[one, 1]]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [one, elsewhere], [[one, 1]]), "main", t.ctx);
     assert.deepEqual([read.on, read.clock, read.elsewhere], ["main v1", clipsOf(1), { v: 2, on: "Sallie's laptop" }]);
     t.done();
   });
@@ -329,7 +330,7 @@ describe("clockFor, for a raw video's versions", () => {
     const rendered = render(2, "2026-10-20T11:00:00-05:00", "Mac Studio", "");
     assert.equal("opened" in rendered, false);
     for (const unopened of [rendered, { ...rendered, opened: "" }]) {
-      const read = clockFor(withPushed(found, t, [one, unopened], [[one, 1]]), "main", t.ctx);
+      const read = clockFor(withPushed(found, [one, unopened], [[one, 1]]), "main", t.ctx);
       assert.deepEqual([read.on, read.clock, "elsewhere" in read], ["main v1", clipsOf(1), false]);
     }
     t.done();
@@ -338,11 +339,11 @@ describe("clockFor, for a raw video's versions", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const one = push(1, "2026-10-20T10:00:00-05:00", "Sallie's laptop");
     const two = render(2, "2026-10-20T11:00:00-05:00");
-    const read = clockFor(withPushed(found, t, [one, two], [[one, 1], [two, 7]]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [one, two], [[one, 1], [two, 7]]), "main", t.ctx);
     assert.deepEqual([read.on, read.clock], ["main v2", clipsOf(7)]);
     // A push of the other Mac counts, newer than the render here.
     const three = push(3, "2026-10-20T12:00:00-05:00", "Sallie's laptop");
-    const next = clockFor(withPushed(found, t, [one, two, three], [[three, 3]]), "main", t.ctx);
+    const next = clockFor(withPushed(found, [one, two, three], [[three, 3]]), "main", t.ctx);
     assert.deepEqual([next.on, next.clock, "elsewhere" in next], ["main v3", clipsOf(3), false]);
     t.done();
   });
@@ -353,16 +354,16 @@ describe("clockFor, for a raw video's versions", () => {
     const there = push(2, "2026-10-20T11:30:00-05:00", "Sallie's laptop");
     const files = [[one, 1], [here, 2], [there, 4]];
     for (const pushed of [[one, here, there], [there, here, one], [here, one, there]]) {
-      const read = clockFor(withPushed(found, t, pushed, files), "main", t.ctx);
+      const read = clockFor(withPushed(found, pushed, files), "main", t.ctx);
       assert.deepEqual([read.on, read.clock], ["main v2", clipsOf(4)], pushed.map((p) => p.file).join());
     }
     const early = { ...there, at: "2026-10-20T10:30:00-05:00" };
-    assert.deepEqual(clockFor(withPushed(found, t, [one, here, early], files), "main", t.ctx).clock, clipsOf(2));
+    assert.deepEqual(clockFor(withPushed(found, [one, here, early], files), "main", t.ctx).clock, clipsOf(2));
     t.done();
   });
   it("says a newer render of the other Mac is there when no version counts here, and reads the timeline as it is now", () => {
     const { t, found } = episode(LAYOUT_3.raw);
-    const read = clockFor(withPushed(found, t, [render(0, AT, "Sallie's laptop")]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [render(0, AT, "Sallie's laptop")]), "main", t.ctx);
     assert.deepEqual([read.on, read.elsewhere], ["the main video as it is now", { v: 0, on: "Sallie's laptop" }]);
     assert.equal(read.pieces.length, 3);
     t.done();
@@ -371,7 +372,7 @@ describe("clockFor, for a raw video's versions", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const old = render(1, "2026-10-20T10:00:00-05:00", "Sallie's laptop");
     const two = push(2, "2026-10-20T11:00:00-05:00");
-    const read = clockFor(withPushed(found, t, [old, two], [[two, 2]]), "main", t.ctx);
+    const read = clockFor(withPushed(found, [old, two], [[two, 2]]), "main", t.ctx);
     assert.deepEqual([read.on, "elsewhere" in read], ["main v2", false]);
     t.done();
   });
@@ -379,10 +380,10 @@ describe("clockFor, for a raw video's versions", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const rough = render(0, AT);
     t.ctx.isWhole = (path) => !path.endsWith("main.v0.fcpxml");
-    assert.deepEqual(clockFor(withPushed(found, t, [rough]), "main", t.ctx), { coming: "edit/main.v0.fcpxml", bring: ["edit/main.v0.fcpxml"] });
+    assert.deepEqual(clockFor(withPushed(found, [rough]), "main", t.ctx), { coming: "edit/main.v0.fcpxml", bring: ["edit/main.v0.fcpxml"] });
     t.ctx.isWhole = () => true;
     const gone = render(5, AT);
-    assert.deepEqual(clockFor(withPushed(found, t, [gone]), "main", t.ctx), { why: "edit/main.v5.fcpxml is not in the episode's folder." });
+    assert.deepEqual(clockFor(withPushed(found, [gone]), "main", t.ctx), { why: "edit/main.v5.fcpxml is not in the episode's folder." });
     t.done();
   });
   it("reads a Reel on its own versions in the same way: a render of the other Mac is not this Mac's clock", () => {
