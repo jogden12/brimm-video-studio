@@ -21,6 +21,7 @@ export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "
 
 /** Why a command is refused, in plain words. None of them names an episode, so that nothing of a file's name reaches the chat. */
 const WAITING = "This video is waiting for its answer: say what it is first.";
+const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
@@ -39,6 +40,10 @@ function sessionNotCleared(record) {
   if (!isObject(mark)) return true;
   return !(isObject(mark.cleared) && mark.cleared.confirmed === "dialog");
 }
+
+/** Whether a video has been left alone by the person (`leave`): it has no kind, and its answer says it is not for brimm-video. It
+    is gated as a video not answered is, but it is not waiting for anything, and says so in words of its own. */
+const leftAlone = (record) => isObject(record) && kindOf(record) === null && isObject(record.answer) && record.answer.state === "not for brimm-video";
 
 /** Whether a record is gated at all: a video with no kind (not yet answered, or left alone as not for brimm-video), or a session
     whose mark is not cleared. Such a record is named by its label in everything edit.js prints (shownName, in episode.js), and
@@ -77,14 +82,15 @@ function reelWords(command, record, words, said) {
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
-      UNANSWERED.
+      UNANSWERED. Any other is refused in the words of a video waiting for its answer, or, for one she left alone, in words that
+      say so: it is not waiting for an answer.
     - A session whose mark is not cleared, only those of SESSION, and, once the training gate is on (`teachingsOn`), those of
       SESSION_TAUGHT. Of those, `reel` and `render` run only with the words of a Reel she has agreed on (reelWords).
     - An answered record that is not a session, and a session whose mark is cleared, every command.
     A command named in none of the lists is refused for a record that is gated at all. */
 export function gateFor(command, record, { teachingsOn = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
-  if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : WAITING;
+  if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;

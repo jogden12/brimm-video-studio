@@ -23,6 +23,7 @@ async function on(deps, ...argv) {
 
 const AT = "2026-10-20T15:00:00-05:00";
 const WAITING = "This video is waiting for its answer: say what it is first.";
+const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
@@ -30,7 +31,7 @@ const PENDING = "Dropbox is still bringing this episode's record over: say it ag
 const NOT_SHOWN_WAITING = "Its words are not shown in the chat while it waits for its answer.";
 const NOT_SHOWN_SESSION = "A client or group session's words are not shown in the chat.";
 /** The gate's own refusals, and with them what `show` itself holds back from a record the gate lets it run for. */
-const GATE_REFUSALS = [WAITING, NOT_FOR_SESSION, TEACHINGS_OFF, REEL_NOT_AGREED, PENDING];
+const GATE_REFUSALS = [WAITING, LEFT_ALONE, NOT_FOR_SESSION, TEACHINGS_OFF, REEL_NOT_AGREED, PENDING];
 const REFUSALS = [...GATE_REFUSALS, NOT_SHOWN_WAITING, NOT_SHOWN_SESSION];
 
 const ANSWER = { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" };
@@ -47,6 +48,7 @@ const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTe
 
 /** What each command is given to name the made-up episode, as Claude runs it. `free` names none: it says it is held back. */
 const ASKED = {
+  kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER],
   open: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["pick", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"]
@@ -94,12 +96,12 @@ describe("the gate walks every command that names an episode", () => {
       t.done();
     }
   });
-  it("refuses a video left alone ('not for brimm-video') as it does one waiting", async () => {
+  it("refuses a video left alone ('not for brimm-video') as it does one waiting, in words that do not say it waits for its answer", async () => {
     for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n))) {
       const t = setup();
       episodeFor(t, { record: LEFT_RECORD });
       const r = await on(t.ctx.deps, name, ...ASKED[name]);
-      assert.deepEqual([r.code, r.said], [1, [WAITING]], name);
+      assert.deepEqual([r.code, r.said], [1, [LEFT_ALONE]], name);
       t.done();
     }
   });
@@ -109,7 +111,7 @@ describe("the gate walks every command that names an episode", () => {
       const found = episodeFor(t, { record: SESSION_RECORD });
       const before = filesIn(found);
       const r = await on(t.ctx.deps, name, ...ASKED[name]);
-      if (["show", "release", "resolve", "name"].includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
+      if (["kind", "leave", "which", "show", "release", "resolve", "name"].includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
       else {
         const why = ["finish", "reel"].includes(name) ? TEACHINGS_OFF : NOT_FOR_SESSION;
         assert.deepEqual([r.code, r.said], [1, [why]], name);
@@ -135,7 +137,7 @@ describe("the gate walks every command that names an episode", () => {
     t.done();
   });
   it("lets a session through the commands of its list, with teachings on or off", async () => {
-    for (const name of ["show", "release", "resolve", "name"]) {
+    for (const name of ["kind", "leave", "which", "show", "release", "resolve", "name"]) {
       for (const deps of [(t) => t.ctx.deps, taught]) {
         const t = setup();
         episodeFor(t, { record: SESSION_RECORD });

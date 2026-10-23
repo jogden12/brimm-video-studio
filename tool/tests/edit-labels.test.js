@@ -80,6 +80,10 @@ function today(setting) {
     commands that name a video or more than one episode, by those. Every command is here, so that one added later is pinned. */
 const TODAY_ASKED = {
   episodes: [[]],
+  // Commands of the switch, new with it: there is no output of today's to pin, and tests/edit-kind.test.js pins their words.
+  kind: [],
+  leave: [],
+  which: [],
   open: [[FOLDER], [NAME], [], ["Pricing"], ["nothing fits this"]],
   push: [[FOLDER], [], [FOLDER, "reel", "2"]],
   bring: [["--now", FOLDER], []],
@@ -732,6 +736,9 @@ describe("the walk: every command, for a video imported lightly from a file name
       has the list of episodes said. */
   const walkWords = (label) => ({
     episodes: [[]],
+    kind: [[label, "finished", "--private", "no"], [label, "session", "--private", "yes"], [label, "raw", "--private", "no", "--again"], []],
+    leave: [[label], []],
+    which: [[label], []],
     open: [[label], [], ["2026"], ["nothing fits this"]],
     push: [[label], [label, "reel", "1"], []],
     bring: [["--now", LIGHT_FOLDER], ["--now", label], []],
@@ -922,7 +929,8 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     library(t);
     const label = record.label;
     for (const name of COMMAND_NAMES) {
-      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], free: [[]] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
+      // `kind` and `leave` would answer the video the commands after them are walked for, so they are given words that do not.
+      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], free: [[]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
       for (const given of words) {
         const before = resultsIn(t.home);
         const r = await on(depsOf(t), name, ...given);

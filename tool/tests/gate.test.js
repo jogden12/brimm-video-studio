@@ -7,6 +7,7 @@ import { COMMAND_NAMES } from "../edit.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
 const WAITING = "This video is waiting for its answer: say what it is first.";
+const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
@@ -39,10 +40,17 @@ describe("gateFor, a video waiting for its answer", () => {
       assert.equal(gateFor(name, unanswered, OFF), WAITING, name);
     }
   });
-  it("is gated whatever its answer says, a video left alone ('not for brimm-video') included", () => {
+  it("is gated whatever its answer says, a video left alone ('not for brimm-video') included, which is refused in words of its own", () => {
     const left = { kind: null, answer: { state: "not for brimm-video" } };
-    assert.equal(gateFor("open", left, ON), WAITING);
-    assert.equal(gateFor("leave", left, ON), "");
+    for (const name of ["open", "ask", "push", "finish", "reel", "teachings", "somethingNew"]) {
+      assert.equal(gateFor(name, left, ON), LEFT, name);
+      assert.equal(gateFor(name, left, OFF), LEFT, name);
+    }
+    for (const name of UNANSWERED) assert.equal(gateFor(name, left, ON), "", name);
+    // Only an answer that says it was left is told so: a missing, unreadable or other answer is a video waiting.
+    for (const answer of [undefined, null, "not for brimm-video", {}, { state: "needs your answer" }, { state: "answered" }]) {
+      assert.equal(gateFor("open", { kind: null, answer }, ON), WAITING, JSON.stringify(answer));
+    }
   });
   it("is gated though it holds no answer at all: a record with no kind is a record not answered", () => {
     assert.equal(gateFor("ask", { kind: null }, ON), WAITING);
