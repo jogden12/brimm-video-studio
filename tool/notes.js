@@ -192,14 +192,15 @@ const ms = (t) => Math.round(t * 1000) / 1000;
 const silencesIn = (ranges) => ranges.filter((r) => r.kind === "pause").map((r) => [ms(r.start - KEPT_SIDE), ms(r.end + KEPT_SIDE)]);
 
 /** The pauses a plan on disk was made from, as the import wrote them in its `pauses`: each [start, end] in seconds of the video,
-    the same pauses cutPlan and applyDecisions are given. Give these to applyDecisions and clipRanges wherever a plan that was
-    read back from its file is changed by Claude's decisions or its clips, so the new plan has the cuts the rules would make.
-    A plan made before the pauses were kept in it has none, and so does one whose `pauses` is not a list of [start, end]: the
-    list is then empty, which says that no silence was heard, as it does for a recording that has none. */
+    the same pauses cutPlan and applyDecisions are given. Give these, as they come, to applyDecisions and clipRanges wherever a
+    plan that was read back from its file is changed by Claude's decisions or its clips, so the new plan has the cuts the rules
+    would make. A plan with no pauses heard has an empty list, and that is what comes back: no silence was heard. A plan made
+    before the pauses were kept in it, or one whose `pauses` is not a list of [start, end], gives undefined, and
+    applyDecisions and clipRanges then go by what the plan shows, as they do when no pauses are at hand. */
 export function pausesOfPlan(plan) {
   const pauses = plan && plan.pauses;
   const pause = (p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
-  return Array.isArray(pauses) && pauses.every(pause) ? pauses : [];
+  return Array.isArray(pauses) && pauses.every(pause) ? pauses : undefined;
 }
 
 /** The seconds that the ranges of a plan keep. */

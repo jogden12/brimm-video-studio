@@ -380,10 +380,16 @@ describe("the pauses a plan on disk keeps", () => {
     assert.deepEqual(pausesOfPlan(onDisk({ ...PLAN, pauses: HEARD })), HEARD);
     assert.deepEqual(pausesOfPlan({ pauses: [] }), []);
   });
-  it("are none for a plan made before they were kept in it, or one whose list is not a list of pauses", () => {
+  it("are undefined for a plan made before they were kept in it, or one whose list is not a list of pauses", () => {
     for (const plan of [PLAN, {}, null, undefined, { ...PLAN, pauses: null }, { ...PLAN, pauses: "some" }, { ...PLAN, pauses: { 0: [1, 2] } }, { ...PLAN, pauses: [[1]] }, { ...PLAN, pauses: [[1, "2"]] }, { ...PLAN, pauses: [[1, null]] }, { ...PLAN, pauses: [{ start: 1, end: 2 }] }]) {
-      assert.deepEqual(pausesOfPlan(plan), [], JSON.stringify(plan && plan.pauses));
+      assert.equal(pausesOfPlan(plan), undefined, JSON.stringify(plan && plan.pauses));
     }
+  });
+  it("leave a plan made before they were kept in it to applyDecisions and clipRanges as they go by what the plan shows", () => {
+    const old = onDisk(PLAN);
+    assert.deepEqual(applyDecisions(old, keepAll, pausesOfPlan(old)), applyDecisions(old, keepAll));
+    const long = talk(16);
+    assert.deepEqual(clipRanges(long.plan, [clip("p2", "p15")], pausesOfPlan(long.plan)), clipRanges(long.plan, [clip("p2", "p15")]));
   });
   it("change the plan as they changed it at import: Claude keeping what the rules cut gets the same ranges from a plan read back", () => {
     const at = applyDecisions(PLAN, keepAll, HEARD);
