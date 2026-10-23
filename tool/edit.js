@@ -28,7 +28,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, MARKER } from "./settings.js";
+import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -266,9 +266,11 @@ function importLines(ctx, fits = () => true) {
 }
 
 /** The drop folders of the Macs, each as { mac, folder }, this Mac's first and the others by name. This Mac's is the one its own
-    settings name (Unedited Video, or Drop once the switch names it). Another Mac's settings are on that Mac, so its folder is
-    found from what Dropbox shows of it, the marker the installer writes in it: Drop/<Mac> when that folder holds a marker that
-    names that Mac, else Unedited Video/<Mac>. The Macs are the folders in either parent. */
+    settings name (Unedited Video, or Drop once the installer has switched it), and no other. Another Mac's settings are on that
+    Mac, so which of its folders it watches is not known here, and both are listed, Drop/<Mac> and Unedited Video/<Mac>, whichever
+    there are: a video is never hidden, though one left in a folder that Mac no longer watches shows as waiting. (A marker in
+    Drop/<Mac> is no sign that it watches it: it stays after a switch back, and after a run that was refused once it was made.)
+    The Macs are the folders in either parent. */
 function dropFolders(ctx) {
   const inRoot = (parent) => {
     try {
@@ -277,19 +279,8 @@ function dropFolders(ctx) {
       return [];
     }
   };
-  const marked = (folder, mac) => {
-    try {
-      return readFileSync(join(folder, MARKER), "utf8").split("\n")[0] === mac;
-    } catch (e) {
-      return false;
-    }
-  };
   const macs = [...new Set([...inRoot("Unedited Video"), ...inRoot("Drop")])].sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
-  return macs.map((mac) => {
-    if (mac === ctx.machine) return { mac, folder: dropFolder(ctx.root, mac, ctx.settings.drop) };
-    const there = dropFolder(ctx.root, mac, "Drop");
-    return { mac, folder: marked(there, mac) ? there : dropFolder(ctx.root, mac) };
-  });
+  return macs.flatMap((mac) => (mac === ctx.machine ? [dropFolder(ctx.root, mac, ctx.settings.drop)] : ["Drop", "Unedited Video"].map((parent) => dropFolder(ctx.root, mac, parent))).map((folder) => ({ mac, folder })));
 }
 
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
