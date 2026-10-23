@@ -1153,7 +1153,8 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });  it("still refuses a drop folder another Mac's marker names, in the folder the settings name", () => {
+  });
+  it("still refuses a drop folder another Mac's marker names, in the folder the settings name", () => {
     const d = box();
     const drop = d.folder("Drop");
     writeFileSync(join(drop, ".brimm-watched-by"), "Sallie's laptop\n");
@@ -1252,6 +1253,13 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+  it("tells, in the README, how to have Claude asked again: without --rules-only for a folder, and with --machine, where readings stay off, node settings.js set --readings on", () => {
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const line = readme.split("\n").find((l) => l.startsWith("Add `--rules-only` to that line"));
+    assert.ok(line, "README's --rules-only paragraph");
+    assert.ok(line.includes("To have Claude asked again, run the line again without `--rules-only`"), line);
+    assert.ok(line.includes("with `--machine`, `--rules-only` wrote `readings: false` into this Mac's settings, and a run without it leaves that as it is: turn the readings on with `node settings.js set --readings on`"), line);
   });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
     const r = ask("--print", "--help");
