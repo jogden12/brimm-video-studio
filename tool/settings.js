@@ -284,20 +284,19 @@ function planned(home, rest, now) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, imported, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
-      if (!work.length && !imported.length && !unreadable.length) return { settings, fields: told.fields, from, to };
-      const head = work.length || imported.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
+      const { work, imported, kept, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
+      if (!work.length && !imported.length && !kept.length && !unreadable.length) return { settings, fields: told.fields, from, to };
+      const head = work.length || imported.length || kept.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
+      // Each kind of line is followed by the advice for it alone: what to do about work is not what to do about an imported video.
+      const kinds = [
+        [work, "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."],
+        [imported, "A video that is already imported leaves the old folder once its late check has passed: run this again after that."],
+        [kept, "Delete each of these from the old folder by hand, then run this again."],
+        [unreadable, "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]
+      ];
       return {
         code: 1,
-        said: [
-          `Not written: the drop folder would change from ${from} to ${to}, ${head}`,
-          ...work,
-          ...imported,
-          ...unreadable,
-          ...(work.length ? ["Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."] : []),
-          ...(imported.length ? ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."] : []),
-          ...(unreadable.length ? ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."] : [])
-        ]
+        said: [`Not written: the drop folder would change from ${from} to ${to}, ${head}`, ...kinds.flatMap(([lines, advice]) => (lines.length ? [...lines, advice] : []))]
       };
     })
     .catch((e) => ({ code: 1, said: [`The old drop folder could not be looked at (${(e && e.code) || "an error"}), so nothing was written.`] }));

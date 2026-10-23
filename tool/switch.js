@@ -27,12 +27,13 @@ function namesIn(folder) {
 }
 
 /** What the old drop folder `old` ("Unedited Video" or "Drop") of the Mac `machine`, in BRIMM Video at `root`, still holds that
-    stops the switch, in plain words: { work, imported, unreadable }, each a list of lines, all [] when it holds nothing of the
-    kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still arriving are none),
-    and an import of this Mac, in Episodes/.importing, that failed or whose late check found a problem. `imported` is a video
-    that an episode holds already: it is imported, and leaves the folder when its late check has passed, so it is to be waited
-    for and never taken out; when `home`, this Mac's own folder, holds the late check it still has to make, the line says when it
-    is due. `unreadable` is what could not be read, with the error's code and the folder's own path, which holds no video's
+    stops the switch, in plain words: { work, imported, kept, unreadable }, each a list of lines, all [] when it holds nothing of
+    the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still arriving are
+    none), and an import of this Mac, in Episodes/.importing, that failed or whose late check found a problem. A video that an
+    episode holds already is imported, and is one of two kinds, by whether `home`, this Mac's own folder, holds the late check
+    this Mac still has to make for it: `imported` has one, so the video leaves the folder once it has passed, is to be waited
+    for and never taken out, and its line says when it is due; `kept` has none (its late check has passed, or it is a copy of an
+    imported video), so nothing of this Mac's import will take it out, and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which holds no video's
     name: the old folder, or the status files. `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
     episode that holds the video does too. A video, or a status, that has none is counted and not named when `light` says the
@@ -70,8 +71,10 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   if (problems) lines.add(`  ${problems === 1 ? "1 late check" : `${problems} late checks`} found a problem.`);
   const pendings = home ? readPendings(home) : [];
   const imported = new Set();
+  const kept = new Set();
   let counted = 0;
   let importedCounted = 0;
+  let keptCounted = 0;
   for (const video of videos.filter((v) => !named.has(v))) {
     // A video that cannot be looked at (a link that goes round in a circle) is a video all the same, whose size is not known.
     let bytes;
@@ -83,14 +86,20 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     const holding = holdingEpisode({ root, video, bytes });
     const label = mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || holding?.record.label;
     if (holding) {
+      // Whether this Mac still owes the episode's late check for it: it is then to be waited for. If not, the late check has passed,
+      // or it is a copy of an imported video, and filing.js leaves it in the drop folder for a person to delete.
       const pending = pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && p.root === root);
-      if (!label && light) importedCounted += 1;
-      else imported.add(`  ${label || video}: already imported; its late check is still to come${pending ? ` (due at ${clockTime(dueAt(pending))})` : ""}.`);
+      if (pending) {
+        if (!label && light) importedCounted += 1;
+        else imported.add(`  ${label || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
+      } else if (!label && light) keptCounted += 1;
+      else kept.add(`  ${label || video}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
     } else if (label) lines.add(`  ${label}: waits in ${folder}.`);
     else if (light) counted += 1;
     else lines.add(`  ${video}: waits in ${folder}.`);
   }
   if (counted) lines.add(`  ${counted === 1 ? "1 video waits" : `${counted} videos wait`} in ${folder}.`);
   if (importedCounted) imported.add(importedCounted === 1 ? "  1 video is already imported, and its late check is still to come." : `  ${importedCounted} videos are already imported, and their late checks are still to come.`);
-  return { work: [...lines], imported: [...imported], unreadable };
+  if (keptCounted) kept.add(keptCounted === 1 ? "  1 video is already imported, and nothing of this Mac's import will take it out of the old folder." : `  ${keptCounted} videos are already imported, and nothing of this Mac's import will take them out of the old folder.`);
+  return { work: [...lines], imported: [...imported], kept: [...kept], unreadable };
 }
