@@ -207,7 +207,7 @@ test("no match: another length, a session, unanswered, or words not on this Mac"
 - Test: `tool/tests/unedited.test.js`, `tool/tests/notes.test.js`
 
 **Interfaces:**
-- Produces: `cut-plan.json` gains `pauses: [{ start, end }]`, the pauses ffmpeg heard (`planned.pauses`); `pausesOfPlan(plan) => plan.pauses || []`. `askAgain` (`unedited.js:1567`) and every later reading pass `pausesOfPlan(plan)` where they pass `[]` today.
+- Produces: `cut-plan.json` gains `pauses: [[start, end], …]`, the pauses ffmpeg heard (`planned.pauses`), a never-ending silence written ending at the duration; `pausesOfPlan(plan)` gives that list, or `undefined` for an older or malformed plan, so `applyDecisions` and `clipRanges` keep their own fallback. `askAgain` (`unedited.js:1567`) and every later reading pass `pausesOfPlan(plan)` where they pass `[]` today.
 
 - [ ] **Step 1: Write the failing tests**: the plan an import writes holds the pauses the stand-in ffmpeg printed (`PAUSES` in `tests/fixtures.js`); `applyDecisions(plan, decisions, pausesOfPlan(plan))` on a plan read back from disk gives the same ranges as on the import's own pauses.
 - [ ] **Step 2: Run** `cd tool && node --test tests/unedited.test.js tests/notes.test.js`. Expected: FAIL.
