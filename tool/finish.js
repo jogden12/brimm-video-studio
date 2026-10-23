@@ -5,20 +5,20 @@
 // rule, the hand-off last. Then it writes the record, shows the hand-off in Finder, and at least 15 minutes after the last
 // copy checks the copies again; only when they are whole does it delete from From Final Cut what it took from there.
 // Nothing here asks anything: what a person must check is said in the result, which status shows.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { probeArgs, factsOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
-import { captionsOf, settled } from "./lib.js";
+import { captionsOf, settled, stampedText } from "./lib.js";
 import { firstWordsMatch } from "./parts.js";
-import { finalTranscript } from "./final-transcript.js";
+import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final-transcript.js";
 import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
-import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, undone, acceptRev } from "./episode.js";
 import { gated } from "./gate.js";
-import { REELS_FILE } from "./reels.js";
+import { REELS_FILE, readReels } from "./reels.js";
 import { fileSafe } from "./names.js";
 import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
@@ -941,4 +941,181 @@ export async function finishNow(ctx, found, deps = {}) {
     progress.end(ended);
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+// --- The hand-off of a finished video or an iPhone clip, made from the import's own captions (spec 2026-10-22, section 3) ---
+
+/** A time to the hundredth of a second, as the hand-off's other times are. */
+const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
+
+/** The words of a finished video's own record that say its hand-off was made from the import (finishFinished), not from a
+    Share of Final Cut: its main part is marked `import`. Such a hand-off is made again from the import's captions, whatever a
+    spelling is then, since they are all still there. */
+export const madeFromImport = (record) => Boolean(record && record.finished && record.finished.parts && record.finished.parts.main && record.finished.parts.main.import === true);
+
+/** A finished video's Reel suggestions as the hand-off holds them (spec section 8, "One suggestion shape"): from the candidates
+    of reels.json, each a stretch of the video in seconds of its own clock, one stretch, `{ n, start, end, stretches, first,
+    last, why, point }`, its first and last words spelled with `spellings`. A candidate the record dropped, and one with no stretch,
+    is passed over; one with no first words, last words, reason or point, or whose times are no stretch of a video `seconds`
+    long, is left out, and `left` says so in plain words, since the page needs all of those. { list, left }. */
+export function suggestionsFrom({ candidates, dropped = [], seconds, spellings = [] }) {
+  const list = [];
+  const left = [];
+  const length = hundredths(seconds);
+  const out = (n, why) => left.push(`Suggestion ${n} is left out of the hand-off: ${why}.`);
+  const text = (v) => (typeof v === "string" ? v.trim() : "");
+  for (const c of candidates) {
+    const ranges = (Array.isArray(c.ranges) ? c.ranges : []).filter((r) => r && Number.isFinite(r.start) && Number.isFinite(r.end));
+    if (dropped.includes(c.n) || !ranges.length) continue;
+    const start = hundredths(Math.min(...ranges.map((r) => r.start)));
+    const end = Math.min(hundredths(Math.max(...ranges.map((r) => r.end))), length);
+    const said = [["first words", spelled(text(c.first), spellings)], ["last words", spelled(text(c.last), spellings)], ["reason", text(c.reason)], ["point", text(c.point)]];
+    const missing = said.find(([, words]) => !words);
+    if (!(start >= 0 && end > start)) out(c.n, "its times are not a stretch of the video");
+    else if (missing) out(c.n, `it has no ${missing[0]}`);
+    else list.push({ n: c.n, start, end, stretches: [{ start, end }], first: said[0][1], last: said[1][1], why: said[2][1], point: said[3][1] });
+  }
+  return { list, left };
+}
+
+/** Write the hand-off of a finished video or an iPhone clip, from the import's own captions, once its spellings are answered
+    (edit.js spell … offers), in the shape finishNow writes: the captions and their plain text in final/, the hand-off last, and
+    the record with `finished` (revision, handoff, and a `main` part marked `import`), the claim this Mac holds let go; then the
+    hand-off is shown in Finder, through the program runner. There is no Final Cut, no render and no transcriber. The captions
+    are the import's `<stem>.srt` with the show's names and the episode's spellings; the suggestions are those of reels.json.
+    When the record already says the hand-off was made so, it is made again as the next revision, the same file, from the import's
+    captions again, so that a spelling dropped or changed is dropped or changed in the final transcripts as well; a hand-off
+    that would come out as it is stays as it is, and only the record is written.
+    `found` is { folder, name, record } as the commands have it, and `record` the record to write: `found.record` with what the
+    command changed (its spellings, the answer to the offers). Before anything is looked at, cannotFinish refuses a session and a
+    video not yet answered; then handoffTarget says where it goes (and whether it is written at all), the hand-off is built and
+    checked (handoffFaultV2), and numbersTakenWords is asked. Nothing is written, in final/ or the record, unless all of that
+    is well. Resolves one of:
+    - { waits: true }: this Mac does not hand off version 2 yet. Nothing was written.
+    - { why }: why it was not written, in plain words, with "Nothing was written." or "Nothing was changed.".
+    - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first.
+    - { ok: true, revision, handoff, left, same }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
+      says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written. */
+export async function finishFinished(ctx, found, { record }) {
+  const who = shownName(record);
+  const refused = cannotFinish(record);
+  if (refused) return { why: refused };
+  const kind = kindOf(record);
+  if (kind !== "finished" && kind !== "short video") return { why: `${who} is a raw video: its hand-off is made when it is finished in Final Cut. Nothing was written.` };
+  const target = handoffTarget(ctx, { folder: found.folder, record });
+  if (!target.v2) return { waits: true };
+  if (target.refusal) return { why: target.refusal };
+
+  const folder = found.folder;
+  const prior = madeFromImport(record) ? record.finished : null;
+  const listed = (rel) => rel in (record.files || {});
+  const stem = basename(record.video.file, extname(record.video.file));
+  const captionsRel = `${stem}.srt`;
+  // What it is made from, here and whole: the import's captions, the reels.json of the reading (a finished video's suggestions),
+  // and, when it is made again, the hand-off on file.
+  const wanted = [captionsRel, ...(kind === "finished" ? [REELS_FILE] : []), ...(prior ? [prior.handoff] : [])];
+  const absent = wanted.filter((rel) => !existsSync(join(folder, rel)));
+  const missing = absent.find((rel) => !listed(rel) && (rel !== REELS_FILE));
+  if (missing) return { why: missing === captionsRel ? `${who} has no captions from the import to hand off. Nothing was written.` : `${missing} is not in the episode's folder, so the hand-off cannot be made again. Nothing was changed.` };
+  const coming = wanted.filter((rel) => (absent.includes(rel) ? listed(rel) : !ctx.isWhole(join(folder, rel))));
+  if (coming.length) return { coming };
+  let imported = "";
+  let reels = null;
+  let onFile = null;
+  try {
+    imported = readFileSync(join(folder, captionsRel), "utf8");
+    if (kind === "finished" && existsSync(join(folder, REELS_FILE))) reels = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    if (prior) onFile = JSON.parse(readFileSync(join(folder, prior.handoff), "utf8"));
+  } catch (e) {
+    return { why: `${who}'s files could not be read (${e.code || "they are not what they should be"}). Nothing was written.` };
+  }
+  if (reels && reels.why) return { why: `${who}'s list of Reel suggestions cannot be used: ${reels.why.replace(/\.$/, "")}. Nothing was written.` };
+
+  const spellings = Array.isArray(record.spellings) ? record.spellings : [];
+  const shows = spelledCaptions(imported, []);
+  const srt = spelledCaptions(imported, spellings);
+  const txt = stampedText(srt);
+  // A spelling is held by the captions only once it has changed them.
+  const held = spellings.filter((pair) => spelledCaptions(shows, [pair], spelledPairs) !== shows);
+  const seconds = record.video.seconds;
+  const dropped = (record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n);
+  const { list, left } = reels ? suggestionsFrom({ candidates: reels.reels.candidates, dropped, seconds, spellings }) : { list: [], left: [] };
+  const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+  const at = localStamp(new Date(ctx.now()));
+  const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, main: { file: record.video.file, seconds, srt }, onPicture: onPictureOf(record), suggestions: list, reels: onFile && Array.isArray(onFile.reels) ? onFile.reels : [] });
+  const fault = handoffFaultV2(handoff);
+  if (fault) return { why: `The hand-off could not be written: ${fault.replace(/\.$/, "")}. Nothing was written.` };
+  // A number another version of the video gave already, under the same id, is never given again (spec section 8).
+  const again = numbersTakenWords(record, handoff, target.taken);
+  if (again) return { why: again };
+
+  const gone = undone(found.record, ctx.home);
+  if (gone) {
+    acceptRev(ctx.home, found.record.id, found.record.rev);
+    return { why: `${gone} Nothing was written.` };
+  }
+  const handoffRel = prior ? prior.handoff : `final/${fileSafe(record.name.text)}.brimm-ops.json`;
+  const finishedNow = (revision, when) => ({ revision, at: when, on: ctx.machine, handoff: handoffRel, parts: { main: { v: 0, file: `final/${record.video.file}`, bytes: record.video.bytes, seconds, spellings: held, noHandEdits: true, import: true } } });
+  const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
+  const work = join(runsFolder(ctx.home), `first-hand-off-${process.pid}-${ctx.now()}`);
+  const same = Boolean(onFile) && JSON.stringify({ ...onFile, revision: 0, made: "", madeOn: "", madeBy: "" }) === JSON.stringify({ ...handoff, revision: 0, made: "", madeOn: "", madeBy: "" });
+  const release = record.editing && record.editing.by === ctx.machine && !prior ? { editing: null } : {};
+  const finalDir = join(folder, "final");
+  const madeDir = !existsSync(finalDir);
+  const before = [];
+  const put = textWriter({ work, ...opts });
+  /** Each final file put back as it was, or taken away if this call made it. */
+  const putBack = () => {
+    for (const [to, was] of before.reverse()) {
+      try {
+        if (was === null) rmSync(to, { force: true });
+        else put(to, was, { replace: true });
+      } catch (e) {
+        // What could not be put back is left; the record was not written, so the next try writes it again.
+      }
+    }
+    if (madeDir) {
+      try {
+        rmdirSync(finalDir);
+      } catch (e) {
+        // It is not empty, or not there.
+      }
+    }
+  };
+  const files = {};
+  try {
+    mkdirSync(finalDir, { recursive: true });
+    if (!same) {
+      // The hand-off last, as finish copies it.
+      const ordered = [[`final/${stem}.srt`, srt], [`final/${stem}.transcript.txt`, txt], [handoffRel, handoffText(handoff)]];
+      for (const [rel, text] of ordered) {
+        const to = join(folder, rel);
+        const there = existsSync(to);
+        before.push([to, there ? readFileSync(to, "utf8") : null]);
+        files[rel] = put(to, text, { replace: there }).bytes;
+      }
+    }
+    const next = {
+      ...record,
+      files: { ...record.files, ...files },
+      finished: same ? { ...prior, parts: { main: { ...prior.parts.main, spellings: held } } } : finishedNow(target.revision, at),
+      ...release
+    };
+    writeEpisode(folder, next, { expectRev: found.record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
+  } catch (e) {
+    putBack();
+    if (e.code === "CHANGED") return { why: "Nothing was written: this episode changed on the other Mac: open it again." };
+    return { why: `Nothing was written: ${String(e.message || e.code || "a file could not be put in").replace(/\.$/, "")}.` };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off.
+  if (!same) {
+    try {
+      await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", join(folder, handoffRel)]);
+    } catch (e) {
+      // The hand-off is in final/ all the same.
+    }
+  }
+  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same };
 }
