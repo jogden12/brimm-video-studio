@@ -15,9 +15,9 @@ import { finalTranscript } from "./final-transcript.js";
 import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
-import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf } from "./episode.js";
 import { fileSafe } from "./names.js";
-import { episodeWork, runsFolder } from "./settings.js";
+import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
 import { commitOf } from "./filing.js";
@@ -150,21 +150,99 @@ function versionOf(record, part, name) {
   const push = (Array.isArray(pushed) ? pushed : []).find((p) => String(p.project).normalize("NFC") === own);
   return push ? push.v : undefined;
 }
-/** The highest revision of a hand-off of this episode already in final/: a revision is never used twice, even when the
-    record of the last finish was never written. */
+/** The hand-offs in a folder, as paths from it, at any depth when `deep`: every name that ends as a hand-off's does. [] when the
+    folder cannot be read. */
+const handoffsIn = (dir, deep) => {
+  try {
+    return readdirSync(dir, { recursive: deep }).filter((name) => name.endsWith(".brimm-ops.json"));
+  } catch (e) {
+    return [];
+  }
+};
+/** The highest revision of a hand-off of this video already in final/, or set aside into history/ beside it, at any depth: a
+    revision is never used twice, even when the record of the last finish was never written, and one that was replaced or
+    cleared is still one the page holds. A hand-off is the video's when its `episode.id` (version 1) or its `video.id`
+    (version 2) is `id`. */
 export function lastRevision(finalDir, id) {
   let most = 0;
-  let names = [];
-  try {
-    names = readdirSync(finalDir).filter((n) => n.endsWith(".brimm-ops.json"));
-  } catch (e) {
-    return 0;
-  }
-  for (const name of names) {
-    const h = readJson(join(finalDir, name));
-    if (h && h.episode && h.episode.id === id && Number.isInteger(h.revision)) most = Math.max(most, h.revision);
+  for (const [dir, deep] of [[finalDir, false], [join(dirname(finalDir), "history"), true]]) {
+    for (const name of handoffsIn(dir, deep)) {
+      const h = readJson(join(dir, name));
+      if (h && [h.episode, h.video].some((who) => who && who.id === id) && Number.isInteger(h.revision)) most = Math.max(most, h.revision);
+    }
   }
   return most;
+}
+
+/** Every episode in Episodes by its id, each as { folder, record }, read as it lies now, past any conflicted copy: nothing is
+    written. A folder with no whole record, as an import not finished, is not there. */
+function episodesById(root) {
+  const byId = new Map();
+  let names = [];
+  try {
+    names = readdirSync(episodesFolder(root)).filter((name) => !name.startsWith(".")).sort();
+  } catch (e) {
+    return byId;
+  }
+  for (const name of names) {
+    const folder = join(episodesFolder(root), name);
+    const { record } = readEpisode(folder, { pastCopies: true });
+    if (record && !byId.has(record.id)) byId.set(record.id, { folder, record });
+  }
+  return byId;
+}
+
+/** A video's versions as the records link them, newest first, and the id the chain starts from. An episode is followed to the
+    one it is a version of (`versionOf`) only when it is answered: the import no longer writes the link, only her answer does,
+    so an unanswered record's chain is itself. The walk ends at an episode this Mac cannot read, as one not yet brought over
+    by Dropbox, and then the id is the one the last record names; and it ends at an episode already seen. The episodes are read
+    only when a link is to be followed. */
+function walk(root, record, folder) {
+  let index = null;
+  const find = (id) => (index = index || episodesById(root)).get(id);
+  const chain = [{ folder: folder || null, record }];
+  const seen = new Set([record.id]);
+  let last = record;
+  while (kindOf(last) !== null && typeof last.versionOf === "string" && last.versionOf !== "") {
+    if (seen.has(last.versionOf)) break;
+    seen.add(last.versionOf);
+    const old = find(last.versionOf);
+    if (!old) return { chain, first: last.versionOf, find };
+    chain.push(old);
+    last = old.record;
+  }
+  return { chain, first: last.id, find };
+}
+
+/** A video's versions, newest first, each as { folder, record }: the record, then every episode it is a version of, by
+    `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given.
+    This only reads: nothing is written into any folder of the chain. */
+export function chainOf(root, record, folder) {
+  const { chain, find } = walk(root, record, folder);
+  if (chain[0].folder === null) {
+    const own = find(record.id);
+    chain[0].folder = own ? own.folder : null;
+  }
+  return chain;
+}
+
+/** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops
+    page takes a new version as a later revision. */
+export function handoffIdOf(root, record) {
+  return walk(root, record, null).first;
+}
+
+/** The revision of the next hand-off of this video: one above the highest that is found, in every record of the chain
+    (`finished.revision`), and in every folder of it, in final/ and in history/, for the hand-off's id. Revisions only rise: the
+    page refuses a hand-off at or below what it holds. `found` is { folder, record }. This only reads. */
+export function nextRevision(root, found) {
+  const { chain, first } = walk(root, found.record, found.folder);
+  let most = 0;
+  for (const { folder, record } of chain) {
+    if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
+    if (folder) most = Math.max(most, lastRevision(join(folder, "final"), first));
+  }
+  return most + 1;
 }
 
 /** Is there a record of the episode numbered above `n`? */

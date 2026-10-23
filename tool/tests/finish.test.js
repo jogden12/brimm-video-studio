@@ -4,18 +4,18 @@
 // (episodes.js), with stand-ins for ffprobe, ffmpeg, the transcriber and open.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { finishEpisode } from "../edit.js";
-import { finishNow, expectedWords } from "../finish.js";
+import { finishNow, expectedWords, lastRevision, chainOf, nextRevision, handoffIdOf } from "../finish.js";
 import { handoffFault } from "../handoff.js";
-import { recordFile, recordText } from "../episode.js";
+import { recordFile, recordText, newEpisode, layoutOf, readEpisode } from "../episode.js";
 import { clearRuns } from "../filing.js";
 import { runsFolder } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { fromFinalCutFolder } from "../settings.js";
 import { tidyTranscript } from "../shared/transcript.js";
-import { setup, episodeFor, reread, EDITED, PROJECT, SRT, FOLDER, partOf } from "./episodes.js";
+import { setup, episodeFor, reread, listAll, EDITED, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
@@ -530,6 +530,261 @@ describe("finish, the detached part", () => {
     assert.ok(!existsSync(join(found.folder, "final")));
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], "the hand-off is not shown when the record was not written");
     assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, "From Final Cut keeps every file");
+    t.done();
+  });
+});
+
+// Revisions only rise (spec 2026-10-22, sections 1 and 8): a video's id, and the revision of each hand-off written for it, are
+// counted across both hand-off versions, across the episodes that are new versions of it, and across the hand-offs set aside into
+// history/. The hand-offs here are the contract fixtures with the id and revision laid over them; the page refuses one at or
+// below what it holds, so a number is never used twice.
+const FIXTURE = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
+const V1 = FIXTURE("handoff-v1");
+const V2 = { finished: FIXTURE("handoff-v2-finished"), session: FIXTURE("handoff-v2-session") };
+/** A hand-off of version 1 or 2 for the video `id`, at `revision`. */
+const handoffOf = (version, id, revision, kind = "finished") => (version === 1 ? { ...V1, revision, episode: { ...V1.episode, id } } : { ...V2[kind], revision, video: { ...V2[kind].video, id } });
+/** Put a hand-off at a path from an episode's folder. */
+const lay = (folder, rel, handoff) => {
+  mkdirSync(dirname(join(folder, rel)), { recursive: true });
+  writeFileSync(join(folder, rel), JSON.stringify(handoff, null, 2) + "\n");
+};
+/** The id of a video's first version, and of two new versions of it. */
+const SECOND = "e-20261020-5b2e77";
+const THIRD = "e-20261022-9d41a0";
+/** Another episode in the made-up root, with its own folder and id: the import's first record with `record` laid over it. */
+function episodeAs(t, { id, name, record = {} }) {
+  const folder = join(t.root, "Episodes", name);
+  mkdirSync(join(folder, "record"), { recursive: true });
+  const made = newEpisode({ id, machine: "Mac Studio", at: "2026-10-22T09:12:00-05:00", video: { file: "Talk.mp4", bytes: 1, seconds: 10, created: "2026-10-22T09:00:00-05:00" }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } });
+  const next = { ...made, rev: 1, ...record };
+  writeFileSync(recordFile(folder, 1), recordText({ ...next, version: layoutOf(next) }));
+  return { folder, name, record: readEpisode(folder).record };
+}
+/** The made-up episode (ID) as an answered finished video, and one that is a new version of the episode `of`. */
+const original = (t, record = {}) => episodeAs(t, { id: ID, name: "2026-10-14 Pricing talk (Mac Studio)", record: { kind: "finished", ...record } });
+const later = (t, id, of, record = {}) => episodeAs(t, { id, name: `${id} Pricing talk, again (Mac Studio)`, record: { kind: "finished", versionOf: of, ...record } });
+
+describe("lastRevision", () => {
+  it("counts a version 1 hand-off by its episode.id and a version 2 one by its video.id, and no other video's", () => {
+    const t = setup();
+    const found = original(t);
+    const final = join(found.folder, "final");
+    assert.equal(lastRevision(final, ID), 0, "there is no final/ yet");
+    lay(found.folder, "final/a.brimm-ops.json", handoffOf(1, ID, 2));
+    assert.equal(lastRevision(final, ID), 2);
+    lay(found.folder, "final/b.brimm-ops.json", handoffOf(2, ID, 5));
+    assert.equal(lastRevision(final, ID), 5);
+    lay(found.folder, "final/c.brimm-ops.json", handoffOf(2, SECOND, 9));
+    lay(found.folder, "final/d.brimm-ops.json", handoffOf(1, SECOND, 11));
+    assert.equal(lastRevision(final, ID), 5, "another video's hand-offs are not counted");
+    assert.equal(lastRevision(final, SECOND), 11);
+    t.done();
+  });
+  it("passes over a file that is not a hand-off, one that cannot be read and a revision that is not a whole number", () => {
+    const t = setup();
+    const found = original(t);
+    const final = join(found.folder, "final");
+    lay(found.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 2));
+    lay(found.folder, "final/notes.json", handoffOf(2, ID, 8));
+    writeFileSync(join(final, "broken.brimm-ops.json"), "{ not json");
+    lay(found.folder, "final/odd.brimm-ops.json", { ...handoffOf(2, ID, 3), revision: "7" });
+    lay(found.folder, "final/none.brimm-ops.json", { format: "brimm-video hand-off" });
+    mkdirSync(join(final, "folder.brimm-ops.json"));
+    assert.equal(lastRevision(final, ID), 2);
+    t.done();
+  });
+  it("counts the hand-offs set aside into the episode's history/, at any depth, beside the ones in final/", () => {
+    const t = setup();
+    const found = original(t);
+    const final = join(found.folder, "final");
+    lay(found.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    lay(found.folder, "history/2026-10-23 10.00 a.brimm-ops.json", handoffOf(1, ID, 4));
+    lay(found.folder, "history/2026-10-23 10.05/final/b.brimm-ops.json", handoffOf(2, ID, 6, "session"));
+    lay(found.folder, "history/2026-10-23 10.05/final/c.brimm-ops.json", handoffOf(2, SECOND, 9));
+    lay(found.folder, "history/2026-10-23 10.05/final/notes.txt", handoffOf(2, ID, 12));
+    assert.equal(lastRevision(final, ID), 6);
+    rmSync(final, { recursive: true });
+    assert.equal(lastRevision(final, ID), 6, "with no final/ at all, history/ still counts");
+    assert.equal(lastRevision(final, THIRD), 0);
+    t.done();
+  });
+});
+
+describe("the chain of a video's versions", () => {
+  it("is the episode alone when it is not a new version of any, and its own id is the hand-off's", () => {
+    const t = setup();
+    const found = original(t);
+    assert.deepEqual(chainOf(t.root, found.record, found.folder), [{ folder: found.folder, record: found.record }]);
+    assert.deepEqual(chainOf(t.root, found.record), [{ folder: found.folder, record: found.record }], "the folder is found by the id when it is not given");
+    assert.equal(handoffIdOf(t.root, found.record), ID);
+    t.done();
+  });
+  it("runs from a new version to the episode it is a version of, and the hand-off's id is the first's", () => {
+    const t = setup();
+    const old = original(t);
+    const next = later(t, SECOND, ID);
+    assert.deepEqual(chainOf(t.root, next.record, next.folder), [{ folder: next.folder, record: next.record }, { folder: old.folder, record: old.record }]);
+    assert.equal(handoffIdOf(t.root, next.record), ID);
+    t.done();
+  });
+  it("runs through every version of a video, and the id is the first version's", () => {
+    const t = setup();
+    const old = original(t);
+    const middle = later(t, SECOND, ID);
+    const newest = later(t, THIRD, SECOND);
+    assert.deepEqual(chainOf(t.root, newest.record, newest.folder).map((link) => link.folder), [newest.folder, middle.folder, old.folder]);
+    assert.equal(handoffIdOf(t.root, newest.record), ID);
+    assert.equal(handoffIdOf(t.root, middle.record), ID);
+    t.done();
+  });
+  it("is read from an episode that Dropbox has kept a conflicted copy in, which is only read", () => {
+    const t = setup();
+    const old = original(t);
+    writeFileSync(join(old.folder, "Pricing talk (Sallie's conflicted copy 2026-10-20).txt"), "a note");
+    const next = later(t, SECOND, ID);
+    assert.deepEqual(chainOf(t.root, next.record, next.folder).map((link) => link.folder), [next.folder, old.folder]);
+    t.done();
+  });
+  it("follows versionOf only from an answered record: an unanswered one's chain is itself", () => {
+    const t = setup();
+    original(t);
+    const waiting = { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" }, versionOf: ID };
+    const unanswered = later(t, SECOND, ID, waiting);
+    assert.equal(unanswered.record.versionOf, ID, "the record holds the link, and the chain does not follow it");
+    assert.deepEqual(chainOf(t.root, unanswered.record, unanswered.folder), [{ folder: unanswered.folder, record: unanswered.record }]);
+    assert.equal(handoffIdOf(t.root, unanswered.record), SECOND);
+    // An answered version stops at an unanswered record it points to.
+    const asked = episodeAs(t, { id: THIRD, name: "2026-10-22 Waiting (Mac Studio)", record: { ...waiting, versionOf: SECOND } });
+    const answered = episodeAs(t, { id: "e-20261023-0a0a0a", name: "2026-10-23 Answered (Mac Studio)", record: { kind: "raw", versionOf: THIRD } });
+    assert.deepEqual(chainOf(t.root, answered.record, answered.folder).map((link) => link.folder), [answered.folder, asked.folder]);
+    assert.equal(handoffIdOf(t.root, answered.record), THIRD);
+    t.done();
+  });
+  it("ends where an episode cannot be read on this Mac, and the id is the last one the records name", () => {
+    const t = setup();
+    const next = later(t, SECOND, ID);
+    assert.deepEqual(chainOf(t.root, next.record, next.folder), [{ folder: next.folder, record: next.record }]);
+    assert.equal(handoffIdOf(t.root, next.record), ID);
+    t.done();
+  });
+  it("ends where two episodes name each other, and does not go round", () => {
+    const t = setup();
+    const one = original(t, { versionOf: SECOND });
+    const two = later(t, SECOND, ID);
+    assert.deepEqual(chainOf(t.root, two.record, two.folder).map((link) => link.folder), [two.folder, one.folder]);
+    assert.equal(typeof handoffIdOf(t.root, two.record), "string");
+    t.done();
+  });
+});
+
+describe("the next revision of a video", () => {
+  it("is 1 for an episode never handed off, and one above its record's last finish when final/ holds none", () => {
+    const t = setup();
+    const found = original(t);
+    assert.equal(nextRevision(t.root, found), 1);
+    const finished = { ...found.record, finished: { revision: 2, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio" } };
+    assert.equal(nextRevision(t.root, { ...found, record: finished }), 3);
+    t.done();
+  });
+  it("is one above the highest hand-off in final/ of either version, even when the record never said it", () => {
+    const t = setup();
+    const found = original(t);
+    lay(found.folder, "final/a.brimm-ops.json", handoffOf(1, ID, 2));
+    assert.equal(nextRevision(t.root, found), 3);
+    lay(found.folder, "final/b.brimm-ops.json", handoffOf(2, ID, 4));
+    assert.equal(nextRevision(t.root, found), 5);
+    t.done();
+  });
+  it("is, for a new version whose old folder's final/ holds revision 3, 4, and the hand-off's id is the old one's", () => {
+    const t = setup();
+    const old = original(t);
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    const next = later(t, SECOND, ID);
+    assert.equal(nextRevision(t.root, next), 4);
+    assert.equal(handoffIdOf(t.root, next.record), ID);
+    // The new version's own final/ counts too, for the first id; a hand-off of its own id does not.
+    lay(next.folder, "final/b.brimm-ops.json", handoffOf(2, ID, 4));
+    lay(next.folder, "final/c.brimm-ops.json", handoffOf(1, SECOND, 9));
+    assert.equal(nextRevision(t.root, next), 5);
+    t.done();
+  });
+  it("counts the revisions every record of the chain says it finished, when final/ has been cleared", () => {
+    const t = setup();
+    original(t, { finished: { revision: 6, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio" } });
+    const middle = later(t, SECOND, ID, { finished: { revision: 7, at: "2026-10-21T10:00:00-05:00", on: "Mac Studio" } });
+    const newest = later(t, THIRD, SECOND);
+    assert.equal(nextRevision(t.root, newest), 8);
+    assert.equal(nextRevision(t.root, middle), 8);
+    t.done();
+  });
+  it("counts the hand-offs set aside into history/ of every episode of the chain", () => {
+    const t = setup();
+    const old = original(t);
+    lay(old.folder, "history/2026-10-21 09.00/final/a.brimm-ops.json", handoffOf(1, ID, 5));
+    const middle = later(t, SECOND, ID);
+    lay(middle.folder, "history/2026-10-22 09.00 b.brimm-ops.json", handoffOf(2, ID, 7));
+    const newest = later(t, THIRD, SECOND);
+    assert.equal(nextRevision(t.root, newest), 8);
+    t.done();
+  });
+  it("takes nothing from the old episodes for one that is not yet answered", () => {
+    const t = setup();
+    const old = original(t);
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    const waiting = later(t, SECOND, ID, { kind: null, answer: { state: "needs your answer", guess: null, seen: "", came: null } });
+    assert.equal(nextRevision(t.root, waiting), 1);
+    assert.equal(handoffIdOf(t.root, waiting.record), SECOND);
+    t.done();
+  });
+  it("rises through a finished video, a session that replaces it, and a finished video again after the session is cleared", () => {
+    const t = setup();
+    const found = original(t);
+    const final = (name) => `final/${name}.brimm-ops.json`;
+    const set = [];
+    const next = () => {
+      const n = nextRevision(t.root, found);
+      assert.ok(set.every((earlier) => n > earlier), `revision ${n} is above every one before it: ${set.join(", ")}`);
+      set.push(n);
+      return n;
+    };
+    // Finished: revision 1.
+    const one = next();
+    lay(found.folder, final("Pricing"), handoffOf(2, ID, one));
+    // Answered as a session: the finished hand-off is set aside into history/ first, and the session's revision is the next.
+    mkdirSync(join(found.folder, "history", "2026-10-23 10.00"), { recursive: true });
+    renameSync(join(found.folder, final("Pricing")), join(found.folder, "history", "2026-10-23 10.00", "Pricing.brimm-ops.json"));
+    assert.deepEqual(readdirSync(join(found.folder, "final")), []);
+    const two = next();
+    lay(found.folder, final("Session, 2026-10-14"), handoffOf(2, ID, two, "session"));
+    // Cleared: the session's hand-off is set aside too, final/ holds none, and the next is above both.
+    mkdirSync(join(found.folder, "history", "2026-10-23 10.30"), { recursive: true });
+    renameSync(join(found.folder, final("Session, 2026-10-14")), join(found.folder, "history", "2026-10-23 10.30", "Session, 2026-10-14.brimm-ops.json"));
+    assert.deepEqual(readdirSync(join(found.folder, "final")), []);
+    const three = next();
+    assert.deepEqual([one, two, three], [1, 2, 3]);
+    lay(found.folder, final("Pricing"), handoffOf(2, ID, three));
+    assert.equal(nextRevision(t.root, found), 4);
+    t.done();
+  });
+});
+
+describe("reading the chain", () => {
+  it("writes nothing and calls nothing: no file, no clone, no program", () => {
+    const t = setup();
+    const old = original(t);
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    lay(old.folder, "history/a.brimm-ops.json", handoffOf(1, ID, 2));
+    const next = later(t, SECOND, ID);
+    const tree = () => listAll(t.dir).map((rel) => [rel, statSync(join(t.dir, rel)).size, statSync(join(t.dir, rel)).mtimeMs]);
+    const before = tree();
+    assert.equal(chainOf(t.root, next.record).length, 2);
+    assert.equal(handoffIdOf(t.root, next.record), ID);
+    assert.equal(nextRevision(t.root, next), 4);
+    assert.equal(lastRevision(join(old.folder, "final"), ID), 3);
+    assert.deepEqual(tree(), before, "every file as it was, and none added");
+    assert.deepEqual(t.clones, []);
+    assert.deepEqual(t.calls, []);
+    assert.deepEqual(t.opened, []);
     t.done();
   });
 });
