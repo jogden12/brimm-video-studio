@@ -76,16 +76,19 @@ export function labelFor({ seconds, machine, at }) {
   };
 }
 
+/** A label that no label in `taken` is: `label` itself when it is free, and otherwise `label` with the first number from 2
+    up that is free, as "Video of 20 Oct, 14:52 (Mac Studio) (2)". */
+export function numbered(label, taken = []) {
+  const used = new Set(taken);
+  if (!used.has(label)) return label;
+  let n = 2;
+  while (used.has(`${label} (${n})`)) n++;
+  return `${label} (${n})`;
+}
+
 /** The label of a session, from the day it is marked ("2026-10-22"): "Session, 2026-10-22", and with a number, "(2)", "(3)",
     for each one more that day. `taken` holds the labels the other sessions have. */
-export function sessionLabel(day, taken = []) {
-  const first = `Session, ${day}`;
-  const used = new Set(taken);
-  if (!used.has(first)) return first;
-  let n = 2;
-  while (used.has(`${first} (${n})`)) n++;
-  return `${first} (${n})`;
-}
+export const sessionLabel = (day, taken = []) => numbered(`Session, ${day}`, taken);
 
 /** What the tool saw, in a line for her card, with nothing of the file's name: "wide, 42:10, 2 retakes". The shape is "wide",
     "upright" (a square picture too, as episodeKind has it) or "sound only", then the length, then what the rules cut as

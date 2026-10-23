@@ -446,6 +446,17 @@ describe("node settings.js set and sessions", () => {
     assert.deepEqual(t.said, ["The hand-off version is 2 already.", "Readings are now off (they were on).", `Written: ${settingsFile(t.home)}`]);
     t.done();
   });
+  it("set says the drop folder is Unedited Video already on a Mac whose settings name none, and changes nothing", () => {
+    // A Mac set up before the switch has no drop field: its drop folder is Unedited Video.
+    const t = mac();
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    assert.equal("drop" in readSettings(t.home).settings, false);
+    assert.equal(t.run("set", "--drop", "Unedited Video"), 0);
+    assert.deepEqual(t.said, ["The drop folder is Unedited Video already."]);
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    unchanged(t);
+    t.done();
+  });
   it("set refuses a value that will not do, says what the setting takes, changes nothing, and ends with 1", () => {
     const t = mac();
     for (const [argv, said] of [
