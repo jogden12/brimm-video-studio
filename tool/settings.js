@@ -6,7 +6,8 @@
 // The settings are kept in Application Support, on this Mac's own disk. install.sh --machine writes them, through this
 // file's command line, and edit.js and the import read them. A write keeps every setting it does not write. Besides those three,
 // the switch to the light import has settings of its own, all optional: what is absent is today's way (import "full", readings
-// on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions).
+// on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions). `set` refuses the drop folder Drop until
+// the installer makes it (Part D).
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
 //   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
@@ -180,7 +181,7 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                write them, as install.sh --machine does, and say where. Any other setting is kept
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
-                               setting is kept
+                               setting is kept. Drop is refused until the Drop folder is built
   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
                                record that Jason has checked that the setting letting Anthropic train on chats is off on
                                both accounts that touch a session, the one the claude command is signed in to and the one
@@ -261,12 +262,9 @@ function localTime(d) {
   return `${local}${off < 0 ? "-" : "+"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
-/** What `set` refuses until it is built, by option and value, and why: the light import, until the question in her chat
-    exists (Part F), and the Drop folder, until the installer makes it (Part D). Those parts take these away. */
-const NOT_BUILT = [
-  ["--import", "light", "The light import needs the question in her chat, which is not built yet."],
-  ["--drop", "Drop", "The Drop folder is not built yet."]
-];
+/** What `set` refuses until it is built, by option and value, and why: the Drop folder, until the installer makes it (Part D),
+    which takes this away. The light import was refused until the question in her chat was built (Part F). */
+const NOT_BUILT = [["--drop", "Drop", "The Drop folder is not built yet."]];
 
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
     left, and said to be. What is not built yet is refused (NOT_BUILT), and nothing is changed. */
@@ -362,7 +360,9 @@ function sessions(home, rest, say, now) {
 }
 
 /** `show`: the settings, with the folders found from them, or why there are none. The settings of the switch are said when
-    the file has them. */
+    the file has them, but not the two accounts the teachings from sessions were turned on for, each said as "(not shown)":
+    what this prints may reach a chat, and an account's email is not to. `sessions --teachings on` says them once, to Jason,
+    who typed them. */
 function show(home, say, now) {
   const got = readSettings(home);
   if (got.why) {
@@ -382,8 +382,7 @@ function show(home, say, now) {
   if (s.readings !== undefined) say(`  Readings:  ${s.readings ? "on" : "off"}`);
   if (s.handoffVersion !== undefined) say(`  Hand-off version:  ${s.handoffVersion}`);
   if (s.sessionTeachings) {
-    const { at, accounts } = s.sessionTeachings;
-    say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : "lapsed"}, turned on ${at} (the claude command: ${accounts.cli}; the Code tab: ${accounts.app})`);
+    say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : "lapsed"}, turned on ${s.sessionTeachings.at} (the claude command: (not shown); the Code tab: (not shown))`);
   }
   return 0;
 }
