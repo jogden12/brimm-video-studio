@@ -172,6 +172,9 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     answered, and this brimm-video cannot read the label a newer one names it by. */
 const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
 
+/** What a command says of an episode a newer brimm-video wrote, and does nothing more with it. */
+const newerWords = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
     fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
@@ -396,7 +399,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(`That is ${newerName(read.record)}. Jason has a newer brimm-video. Ask him to update this Mac.`);
+    ctx.say(newerWords(read.record));
     return { code: newerEnds };
   }
   return { found, record: read.record };
@@ -2067,12 +2070,19 @@ const keptOrWait = (ctx, found, record) => {
 
 /** `ask "<episode>"`: Claude asked again for the episode's Reel candidates, detached (`ask --now "<episode folder>"`, which
     askAgain does, in unedited.js), since it can take minutes. It refuses a short video, a Mac without Claude Code, an
-    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says. */
+    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says.
+    Both parts refuse an episode a newer brimm-video wrote, by its short id alone. */
 async function ask(ctx, rest) {
   if (rest[0] === "--now") {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
       ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      return 1;
+    }
+    // A record a newer brimm-video wrote may be a session or a video not yet answered, whose fields this one cannot read: it is
+    // named by its short id alone, nothing is asked of Claude, and nothing is written, not even the result of a run.
+    if (found.read.newer) {
+      ctx.say(newerWords(found.read.record));
       return 1;
     }
     const deps = {

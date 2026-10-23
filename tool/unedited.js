@@ -63,7 +63,7 @@ import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS }
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
-import { cameFrom, guessKind, labelFor, seenLine } from "./kinds.js";
+import { cameFrom, guessKind, labelFor, numbered, seenLine } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { readStatuses, importState } from "./importing.js";
@@ -665,6 +665,30 @@ function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
   return matchVersion(mine, candidates, readWords);
 }
 
+/** The labels this Mac has given already, so that a light import does not give one of them again (kinds.js numbered): the
+    label of each record in Episodes under `root`, and of each status of this Mac, `machine`, in Episodes/.importing. The
+    status of this same import, of the video `video` with the import id `importId`, is left out, so that an import tried again
+    keeps its label. A record or a status that cannot be read gives none. */
+function labelsGiven(root, machine, { video, importId }) {
+  const taken = [];
+  let names = [];
+  try {
+    names = readdirSync(episodesFolder(root)).filter((n) => !n.startsWith("."));
+  } catch (e) {
+    // There is no Episodes folder yet, so no record has a label.
+  }
+  for (const n of names) {
+    const { record } = readEpisode(join(episodesFolder(root), n), { pastCopies: true });
+    if (record && typeof record.label === "string" && record.label) taken.push(record.label);
+  }
+  for (const { status } of readStatuses(root)) {
+    if (!status || status.machine !== machine || !status.label) continue;
+    if (status.video === video && (status.import || "") === importId) continue;
+    taken.push(status.label);
+  }
+  return taken;
+}
+
 /** What a light import puts into a video's record beyond today's fields (spec 2026-10-22, section 1): her answer, waiting, with
     the tool's guess at the kind, what it saw, how the video came (kinds.js), and the id of the episode whose words it found
     in the video, or null (versionIn), as `answer.match`; and the fingerprint of its words. The match is only what her card
@@ -722,11 +746,13 @@ async function workOn(file, deps) {
   // panel and every notice name the video by its label, made of the Mac and the moment it was dropped, and never by its file:
   // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read. The moment is when
   // this Mac first saw the video in its drop folder (seen.json, filing.js noteSeen), so that a queue of drops keeps their own
-  // times; when that was not noted, it is the moment this import began.
+  // times; when that was not noted, it is the moment this import began. Videos first seen at one look of the folder share
+  // that moment, so a label this Mac has given already is numbered, "(2)", "(3)", as a session's is.
   const light = Boolean(episode && deps.light);
   const noted = light && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
   const dropped = noted && Number.isFinite(noted.at) ? new Date(noted.at) : deps.now ? deps.now() : new Date();
-  const label = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
+  const unnumbered = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
+  const label = light ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, { video: name, importId: importIdOf(arrived) })) : "";
   const shown = light ? label : name;
   const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
@@ -1603,8 +1629,9 @@ export function listGone({ folder, record, home }) {
 /** Why Claude cannot be asked again for the Reel candidates of the episode in `folder`, whose record is `record`: {why}, in
     plain words, with `bring`, the files Dropbox has still to bring over to this Mac, when that is why; {} when it can be
     asked. The quick part of `ask` and the detached part both look, in this order, for:
-    - a video waiting for its answer, and a client or group session whose mark is not cleared (spec 2026-10-22, section 2):
-      nothing of the first goes to Claude until she says what it is, and a session's words go only to its own reading;
+    - a video waiting for its answer, and a client or group session, by its kind or its mark, whose mark is not cleared or
+      that has none (spec 2026-10-22, section 2): nothing of the first goes to Claude until she says what it is, and a
+      session's words go only to its own reading;
     - a short video, which gets no Reels;
     - the other Mac having it open (phase 1b's claim, episode.js heldText);
     - a change of this Mac's that Dropbox undid (episode.js undone);
@@ -1617,7 +1644,9 @@ export function listGone({ folder, record, home }) {
     - an import told to go by the rules alone, as the list says (`rulesOnly`). */
 export function askBlocked({ folder, record, root, home, machine, now = Date.now(), whole = isWhole }) {
   if (kindOf(record) === null) return { why: "This video is waiting for its answer: say what it is first." };
-  if (record.session && !record.session.cleared) return { why: "This is a client or group session: Claude reads it only for its teachings." };
+  // A session is known by its kind or by its mark, and only a mark that is cleared lets Claude read it: a record of kind
+  // "session" with no mark at all is refused too.
+  if ((kindOf(record) === "session" || record.session) && !(record.session && record.session.cleared)) return { why: "This is a client or group session: Claude reads it only for its teachings." };
   if (record.kind === "short video") return { why: "A short video gets no Reels." };
   // The other Mac has it open (phase 1b's claim): nothing is put into it from here meanwhile.
   const open = heldText(record, machine);

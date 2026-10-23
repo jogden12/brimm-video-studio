@@ -2,7 +2,7 @@
 // hold the file's name. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, seenLine } from "../kinds.js";
+import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine } from "../kinds.js";
 
 /** A cut plan holding `n` ranges the rules cut as `kind`, among a few that are kept and some pauses. */
 const plan = (n, kind = "retake") => ({
@@ -183,6 +183,21 @@ describe("a session's label", () => {
   });
   it("is not changed by another day's sessions or other labels", () => {
     assert.equal(sessionLabel("2026-10-22", ["Session, 2026-10-21", "Video of 22 Oct, 10:40 (Mac Studio)"]), "Session, 2026-10-22");
+  });
+});
+
+describe("a label this Mac has given already", () => {
+  it("is numbered as a session's is, with the first number from 2 that no label taken has", () => {
+    const at = "Video of 20 Oct, 14:52 (Mac Studio)";
+    assert.equal(numbered(at), at);
+    assert.equal(numbered(at, []), at);
+    assert.equal(numbered(at, [at]), `${at} (2)`);
+    assert.equal(numbered(at, [at, `${at} (2)`]), `${at} (3)`);
+    assert.equal(numbered(at, [`${at} (2)`, at, `${at} (3)`]), `${at} (4)`);
+  });
+  it("is left as it is when only a number of it, another moment or another Mac's is taken", () => {
+    const at = "Video of 20 Oct, 14:52 (Mac Studio)";
+    assert.equal(numbered(at, [`${at} (2)`, "Video of 20 Oct, 14:57 (Mac Studio)", "Video of 20 Oct, 14:52 (Sallie's laptop)"]), at);
   });
 });
 

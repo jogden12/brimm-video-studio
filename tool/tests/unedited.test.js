@@ -20,7 +20,7 @@ import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { seenFile, writeSettings } from "../settings.js";
 import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
-import { noteSeen, writePending } from "../filing.js";
+import { fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
@@ -4784,6 +4784,55 @@ describe("the light import", () => {
     assert.equal(u.record().label, LABEL);
     u.done();
   });
+  it("gives each video a label of its own on this Mac, numbered when two were first seen at one look of the drop folder", async () => {
+    // This Mac saw Talk.mov and Talk two.mov at one look, at 14:52, and imports both at 15:00: Talk two.mov first, as the
+    // import takes them in order of their names.
+    const t = episodeImport();
+    t.put("Talk two.mov");
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:52:00"));
+    await uneditedFolder(t.drop, t.deps);
+    const labels = ["Video of 20 Oct, 14:52 (Mac Studio)", "Video of 20 Oct, 14:52 (Mac Studio) (2)"];
+    assert.deepEqual([t.record("Talk two.mov").label, t.record("Talk.mov").label], labels);
+    assert.deepEqual(t.notes, labels.map((label) => `Ready: ${label}. In Claude, say "what's waiting?"`));
+    assert.deepEqual(t.told.filter(([what]) => what === "begin"), labels.map((label) => ["begin", label]));
+    // Every status of each import carries its own label, from its start to its late check.
+    const statuses = t.clones.filter(([, to]) => to.includes("/.importing/")).map(([, , text]) => JSON.parse(text));
+    assert.deepEqual(["Talk two.mov", "Talk.mov"].map((video) => [...new Set(statuses.filter((s) => s.video === video).map((s) => s.label))]), labels.map((label) => [label]));
+    // Once their late checks have passed, their statuses are gone, and their records still hold the labels: a third video
+    // seen at that look is numbered after them.
+    assert.deepEqual(readStatuses(t.root), []);
+    t.put("Talk three.mov");
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:52:00"));
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(t.record("Talk three.mov").label, "Video of 20 Oct, 14:52 (Mac Studio) (3)");
+    t.done();
+  });
+  it("keeps the label of an import tried again, though its own status is still there, and numbers one another status of this Mac holds", async () => {
+    const LABEL_AT = "Video of 20 Oct, 14:52 (Mac Studio)";
+    const writeText = (to, text) => writeFileSync(to, text);
+    /** A status this Mac left of an import that failed, of `video`, the import `id`, with `label`. */
+    const failedStatus = (t, video, id, label) => writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: id, video, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:53:00-04:00", failed: "the transcriber stopped", label }, writeText);
+    // Talk.mov was seen at 14:52, and its import failed: its status, with its label, is still there when it is imported
+    // again, as an import is given its video once nothing holds it.
+    const t = episodeImport();
+    noteSeen(t.home, t.drop, Date.parse("2026-10-20T14:52:00"));
+    const file = join(t.drop, "Talk.mov");
+    failedStatus(t, "Talk.mov", importIdOf(fileId(file)), LABEL_AT);
+    const episode = { root: t.root, machine: "Mac Studio", checkout: "/checkout", home: t.home };
+    const r = await uneditedFile(file, { ...t.deps, episode, outDir: "", watched: t.drop });
+    assert.equal(r.ok, true, r.message);
+    assert.equal(t.record().label, LABEL_AT);
+    assert.deepEqual(t.notes, [`Ready: ${LABEL_AT}. In Claude, say "what's waiting?"`]);
+    assert.deepEqual(readStatuses(t.root).map(({ status }) => [status.video, status.label]), [["Talk.mov", LABEL_AT]]);
+    t.done();
+    // Another video's import on this Mac failed with that label, and nothing else holds it: the new one is numbered.
+    const u = episodeImport();
+    noteSeen(u.home, u.drop, Date.parse("2026-10-20T14:52:00"));
+    failedStatus(u, "Old talk.mov", "k3j9x", LABEL_AT);
+    await uneditedFolder(u.drop, u.deps);
+    assert.equal(u.record().label, `${LABEL_AT} (2)`);
+    u.done();
+  });
   it("names the Mac in the notice once, by the label, which holds it", async () => {
     const t = episodeImport({ machine: "Sallie's laptop" });
     await uneditedFolder(t.drop, t.deps);
@@ -4984,6 +5033,14 @@ describe("the light import", () => {
     assert.deepEqual(t.logs, Array(2).fill(`Talk.mov: ${NEWER}. Nothing was made.`));
     assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
     t.done();
+  });
+  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer brimm-video wrote and one imported lightly", () => {
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const part = /\n\*\*`--from-plan` of an episode's video\*\*([^\n]*)\n/.exec(readme);
+    assert.ok(part, "the README's paragraph on --from-plan of an episode's video");
+    // One sentence says both refusals, and that --out changes neither.
+    const said = part[1].split(/(?<=\.) /).find((sentence) => sentence.includes("with or without `--out`")) || "";
+    assert.ok(said.includes("a newer brimm-video wrote") && said.includes("imported lightly"), part[1]);
   });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });
