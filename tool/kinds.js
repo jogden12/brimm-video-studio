@@ -58,6 +58,9 @@ function whenIn(at) {
   return { day: `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`, time: `${m[4]}:${m[5]}` };
 }
 
+/** A Mac as a sentence says it, from its name in the settings: "the Mac Studio", but "Sallie's laptop". */
+export const spokenMac = (machine) => (/['’]s\b/.test(machine) ? machine : `the ${machine}`);
+
 /** The two ways to name a video that has been dropped and not answered, from its length in `seconds`, the Mac it was dropped
     on and the moment `at` it was (localStamp): { short, spoken }, as
     { short: "Video of 22 Oct, 10:40 (Mac Studio)", spoken: "the 42-minute video dropped on the Mac Studio at 10:40 on 22 Oct" }.
@@ -66,8 +69,7 @@ function whenIn(at) {
 export function labelFor({ seconds, machine, at }) {
   const minutes = Math.round(Number(seconds) / 60);
   const when = whenIn(at);
-  // "the Mac Studio", but "Sallie's laptop".
-  const on = /['’]s\b/.test(machine) ? machine : `the ${machine}`;
+  const on = spokenMac(machine);
   return {
     short: `Video${when ? ` of ${when.day}, ${when.time}` : ""} (${machine})`,
     spoken: `${minutes >= 1 ? `the ${minutes}-minute video` : "the video"} dropped on ${on}${when ? ` at ${when.time} on ${when.day}` : ""}`

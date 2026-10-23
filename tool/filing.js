@@ -83,12 +83,15 @@ export function commitOf(checkout) {
     are the record's Reels, made of the Reel candidates (reelEntries, in reels.js). A made file goes into the episode folder
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others.
+    The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
+    `answer` (her answer, waiting, with the guess), `label`, `fingerprint` and `versionOf` (the id of the episode it is a new
+    version of, or null), which go into the record as they are (newEpisode).
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
     file is cloned in from the run's folder; and the first record is written last, by the rule, its work copy kept. Gives
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
     uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile }, deps) {
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", versionOf = null }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -101,7 +104,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   mkdirSync(episodes, { recursive: true });
   const found = findFolder(episodes, { video, bytes, machine: episode.machine, day });
   const path = join(episodes, found.name);
-  mkdirSync(join(path, "edit"), { recursive: true });
+  if (fcpxml) mkdirSync(join(path, "edit"), { recursive: true });
   // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
   if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
   const entries = [];
@@ -127,7 +130,11 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
     writer,
     files,
     title,
-    reels
+    reels,
+    answer,
+    label,
+    fingerprint,
+    versionOf
   });
   const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
   log(`${video}: filed into Episodes as "${found.name}"${found.reused ? ", in the folder an import that stopped had made" : ""}.`);
@@ -245,10 +252,10 @@ export function clearCrashes({ root, machine, now = Date.now(), alive = isRunnin
 
 /** The late check a Mac has still to make of an episode's import, kept on its own disk until it is made, so that a run that
     is stopped first leaves it for the next: { version: 1, id, name, folder, video, bytes, seconds, drop, work, entries,
-    lastCopy, root, machine, planTxt, problem? }. `entries` are the late check's (dropbox.js); `work` is the run's own folder,
-    which holds their work copies; `drop` is the raw video in the drop folder; `lastCopy` is when the last file was put into
-    Dropbox, in milliseconds; `planTxt` is the cut plan's text file, by its name. `problem` is there once a late check found a
-    file still wrong. */
+    lastCopy, root, machine, planTxt, label?, problem? }. `entries` are the late check's (dropbox.js); `work` is the run's own
+    folder, which holds their work copies; `drop` is the raw video in the drop folder; `lastCopy` is when the last file was put
+    into Dropbox, in milliseconds; `planTxt` is the cut plan's text file, by its name. `label` is there for a light import: the
+    video's label, which its banner names it by. `problem` is there once a late check found a file still wrong. */
 const pendingFile = (home, id) => join(pendingFolder(home), `${id}.json`);
 
 /** Keep a late check still to be made, written whole on this Mac's own disk, under another name and then renamed. */
@@ -349,7 +356,8 @@ export function finishLate(pending, deps) {
   for (const problem of problems) log(`${pending.video}: the late check found a problem: ${problem}`);
   const said = problems.join(" ");
   if (!pending.problem) {
-    notify(`Dropbox lost a file of ${basename(pending.video, extname(pending.video))}. The video stays in the drop folder; see the log.`);
+    // A light import's video is named by its label, as in every notice of its import: a notice may show on a shared screen.
+    notify(`Dropbox lost a file of ${pending.label || basename(pending.video, extname(pending.video))}. The video stays in the drop folder; see the log.`);
     try {
       noteProblem(pending, said, deps);
     } catch (e) {

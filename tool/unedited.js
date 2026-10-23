@@ -36,6 +36,10 @@
 // While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
 // progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
+// When this Mac's settings say `import: "light"` (settings.js), a video in its drop folder is imported lightly (spec
+// 2026-10-22, section 1): its transcript, words, cut plan and cut log, and the rough cut's captions worked out from the plan,
+// and nothing more. Claude is not asked, no video is made, and there is no Final Cut file, reels.json or notes: the episode's
+// record waits for her to say what the video is, and until then the video is named by its label, never by its file.
 import { mainProject } from "./projects.js";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -54,8 +58,10 @@ import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder } from "./settings.js";
-import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf } from "./episode.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
+import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
+import { cameFrom, guessKind, labelFor, seenLine, spokenMac } from "./kinds.js";
+import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { readStatuses, importState } from "./importing.js";
 
@@ -270,8 +276,9 @@ const sentence = (part) => `${capital(part)}.`;
 
 /** The steps of the work on one video, as the progress panel counts them: Claude is asked (`claude`), there is an upright
     version to make (`wide`), there are clips to cut (`clips`), or, for an episode, Reel previews to make (`previews`), and the
-    video is filed away after (`watched`). */
-const stepsFor = ({ claude, wide, clips, previews, watched }) => [
+    video is filed away after (`watched`). The light import (`light`) reads, transcribes, plans and files, and nothing more. */
+const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
+const stepsFor = ({ claude, wide, clips, previews, watched, light }) => light ? [...LIGHT_STEPS] : [
   "Reading the sound", "Writing the transcript", "Making the cut plan", ...(claude ? ["Asking Claude"] : []), "Making the rough cut",
   ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(previews ? ["Making the Reel previews"] : clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
 ];
@@ -610,6 +617,62 @@ function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { lib
   return mainProject({ video, facts, more: { ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) }, plan, srt, ideas, library, src, writer });
 }
 
+/** The first line of a light import's cut log: its times are the recording's, since no rough cut is made at a drop, and the plan
+    is the rules' alone. */
+const LIGHT_PLAN_NOTE = "The times here are the recording's own, from its start.\nThis plan is the rules' alone: Claude has not read it.";
+
+/** The episode on this Mac that a new video, given by its length in `seconds`, its `fingerprint` and its `words`, is a new
+    version of (matchVersion, in versions.js): { id, folder }, or null. Each whole record in Episodes under `root` is a
+    candidate, and an episode's words are read from its .words.json only when that file is whole on this Mac (`whole`):
+    nothing is brought down from Dropbox for it, and the log says so, by the episode's label. A record of before the switch has
+    no fingerprint, and never matches. Nothing is thrown from here: a folder that cannot be read is no match. */
+function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
+  let names = [];
+  try {
+    names = readdirSync(episodesFolder(root)).filter((n) => !n.startsWith(".")).sort();
+  } catch (e) {
+    return null;
+  }
+  const records = new Map();
+  const candidates = [];
+  for (const n of names) {
+    const folder = join(episodesFolder(root), n);
+    const { record } = readEpisode(folder);
+    if (!record || !record.video) continue;
+    records.set(folder, record);
+    candidates.push({ id: record.id, folder, kind: kindOf(record), archived: record.archived || null, session: record.session || null, seconds: record.video.seconds, fingerprint: record.fingerprint || "" });
+  }
+  const readWords = (folder) => {
+    const record = records.get(folder);
+    const named = record.label || basename(folder);
+    const words = cutOutputs(join(folder, record.video.file)).words;
+    if (!whole(words)) {
+      log(`${named}: its words are not on this Mac, so it was not compared.`);
+      return null;
+    }
+    try {
+      const read = JSON.parse(readFileSync(words, "utf8")).words;
+      if (Array.isArray(read)) return read;
+    } catch (e) {
+      // It cannot be read, and the line below says so.
+    }
+    log(`${named}: its words could not be read, so it was not compared.`);
+    return null;
+  };
+  return matchVersion(mine, candidates, readWords);
+}
+
+/** What a light import puts into a video's record beyond today's fields (spec 2026-10-22, section 1): her answer, waiting, with
+    the tool's guess at the kind, what it saw and how the video came (kinds.js); the fingerprint of its words; and the id of
+    the episode it is a new version of, or null (versionIn). `name` is the file's, which only says whether it came from Zoom. */
+function lightFields({ name, facts, plan, words, root }, deps) {
+  const came = cameFrom({ name, facts });
+  const answer = { state: "needs your answer", guess: guessKind({ facts, plan, came }), seen: seenLine({ facts, plan, came }), came };
+  const fingerprint = fingerprintOf(words);
+  const match = fingerprint ? versionIn(root, { seconds: facts.duration, fingerprint, words }, deps) : null;
+  return { answer, fingerprint, versionOf: match ? match.id : null };
+}
+
 async function workOn(file, deps) {
   const { run, tools, model, log = () => {}, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
   let progress = deps.progress || noProgress;
@@ -647,6 +710,14 @@ async function workOn(file, deps) {
   const { episode } = deps;
   // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
   const arrived = episode ? fileId(file) : null;
+  // With this Mac's settings saying `import: "light"`, an episode's import is the light one (spec 2026-10-22, section 1): the
+  // transcript, the cut plan and its text, and the rough cut's captions, worked out from the plan; no Claude, no video made,
+  // no Final Cut file, no reels.json and no notes. Its record waits for her answer. Her screen may be shared, so the progress
+  // panel and every notice name the video by its label, made of the Mac and the moment it was dropped, and never by its file:
+  // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read.
+  const light = Boolean(episode && deps.light);
+  const label = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(deps.now ? deps.now() : new Date()) }).short : "";
+  const shown = light ? label : name;
   const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   // Whether the run's folder stays when the run ends: it does once an episode's files are in Dropbox, for the late check.
@@ -668,16 +739,16 @@ async function workOn(file, deps) {
       files.put(out.failed);
     }
     log(`${name}: failed. ${why}.`);
-    notify(episode ? `No transcript could be made from ${name}. It stays in the drop folder; see the log.` : `No transcript could be made from ${name}. See the note beside it.`);
+    notify(episode ? `No transcript could be made from ${shown}. It stays in the drop folder; see the log.` : `No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
   };
   // The progress panel is told each step as it begins. It is told the steps to come as far as they are known, and again as
   // more is known: whether there is an upright version to make, once the video has been read, and whether there are clips.
   // `asking` and not `claude`: the plan's own record of Claude's reply is called claude further down, in the same scope.
-  const asking = !deps.rulesOnly && Boolean(tools.claude);
+  const asking = !light && !deps.rulesOnly && Boolean(tools.claude);
   const watched = Boolean(deps.watched);
-  progress.begin(name);
-  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking && !episode, previews: asking && Boolean(episode), watched }));
+  progress.begin(shown);
+  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking && !episode, previews: asking && Boolean(episode), watched, light }));
   // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
   let finished = false;
   try {
@@ -697,7 +768,7 @@ async function workOn(file, deps) {
     const wide = (f) => needsReframe(f) && kind !== "short video";
     if (facts) {
       progress.length(facts.duration);
-      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && !episode, previews: asking && Boolean(episode) && kind !== "short video", watched }));
+      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && !episode, previews: asking && Boolean(episode) && kind !== "short video", watched, light }));
     }
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
@@ -766,16 +837,28 @@ async function workOn(file, deps) {
         log(`${name}: its Final Cut file names it in a folder it is not in, and could not be written again (${e.code || e.message}).`);
       }
     };
+    /** What a plan comes to, as the log says it. */
+    const sums = (made) => {
+      const cuts = made.ranges.filter((r) => !r.keep).length;
+      return `keeps ${stamp(Math.round(made.kept))} of ${stamp(Math.round(facts.duration))} and suggests ${cuts} cut${cuts === 1 ? "" : "s"}`;
+    };
+    /** The plan `made` as its file holds it (see where it is written, below), with `claude`, what Claude made of it, or null. */
+    const planJson = (made, claude) => JSON.stringify({ version: 1, video: name, facts, phrases: made.phrases, ranges: made.ranges, kept: made.kept, cut: made.cut, pauses: planned.pauses.map(([start, end]) => [start, Math.min(end, facts.duration)]), by: made.by || "rules", ...(made.changes ? { changes: made.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n";
     if (!plan) {
       if (!noReels.none) noReels = { none: "no cut plan could be made", cannotAsk: "" };
       missing.push(`no cut plan could be made: ${planned.why}`);
       files.text(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
+    } else if (light) {
+      // The light import makes no video: the words, the rough cut's captions, placed by the plan's own arithmetic, the cut log,
+      // whose first line says its times are the recording's, and the plan, written last, as below.
+      log(`${name}: the cut plan ${sums(plan)}.`);
+      files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
+      const roughSrt = roughCaptions(plan.phrases, keptSpans(plan.ranges, roughRate(facts)));
+      files.text(out.roughTxt, stampedText(roughSrt));
+      files.text(out.roughSrt, roughSrt);
+      files.text(out.planTxt, planText(plan, LIGHT_PLAN_NOTE));
+      files.text(out.plan, planJson(plan, null));
     } else {
-      /** What a plan comes to, as the log says it. */
-      const sums = (made) => {
-        const cuts = made.ranges.filter((r) => !r.keep).length;
-        return `keeps ${stamp(Math.round(made.kept))} of ${stamp(Math.round(facts.duration))} and suggests ${cuts} cut${cuts === 1 ? "" : "s"}`;
-      };
       log(`${name}: the cut plan ${sums(plan)}.`);
 
       // Claude reads the rules' plan before anything is made from it. Its decisions are applied with the pauses ffmpeg heard,
@@ -929,7 +1012,7 @@ async function workOn(file, deps) {
       // made of the plan later. The title Claude recommends comes first, when it gave one: the import of an episode takes it
       // for the episode's title, for a person to approve.
       const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
-      files.text(out.plan, JSON.stringify({ version: 1, video: name, facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, pauses: planned.pauses.map(([start, end]) => [start, Math.min(end, facts.duration)]), by: plan.by || "rules", ...(plan.changes ? { changes: plan.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n");
+      files.text(out.plan, planJson(plan, claude));
     }
     for (const what of missing) log(`${name}: ${what}.`);
     if (!missing.length) log(`${name}: done.`);
@@ -938,7 +1021,7 @@ async function workOn(file, deps) {
     // video where it stays.
     // An episode's Reel candidates go into reels.json, beside its other files, with why there are none when there are none.
     const reelsAt = join(dirname(file), REELS_FILE);
-    if (episode) {
+    if (episode && !light) {
       try {
         files.text(reelsAt, JSON.stringify(reelsFile({ video: name, by: "import", made: localStamp(deps.now ? deps.now() : new Date()), candidates, ...noReels }), null, 2) + "\n");
       } catch (e) {
@@ -954,10 +1037,14 @@ async function workOn(file, deps) {
       const stem = basename(name, extname(name));
       let filed = null;
       try {
-        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived }, deps);
+        const given = { file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived };
+        // A light import's video waits for her answer: it has no kind yet and no Final Cut file, and it has its label, its guess,
+        // the fingerprint of its words, and the episode it is a new version of, when its words match one on this Mac.
+        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: null, label, ...lightFields({ name, facts: given.facts, plan, words: planned.words || [], root: episode.root }, { log, whole }) } : given, deps);
+        if (light && filed.record.versionOf) log(`${name}: its words are those of the episode ${filed.record.versionOf}, so it is filed as a new version of it.`);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
-        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt) };
+        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt), ...(light ? { label } : {}) };
         try {
           writePending(episode.home, pending);
           log(`${name}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
@@ -976,8 +1063,9 @@ async function workOn(file, deps) {
         progress.fail(why);
         log(`${name}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
-      if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
-      else notify(`${name} could not be put into Episodes. It stays in the drop folder; see the log.`);
+      if (filed && light) notify(`Ready on ${spokenMac(episode.machine)}: ${label}. In Claude, say "what's waiting?"`);
+      else if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
+      else notify(`${shown} could not be put into Episodes. It stays in the drop folder; see the log.`);
       finished = !missing.length;
       return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder: filed ? filed.name : "", ...(filed ? { filed } : {}), message: missing.join("; ") };
     }
@@ -1941,7 +2029,9 @@ clips it picked.
 
 An episode, made of a video in this Mac's drop folder, gets Reel candidates in place of the short clips: reels.json, and a
 small upright preview of each in previews/. --from-plan of an episode's video makes the previews again, and puts every
-file into the episode by the rule. See the README, "Reel candidates".
+file into the episode by the rule. See the README, "Reel candidates". With this Mac's settings saying import light, a video
+in the drop folder is imported lightly instead: its transcript, cut plan and the rough cut's captions, and nothing else.
+Claude is not asked, and no video is made, until its person says what it is.
 
 The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
 rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
@@ -1960,12 +2050,14 @@ const banner = (text) => {
 /** What a run started from the command line is given: the real way of running a program, the programs `found` on this Mac,
     the log, the banner and a real wait. And the home folder, where the Final Cut file's library is kept: the one HOME names,
     as it does for the launch agent and in a shell, and the Mac's own word for it when HOME names none. `args` is what the
-    run was asked to do: with --rules-only among it, the run is told never to ask Claude. */
+    run was asked to do: with --rules-only among it, the run is told never to ask Claude. When this Mac's settings say
+    `import: "light"`, the run is told so (`light`), and the episodes of its drop folder are imported lightly: nothing else
+    is, neither the one file nor a folder that is not its drop folder. With no such setting the run is given what it was. */
 export function depsFor(found, log, env = process.env, args = {}) {
   const home = env.HOME || homedir();
   // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
   const settings = readSettings(home).settings || null;
-  return { run: runProgram, tools: found, model: found.model, home, settings, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
+  return { run: runProgram, tools: found, model: found.model, home, settings, ...(lightImport(settings) ? { light: true } : {}), rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends
