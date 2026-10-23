@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
+import { finishNow, finishFinished, madeFromImport, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -123,9 +123,12 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         --hand-edits-stay that the changes stay in this Mac's library
   node edit.js captions "<episode>" reel <n> on|off
                                         a Reel's running captions, in its caption style; its title on screen stays
-  node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]
-                                        the episode's spellings, which every timeline's captions take; after a finish,
-                                        the final transcripts too, and the hand-off is made again
+  node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
+                                        the episode's spellings, which every timeline's captions take; several pairs of
+                                        add are one change; after a finish, the final transcripts too, and the hand-off is
+                                        made again. offers shows the spellings Claude offered as one numbered card, or
+                                        answers them (all, some or none), and a finished video's or an iPhone clip's
+                                        hand-off is then written
   node edit.js logo "<episode>" on|off [--picture "<name>"]
                                         the logo on the main video, top right; its picture is named once, from the
                                         Pictures folder
@@ -2593,6 +2596,58 @@ function shownAfter(stamp, ms) {
   return new Date(Date.parse(stamp) + ms + offset).toISOString().slice(0, 16).replace("T", " ");
 }
 
+/** What is said when the hand-off waits for the switch, and when it is written. */
+const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
+const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
+/** A finished video and an iPhone clip have no Final Cut, and nothing of them is shown there. */
+const hasFinalCut = (record) => !["finished", "short video"].includes(recordKind(record));
+/** Spellings as they are said in a row: "a" as "b", "c" as "d" and "e" as "f". */
+const pairsSaid = (pairs) => listed(pairs.map(([heard, meant]) => `"${heard}" as "${meant}"`));
+
+/** The spellings Claude's reading offered, each { heard, spelled, why }, as the card numbers them (by their place in the record,
+    so that a spelling added meanwhile changes no number); null when the video has not been read. */
+function offersOf(record) {
+  if (!record.reading) return null;
+  const offered = record.offers && Array.isArray(record.offers.spellings) ? record.offers.spellings : [];
+  return offered.map((o) => ({ heard: String((o && o.heard) ?? ""), spelled: String((o && o.spelled) ?? ""), why: typeof (o && o.why) === "string" ? o.why : "" }));
+}
+
+/** Her answer to the offers of the reading the record holds, { reading, at, on, applied, left }, or null while they are not
+    answered. An answer is of one reading: a reading made again (its `at` is another) has offers of its own. */
+function answerOf(record) {
+  const answer = record.offers && record.offers.answered;
+  return answer && record.reading && answer.reading === record.reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
+}
+
+/** Is the hand-off of a finished video or an iPhone clip owed: its offers are answered, and it is not written yet? */
+const handoffOwed = (record) => !record.finished && !hasFinalCut(record) && answerOf(record) !== null;
+
+/** Why an offer cannot be kept, in plain words, or "": the episode has a spelling of that word already, or it is not a spelling
+    (spellingFault). */
+function offerFault(record, offer) {
+  const mine = (record.spellings || []).find(([heard]) => heard === offer.heard);
+  if (mine && mine[1] !== offer.spelled) return `You have "${offer.heard}" spelled "${mine[1]}" already.`;
+  return spellingFault(offer.heard, offer.spelled);
+}
+
+/** Write the hand-off of a finished video or an iPhone clip from the import's captions (finish.js finishFinished), the first
+    one or the next revision of it, with the record `record` (its spellings and the answer to the offers in it), and say `done`
+    and what came of it. Version 1 of the hand-off waits for the switch: the record is kept, and nothing is put in final/. */
+async function importHandoff(ctx, found, record, done) {
+  const wrote = await finishFinished(ctx, found, { record });
+  if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}`);
+  if (wrote.coming) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: wrote.coming });
+    const what = listed([...new Set(wrote.coming.map((rel) => (rel.endsWith(".srt") ? "captions" : rel === REELS_FILE ? "Reel suggestions" : "hand-off")))]);
+    return refuse(ctx, `Dropbox is bringing the import's ${what} over to this Mac. Say it again when it is done. Nothing was changed.`);
+  }
+  if (wrote.why) return refuse(ctx, wrote.why);
+  if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
+  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.`);
+  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision)}`);
+  return 0;
+}
+
 /** The record with its spellings, `spellings`; and after a finish (spec section 4, "spell applies to every timeline and to
     the final transcripts") the final transcripts with each spelling they do not hold yet, and the hand-off made again as its
     next revision, each file put in by the rule, and only when its words change. Each finished part's transcripts hold the
@@ -2602,11 +2657,17 @@ function shownAfter(stamp, ms) {
     it checks they are here, whole (her folder may be online-only after a hand-off): if not, it starts bringing them over and
     stops. (`spell` has refused already while a finish runs, whose late check would put its own copies back.) When the record
     cannot be written, each final file is put back as it was, each on its own; one that cannot be is named, and she is told
-    the episode needs Jason. Resolves the save's code. */
-async function saveSpellings(ctx, found, spellings, done) {
-  const record = { ...found.record, spellings };
+    the episode needs Jason. `set` is what else the command changes in the record (the answer to Claude's offers), written in the
+    same record, and `later` what is said at the end when no hand-off is written yet and none is due (a raw video's). Resolves the
+    save's code. */
+async function saveSpellings(ctx, found, spellings, done, { set = {}, later = "" } = {}) {
+  const record = { ...found.record, ...set, spellings };
   const finished = record.finished;
-  if (!finished) return save(ctx, found, record, done);
+  // The hand-off of a finished video or an iPhone clip is made from the import's own captions (finish.js finishFinished): it is
+  // written at the first spell once its offers are answered, and made again from the captions at every one after, so that a
+  // spelling dropped or changed is dropped or changed in it too. Which refusals apply is that function's.
+  if (madeFromImport(record) || (!finished && handoffOwed(record))) return importHandoff(ctx, found, record, done);
+  if (!finished) return save(ctx, found, record, [done, later].filter(Boolean).join(" "));
   // A client or group session, and a video not yet answered, are refused at once, as finish refuses them (finish.js
   // cannotFinish), before any file in final/ is named or read, and nothing is written, the spelling included: none of a
   // session's transcripts may be in the shared folder, and an unanswered video has no kind to hand off as.
@@ -2719,10 +2780,97 @@ async function saveSpellings(ctx, found, spellings, done) {
   }
 }
 
-/** `spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]`: the episode's own spellings, which every
-    timeline's captions and the final transcripts take. */
+/** The pairs of `spell … add` after its first "add": "<as heard>" "<as spelled>", and more pairs after them, each of which may be
+    started with "add" again, as the command line is written. { pairs }, or { odd } with the word that has no spelling after it.
+    An "add" is passed over where a pair would start only when at least a pair follows it, so a word heard as "add" is still one
+    when it is the last pair. */
+function spellPairs(words) {
+  const pairs = [];
+  for (let i = 0; i < words.length; ) {
+    if (words[i] === "add" && words.length - i >= 3) i += 1;
+    if (i + 1 >= words.length) return { odd: words[i] };
+    pairs.push([words[i].trim(), words[i + 1].trim()]);
+    i += 2;
+  }
+  return { pairs };
+}
+
+/** What she is to say to answer Claude's offers. */
+const ANSWER_WITH = 'Say which to apply: "all", "none", or their numbers, as in 1 3.';
+
+/** `spell "<episode>" offers`: the spellings Claude's reading offered, as one numbered card, or, once she has answered them, what
+    she answered. It reads only. */
+function spellCard(ctx, found) {
+  const { record } = found;
+  const name = shownName(record);
+  const offers = offersOf(record);
+  if (!offers) return refuse(ctx, `Claude has not read ${name} yet, so it has offered no spellings.`);
+  const answer = answerOf(record);
+  if (answer) {
+    ctx.say(`Claude's spellings for ${name} were answered on ${shownAt(answer.at)}:`);
+    offers.forEach((o, i) => ctx.say(`${i + 1}. "${o.heard}" as "${o.spelled}": ${answer.applied.includes(o.heard) ? "applied" : "left"}.`));
+    if (handoffOwed(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(HANDOFF_WAITS);
+    return 0;
+  }
+  if (!offers.length) {
+    ctx.say(`Claude offered no spellings for ${name}.`);
+    ctx.say("Answer none to go on.");
+    return 0;
+  }
+  ctx.say(`Claude offers these spellings for ${name}:`);
+  offers.forEach((o, i) => {
+    const fault = offerFault(record, o);
+    ctx.say(fault ? `${i + 1}. "${o.heard}" as "${o.spelled}" cannot be kept. ${fault}` : `${i + 1}. "${o.heard}" as "${o.spelled}"${o.why ? `: ${o.why}` : ""}`);
+  });
+  ctx.say(ANSWER_WITH);
+  return 0;
+}
+
+/** `spell "<episode>" offers all|none|<n> <n>…`: her answer to Claude's offers. The ones named are applied as the episode's
+    spellings, in the card's order, together with the answer, in one record; and, for a finished video or an iPhone clip, the
+    hand-off is then written (saveSpellings). "all" applies every offer that can be kept; a number whose offer cannot is refused.
+    An offer for a word the episode spells already is not used: her own spelling stays. Nothing is written when it is refused. */
+async function answerOffers(ctx, found, words) {
+  const { record } = found;
+  const name = shownName(record);
+  const offers = offersOf(record);
+  if (!offers) return refuse(ctx, `Claude has not read ${name} yet, so it has offered no spellings.`);
+  if (answerOf(record)) {
+    // Her answer stands. A hand-off still owed, because this Mac handed off version 1 when she gave it, is written now.
+    if (handoffOwed(record) && writesV2For(ctx.settings, found.folder, record)) return saveSpellings(ctx, found, record.spellings || [], `The spellings Claude offered for ${name} were answered already.`);
+    return refuse(ctx, `The spellings Claude offered for ${name} were answered already. To spell a word another way, say it with spell add; to take one back, spell drop.`);
+  }
+  const said = words.join(" ").split(/[\s,]+/).filter(Boolean);
+  const numbers = said.length > 0 && said.every((w) => /^[1-9]\d*$/.test(w));
+  if (said.length !== 1 && !numbers) return refuse(ctx, ANSWER_WITH);
+  if (said.length === 1 && !numbers && !["all", "none"].includes(said[0])) return refuse(ctx, ANSWER_WITH);
+  const faults = offers.map((o) => offerFault(record, o));
+  let chosen = [];
+  const notKept = [];
+  if (said[0] === "all") {
+    chosen = offers.map((_, i) => i).filter((i) => !faults[i]);
+    notKept.push(...faults.filter(Boolean));
+  } else if (numbers) {
+    const asked = [...new Set(said.map(Number))].sort((a, b) => a - b);
+    if (!offers.length) return refuse(ctx, `Claude offered no spellings for ${name}. Answer none to go on.`);
+    const beyond = said.map(Number).find((n) => n > offers.length);
+    if (beyond !== undefined) return refuse(ctx, `There is no offer ${beyond}: the offers are 1 to ${offers.length}.`);
+    const bad = asked.find((n) => faults[n - 1]);
+    if (bad !== undefined) return refuse(ctx, `Offer ${bad} cannot be kept. ${faults[bad - 1]} Nothing was written.`);
+    chosen = asked.map((n) => n - 1);
+  }
+  const applied = chosen.map((i) => offers[i]);
+  let next = record.spellings || [];
+  for (const o of applied) next = withSpelling(next, o.heard, o.spelled);
+  const answer = { reading: record.reading.at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
+  const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
+  return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later: recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : "" });
+}
+
+/** `spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all|none|<n> <n>…]]`: the
+    episode's own spellings, which every timeline's captions and the final transcripts take. Several pairs are one change. */
 async function spell(ctx, rest) {
-  const [said, verb, heard, meant] = rest;
+  const [said, verb, ...more] = rest;
   const got = episodeFor(ctx, said === undefined ? [] : [said], { newerEnds: 1 });
   if (!got.found) return got.code;
   const found = { ...got.found, record: got.record };
@@ -2731,21 +2879,43 @@ async function spell(ctx, rest) {
     ctx.say(spellings.length ? `The spellings: ${spellings.map(([h, m]) => `"${h}" as "${m}"`).join(", ")}.` : "There are no spellings for this episode yet.");
     return 0;
   }
-  if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
-  // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here.
-  const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
-  if (verb === "drop") {
-    if (!spellings.some(([h]) => h === heard)) return refuse(ctx, `There is no spelling of "${heard}".`);
-    return saveSpellings(ctx, found, spellings.filter(([h]) => h !== heard), `"${heard}" is as the transcriber writes it again. ${SHOW_IT}`);
+  if (verb === "offers") {
+    // A session, and a video not yet answered, are refused as finish refuses them, before any file is looked at.
+    const notYet = cannotFinish(got.record);
+    if (notYet) return refuse(ctx, notYet);
+    if (more.length === 0) return spellCard(ctx, found);
   }
+  if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
+  // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here. A
+  // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes.
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running && running !== "bring" && !(running === "read" && got.record.reading)) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  const fc = hasFinalCut(got.record);
+  if (verb === "drop") {
+    const heard = more[0];
+    if (!spellings.some(([h]) => h === heard)) return refuse(ctx, `There is no spelling of "${heard}".`);
+    return saveSpellings(ctx, found, spellings.filter(([h]) => h !== heard), `"${heard}" is as the transcriber writes it again.${fc ? ` ${SHOW_IT}` : ""}`);
+  }
+  if (verb === "offers") return answerOffers(ctx, found, more);
   if (verb !== "add") {
     ctx.say(HELP);
     return 2;
   }
-  const fault = spellingFault(heard, meant);
-  if (fault) return refuse(ctx, fault);
-  return saveSpellings(ctx, found, withSpelling(spellings, heard.trim(), meant.trim()), `"${heard.trim()}" is spelled "${meant.trim()}" now, in every timeline's captions. ${SHOW_IT}`);
+  let pairs = [[more[0], more[1]]];
+  if (more.length > 2) {
+    const read = spellPairs(more);
+    if (read.odd !== undefined) return refuse(ctx, spellingFault(read.odd, ""));
+    pairs = read.pairs;
+  }
+  for (const [heard, meant] of pairs) {
+    const fault = spellingFault(heard, meant);
+    if (fault) return refuse(ctx, fault);
+  }
+  const written = [...new Map(pairs.map(([h, m]) => [h.trim(), [h.trim(), m.trim()]])).values()];
+  const next = written.reduce((all, [h, m]) => withSpelling(all, h, m), spellings);
+  const where = fc ? "in every timeline's captions" : "in every caption";
+  const done = written.length === 1 ? `"${written[0][0]}" is spelled "${written[0][1]}" now, ${where}.` : `Spelled now, ${where}: ${pairsSaid(written)}.`;
+  return saveSpellings(ctx, found, next, fc ? `${done} ${SHOW_IT}` : done);
 }
 
 /** `logo "<episode>" on|off [--picture "<name>"]`: the logo on the main video, top right (spec section 4). Its picture is
