@@ -575,7 +575,7 @@ Not a code task. Each step on Jason's yes.
 2. On the Mac Studio, with nothing at work (`launchctl list | grep com.thebrimm` shows `-` for both agents): `git pull` in the main checkout.
 3. `cd tool && ./install.sh --print --machine "Mac Studio" --drop Drop --import light --handoff 2 "<BRIMM Video>"`, read with Jason; then without `--print`. Her folder is written again, and the setup guide's lock-down check made again.
 4. `node tool/settings.js sessions --teachings on --cli-account … --app-account …`, once Jason has checked both accounts' training setting.
-5. Her laptop, in one sitting with the Mac Studio, the same steps (Jason said to set her laptop aside for now: until then her laptop stays as it is, and nothing is dropped in its folder).
+5. Her laptop, in the same sitting as the Mac Studio, the same steps, its checkout on F's code before either Mac turns `import` light: a laptop still on older code would list a light episode by its folder name, which holds the file's name (Part L's branch review). Until then neither Mac turns it on; `settings.js set --import light` refuses until Part F is merged, and `set --drop Drop` until Part D is.
 6. One drop of each kind from Jason's test recordings, never Sallie's episodes; the card in the Code tab (phase R1's check).
 
 ## Self-review (against the spec)

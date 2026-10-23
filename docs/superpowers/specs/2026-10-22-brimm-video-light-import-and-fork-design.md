@@ -138,7 +138,7 @@ When the editor sends a corrected file, or Sallie re-exports one, it lands as a 
 {
   "version": 3,
   "kind": null,
-  "answer": { "state": "needs your answer", "guess": "finished", "seen": "wide, 42:10, 2 retakes", "came": "camera" },
+  "answer": { "state": "needs your answer", "guess": "finished", "seen": "wide, 42:10, 2 retakes", "came": "camera", "match": null },
   "label": "the 42-minute video dropped on the Mac Studio at 10:40",
   "fingerprint": "…",
   "versionOf": null,
@@ -148,6 +148,7 @@ When the editor sends a corrected file, or Sallie re-exports one, it lands as a 
 ```
 
 - `kind` is `null` until she answers, then `"finished"`, `"raw"`, `"session"` or `"short video"` (an iPhone clip is stored as today's `"short video"`, so the twelve places that test it keep working; `kind … clip` stores it so, and her chat says "iPhone clip"). An `"episode"` already in a record is a raw recording imported before this design; one helper, `kindOf(record)`, reads it so.
+- `answer.match` is the import's guess at the episode this is a new version of (its id), or null; `versionOf` is set only by her answer, so a declined match never carries another video's id (Part L's branch review).
 - `answer.state` is "needs your answer", then "answered", with who answered, on which Mac, when, and both answers of the card (section 2); or "not for brimm-video" after `leave`.
 - `session` is `null`, or `{ "marked", "on", "teachings": "asked"|"transcript only"|null, "cleared": null|{ "at", "on", "to", "confirmed": "dialog" } }`.
 - `reading` is what the one Claude call did: `{ "kind", "model", "at", "on", "account", "outcome" }`.
