@@ -117,7 +117,7 @@ const byItem = (v, each) => isObject(v) && Object.entries(v).every(([list, items
 const isDecision = (d) => d === "kept" || d === "dropped";
 const isEdit = (e, list) => isObject(e) && Object.entries(e).every(([key, text]) => SESSION_EDITS[list].includes(key) && isText(text));
 /** A day as the calendar has it, written 2026-10-23: not 2026-02-30. */
-const isDay = (v) => {
+export const isDay = (v) => {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const at = new Date(`${v}T00:00:00Z`);
   return !Number.isNaN(at.getTime()) && at.toISOString().startsWith(v);
