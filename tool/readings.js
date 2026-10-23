@@ -75,7 +75,7 @@ const ASKS = {
     recording: (about) => [
       `Length: ${stamp(Math.round(about.duration))}`,
       ...(hasSpeakers(about)
-        ? [`You are also given who says what, from the meeting's own transcript. ${HOST}'s lines carry her name; every other speaker is named "Participant 1", "Participant 2" and so on:`, spoken(about.speakers)]
+        ? [`You are also given who says what, from the meeting's own transcript. ${HOST}'s lines carry her name or the show's; every other speaker is named "Participant 1", "Participant 2" and so on:`, spoken(about.speakers)]
         : ["There are no speaker labels for this recording, so who says what is not known."])
     ],
     task: [START, EVERY_FIELD, FRAMEWORKS, RECURRING, REEL_IDEAS]

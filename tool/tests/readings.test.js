@@ -186,8 +186,8 @@ describe("the request for each kind of video", () => {
       assert.equal(planned, request);
       for (const word of ["File:", "Jane", "Coaching call", ".mp4"]) assert.ok(!planned.includes(word), word);
     });
-    it("says how long it is, and gives who says what as the meeting's own transcript has it", () => {
-      assert.ok(request.includes(`<recording>\nLength: 1:02:03\nYou are also given who says what, from the meeting's own transcript. Sallie Ogden's lines carry her name; every other speaker is named "Participant 1", "Participant 2" and so on:\n${SPEAKERS}\n</recording>`));
+    it("says how long it is, and gives who says what as the meeting's own transcript has it, her lines by her name or the show's", () => {
+      assert.ok(request.includes(`<recording>\nLength: 1:02:03\nYou are also given who says what, from the meeting's own transcript. Sallie Ogden's lines carry her name or the show's; every other speaker is named "Participant 1", "Participant 2" and so on:\n${SPEAKERS}\n</recording>`));
     });
     it("says that who says what is not known when there is no transcript of the meeting to say it", () => {
       const none = 'Length: 1:02:03\nThere are no speaker labels for this recording, so who says what is not known.\n</recording>';
