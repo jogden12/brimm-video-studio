@@ -478,9 +478,12 @@ describe("episodes, on a Mac that does the light import", () => {
     clientEpisode(t, { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", over: SESSION_OVER });
     clientEpisode(t, { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED } });
     const said = await listing(t);
-    assert.deepEqual(said.slice(0, 4), [
+    assert.deepEqual(said.slice(0, 7), [
       "Episodes, newest first:",
       `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`,
+      "    Seen: wide, 2:00, 3 retakes",
+      "    Came: from a camera",
+      "    Guess: raw with retakes",
       `  ${SESSION}: a client or group session, of 2:00, id 0c0c0c`,
       "  Pricing talk (a placeholder name): an episode of 2:00, in 2026-10-18 Pricing talk (Mac Studio), id 0d0d0d"
     ]);
@@ -506,7 +509,8 @@ describe("episodes, on a Mac that does the light import", () => {
     conflictedRecord(newer.folder);
     const said = await listing(t);
     assert.equal(said[1], `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`);
-    assert.match(said[2], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
+    assert.deepEqual(said.slice(2, 5), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
+    assert.match(said[5], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
     assert.ok(said.includes("  An episode a newer brimm-video wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Ann Other/);
     t.done();
@@ -556,6 +560,177 @@ describe("episodes, on a Mac that does the light import", () => {
     const said = await listing(t);
     const at = said.indexOf("On this Mac:");
     assert.deepEqual(said.slice(at, at + 4), ["On this Mac:", "  The library of an episode of 2026-10-17 from the Mac Studio whose record cannot be read: 9 bytes", "  2026-10-18 Pricing talk (Mac Studio).fcpbundle: 9 bytes", `  The library of ${SESSION} (a1b2c3): 9 bytes`]);
+    t.done();
+  });
+});
+
+// --- The card's facts: what `episodes` prints for her skill to read, word for word (spec 2026-10-22, section 2, "The card") ---
+
+describe("episodes, the card's facts of a video waiting for its answer", () => {
+  /** The label line of the video here, and below it the lines indented four spaces: what `episodes` says of the video. */
+  const cardOf = async (t, label = LABEL) => {
+    const said = (await on(depsOf(t), "episodes")).said;
+    const at = said.indexOf(said.find((line) => line.startsWith(`  ${label}: `)));
+    const lines = [];
+    for (let i = at + 1; i < said.length && said[i].startsWith("    "); i++) lines.push(said[i]);
+    return { said, at, lines };
+  };
+  /** A finished, raw, short or unanswered video that the walked video's words matched, in the folder of its own day. */
+  const TARGET = { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", label: "Video of 18 Oct, 09:30 (Mac Studio)" };
+  const NAMED = { text: "Pricing talk", placeholder: false };
+  /** The Maybe line a match on TARGET says, with `kind` words after the id (none when `kind` is ""). */
+  const maybe = (name, kind) => `    Maybe a new version of: ${name} (id 0d0d0d)${kind ? `, ${kind}` : ""}`;
+  /** An unanswered video whose answer is ANSWER with `answer` laid on it, in a Mac of its own that does the light import. */
+  function waiting(answer = {}, ...more) {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    const e = clientEpisode(t, { over: { answer: { ...ANSWER, ...answer } } });
+    for (const extra of more) clientEpisode(t, extra);
+    return { t, e };
+  }
+  it("says what was seen, how it came and the guess, each under the video's line, indented four spaces, in that order", async () => {
+    const { t } = waiting();
+    const { said } = await cardOf(t);
+    assert.deepEqual(said.slice(0, 5), [
+      "Episodes, newest first:",
+      `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`,
+      "    Seen: wide, 2:00, 3 retakes",
+      "    Came: from a camera",
+      "    Guess: raw with retakes"
+    ]);
+    t.done();
+  });
+  it("says how it came in the words of each way", async () => {
+    const { t, e } = waiting();
+    for (const [came, words] of [["camera", "from a camera"], ["phone", "from an iPhone"], ["zoom", "as a Zoom download"], ["sound", "as sound alone"]]) {
+      rewrite(e.folder, { answer: { ...ANSWER, came } });
+      assert.ok((await cardOf(t)).lines.includes(`    Came: ${words}`), `${came}: ${(await cardOf(t)).lines.join("\n")}`);
+    }
+    t.done();
+  });
+  it("says the guess in the words of each kind guessKind stores", async () => {
+    const { t, e } = waiting();
+    for (const [guess, words] of [["finished", "finished by your editor"], ["raw", "raw with retakes"], ["clip", "an iPhone clip"]]) {
+      rewrite(e.folder, { answer: { ...ANSWER, guess } });
+      assert.ok((await cardOf(t)).lines.includes(`    Guess: ${words}`), `${guess}: ${(await cardOf(t)).lines.join("\n")}`);
+    }
+    t.done();
+  });
+  it("leaves out a line for what is not given: no seen, no way it came, no guess, no match", async () => {
+    const { t, e } = waiting();
+    const lines = [["seen", "", "    Seen: "], ["came", null, "    Came: "], ["guess", null, "    Guess: "], ["match", null, "    Maybe a new version of: "]];
+    for (const [key, empty, start] of lines) {
+      rewrite(e.folder, { answer: { ...ANSWER, match: "e-20261018-0d0d0d", [key]: empty } });
+      const { lines: said } = await cardOf(t);
+      assert.ok(!said.some((line) => line.startsWith(start)), `${key}: ${said.join("\n")}`);
+      // The others stay (the match here names no record on this Mac, so it is left out as well).
+      for (const [other, , otherStart] of lines.filter(([k]) => k !== key && k !== "match")) assert.ok(said.some((line) => line.startsWith(otherStart)), `${key}, ${other}: ${said.join("\n")}`);
+    }
+    rewrite(e.folder, { answer: { ...ANSWER, seen: "", came: null, guess: null, match: null } });
+    assert.deepEqual((await cardOf(t)).lines, []);
+    t.done();
+  });
+  it("leaves out the line of a guess that it has no words for, as a word of an object is not one", async () => {
+    for (const guess of ["constructor", "toString", "session"]) {
+      const { t } = waiting({ guess });
+      assert.deepEqual((await cardOf(t)).lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera"], guess);
+      t.done();
+    }
+  });
+  it("says a match that is finished by the editor, raw (before the switch too), or a short video, with its kind in words", async () => {
+    const { t } = waiting({ match: TARGET.id });
+    for (const [over, kind] of [
+      [{ kind: "finished", answer: ANSWERED }, "finished by your editor"],
+      [{ kind: "raw", answer: ANSWERED }, "raw with retakes"],
+      [{ kind: "episode", answer: undefined }, "raw with retakes"],
+      [{ kind: "short video", answer: ANSWERED }, "an iPhone clip"]
+    ]) {
+      const target = clientEpisode(t, { ...TARGET, over: { ...over, name: NAMED } });
+      const { lines } = await cardOf(t);
+      assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", maybe("Pricing talk", kind)]);
+      rmSync(target.folder, { recursive: true, force: true });
+    }
+    t.done();
+  });
+  it("says a match that is not answered yet by its label alone, with no kind in words", async () => {
+    const { t } = waiting({ match: TARGET.id }, TARGET);
+    assert.ok((await cardOf(t)).lines.includes(maybe(TARGET.label, "")), (await cardOf(t)).lines.join("\n"));
+    t.done();
+  });
+  it("says the match by its name and short id, found by its record alone, and not by its folder or its file", async () => {
+    // The match's folder and file are named for a client, and its name is a name she gave it.
+    const { t } = waiting({ match: "e-20261018-0d0d0d" }, { folder: "2026-10-18 Coaching call Jane Doe again (Mac Studio)", video: "Coaching call Jane Doe again.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED, name: NAMED } });
+    const { said, lines } = await cardOf(t);
+    assert.ok(lines.includes(maybe("Pricing talk", "finished by your editor")), lines.join("\n"));
+    assert.ok(!lines.join("\n").match(SECRET), lines.join("\n"));
+    assert.ok(said.length > lines.length);
+    t.done();
+  });
+  it("leaves out the whole Maybe line when the match names no record, or a session, or a record it cannot read", async () => {
+    const sessionMark = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+    const cleared = { ...sessionMark, cleared: { at: AT, on: "Mac Studio", to: "a client", confirmed: "dialog" } };
+    const asSession = { name: { text: SESSION, placeholder: false } };
+    const { t } = waiting({ match: TARGET.id });
+    // Each case: what the match is, its record laid on a finished video's, and whether `episodes` lists it (an archived video is not).
+    const cases = [
+      ["no record with that id", null, false],
+      ["a session, its mark not cleared", { kind: "session", answer: ANSWERED, session: sessionMark, ...asSession }, true],
+      ["a session with no mark at all", { kind: "session", answer: ANSWERED, ...asSession }, true],
+      ["a session, its mark cleared", { kind: "session", answer: ANSWERED, session: cleared, ...asSession }, true],
+      ["a finished video marked a session, not cleared", { kind: "finished", answer: ANSWERED, session: sessionMark, name: NAMED }, true],
+      ["an archived video", { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: NAMED }, false],
+      ["a video a newer brimm-video wrote", { kind: "finished", answer: ANSWERED, version: 9, name: NAMED }, true]
+    ];
+    const noMaybe = (said, what) => assert.ok(!said.some((line) => line.includes("Maybe a new version of")), `${what}: ${said.join("\n")}`);
+    for (const [what, over, listed] of cases) {
+      const target = over ? clientEpisode(t, { ...TARGET, over }) : null;
+      const { lines, said } = await cardOf(t);
+      noMaybe(said, what);
+      assert.equal(said.some((line) => line.includes("0d0d0d")), listed, `${what}: ${said.join("\n")}`);
+      assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"], what);
+      if (target) rmSync(target.folder, { recursive: true, force: true });
+    }
+    // The same of an episode with a conflicted copy, where the record in force is read past the copy: archived in force, and a copy
+    // that is a session not cleared beside a finished video in force (the gate reads any record of an episode).
+    const archived = clientEpisode(t, { ...TARGET, over: { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: NAMED } });
+    conflictedRecord(archived.folder, { archived: null });
+    noMaybe((await cardOf(t)).said, "an archived video with a conflicted copy");
+    rmSync(archived.folder, { recursive: true, force: true });
+    const both = clientEpisode(t, { ...TARGET, over: { kind: "finished", answer: ANSWERED, name: NAMED } });
+    conflictedRecord(both.folder, { kind: "session", session: sessionMark, ...asSession });
+    const { said } = await cardOf(t);
+    noMaybe(said, "a finished video with a session's conflicted copy");
+    assert.ok(said.some((line) => line.includes("0d0d0d")), said.join("\n"));
+    t.done();
+  });
+  it("says nothing of the card under a video she answered, left alone, or a session, whatever its answer holds", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    const held = { guess: "raw", seen: "wide, 2:00, 3 retakes", came: "camera", match: null };
+    clientEpisode(t, { over: { kind: "finished", answer: { ...ANSWERED, ...held } } });
+    clientEpisode(t, { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", label: "Video of 19 Oct, 10:00 (Mac Studio)", over: { ...SESSION_OVER, answer: { ...ANSWERED, ...held } } });
+    clientEpisode(t, { folder: "2026-10-17 Left alone (Mac Studio)", video: "Left alone.mov", id: "e-20261017-0b0b0b", label: "Video of 17 Oct, 10:00 (Mac Studio)", over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
+    const said = (await on(depsOf(t), "episodes")).said;
+    assert.ok(!said.some((line) => /^ {4}(Seen|Came|Guess|Maybe a new version of):/.test(line)), said.join("\n"));
+    assert.ok(said.includes("Left alone, not for brimm-video:"), said.join("\n"));
+    t.done();
+  });
+  it("puts the card's lines before anything else under the video's line, and the video's other lines stay", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    const e = clientEpisode(t);
+    conflictedRecord(e.folder);
+    rmSync(join(e.folder, `${STEM}.transcript.txt`));
+    const { said, at } = await cardOf(t);
+    assert.deepEqual(said.slice(at, at + 4), [`  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`, "    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
+    assert.match(said[at + 4], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode/);
+    t.done();
+  });
+  it("is the same on a Mac whose import is not the light one, for a video waiting for its answer", async () => {
+    const t = setup();
+    clientEpisode(t);
+    const { lines } = await cardOf(t);
+    assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
     t.done();
   });
 });
@@ -814,6 +989,11 @@ describe("the walk: every command, for a video imported lightly from a file name
   it("names it by its label in all it says, logs and writes, waiting for its answer, then as a session with teachings off and on", async () => {
     const w = await lightMac();
     for (const line of [...w.logs, ...w.notes]) assert.doesNotMatch(line, SECRET, `the import: ${line}`);
+    // Her card offers the video as a new version of another video of the same client, not answered yet, whose own file and folder
+    // are named for the client too: it is named by its label alone in the card's Maybe line, and so in everything else.
+    const TARGET_LABEL = "Video of 18 Oct, 09:30 (Mac Studio)";
+    clientEpisode(w.t, { folder: "2026-10-18 Coaching call Jane Doe again (Mac Studio)", video: "Coaching call Jane Doe again.mov", id: "e-20261018-0e0e0e", label: TARGET_LABEL });
+    rewrite(lightFolder(w.t), { answer: { ...readEpisode(lightFolder(w.t)).record.answer, match: "e-20261018-0e0e0e" } });
     // Each command starts from the Mac as it is now: what one wrote is taken away again before the next.
     const snap = mkdtempSync(join(tmpdir(), "brimm-labels-"));
     const save = () => {
@@ -861,7 +1041,12 @@ describe("the walk: every command, for a video imported lightly from a file name
     assert.ok(episodes.includes(`  ${NAME}: an episode of 0:23, in ${FOLDER}, id 3fa9c1`), episodes.join("\n"));
     assert.ok(episodes.includes(`  The library of ${LABEL} (${short}): 9 bytes`), episodes.join("\n"));
     assert.ok(!seen["waiting for its answer: open 2026"].some((line) => line.includes(LABEL)), seen["waiting for its answer: open 2026"].join("\n"));
-    assert.deepEqual(seen["waiting for its answer: open nothing fits this"], [`No episode fits "nothing fits this". The episodes are: ${LABEL} (${short}) and ${FOLDER}.`]);
+    assert.deepEqual(seen["waiting for its answer: open nothing fits this"], [`No episode fits "nothing fits this". The episodes are: ${LABEL} (${short}), ${TARGET_LABEL} (0e0e0e) and ${FOLDER}.`]);
+    // Her card's facts are printed with the video's line, and the match is named by its label and short id: no file, no folder.
+    const at = episodes.indexOf(`  ${LABEL}: a video waiting for your answer, of 2:00, id ${short}`);
+    assert.ok(/^ {4}Seen: \S/.test(episodes[at + 1]), episodes.join("\n"));
+    assert.ok(episodes.includes(`    Maybe a new version of: ${TARGET_LABEL} (id 0e0e0e)`), episodes.join("\n"));
+    assert.ok(!seen["a session, teachings off: episodes"].some((line) => line.includes("Maybe a new version of")), seen["a session, teachings off: episodes"].join("\n"));
     assert.deepEqual(seen[`waiting for its answer: release ${LABEL}`], [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`]);
     assert.deepEqual(seen[`a session, teachings off: release ${SESSION}`], [`This Mac does not have ${SESSION} open, so there is nothing to hand over.`]);
     assert.ok(seen["a session, teachings off: episodes"].includes(`  ${SESSION}: a client or group session, of 2:00, id ${short}`));

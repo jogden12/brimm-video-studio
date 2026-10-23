@@ -487,13 +487,47 @@ function labelIn(statuses, video, machine) {
     as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. */
 const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"} of ${sizeText(bytes)}`;
 
+/** How a video came, in the words of her card (answer.came, as episode.js CAMES has them). */
+const CAME_WORDS = { camera: "from a camera", phone: "from an iPhone", zoom: "as a Zoom download", sound: "as sound alone" };
+/** The tool's guess at what a video is, in the words of her card: the values kinds.js guessKind stores, which are "finished", "raw"
+    and "clip" (never "short video"). */
+const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retakes", clip: "an iPhone clip" };
+/** The kind of the video her card's match names (episode.js kindOf), in the same words: a raw video of before the switch is raw. */
+const MATCH_WORDS = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip" };
+
+/** The lines of her card for the video not yet answered whose record is `named` (spec 2026-10-22, section 2, "The card"), below
+    its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen,
+    which kinds.js seenLine made with nothing of the file's name in it), how it came, the tool's guess, and the episode whose words
+    it found in the video, as "Maybe a new version of: <its name> (id <short id>), <its kind>". Each line is left out when its fact
+    is not given: no sight of it, no way it came, no guess, or a match that is none. The match (answer.match, an id) is looked for
+    among `others`, the episodes `episodes` lists, by their records alone (episodeAt's inForce), and is named as shownName names
+    it: by its label while it is not answered, and then with no kind said. The whole line is left out when no episode is known by that record, or when the one
+    that is is a session, whether by its kind or by a mark not cleared in any of its records (asSession), is archived, or is
+    one a newer brimm-video wrote: her card does not offer a session, and `kind --version-of` takes none of the others. */
+function cardLines(named, others) {
+  const answer = named.answer;
+  if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
+  const lines = [];
+  if (typeof answer.seen === "string" && answer.seen !== "") lines.push(`    Seen: ${answer.seen}`);
+  if (Object.hasOwn(CAME_WORDS, answer.came)) lines.push(`    Came: ${CAME_WORDS[answer.came]}`);
+  if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
+  const match = typeof answer.match === "string" ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
+  if (match && !match.inForce.archived && !match.records.filter(recordShaped).some(asSession)) {
+    const kind = recordKind(match.inForce);
+    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)})${Object.hasOwn(MATCH_WORDS, kind) ? `, ${MATCH_WORDS[kind]}` : ""}`);
+  }
+  return lines;
+}
+
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
     files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
     answer, a client or group session, or a video left alone (`left`), with no folder; its title, which Claude may have made of
-    its words, is not said; and no line of it names its video's files (cleanFor). An episode whose record cannot be read is
-    named as listedAs names it, and so is one a newer brimm-video wrote. */
-function episodeLines(ctx, e, left) {
+    its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
+    answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
+    the episodes `episodes` lists. An episode whose record cannot be read is named as listedAs names it, and so is one a newer
+    brimm-video wrote. */
+function episodeLines(ctx, e, left, all) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
   if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    Not right: ${e.read.why}.`];
@@ -505,6 +539,7 @@ function episodeLines(ctx, e, left) {
     const named = gatedRecord(e);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : "a client or group session, of";
     lines.push(`  ${shownName(named)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
@@ -525,10 +560,11 @@ const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boole
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
     archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). A video not
-    yet answered, or a session, is named by its label (episodeLines), and one she has left alone is listed apart, under a
-    heading of its own. A video waiting in a drop folder that a light import's status gives a label, or that a gated episode
-    holds, is named by its label, or by what it is and its size, and why it waits holds no name of its file, on either Mac; on
-    a Mac that does the light import, every video waiting is; any other, on a Mac that does not, as always. */
+    yet answered, or a session, is named by its label (episodeLines), with the lines of her card under one not yet answered
+    (cardLines), and one she has left alone is listed apart, under a heading of its own. A video waiting in a drop folder that
+    a light import's status gives a label, or that a gated episode holds, is named by its label, or by what it is and its size,
+    and why it waits holds no name of its file, on either Mac; on a Mac that does the light import, every video waiting is; any
+    other, on a Mac that does not, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
   const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
@@ -537,11 +573,11 @@ export async function episodes(ctx) {
   if (!shown.length && !left.length) say("No episodes yet.");
   else if (shown.length) {
     say("Episodes, newest first:");
-    for (const e of shown) for (const line of episodeLines(ctx, e, false)) say(line);
+    for (const e of shown) for (const line of episodeLines(ctx, e, false, all)) say(line);
   }
   if (left.length) {
     say("Left alone, not for brimm-video:");
-    for (const e of left) for (const line of episodeLines(ctx, e, true)) say(line);
+    for (const e of left) for (const line of episodeLines(ctx, e, true, all)) say(line);
   }
   // The videos in each Mac's drop folder.
   const drops = join(ctx.root, "Unedited Video");
