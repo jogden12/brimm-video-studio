@@ -500,7 +500,8 @@ describe("the installer's own text", () => {
     assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
     // It is told the settings of the switch that the installer was told (--drop, --import, --handoff, and --rules-only as readings
     // off), and checks the old drop folder again itself.
-    assert.ok(made.includes('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"\n  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi\n'), made);
+    assert.ok(made.includes('  if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then\n'), made);
+    assert.ok(made.includes('\n  fi\n  if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi\n'), made);
     // Her folder for Claude is written only when Claude Code is new enough for its guard, and the install says so at the end
     // when it is not, and ends with 1.
     const end = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
@@ -1146,14 +1147,17 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   it("asks settings.js before it says anything or changes anything, and has write told the same options, in the real run", () => {
     const text = readFileSync(INSTALL, "utf8");
     // The check is made where the Mac's own folders are worked out, before the summary.
-    const planAt = text.indexOf('"$settings_node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
-    assert.ok(planAt > 0, "plan, in install.sh");
+    // It is asked by one function, with the node to ask, and asked again in the real run (below).
+    assert.ok(text.includes('"$1" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"'), "plan, in install.sh");
+    assert.equal(text.split('"$HERE/settings.js" plan ').length - 1, 1, "asked in one place");
+    const planAt = text.indexOf('settings_plan "$settings_node"');
+    assert.ok(planAt > 0, "the first check");
     assert.ok(planAt < text.indexOf('say "The unedited-video tool"'), "the check is made before the summary");
     assert.ok(planAt < text.indexOf('drop="$root/$drop_name/$machine"'), "and before the drop folder is worked out");
     // Nothing is changed before it: the first change, the removal of a left-behind check, comes after "Go ahead".
     assert.ok(planAt < text.indexOf('read -q "go?Go ahead? [y/N] "'), "and before the question");
     // The real run's write is told what the check was, and so checks the old folder again; the marker is made first, as it was.
-    const writeAt = text.indexOf('"$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
+    const writeAt = text.indexOf('if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then');
     assert.ok(writeAt > text.indexOf('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), "the write, after the marker");
     assert.ok(text.includes('[[ -z "$rules_only" ]] || switch_args+=(--readings off)'), "--rules-only is written as readings off");
   });
@@ -1176,6 +1180,61 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     // --remove alone is as it was.
     assert.equal(ask("--print", "--remove").status, 0);
     d.done();
+  });
+  /** Lines of install.sh, from the first that is found to the end of the second, whole. */
+  const piece = (from, to) => {
+    const text = readFileSync(INSTALL, "utf8");
+    const at = text.indexOf(from);
+    assert.ok(at >= 0, `${from}, in install.sh`);
+    const end = text.indexOf(to, at);
+    assert.ok(end >= 0, `${to}, in install.sh`);
+    return text.slice(at, end + to.length);
+  };
+  it("asks settings.js again in the real run, right before the folders and the marker are made, after the question, the programs and the model", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    const again = text.indexOf('if ! settings_plan "$node"; then');
+    assert.ok(again > 0, "the second check");
+    assert.ok(again > text.indexOf('read -q "go?Go ahead? [y/N] "'), "after the question");
+    assert.ok(again > text.indexOf('curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"'), "after the model is fetched");
+    assert.ok(again < text.indexOf('mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"'), "before the folders are made");
+    assert.ok(again < text.indexOf('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), "and before the marker");
+  });
+  it("stops, and says what was and was not touched, when the second check refuses: its own lines run alone in zsh", { skip: noZsh }, () => {
+    const block = piece('# Things can change while', '\n  fi\nfi\n');
+    const r = spawnSync("/bin/zsh", ["-c", `set -euo pipefail\nsay() { print -r -- "$@"; }\nsettings_plan() { planned="Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:\n  Talk.mov: waits in /x."; return 1; }\nmachine="Mac Studio"\nnode=/x/node\n${block}\nprint -r -- went on`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+    assert.deepEqual([r.status, r.stdout, r.stderr], [1, [
+      "",
+      "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
+      "  Talk.mov: waits in /x.",
+      "",
+      "Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Deal with what is said above, then run this again.",
+      ""
+    ].join("\n"), ""]);
+    // When it agrees, it says nothing and goes on.
+    const fine = spawnSync("/bin/zsh", ["-c", `set -euo pipefail\nsay() { print -r -- "$@"; }\nsettings_plan() { return 0; }\nmachine="Mac Studio"\nnode=/x/node\n${block}\nprint -r -- went on`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+    assert.deepEqual([fine.status, fine.stdout], [0, "went on\n"]);
+  });
+  it("says plainly what it made, and that the settings and the launch agent are as they were, when write refuses after the marker: its own lines run alone in zsh", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-write-"));
+    try {
+      const calls = join(dir, "calls");
+      // A node that writes down how it was called, and refuses a write, as settings.js does when a video has come into the old folder.
+      writeFileSync(join(dir, "node"), `#!/bin/sh\necho "$2" >> "${calls}"\nif [ "$2" = write ]; then echo "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:"; exit 1; fi\n`);
+      chmodSync(join(dir, "node"), 0o755);
+      const block = piece('if [[ -n "$machine" ]]; then\n  mkdir -p "$root/Episodes/.importing"', '\nfi\n');
+      const script = `set -euo pipefail\nsay() { print -r -- "$@"; }\nnode="${dir}/node"\nHERE=settings\nmachine="Mac Studio"\nroot="${dir}/BRIMM Video"\nWORK="${dir}/Work"\ndrop="${dir}/BRIMM Video/Drop/Mac Studio"\nCHECKOUT=/x\nswitch_args=(--drop Drop)\nstudio_why=""\nmkdir -p "$drop"\n${block}\nprint -r -- went on`;
+      const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.deepEqual([r.status, r.stdout, r.stderr], [1, [
+        "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
+        "",
+        `The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/BRIMM Video/Drop/Mac Studio and its marker, and the folders for Episodes and its status files and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again.`,
+        ""
+      ].join("\n"), ""]);
+      // The marker was asked for, then the write, and nothing after it: her folder for Claude is not written.
+      assert.deepEqual(readFileSync(calls, "utf8").trim().split("\n"), ["marker", "write"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
     const r = ask("--print", "--help");

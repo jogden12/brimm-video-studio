@@ -148,6 +148,14 @@ find_program() {
   done
   return 1
 }
+# What settings.js says it would write, into $planned, asked of the node at $1: gives 0, or what it ends with, which is 1 when it
+# refuses and then says why in $planned. What it says is its standard output alone, which is read; anything node says on its
+# standard error, a warning or why it could not run, goes to this one's own output as it comes (fd 3), and is never taken for it.
+settings_plan() {
+  local code=0
+  { planned="$("$1" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)" || code=$?; } 3>&1
+  return $code
+}
 # Whether the node at $1 is older than 22, which the tool needs: gives 0 when it is, and with "say" as the second word says so too,
 # as a refusal does. The one place its version is looked at.
 node_old() {
@@ -330,9 +338,7 @@ if [[ "$machined" == "yes" ]]; then
   # answer is the settings shown below, and the drop folder is the one they name: --drop, else the settings', else Unedited Video.
   planned=""
   if [[ -n "$settings_node" ]]; then
-    # What it says is its standard output alone, which is read below: anything node says on its standard error, a warning or why
-    # it could not run, goes to this one's own output as it comes (fd 3), and is never taken for the settings.
-    if ! { planned="$("$settings_node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)"; } 3>&1; then
+    if ! settings_plan "$settings_node"; then
       say "$planned"
       say ""
       say "Nothing was changed."
@@ -559,6 +565,19 @@ if [[ ! -f "$MODEL" ]]; then
   mv "$MODEL.part" "$MODEL"
 fi
 
+# Things can change while the programs and the model are fetched, and the first check was made before the question: a video may
+# have come into the old drop folder. So it is made again, right before the folders and the marker are made. Nothing of this Mac's
+# drop folder, settings or launch agent has been touched yet.
+if [[ -n "$machine" ]]; then
+  if ! settings_plan "$node"; then
+    say ""
+    say "$planned"
+    say ""
+    say "Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Deal with what is said above, then run this again."
+    exit 1
+  fi
+fi
+
 # Give the Mac the launch agent: write its file, check it, stop the agent of that name if one is running, and start this one.
 mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 # For one of the two Macs: Episodes and its status files in Dropbox, the marker by the rule for writing into Dropbox, this
@@ -566,7 +585,12 @@ mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 if [[ -n "$machine" ]]; then
   mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
-  "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"
+  # It checks the old drop folder once more, and may still refuse: the marker is made, and the settings and the agent are not.
+  if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then
+    say ""
+    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again."
+    exit 1
+  fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
 fi
 
