@@ -1332,3 +1332,42 @@ describe("fix round 3, 4: herWordsName needs the names it checks against", () =>
     assert.equal(herWordsName("pricing", { strict: ["Quillon"], lenient: [], joined: [] }), "");
   });
 });
+
+// --- Fix round 4 ---
+
+describe("fix round 4, 1: ordinary words the transcript writes with capitals side by side are not joined", () => {
+  // The plan writes "Brand Voice", "Sales Funnel" and "Brand Strategy" with capitals once, and says each word in lowercase too:
+  // each is an ordinary word (lenient), and runs of them make no joined name. "Marsh" is said in lowercase too, but "Quillon"
+  // never is: their run is still a joined name, for "Quillon" is strict.
+  const file = "Zed Thorn.mp4";
+  const phrases = [
+    { id: "p1", start: 0, end: 4, keep: true, text: "Welcome back, everyone, to the group call." },
+    { id: "p2", start: 4.5, end: 9, keep: true, text: "Your Brand Voice is what people hear." },
+    { id: "p3", start: 9.5, end: 15, keep: true, text: "Build your Sales Funnel before your Brand Strategy." },
+    { id: "p4", start: 15.5, end: 20, keep: true, text: "A brand needs one voice, a sales plan, a funnel and a strategy." },
+    { id: "p5", start: 20.5, end: 26, keep: true, text: "Then my client Quillon Marsh asked about it, by the marsh." }
+  ];
+  const files = { [file]: "the recording", "Zed Thorn.cut-plan.json": JSON.stringify({ ...PLAN, video: file, phrases }, null, 2) + "\n" };
+  const over = { video: { file, bytes: 13, seconds: 26, recorded: "2026-10-20", recordedFrom: "video" } };
+
+  it("takes her ordinary words in lowercase, side by side or joined, at edit and at name", async () => {
+    const { t, found } = await readSession({ files, over });
+    for (const words of ["a brand voice first", "our sales funnel", "a brand strategy", "brandvoice", "a walk by the marsh"]) {
+      const edited = await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words);
+      assert.equal(edited.code, 0, `${words}: ${edited.text}`);
+      const named = await on(t.ctx.deps, "name", LABEL, words);
+      assert.equal(named.code, 0, `${words}: ${named.text}`);
+      writeOver(found, { name: { text: LABEL, placeholder: false } });
+    }
+    t.done();
+  });
+
+  it("still refuses the client's name of several words joined, though one of its words is ordinary", async () => {
+    const { t } = await readSession({ files, over });
+    for (const [words, word] of [["quillonmarsh", "quillonmarsh"], ["@QuillonMarsh", "QuillonMarsh"], ["ask quillon", "quillon"]]) {
+      assert.deepEqual((await on(t.ctx.deps, "ideas", LABEL, "edit", "1", "--words", words)).said, [EDIT_HOLDS(word)], words);
+    }
+    assert.deepEqual((await on(t.ctx.deps, "name", LABEL, "quillonmarsh notes")).said, [NAME_HOLDS("quillonmarsh")]);
+    t.done();
+  });
+});

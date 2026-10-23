@@ -163,7 +163,8 @@ function spellingNames(spellings) {
     plural or singular) is an ordinary word, `lenient`, unless a name of another place holds it too: a speaker brimm-video
     replaced, the name of a file, a name she gave before, a spelling (`sources`, their texts). Every other name is `strict`.
     `joined` is each run of two or more names side by side in one of `sources`, or written with a capital side by side in the
-    transcript (`said`), letters only, in lowercase ("quillonmarsh"). */
+    transcript (`said`) with at least one name of the run strict, letters only, in lowercase ("quillonmarsh"): ordinary words
+    side by side ("Your Brand Voice", said in lowercase too) are no one's name joined. */
 function hersOf(names, { said, sources }) {
   const lower = new Set((said.normalize("NFKC").match(/[\p{L}\p{M}'’]+/gu) || []).filter((w) => /^\p{Ll}/u.test(w)).map((w) => w.replace(/['’]s$/i, "").toLowerCase()));
   const elsewhere = new Set(sources.flatMap((text) => String(text ?? "").normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}]+/gu) || []));
@@ -172,15 +173,18 @@ function hersOf(names, { said, sources }) {
     return /^\p{Lu}/u.test(name) && !elsewhere.has(n) && [n, `${n}s`, n.replace(/s$/, "")].some((form) => lower.has(form));
   };
   const known = new Set(names.map((n) => n.toLowerCase()));
+  const lenient = new Set(names.filter(ordinary).map((n) => n.toLowerCase()));
   const joined = new Set();
-  /** Every run of two or more of `words` side by side for which `takes` is true, joined: each `{ w, ends }`, where `ends` says a
-      run stops after it. */
-  const runsOf = (words, takes) => {
+  /** Every run of two or more of `words` side by side for which `takes` is true, joined, when `counts` takes the run: each
+      `{ w, ends }`, where `ends` says a run stops after it. */
+  const runsOf = (words, takes, counts = () => true) => {
     let run = [];
     for (const word of [...words, null]) {
       if (word && takes(word.w)) run.push(word.w);
       if (!word || !takes(word.w) || word.ends) {
-        for (let i = 0; i < run.length; i++) for (let j = i + 2; j <= run.length; j++) joined.add(lettersOf(run.slice(i, j).join("")));
+        for (let i = 0; i < run.length; i++) {
+          for (let j = i + 2; j <= run.length; j++) if (counts(run.slice(i, j))) joined.add(lettersOf(run.slice(i, j).join("")));
+        }
         run = [];
       }
     }
@@ -188,9 +192,11 @@ function hersOf(names, { said, sources }) {
   // In a speaker's label, a file's name, a name she gave or a spelling, names side by side in any case.
   for (const text of sources) runsOf((String(text ?? "").normalize("NFKC").match(/[\p{L}\p{M}]+/gu) || []).map((w) => ({ w, ends: false })), (w) => known.has(w.toLowerCase()));
   // In the transcript, names it writes with a capital side by side ("my client Quillon Marsh asked"), a run stopping at a mark
-  // that ends a sentence or a clause. These are for `joined` alone: they make no name strict.
+  // that ends a sentence or a clause. These are for `joined` alone: they make no name strict. A run counts only when one of its
+  // names is strict: "Your Brand Voice", whose words it says in lowercase too, is ordinary words side by side, while "Quillon
+  // Marsh" stays joined though "marsh" is said in lowercase too.
   const spoken = said.normalize("NFKC").split(/\s+/).filter(Boolean).map((token) => ({ w: token.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "").replace(/['’]s$/i, ""), ends: /[.,;:!?…)\]"”]$/u.test(token) }));
-  runsOf(spoken, (w) => /^\p{Lu}/u.test(w) && known.has(w.toLowerCase()));
+  runsOf(spoken, (w) => /^\p{Lu}/u.test(w) && known.has(w.toLowerCase()), (run) => run.some((w) => !lenient.has(w.toLowerCase())));
   return { strict: names.filter((n) => !ordinary(n)), lenient: names.filter(ordinary), joined: [...joined] };
 }
 
