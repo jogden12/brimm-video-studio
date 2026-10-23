@@ -418,22 +418,23 @@ describe("node settings.js set and sessions", () => {
 
   it("set changes the settings it is told, keeps the rest, says what changed, and ends with 0", () => {
     const t = mac();
-    // The light import and the Drop folder are written here as a later brimm-video would: set refuses them until they are built.
+    // The light import and the Drop folder are written here as a later brimm-video, or the installer, would: set refuses the light
+    // import until it is built, and never changes the drop folder, which the installer switches.
     writeSettings(t.home, { import: "light", drop: "Drop", later: { x: 1 } });
-    assert.equal(t.run("set", "--import", "full", "--readings", "off", "--handoff", "2", "--drop", "Unedited Video"), 0);
+    assert.equal(t.run("set", "--import", "full", "--readings", "off", "--handoff", "2", "--drop", "Drop"), 0);
     assert.deepEqual(t.said, [
       "The import is now full (it was light).",
       "Readings are now off (they were on).",
       "The hand-off version is now 2 (it was 1).",
-      "The drop folder is now Unedited Video (it was Drop).",
+      "The drop folder is Drop already.",
       `Written: ${settingsFile(t.home)}`
     ]);
-    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: false, handoffVersion: 2, drop: "Unedited Video", later: { x: 1 } });
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: false, handoffVersion: 2, drop: "Drop", later: { x: 1 } });
     t.said.length = 0;
     assert.equal(t.run("set", "--handoff", "1", "--readings", "on"), 0);
     // Each change is said in the order it was told.
     assert.deepEqual(t.said, ["The hand-off version is now 1 (it was 2).", "Readings are now on (they were off).", `Written: ${settingsFile(t.home)}`]);
-    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: true, handoffVersion: 1, drop: "Drop", later: { x: 1 } });
     t.done();
   });
   it("set takes one setting alone, in any order, and says so when nothing changes", () => {
@@ -493,18 +494,34 @@ describe("node settings.js set and sessions", () => {
     unchanged(t);
     t.done();
   });
-  it("set changes the drop folder to Drop, and back, now that the installer makes it, and says what changed", () => {
+  const SWITCHED = (to) => `The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "Mac Studio" --drop ${to} "${ROOT}"`;
+  it("set refuses to change the drop folder, in either direction, says the installer switches it and how to see what it would do, changes nothing, and ends with 1", () => {
+    // set wrote the setting with no check of the old folder, no new folder, no marker and no change to the launch agent: the agent
+    // went on watching the old folder, and the import then skipped every video it found there.
     const t = mac();
-    assert.equal(t.run("set", "--drop", "Drop"), 0);
-    assert.deepEqual(t.said, ["The drop folder is now Drop (it was Unedited Video).", `Written: ${settingsFile(t.home)}`]);
-    assert.equal(readSettings(t.home).settings.drop, "Drop");
+    assert.equal(t.run("set", "--drop", "Drop"), 1);
+    assert.deepEqual(t.said, [SWITCHED("Drop")]);
+    unchanged(t);
+    // Whatever else it is told in the same line is not changed either.
     t.said.length = 0;
-    assert.equal(t.run("set", "--drop", "Drop"), 0);
-    assert.deepEqual(t.said, ["The drop folder is Drop already."]);
+    assert.equal(t.run("set", "--readings", "off", "--drop", "Drop", "--handoff", "2"), 1);
+    assert.deepEqual(t.said, [SWITCHED("Drop")]);
+    unchanged(t);
+    // And back: the other direction is the installer's too, and says its own words for the folder.
+    writeSettings(t.home, { drop: "Drop" });
+    const before = readFileSync(settingsFile(t.home), "utf8");
     t.said.length = 0;
-    assert.equal(t.run("set", "--drop", "Unedited Video", "--handoff", "2"), 0);
-    assert.deepEqual(t.said, ["The drop folder is now Unedited Video (it was Drop).", "The hand-off version is now 2 (it was 1).", `Written: ${settingsFile(t.home)}`]);
-    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, drop: "Unedited Video", handoffVersion: 2 });
+    assert.equal(t.run("set", "--drop", "Unedited Video"), 1);
+    assert.deepEqual(t.said, [SWITCHED('"Unedited Video"')]);
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    t.done();
+  });
+  it("set says the drop folder is Drop already when it is, and changes the others told with it", () => {
+    const t = mac();
+    writeSettings(t.home, { drop: "Drop" });
+    assert.equal(t.run("set", "--drop", "Drop", "--readings", "off"), 0);
+    assert.deepEqual(t.said, ["The drop folder is Drop already.", "Readings are now off (they were on).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, drop: "Drop", readings: false });
     t.done();
   });
   it("set says how it is used, changes nothing, and ends with 2, when it is asked wrongly", () => {
@@ -1154,15 +1171,6 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.done();
     });
   });
-
-  it("is looked at by the installer's write and plan alone: set changes the drop folder as the plain change of one setting it is", async () => {
-    // set stays the plain change of one setting; only the installer's write and plan look at the old folder.
-    const t = mac();
-    put(t.folder(), "Talk.mov");
-    assert.equal(await t.run("set", "--drop", "Drop"), 0);
-    assert.equal(readSettings(t.home).settings.drop, "Drop");
-    t.done();
-  });
 });
 
 describe("what set, sessions, show and studio say when this Mac's settings cannot be used", () => {
@@ -1228,6 +1236,12 @@ describe("what --help says of write, plan and set", () => {
     assert.ok(help.includes("Nothing is written."), help);
     const write = HELP_OF("write").replace(/\s+/g, " ");
     assert.ok(write.includes("old drop folder"), write);
+  });
+  it("says of set that it does not change the drop folder: the installer switches it", () => {
+    const set = HELP_OF("set").replace(/\s+/g, " ");
+    assert.ok(set.includes("does not change the drop folder: it is switched by the installer"), set);
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    assert.ok(readme.includes("`node settings.js set` never changes the drop folder"), "README.md");
   });
   it("is as the header of settings.js says, for each of the three: the line that names the command and its options is the same", () => {
     const top = readFileSync(SETTINGS, "utf8").split("\n").filter((l) => l.startsWith("//   node settings.js ")).map((l) => l.slice(3));

@@ -206,7 +206,8 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                Nothing is written. install.sh asks this before it changes anything
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
-                               setting is kept
+                               setting is kept. It does not change the drop folder: it is switched by the installer, which
+                               makes the new folder, marks it and points the import at it, after it has checked the old one
   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
                                record that Jason has checked that the setting letting Anthropic train on chats is off on
                                both accounts that touch a session, the one the claude command is signed in to and the one
@@ -380,7 +381,8 @@ function notBuilt(values) {
 }
 
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
-    left, and said to be. What is not built yet is refused (NOT_BUILT), and nothing is changed. */
+    left, and said to be. What is not built yet is refused (NOT_BUILT), and so is a change of the drop folder, which the
+    installer makes: nothing is changed. */
 function set(home, rest, say) {
   const told = pairsOf(rest, OF_SET());
   if (!told || !Object.keys(told).length) {
@@ -404,6 +406,14 @@ function set(home, rest, say) {
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
+  }
+  // The drop folder is not a setting to change by itself: the new folder must be made and marked, the launch agent pointed at it,
+  // and the old folder looked at first. Written alone, the setting left the agent watching the old folder, and the import then
+  // skipped every video found there. So a change of it is the installer's, and nothing here is changed.
+  const to = values["--drop"];
+  if (to !== undefined && to !== (got.settings.drop ?? SETTABLE["--drop"].otherwise)) {
+    say(`The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "${got.settings.machine}" --drop ${to === "Drop" ? to : `"${to}"`} "${got.settings.root}"`);
+    return 1;
   }
   const changes = {};
   const lines = [];
