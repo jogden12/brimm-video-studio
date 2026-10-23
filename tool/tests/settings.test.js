@@ -1309,6 +1309,17 @@ describe("what --help says of write, plan and set", () => {
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     assert.ok(readme.includes("`node settings.js set` never changes the drop folder"), "README.md");
   });
+  it("is told by the README: every kind of line the refusal of a switch has, and an old node counting as none", () => {
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const paragraph = readme.split("\n").find((line) => line.startsWith("**Switching a Mac's drop folder.**"));
+    assert.ok(paragraph, "README's Switching a Mac's drop folder");
+    for (const said of [
+      "a video an episode already holds, which this Mac still owes a late check, is said to be already imported, with when the check is due, and to run the installer again after it",
+      "one it owes none (the check passed, or it is a copy of an imported video) is said to be one nothing of its import will take out, for a person to delete by hand before the installer is run again",
+      "an old folder or status files that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
+      "a node older than 22 counts as no node when the settings are to be checked"
+    ]) assert.ok(paragraph.includes(said), `${said}\n---\n${paragraph}`);
+  });
   it("is as the header of settings.js says, for each of the three: the line that names the command and its options is the same", () => {
     const top = readFileSync(SETTINGS, "utf8").split("\n").filter((l) => l.startsWith("//   node settings.js ")).map((l) => l.slice(3));
     for (const command of ["write", "plan", "set"]) {
