@@ -2112,13 +2112,20 @@ const keptOrWait = (ctx, found, record) => {
 
 /** `ask "<episode>"`: Claude asked again for the episode's Reel candidates, detached (`ask --now "<episode folder>"`, which
     askAgain does, in unedited.js), since it can take minutes. It refuses a short video, a Mac without Claude Code, an
-    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says. */
+    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says.
+    Both parts refuse an episode a newer brimm-video wrote, by its short id alone. */
 async function ask(ctx, rest) {
   if (rest[0] === "--now") {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
       ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
       if (found.gate) await leaveGateResult(ctx, found, "ask");
+      return 1;
+    }
+    // A record a newer brimm-video wrote may be a session or a video not yet answered, whose fields this one cannot read: it is
+    // named by its short id alone, nothing is asked of Claude, and nothing is written, not even the result of a run.
+    if (found.read.newer) {
+      ctx.say(newerWhy(found.read.record));
       return 1;
     }
     const deps = {
