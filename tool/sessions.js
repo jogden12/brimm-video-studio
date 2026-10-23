@@ -25,9 +25,11 @@ const COLON = /:(?=\s|$)/;
 const VOICED = /^\s*<v[\s.]/;
 /** A voice tag, "<v Jane Doe>" or "<v.loud Jane Doe>": its text is the label. */
 const VOICE = /<v(?:\.[^\s>]*)?[ \t]+([^>\r\n]*)>/g;
-/** A line of Zoom's saved transcript, "[Jane Doe] 10:02:13": the label is the text up to the bracket that spaces and the time follow,
-    so that a label with brackets in it, "[Jane Doe [she/her]] 10:02:13", is taken whole. */
-const SAVED = new RegExp(`^([ \\t]*\\[)(.{1,${LABEL_MOST}}?)(\\](?=[ \\t]+\\d{1,2}:\\d{2}))`);
+/** A speaker's line of Zoom's saved transcript, and only that: a bracket, the label, a bracket, spaces, a time of the form H:MM:SS or
+    HH:MM:SS and nothing after it but spaces, "[Jane Doe] 10:02:13". The label is the text up to the bracket that the time follows,
+    so that a label with brackets in it, "[Jane Doe [she/her]] 10:02:13", is taken whole, and a line of speech that holds a bracket
+    and a time, "[laughs] okay [pause] 10:30 works", is not one. The same pattern says whether a text is a saved transcript. */
+const SAVED = new RegExp(`^(\\[)(.{1,${LABEL_MOST}}?)(\\](?=[ \\t]+\\d{1,2}:\\d{2}:\\d{2}[ \\t]*\\r?$))`);
 
 /** What may be a speaker's label in a text that has neither form: one to four words, and a bracketed note after them. Whether it
     is one is for `isLabel` to say. */
@@ -49,13 +51,15 @@ const wordsAlone = (text) => String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u)
 /** The names of the show, which a label made of nothing else is the show's own account in: a name for the host, the show and the
     brand. */
 const SHOW_NAMES = [SHOW, HOST, "The BRIMM"];
-/** What sets a label's name apart from what follows it: a dash, a bar or a slash with a space on both sides, or a comma and a space. */
-const SEPARATOR = / [-\u2013\u2014|/] |, /;
+/** What sets one name in a label apart from the next: a dash, a bar, a slash, "&" or "+" with a space on both sides, " and ", " x ",
+    or a comma. */
+const SEPARATOR = / [-\u2013\u2014|/&+] | and | x |,/i;
 
 /** Whether a label is Sallie's. It is when, with every bracketed part left out ("( ... )" and "[ ... ]", also one inside another)
-    and only the part before the first separator kept, it holds every word of `sallie` as a whole word, whatever the case; or when
-    it is made of the words of the show's names and nothing else. "Sallie's iPhone" and "Sallie Ogden - The BRIMM" are hers,
-    "The BRIMM" is, and "Salliebeth Kay", "Jane Doe - Sallie's client" and "[Sallie's guest] Kip Doe" are not. */
+    and what is left split at its separators, every part either holds every word of `sallie` as a whole word, whatever the case, or
+    is made of the words of the show's names and nothing else. So "Sallie's iPhone", "Sallie Ogden - The BRIMM" and "The BRIMM" are
+    hers, and "Salliebeth Kay", "Jane Doe - Sallie's client", "Sallie & Jane" and "Sallie Ogden, Coach" are not: a label that is
+    hers and something more is not known to be hers alone. */
 function isHers(label, sallie, show) {
   let outside = label;
   for (let before = ""; before !== outside; ) {
@@ -63,11 +67,9 @@ function isHers(label, sallie, show) {
     outside = outside.replace(/\([^()]*\)|\[[^[\]]*\]/g, " ");
   }
   const mine = wordsAlone(sallie || "");
-  const here = wordsAlone(outside.split(SEPARATOR)[0]);
-  if ((mine.length ? mine : ["sallie"]).every((w) => here.includes(w))) return true;
   const shows = new Set(list(show).flatMap(wordsAlone));
-  const all = wordsAlone(label);
-  return all.length > 0 && all.every((w) => shows.has(w));
+  const parts = outside.split(SEPARATOR).map(wordsAlone).filter((words) => words.length > 0);
+  return parts.length > 0 && parts.every((words) => (mine.length ? mine : ["sallie"]).every((w) => words.includes(w)) || words.every((w) => shows.has(w)));
 }
 
 /** The place [from, to) of `line` between `from` and `to` with the white space at both ends left out, or null when nothing is left. */
@@ -159,10 +161,11 @@ export const NOT_NAMES = [
     ..."a an the and or but nor so yet if then than when while what why how who where here there now well yes no not oh ok okay also just of for at to in on by with from into onto about as up out my our your its their this that these those we you us it is are was be me i".split(" "),
     ..."she her hers he him his they them their theirs".split(" "),
     ..."mr mrs ms mx dr prof st jr sr".split(" "),
-    ..."com net org co uk gmail icloud outlook hotmail yahoo mac".split(" ")
+    ..."com net org co uk gmail icloud outlook hotmail yahoo".split(" ")
   ])
 ];
-const NEVER = new Set(NOT_NAMES);
+/** The words of her own name are nobody's name either, in whatever label or file name they stand. */
+const NEVER = new Set([...NOT_NAMES, ...wordsAlone(HOST)]);
 /** The words in the name of a file that Zoom downloads that are Zoom's own. */
 const ZOOM_WORDS = new Set(["gmt", "recording", "gvo", "avo", "audio", "video", "gallery", "speaker", "shared", "screen", "view", "only", "transcript", "chat"]);
 
@@ -202,42 +205,48 @@ const sidesOf = (s) => (Array.isArray(s) ? s.slice(0, 2) : s && typeof s === "ob
 
 /** The single words that brimm-video can see are names, each once, in the spelling it saw first:
     - every word of the labels in `map`, the speakers it replaced, the words of a bracketed note too: the tool has ruled the label
-      is not Sallie's, so not even a word of the show's names, of a spelling or of Sally is left out. But a word in NOT_NAMES is,
-      and a word that begins in lowercase and that `words` writes in lowercase in the middle of a sentence, which is an ordinary word;
+      is not Sallie's, so not even a word of the show's names, of a spelling or of Sally is left out. But a word in NOT_NAMES is, a
+      word of the host's name ("Sallie", "Ogden") is, and a word that begins in lowercase and that `words` writes in lowercase in the
+      middle of a sentence, which is an ordinary word;
     - every word of the file's name (its folder and its extension are not), of at least two letters and no figure, but for a word in
-      NOT_NAMES, one that `words` writes in lowercase in the middle of a sentence, and, for a name that is Zoom's, Zoom's own words;
+      NOT_NAMES or of the host's name, one that `words` writes in lowercase in the middle of a sentence, and, for a name that is
+      Zoom's, Zoom's own words;
     - unless the recording is capitalised throughout, every word that `words` writes with a capital in the middle of a sentence,
-      but for a word in NOT_NAMES;
+      but for a word in NOT_NAMES or of the host's name;
     and of the last two, not, whatever the case, a word of the `show`'s names or of either side of a spelling of the episode's,
-    which are no one's, and each is spelled the show's way first, so that "Sally" is "Sallie" and left out. A joined word of a label
-    or of the file's name, "JaneDoe", is the whole word and each of its parts of three letters or more that `words` does not write
-    in lowercase, "Jane" and "Doe". A capitalised word of the recording is not split: "YouTube" is not "You". */
+    which are no one's, and each is spelled the show's way first, so that "Sally" is "Sallie" and left out. A joined word, from any
+    of the three, "JaneDoe", is the whole word as above, and each of its parts, split where it changes from lowercase to a capital,
+    that has three letters or more and is left out by none of what leaves a word out: NOT_NAMES, the host's name, the show's names,
+    the spellings, and a lowercase word of the recording. "Jane" and "Doe" are names, "You" of "YouTube" is not, and nothing of a
+    joined word that is left out as a whole is a name. */
 export function visibleNames({ map = {}, fileName = "", words = [], show = SHOW_NAMES, spellings = [] } = {}) {
   const mid = midSentence(words);
   const ordinary = new Set(mid);
   const never = (w) => NEVER.has(w.toLowerCase());
   const written = (w) => ordinary.has(w.toLowerCase());
-  // A joined word of a label or of the file's name is names whole and in the parts of three letters or more that the recording
-  // does not write in lowercase. A capitalised word of the recording is one name: it may be a brand, "YouTube", and not "You".
-  const joined = (w) => [w, ...partsOf(w).filter((part) => letters(part) >= 3 && !written(part))];
-  const speakers = Object.keys(map || {})
-    .flatMap((label) => baseWords(label))
-    .flatMap(joined)
-    .filter((w) => letters(w) >= 2 && !never(w) && !(lowercase(w) && written(w)));
-  const file = String(fileName ?? "");
-  const own = isZoomName(file) ? ZOOM_WORDS : new Set();
-  const fromFile = baseWords(basename(file, extname(file)))
-    .filter((w) => !/\p{N}/u.test(w))
-    .flatMap(joined)
-    .filter((w) => letters(w) >= 2 && !never(w) && !own.has(w.toLowerCase()) && !written(w));
-  const capitalised = throughout(mid) ? [] : mid.filter((w) => capital(w) && letters(w) >= 2 && !never(w) && !I_FORM.test(w));
   const left = new Set([...list(show), ...list(spellings).flatMap(sidesOf)].flatMap(wordsOf).map((w) => w.toLowerCase()));
+  // The parts of a joined word that are names: those of three letters or more that nothing leaves out, as it leaves out a whole word.
+  const parts = (w) => partsOf(w).map(spellNames).filter((part) => letters(part) >= 3 && !never(part) && !left.has(part.toLowerCase()) && !written(part));
   const names = new Map();
   const add = (w) => {
     if (!names.has(w.toLowerCase())) names.set(w.toLowerCase(), w);
   };
-  speakers.forEach(add);
-  for (const w of [...fromFile, ...capitalised].map(spellNames)) if (!left.has(w.toLowerCase())) add(w);
+  // A label's words are names whatever the show's names and the spellings say.
+  for (const w of Object.keys(map || {}).flatMap((label) => baseWords(label))) {
+    if (letters(w) < 2 || never(w) || (lowercase(w) && written(w))) continue;
+    add(w);
+    parts(w).forEach(add);
+  }
+  const file = String(fileName ?? "");
+  const own = isZoomName(file) ? ZOOM_WORDS : new Set();
+  const fromFile = baseWords(basename(file, extname(file))).filter((w) => !/\p{N}/u.test(w) && letters(w) >= 2 && !never(w) && !own.has(w.toLowerCase()) && !written(w));
+  const capitalised = throughout(mid) ? [] : mid.filter((w) => capital(w) && letters(w) >= 2 && !never(w) && !I_FORM.test(w));
+  for (const w of [...fromFile, ...capitalised]) {
+    const spelt = spellNames(w);
+    if (left.has(spelt.toLowerCase())) continue;
+    add(spelt);
+    parts(w).forEach(add);
+  }
   return [...names.values()];
 }
 
