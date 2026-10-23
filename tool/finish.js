@@ -150,14 +150,25 @@ function versionOf(record, part, name) {
   const push = (Array.isArray(pushed) ? pushed : []).find((p) => String(p.project).normalize("NFC") === own);
   return push ? push.v : undefined;
 }
-/** The hand-offs in a folder, as paths from it, at any depth when `deep`: every name that ends as a hand-off's does. [] when the
-    folder cannot be read. */
+/** The hand-offs in a folder, as paths from it, at any depth when `deep`: every name that ends as a hand-off's does. A folder is
+    read on its own, one at a time, so that one which cannot be read, or has gone, is passed over and loses only its own
+    hand-offs. [] when the folder itself cannot be read. */
 const handoffsIn = (dir, deep) => {
+  let entries = [];
   try {
-    return readdirSync(dir, { recursive: deep }).filter((name) => name.endsWith(".brimm-ops.json"));
+    entries = readdirSync(dir, { withFileTypes: true });
   } catch (e) {
     return [];
   }
+  const found = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (deep) found.push(...handoffsIn(join(dir, entry.name), true).map((name) => join(entry.name, name)));
+    } else if (entry.name.endsWith(".brimm-ops.json")) {
+      found.push(entry.name);
+    }
+  }
+  return found;
 };
 /** The highest revision of a hand-off of this video already in final/, or set aside into history/ beside it, at any depth: a
     revision is never used twice, even when the record of the last finish was never written, and one that was replaced or
@@ -174,74 +185,113 @@ export function lastRevision(finalDir, id) {
   return most;
 }
 
-/** Every episode in Episodes by its id, each as { folder, record }, read as it lies now, past any conflicted copy: nothing is
-    written. A folder with no whole record, as an import not finished, is not there. */
-function episodesById(root) {
-  const byId = new Map();
+/** Every folder in Episodes, each as { folder, record }, read as it lies now, past any conflicted copy: nothing is written. The
+    record is null for a folder with no whole record, as an import not finished. */
+function episodesIn(root) {
   let names = [];
   try {
     names = readdirSync(episodesFolder(root)).filter((name) => !name.startsWith(".")).sort();
   } catch (e) {
-    return byId;
+    return [];
   }
-  for (const name of names) {
+  return names.map((name) => {
     const folder = join(episodesFolder(root), name);
-    const { record } = readEpisode(folder, { pastCopies: true });
-    if (record && !byId.has(record.id)) byId.set(record.id, { folder, record });
-  }
-  return byId;
+    return { folder, record: readEpisode(folder, { pastCopies: true }).record || null };
+  });
 }
 
-/** A video's versions as the records link them, newest first, and the id the chain starts from. An episode is followed to the
-    one it is a version of (`versionOf`) only when it is answered: the import no longer writes the link, only her answer does,
-    so an unanswered record's chain is itself. The walk ends at an episode this Mac cannot read, as one not yet brought over
-    by Dropbox, and then the id is the one the last record names; and it ends at an episode already seen. The episodes are read
-    only when a link is to be followed. */
-function walk(root, record, folder) {
-  let index = null;
-  const find = (id) => (index = index || episodesById(root)).get(id);
+/** What is in Episodes for the length of one call: read once, the first time it is asked for, and not again, so that a call
+    which follows no link reads none. `all()` is every folder as episodesIn gives them; `find(id)` is the first one whose
+    record has that id, or undefined. */
+function viewOf(root) {
+  let all = null;
+  let byId = null;
+  const view = {
+    all: () => (all = all || episodesIn(root)),
+    find: (id) => {
+      if (!byId) {
+        byId = new Map();
+        for (const one of view.all()) if (one.record && !byId.has(one.record.id)) byId.set(one.record.id, one);
+      }
+      return byId.get(id);
+    }
+  };
+  return view;
+}
+
+/** A video's versions as the records link them, newest first, the id the chain starts from, and the gap that stopped it, if one
+    did. An episode is followed to the one it is a version of (`versionOf`) only when it is answered: the import no longer writes
+    the link, only her answer does, so an unanswered record's chain is itself, and has no gap. The walk ends at an episode this
+    Mac cannot read, as one not yet brought over by Dropbox, and then the id is the one the last record names and the gap is
+    that id, `missing`; and it ends at an episode it has already been through, and then the gap is that id, `loop`. The
+    episodes are read only when a link is to be followed. */
+function walk(view, record, folder) {
   const chain = [{ folder: folder || null, record }];
   const seen = new Set([record.id]);
   let last = record;
   while (kindOf(last) !== null && typeof last.versionOf === "string" && last.versionOf !== "") {
-    if (seen.has(last.versionOf)) break;
+    if (seen.has(last.versionOf)) return { chain, first: last.id, gap: { id: last.versionOf, reason: "loop" } };
     seen.add(last.versionOf);
-    const old = find(last.versionOf);
-    if (!old) return { chain, first: last.versionOf, find };
+    const old = view.find(last.versionOf);
+    if (!old) return { chain, first: last.versionOf, gap: { id: last.versionOf, reason: "missing" } };
     chain.push(old);
     last = old.record;
   }
-  return { chain, first: last.id, find };
+  return { chain, first: last.id, gap: null };
 }
 
 /** A video's versions, newest first, each as { folder, record }: the record, then every episode it is a version of, by
     `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given.
     This only reads: nothing is written into any folder of the chain. */
 export function chainOf(root, record, folder) {
-  const { chain, find } = walk(root, record, folder);
+  const view = viewOf(root);
+  const { chain } = walk(view, record, folder);
   if (chain[0].folder === null) {
-    const own = find(record.id);
+    const own = view.find(record.id);
     chain[0].folder = own ? own.folder : null;
   }
   return chain;
 }
 
+/** Why the chain of a video's versions cannot be followed to its first, or null when it can: { id, reason }. `missing` is an
+    episode `versionOf` names that this Mac cannot read in Episodes, the first version too, as one Dropbox has not yet brought
+    over; `loop` is an episode the chain names a second time, as two episodes that each say they are a version of the other.
+    `id` is that episode's. Anything that writes a hand-off for the video asks this first, since the id and the revision it
+    would give are then not the chain's. An unanswered record has no chain to follow, so no gap. This only reads. */
+export function chainGap(root, record) {
+  return walk(viewOf(root), record, null).gap;
+}
+
 /** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops
     page takes a new version as a later revision. */
 export function handoffIdOf(root, record) {
-  return walk(root, record, null).first;
+  return walk(viewOf(root), record, null).first;
 }
 
-/** The revision of the next hand-off of this video: one above the highest that is found, in every record of the chain
-    (`finished.revision`), and in every folder of it, in final/ and in history/, for the hand-off's id. Revisions only rise: the
-    page refuses a hand-off at or below what it holds. `found` is { folder, record }. This only reads. */
+/** The revision of the next hand-off of this video: one above the highest revision written for the hand-off's id (that of
+    `handoffIdOf`) on this Mac, whichever version of the video wrote it. Revisions only rise: the page refuses a hand-off at or
+    below what it holds, so an old version handed off again is above its new version's, and the other way round. That is, the
+    highest of every hand-off for the id in final/ and in history/ of every episode in Episodes, and of `finished.revision` in
+    the record, in every episode it is a version of and in every episode that is a version of it, directly or through others
+    (every one whose own chain ends at the id). The record's own folder is counted when `found.folder` is not given. `found` is
+    { folder, record }. This only reads. */
 export function nextRevision(root, found) {
-  const { chain, first } = walk(root, found.record, found.folder);
+  const view = viewOf(root);
+  const { chain, first } = walk(view, found.record, found.folder);
   let most = 0;
-  for (const { folder, record } of chain) {
+  const finished = (record) => {
     if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
-    if (folder) most = Math.max(most, lastRevision(join(folder, "final"), first));
+  };
+  const folders = new Set();
+  for (const link of chain) {
+    finished(link.record);
+    if (link.folder) folders.add(link.folder);
   }
+  for (const { folder, record } of view.all()) {
+    folders.add(folder);
+    if (record && walk(view, record, folder).first === first) finished(record);
+  }
+  for (const folder of folders) most = Math.max(most, lastRevision(join(folder, "final"), first));
   return most + 1;
 }
 
