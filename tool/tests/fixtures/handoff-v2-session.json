@@ -1,0 +1,136 @@
+{
+  "format": "brimm-video hand-off",
+  "version": 2,
+  "revision": 1,
+  "made": "2026-10-23T10:15:40-04:00",
+  "madeOn": "Mac Studio",
+  "madeBy": "brimm-video c709b57",
+  "video": {
+    "id": "e-20261022-77ab12",
+    "kind": "session",
+    "name": "Session, 2026-10-22",
+    "recorded": "2026-10-22",
+    "recordedFrom": "video"
+  },
+  "reels": [
+    {
+      "n": 3,
+      "title": "Price is a message",
+      "file": "Session, 2026-10-22 reel 3 v1 77ab12.mp4",
+      "seconds": 16.3,
+      "srt": "1\n00:00:00,000 --> 00:00:03,400\n Your price tells people what to expect\n\n2\n00:00:03,400 --> 00:00:06,700\n before you have said a word about the work.\n\n3\n00:00:06,700 --> 00:00:10,100\n If it is too low, they wonder what is wrong.\n\n4\n00:00:10,100 --> 00:00:13,300\n If it is a little higher than they thought,\n\n5\n00:00:13,300 --> 00:00:16,300\n they lean in. So choose it on purpose.\n\n",
+      "fromSuggestion": null,
+      "clientAgreed": "2026-10-23"
+    }
+  ],
+  "session": {
+    "principles": [
+      {
+        "n": 1,
+        "name": "Price the outcome",
+        "category": "pricing",
+        "description": "Charge for what the work changes for the buyer, not for the hours it takes.",
+        "steps": [
+          "Name the result the buyer wants",
+          "Put a number on what that result is worth to them",
+          "Set the price as a fair share of that number"
+        ],
+        "red_flags": [
+          "Pricing by the hour because it feels safe",
+          "Matching someone else's price without a reason of your own"
+        ],
+        "green_flags": [
+          "A price you can explain in one sentence",
+          "Buyers asking what is included, not what it costs"
+        ],
+        "decision_criteria": [
+          "Does the price say what the work is worth?",
+          "Could you say it out loud without apologising?"
+        ],
+        "example_application": "A baker who sells wedding cakes prices by the celebration the cake serves, not by the hours in the kitchen.",
+        "verbatim_key_phrases": [
+          "What is it worth to them?",
+          "Your price is a message."
+        ]
+      },
+      {
+        "n": 2,
+        "name": "Say the price first",
+        "category": "sales conversations",
+        "description": "Name the number early in a conversation, so that the rest of it can be about fit and not about waiting for the cost.",
+        "steps": [
+          "Say the price in the first few minutes",
+          "Stop talking and let it land",
+          "Ask whether it works for them, then move to what would make it a yes"
+        ],
+        "red_flags": [
+          "Circling for ten minutes before the number comes up",
+          "Softening the price with an apology"
+        ],
+        "green_flags": [
+          "The buyer asks about the work after hearing the price",
+          "A no that comes early and costs nobody anything"
+        ],
+        "decision_criteria": [
+          "Has the buyer heard the number yet?",
+          "Is the next question about fit?"
+        ],
+        "example_application": "A service provider states the price in the first call, asks whether it works, and spends the rest of the call on what would make it a yes.",
+        "verbatim_key_phrases": []
+      },
+      {
+        "n": 3,
+        "name": "Check one number each week",
+        "category": "operations",
+        "description": "Choose the one number that says whether the business is healthy, look at it on the same day every week, and change one thing at a time.",
+        "steps": [
+          "Pick the one number that matters most this quarter",
+          "Look at it every Monday",
+          "Change one thing, then watch the number for a month"
+        ],
+        "red_flags": [
+          "Tracking ten numbers and acting on none",
+          "Changing three things at once"
+        ],
+        "green_flags": [
+          "This week's number can be said without looking it up",
+          "Each change has a before and an after"
+        ],
+        "decision_criteria": [
+          "Will this number move if the work is done well?",
+          "Is there one thing to change this week?"
+        ],
+        "example_application": "The owner of a small shop watches the number of returning customers each Monday and tries one new thing a month to raise it.",
+        "verbatim_key_phrases": [
+          "One number, every Monday."
+        ]
+      }
+    ],
+    "recurringPrinciples": [
+      {
+        "n": 1,
+        "text": "Price is a message."
+      },
+      {
+        "n": 2,
+        "text": "Decide once, then stop re-deciding."
+      }
+    ],
+    "reelsToFilm": [
+      {
+        "n": 1,
+        "idea": "Why price is a message",
+        "words": "Your price tells people what to expect before you have said a word about the work.",
+        "why": "It was said more than any other point, and it stands alone.",
+        "principle": 1
+      },
+      {
+        "n": 2,
+        "idea": "The day after you raise a price",
+        "words": "The day after you raise a price, change nothing. Same warmth, same work, same you.",
+        "why": "A calming note that belongs to no one principle.",
+        "principle": null
+      }
+    ]
+  }
+}
