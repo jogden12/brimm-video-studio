@@ -279,18 +279,24 @@ function planned(home, rest, now) {
   const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
   if (from === to) return { settings, fields: told.fields };
   const light = lightImport(held) || lightImport(settings);
-  return import("./switch.js").then(({ heldInOld }) => {
-    const lines = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, now: Number(now) });
-    if (!lines.length) return { settings, fields: told.fields };
-    return {
-      code: 1,
-      said: [
-        `Not written: the drop folder would change from ${from} to ${to}, and work is not finished in the old one:`,
-        ...lines,
-        "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."
-      ]
-    };
-  }, (e) => ({ code: 1, said: [`The old drop folder could not be looked at (${e.code || e.message}), so nothing was written.`] }));
+  // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
+  return import("./switch.js")
+    .then(({ heldInOld }) => {
+      const { work, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, now: Number(now) });
+      if (!work.length && !unreadable.length) return { settings, fields: told.fields };
+      const head = work.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
+      return {
+        code: 1,
+        said: [
+          `Not written: the drop folder would change from ${from} to ${to}, ${head}`,
+          ...work,
+          ...unreadable,
+          ...(work.length ? ["Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."] : []),
+          ...(unreadable.length ? ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."] : [])
+        ]
+      };
+    })
+    .catch((e) => ({ code: 1, said: [`The old drop folder could not be looked at (${(e && e.code) || "an error"}), so nothing was written.`] }));
 }
 
 /** Gives `next(result)`, after the result when it is a promise of one: a command that needs no look at the old drop folder
@@ -565,7 +571,13 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  Promise.resolve(settingsMain(process.argv.slice(2))).then((code) => {
-    process.exitCode = code;
-  });
+  // Whatever else goes wrong ends it with 1 and a plain line, never an unhandled rejection with a stack trace, which holds paths.
+  Promise.resolve()
+    .then(() => settingsMain(process.argv.slice(2)))
+    .then((code) => {
+      process.exitCode = code;
+    }, (e) => {
+      process.stdout.write(`This Mac's settings could not be handled (${(e && e.code) || "an error"}).\n`);
+      process.exitCode = 1;
+    });
 }

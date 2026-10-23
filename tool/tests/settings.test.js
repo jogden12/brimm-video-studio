@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1046,6 +1046,80 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const said = await refused(t, "--drop", "Drop", "--import", "full");
       assert.ok(!said.join("\n").includes("Jane Doe"), said.join("\n"));
       assert.equal(said[1], `  1 video waits in ${t.folder()}.`);
+      t.done();
+    });
+    const READABLE = "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again.";
+    const HEAD_UNREAD = "Not written: the drop folder would change from Unedited Video to Drop, and the old one could not be looked at:";
+    it("refuses when the old folder cannot be read, and says so with the code and the folder's own path: only a folder that is not there is empty", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4");
+      chmodSync(old, 0o000);
+      try {
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, [HEAD_UNREAD, `  The old folder, ${old}, could not be read (EACCES), so what it holds is not known.`, READABLE]);
+        assert.ok(!/Jane|Doe/.test(said.join("\n")), said.join("\n"));
+      } finally {
+        chmodSync(old, 0o755);
+      }
+      // Readable again, the video that is there is what stops it.
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  1 video waits in ${old}.`, ADVICE]);
+      t.done();
+    });
+    it("refuses when the status files cannot be read: what is not known is not taken for none", async () => {
+      const t = mac();
+      const importing = join(t.root, "Episodes", ".importing");
+      t.status("Talk.mov", { failed: "the sound could not be read" });
+      chmodSync(importing, 0o000);
+      try {
+        assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD_UNREAD, `  The import status files, in ${importing}, could not be read (EACCES), so whether an import failed is not known.`, READABLE]);
+      } finally {
+        chmodSync(importing, 0o755);
+      }
+      t.done();
+    });
+    it("says what could not be read beside what holds the switch, when both are so", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov");
+      const importing = join(t.root, "Episodes", ".importing");
+      chmodSync(importing, 0o000);
+      try {
+        assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, `  The import status files, in ${importing}, could not be read (EACCES), so whether an import failed is not known.`, ADVICE, READABLE]);
+      } finally {
+        chmodSync(importing, 0o755);
+      }
+      t.done();
+    });
+    it("refuses, and names no part of a client's file name, when a video in the old folder cannot be looked at: a link that goes round in a circle", async () => {
+      for (const light of [true, false]) {
+        const t = mac(light ? { import: "light" } : {});
+        const old = t.folder();
+        // stat of it fails with ELOOP, which once escaped the check as an unhandled rejection with a stack trace holding the path.
+        symlinkSync("Coaching call Jane Doe.mp4", join(old, "Coaching call Jane Doe.mp4"));
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, [HEAD, light ? `  1 video waits in ${old}.` : `  Coaching call Jane Doe.mp4: waits in ${old}.`, ADVICE]);
+        if (light) assert.ok(!/Jane|Doe/.test(said.join("\n")), said.join("\n"));
+        t.done();
+      }
+    });
+    it("says only a plain line with the error's code when the look itself fails, never its message, which may hold a path: nothing is written and no rejection escapes", async () => {
+      const t = mac({ import: "light" });
+      put(t.folder(), "Coaching call Jane Doe.mp4");
+      const before = t.held();
+      // A time that cannot be read throws from inside the look, with a message that holds a client's file name.
+      const boom = { valueOf: () => { throw Object.assign(new Error("/x/Unedited Video/Mac Studio/Coaching call Jane Doe.mp4: boom"), { code: "EBOOM" }); } };
+      for (const command of ["plan", "write"]) {
+        t.said.length = 0;
+        const code = await settingsMain([command, ...t.told, "--drop", "Drop"], { home: t.home, say: (line) => t.said.push(line), now: boom });
+        assert.deepEqual([code, t.said], [1, ["The old drop folder could not be looked at (EBOOM), so nothing was written."]], command);
+        assert.equal(t.held(), before);
+      }
+      // With no code, it says there was an error, and nothing more.
+      const bare = { valueOf: () => { throw new Error("Coaching call Jane Doe.mp4"); } };
+      t.said.length = 0;
+      assert.equal(await settingsMain(["plan", ...t.told, "--drop", "Drop"], { home: t.home, say: (line) => t.said.push(line), now: bare }), 1);
+      assert.deepEqual(t.said, ["The old drop folder could not be looked at (an error), so nothing was written."]);
       t.done();
     });
   });

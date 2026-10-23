@@ -13,10 +13,25 @@ import { holdingEpisode } from "./filing.js";
 import { importState, readStatuses } from "./importing.js";
 import { dropFolder, importingFolder } from "./settings.js";
 
+/** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
+const codeOf = (e) => (e && e.code) || "an error";
+
+/** The names in `folder`: { names }, none when the folder is not there, or { code } when it cannot be read. Only a folder that
+    is not there is empty: one that macOS has not let node read (it asks about Dropbox) is not known to be. */
+function namesIn(folder) {
+  try {
+    return { names: readdirSync(folder) };
+  } catch (e) {
+    return e.code === "ENOENT" ? { names: [] } : { code: codeOf(e) };
+  }
+}
+
 /** What the old drop folder `old` ("Unedited Video" or "Drop") of the Mac `machine`, in BRIMM Video at `root`, still holds that
-    stops the switch, in plain words, one line each: [] when it holds nothing of the kind. A video in the folder (the marker, the
-    files Finder keeps and the parts of a file still arriving are none), and an import of this Mac, in Episodes/.importing, that
-    failed or whose late check found a problem. `now` is a time in milliseconds, for the status files.
+    stops the switch, in plain words: { work, unreadable }, each a list of lines, both [] when it holds nothing of the kind.
+    `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still arriving are none), and an
+    import of this Mac, in Episodes/.importing, that failed or whose late check found a problem. `unreadable` is what could not
+    be read, with the error's code and the folder's own path, which holds no video's name: the old folder, or the status files.
+    `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
     episode that holds the video does too. A video, or a status, that has none is counted and not named when `light` says the
     import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to
@@ -24,13 +39,13 @@ import { dropFolder, importingFolder } from "./settings.js";
     name; and what it says of why it failed is left out, as it may hold a file's name. */
 export function heldInOld({ root, machine, old, light, now = Date.now() }) {
   const folder = dropFolder(root, machine, old);
-  let videos = [];
-  try {
-    videos = readdirSync(folder).filter(isMedia).sort();
-  } catch (e) {
-    // The old folder is not there, or cannot be read: it holds nothing that a switch could leave behind.
-  }
-  const mine = readStatuses(root, now).map((s) => s.status).filter((status) => status && status.machine === machine);
+  const unreadable = [];
+  const inFolder = namesIn(folder);
+  if (inFolder.code) unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
+  const videos = (inFolder.names || []).filter(isMedia).sort();
+  const importing = namesIn(importingFolder(root));
+  if (importing.code) unreadable.push(`  The import status files, in ${importingFolder(root)}, could not be read (${importing.code}), so whether an import failed is not known.`);
+  const mine = importing.code ? [] : readStatuses(root, now).map((s) => s.status).filter((status) => status && status.machine === machine);
   const lines = new Set();
   const named = new Set();
   const trouble = mine.filter((s) => ["failed", "problem"].includes(importState(s, now))).sort((a, b) => a.video.localeCompare(b.video));
@@ -46,19 +61,25 @@ export function heldInOld({ root, machine, old, light, now = Date.now() }) {
     }
     const what = isFailed ? "its import failed" : "it was copied in, but its late check found a problem";
     // A failed import whose video has since been taken out of the folder cannot be tried again: only its status file holds it.
-    const gone = videos.includes(status.video) ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
+    const gone = videos.includes(status.video) || inFolder.code ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
     lines.add(`  ${status.label || status.video}: ${what}${gone}.`);
   }
   if (failed) lines.add(`  ${failed === 1 ? "1 import" : `${failed} imports`} failed.`);
   if (problems) lines.add(`  ${problems === 1 ? "1 late check" : `${problems} late checks`} found a problem.`);
   let counted = 0;
   for (const video of videos.filter((v) => !named.has(v))) {
-    const bytes = statSync(join(folder, video), { throwIfNoEntry: false })?.size;
+    // A video that cannot be looked at (a link that goes round in a circle) is a video all the same, whose size is not known.
+    let bytes;
+    try {
+      bytes = statSync(join(folder, video)).size;
+    } catch (e) {
+      bytes = undefined;
+    }
     const label = mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || holdingEpisode({ root, video, bytes })?.record.label;
     if (label) lines.add(`  ${label}: waits in ${folder}.`);
     else if (light) counted += 1;
     else lines.add(`  ${video}: waits in ${folder}.`);
   }
   if (counted) lines.add(`  ${counted === 1 ? "1 video waits" : `${counted} videos wait`} in ${folder}.`);
-  return [...lines];
+  return { work: [...lines], unreadable };
 }
