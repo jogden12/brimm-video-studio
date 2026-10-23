@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
 import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, SETTABLE, WRITTEN } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
+import { writePending } from "../filing.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -736,6 +737,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
   const AT = new Date("2026-10-23T10:00:00-04:00");
   const LIGHT = "The light import needs the question in her chat, which is not built yet.";
   const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
+  const LATE = "A video that is already imported leaves the old folder once its late check has passed: run this again after that.";
   /** A Mac with settings, `held` over them, whose BRIMM Video is a folder of its own in the test's home folder, with Episodes and
       its status files. `told` is what install.sh tells write and plan of this Mac. `drop(name)` is its drop folder in `name`'s
       parent, made; `video(folder, name)` puts a video there; `status(video, more, machine)` is a status file of an import, as one
@@ -1001,7 +1003,36 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       put(old, "Budget.mov", "123456");
       t.status("Talk.mov", { bytes: 5, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
       t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, "Video of 21 Oct, 09:00 (Mac Studio)");
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Video of 21 Oct, 09:00 (Mac Studio): waits in ${old}.`, `  Video of 20 Oct, 15:00 (Mac Studio): waits in ${old}.`, ADVICE]);
+      // The video an episode holds is imported already: it has a line of its own, and its own advice.
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Video of 20 Oct, 15:00 (Mac Studio): waits in ${old}.`, "  Video of 21 Oct, 09:00 (Mac Studio): already imported; its late check is still to come.", ADVICE, LATE]);
+      t.done();
+    });
+    it("says a video an episode holds is imported and its late check is still to come, and by when when it knows, and never to take it out of the folder", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  Budget.mov: already imported; its late check is still to come.", LATE]);
+      // This Mac keeps the late check it still has to make, and when it is due.
+      const lastCopy = Date.parse("2026-10-23T09:50:00-04:00");
+      writePending(t.home, { version: 1, id: "e-20261022-000001", name: "2026-10-20 Budget (Mac Studio)", folder: join(t.root, "Episodes", "2026-10-20 Budget (Mac Studio)"), video: "Budget.mov", bytes: 6, seconds: 120, drop: join(old, "Budget.mov"), work: "/nowhere", entries: [], lastCopy, root: t.root, machine: "Mac Studio", planTxt: "Budget.cut-plan.txt" });
+      const due = new Date(lastCopy + 15 * 60000).toTimeString().slice(0, 5);
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE]);
+      assert.ok(!said.some((line) => /take the video out|retry/.test(line)), said.join("\n"));
+      t.done();
+    });
+    it("counts an imported video that has no label under the light import, with the late check said for them", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4", "12345");
+      t.episode("2026-10-22 Coaching (Mac Studio)", "Coaching call Jane Doe.mp4", 5);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  1 video is already imported, and its late check is still to come.", LATE]);
+      put(old, "Sales call Acme Ltd.mov", "123456");
+      t.episode("2026-10-22 Sales call (Mac Studio)", "Sales call Acme Ltd.mov", 6);
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, "  2 videos are already imported, and their late checks are still to come.", LATE]);
+      assert.ok(!/Jane|Doe|Acme|Coaching|Sales/.test(said.join("\n")), said.join("\n"));
       t.done();
     });
     it("under the light import counts a waiting video that has no label, and does not name it: its name may be a client's", async () => {
@@ -1018,7 +1049,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.episode("2026-10-22 Sales call (Mac Studio)", "Sales call Acme Ltd.mov", 5, "Video of 22 Oct, 11:00 (Mac Studio)");
       put(old, "Sales call Acme Ltd.mov", "12345");
       const labelled = await refused(t, "--drop", "Drop");
-      assert.deepEqual(labelled, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.`, `  Video of 22 Oct, 11:00 (Mac Studio): waits in ${old}.`, ADVICE]);
+      assert.deepEqual(labelled, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.`, "  Video of 22 Oct, 11:00 (Mac Studio): already imported; its late check is still to come.", ADVICE, LATE]);
       for (const said of [...two, ...labelled]) assert.ok(!/Jane Doe|Acme/.test(said), said);
       t.done();
     });

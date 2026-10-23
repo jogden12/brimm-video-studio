@@ -323,7 +323,7 @@ export const importIdOf = (id) => (id ? Number(id.ino).toString(36) : "");
 export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
 
 /** A time of day as a person reads it, "10:15". */
-const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
+export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 /** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
 const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });

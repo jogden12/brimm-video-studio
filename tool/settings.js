@@ -282,16 +282,18 @@ function planned(home, rest, now) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, now: Number(now) });
-      if (!work.length && !unreadable.length) return { settings, fields: told.fields };
-      const head = work.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
+      const { work, imported, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
+      if (!work.length && !imported.length && !unreadable.length) return { settings, fields: told.fields };
+      const head = work.length || imported.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
       return {
         code: 1,
         said: [
           `Not written: the drop folder would change from ${from} to ${to}, ${head}`,
           ...work,
+          ...imported,
           ...unreadable,
           ...(work.length ? ["Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."] : []),
+          ...(imported.length ? ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."] : []),
           ...(unreadable.length ? ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."] : [])
         ]
       };
