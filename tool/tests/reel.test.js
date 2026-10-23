@@ -3,7 +3,7 @@
 // (reel.js). Further down: phase 3's own project of a Reel, the list of candidates (reels), and ask.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync as copyFile, existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync as copyFile, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { reelTimeline } from "../reel.js";
 import { pushReel, editMain } from "../edit.js";
@@ -579,7 +579,7 @@ describe("ask, when something fails half-way (from the review)", () => {
 // part, which asks Claude nothing and changes nothing.
 import { writeStatus } from "../importing.js";
 import { writePending } from "../filing.js";
-import { acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
+import { RECORD_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
 const askedBoth = async (p) => {
@@ -2008,6 +2008,20 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.ok(p.t.said().includes(why), p.t.said());
     assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  // A newer brimm-video may have written a session or a video not yet answered: its detached part, which a stopped run or a
+  // person may start by the folder's name, names it by its short id alone, as every other command does, and goes no further.
+  it("refuses, in its detached part, an episode a newer brimm-video wrote, by its short id alone, and asks nothing and writes nothing", async () => {
+    const p = askable();
+    relayout(p.found, { version: RECORD_VERSION + 1 });
+    const { id } = JSON.parse(readFileSync(join(p.found.folder, "record", "0001.json"), "utf8"));
+    /** Every file in the episode's folder, with its size. */
+    const listing = () => readdirSync(p.found.folder, { recursive: true }).sort().map((n) => [n, statSync(join(p.found.folder, n)).size]);
+    const before = listing();
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+    assert.equal(p.t.said(), `That is an episode a newer brimm-video wrote (${id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`);
+    assert.deepEqual([p.t.calls.filter((c) => c.cmd === "CLAUDE").length, readResult(p.t.home, FOLDER, "ask"), listing()], [0, null, before]);
     p.t.done();
   });
   // An answered video, and a session whose mark is cleared, are not refused for what they are: the checks after those come to
