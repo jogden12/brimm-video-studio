@@ -15,21 +15,32 @@ import { writtenFile } from "./settings.js";
 
 /** The folder of an episode's records. */
 export const RECORD_DIR = "record";
-/** The record's layout this brimm-video reads and writes. A record of a higher one is read for what it says, and never
-    written: a later brimm-video wrote it. */
-/** The newest layout of the record this brimm-video reads and writes. Layout 2 (phase 4) adds what the session's commands
-    record: on each Reel its captions, texts, graphics, cuts, logo and preset, and the episode's logo picture, `brand`, beside
-    the main video's own, which layout 1 already had. A record is written at layout 2 only once it holds one of them
-    (layoutOf), so an episode no phase 4 command has touched is still read by a Mac that knows layout 1 alone, and one that
-    holds them is refused there, never changed by code that would drop them. */
-export const RECORD_VERSION = 2;
+/** The newest layout of the record this brimm-video reads and writes. A record of a higher one is read for what it says, and
+    never written: a later brimm-video wrote it.
+    Layout 2 (phase 4) adds what the session's commands record: on each Reel its captions, texts, graphics, cuts, logo and
+    preset, and the episode's logo picture, `brand`, beside the main video's own, which layout 1 already had.
+    Layout 3 (the switch) adds the video that is not yet answered, which has no kind; the kinds finished, raw and session;
+    `answer`, `label`, `fingerprint`, `versionOf`, `session` and `reading`; and a version of a timeline that was rendered, not
+    handed to Final Cut, which may be version 0.
+    A record is written at layout 2 or 3 only once it holds one of them (layoutOf), so an episode that none of them has
+    touched is still read by a Mac that knows layout 1 alone, and one that holds them is refused there, never changed by code
+    that would drop them. */
+export const RECORD_VERSION = 3;
 /** The name of a record file: its number, with four digits. */
 const RECORD_NAME = /^(\d{4})\.json$/;
 /** The record file of one rev, in an episode's folder. */
 export const recordFile = (folder, rev) => join(folder, RECORD_DIR, `${String(rev).padStart(4, "0")}.json`);
 
-/** What an episode is: a whole episode, or a short or upright recording, which gets no Reels. */
-const KINDS = ["episode", "short video"];
+/** What an episode is. Today's two: an "episode", a whole recording imported before the switch, and a "short video", a short or
+    upright recording, which gets no Reels. And the switch's: "finished" (the editor's), "raw" (with retakes) and "session"
+    (with a client or a group). A video not yet answered has none, and its kind is null (NO_KIND_STATES). */
+const KINDS = ["episode", "short video", "finished", "raw", "session"];
+/** While `answer.state` is one of these, a record may have no kind: the video is waiting for its answer, or has been left. */
+const NO_KIND_STATES = ["needs your answer", "not for brimm-video"];
+/** Where a video stands: waiting for its answer, answered, or left alone by the person ("leave"). */
+const ANSWER_STATES = ["needs your answer", "answered", "not for brimm-video"];
+/** How a video came: from a camera or a phone, as a Zoom download, or as sound alone. */
+const CAMES = ["camera", "phone", "zoom", "sound"];
 /** Where a Reel candidate has got to: Claude's pick, kept by a person, dropped by one, or finished. */
 const REEL_STATUSES = ["candidate", "picked", "dropped", "finished"];
 /** Dropbox's names for the copy it keeps when two Macs changed one file at once: "talk (Jason Ogden's conflicted copy
@@ -60,8 +71,10 @@ const isCount = (v) => Number.isInteger(v) && v >= 0;
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
 /** A list of files: each path from the episode's folder, with "/", and inside it, to its size in bytes. */
 const isFiles = (v) => isObject(v) && Object.entries(v).every(([path, bytes]) => isText(path) && !path.startsWith("/") && !path.split("/").includes("..") && isCount(bytes));
-/** A version of a timeline handed to Final Cut: its number from 1, when, on which Mac, and the file kept in edit/. */
-const isPush = (p) => isObject(p) && Number.isInteger(p.v) && p.v >= 1 && isTime(p.at) && isText(p.on) && isText(p.file);
+/** A version of a timeline: its number, when, on which Mac, and the file kept in edit/. Handed to Final Cut, it is a push, from
+    number 1, and has no `how` or the word "push" (every version before the switch is one). Rendered by brimm-video, it has
+    `how: "render"`, and may be number 0, the rough cut. */
+const isPush = (p) => isObject(p) && Number.isInteger(p.v) && (p.how === "render" ? p.v >= 0 : (p.how === undefined || p.how === "push") && p.v >= 1) && isTime(p.at) && isText(p.on) && isText(p.file);
 /** A moment of the raw video, in seconds from its start, and a length after it. */
 const isAt = (v) => isNumber(v) && v >= 0;
 const isLength = (v) => isNumber(v) && v > 0;
@@ -79,10 +92,36 @@ const isLayered = (x) => listOf(x.texts, isTextLayer) && listOf(x.graphics, isGr
     the layers a person asked for on it (phase 4). */
 const isReel = (c) => isObject(c) && Number.isInteger(c.n) && c.n >= 1 && REEL_STATUSES.includes(c.status) && isNumber(c.from) && isNumber(c.to) && c.from < c.to && typeof c.title === "string" && (c.pushed === undefined || (Array.isArray(c.pushed) && c.pushed.every(isPush))) && isLayered(c);
 
-/** The layout a record is written at: 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
-    preset, a Reel's captions turned off, or the logo's picture), and 1 while it holds none. */
+/** What the person said to the card about a video (layout 3): where it stands, what the import guessed, what it saw, how the
+    video came, and once answered, who answered, on which Mac, when, and whether it is a private session. */
+const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && CAMES.includes(a.came)
+  && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
+/** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
+    when it was cleared, if it was: confirmed by her click on a dialog. */
+const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
+  && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"));
+/** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
+    ended. */
+const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome);
+/** A field of layout 3 that may be missing or null, and is checked when it is there. */
+const optional = (v, ok) => v === undefined || v === null || ok(v);
+
+/** The kind of a record as a person means it: "raw", "finished", "session" or "short video", or null while the video waits for
+    its answer. An "episode" is a raw recording imported before the switch. */
+export function kindOf(r) {
+  const kind = isObject(r) ? r.kind : null;
+  if (kind === "episode") return "raw";
+  return KINDS.includes(kind) ? kind : null;
+}
+
+/** The layout a record is written at: 3 once it holds anything of the switch (a kind other than "episode" or "short video",
+    and having none is one; an answer, a session mark, a reading, or the episode it is a version of; or a version with a `how`,
+    one that was rendered); otherwise 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
+    preset, a Reel's captions turned off, or the logo's picture); and 1 while it holds none. */
 export function layoutOf(r) {
   const layered = (x) => Boolean(x) && (["texts", "graphics", "cuts"].some((k) => Array.isArray(x[k]) && x[k].length > 0) || x.logo === true || Boolean(x.preset) || x.captions === false);
+  const withHow = (x) => Boolean(x) && Array.isArray(x.pushed) && x.pushed.some((p) => isObject(p) && p.how !== undefined);
+  if (!["episode", "short video"].includes(r.kind) || Boolean(r.answer) || Boolean(r.session) || Boolean(r.reading) || Boolean(r.versionOf) || withHow(r.main) || (r.reels || []).some(withHow)) return 3;
   return (r.spellings || []).length > 0 || layered(r.main) || (r.reels || []).some(layered) || Boolean(r.brand && r.brand.logo) ? 2 : 1;
 }
 
@@ -103,15 +142,18 @@ export const shown = (at) => String(at || "").slice(0, 16).replace("T", " ");
 
 /** The record of a video the import has just made an episode of, with every field of version 1, from what the import knows:
     the new `id`, this Mac's name as `machine`, the moment `at` (localStamp), the `video` as { file, bytes, seconds, created },
-    where `created` is the creation time ffprobe read from the file, or null; the `kind`; the `writer`, { commit, on }; the
-    `files` it copied in, each path from the episode's folder to its size; the `title` Claude recommended, or null; and the Reel
-    `reels` candidates Claude picked.
+    where `created` is the creation time ffprobe read from the file, or null; the `kind`, which is null for a video not yet
+    answered; the `writer`, { commit, on }; the `files` it copied in, each path from the episode's folder to its size; the
+    `title` Claude recommended, or null; and the Reel `reels` candidates Claude picked.
+    The fields of layout 3 are in the record only when the import gives them: the `answer` (the card's question, with the
+    guess and what the import saw), the `label` that names the video until it is answered, the `fingerprint` of its words, and
+    `versionOf`, the id of the episode it is a new version of. A record made without them is the record of version 1.
     The video was recorded on the day its file says, when it says one, and otherwise on the day of the import. Its name is
     the video's own, without its ending, until a person gives it one. Its rev is 0 until writeEpisode first writes it. */
-export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [] }) {
+export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null }) {
   const made = video.created ? new Date(video.created) : null;
   const dated = made !== null && Number.isFinite(made.getTime()) && made.getFullYear() >= FIRST_YEAR;
-  return {
+  const record = {
     version: 1,
     id,
     rev: 0,
@@ -129,22 +171,29 @@ export function newEpisode({ id, machine, at, video, kind, writer, files = {}, t
     main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [], base: null },
     reels,
     libraries: {},
-    finished: null
+    finished: null,
+    ...(answer ? { answer } : {}),
+    ...(label ? { label } : {}),
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(versionOf ? { versionOf } : {})
   };
+  return { ...record, version: layoutOf(record) };
 }
 
-/** What is wrong with a record, in plain words: "" when it is a whole record of version 1. Fields this version does not know
-    are not looked at, since they are kept as they are. */
-export function episodeFault(r) {
+/** What is wrong with a record, in plain words, by a brimm-video that reads the layouts up to `known`: "" when it is a whole
+    record. Fields it does not know are not looked at, since they are kept as they are. Of the fields of layout 3, which are
+    all optional, each is checked only when it is there. `episodeFault` is this for the layout this brimm-video reads; another
+    `known` stands in for a Mac on older code, in a test. */
+export const faultFor = (known) => (r) => {
   if (!isObject(r)) return "it is not an episode's record";
-  if (!Number.isInteger(r.version) || r.version < 1 || r.version > RECORD_VERSION) return `it is version ${JSON.stringify(r.version)}, and this brimm-video reads versions 1 to ${RECORD_VERSION}`;
+  if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this brimm-video reads versions 1 to ${known}`;
   const v = r.video;
   const m = r.main;
   const faults = [
     [/^e-\d{8}-[0-9a-f]{6}$/.test(r.id), "its id cannot be read"],
     [Number.isInteger(r.rev) && r.rev >= 1, "its rev cannot be read"],
     [isObject(r.writer) && isText(r.writer.commit) && isText(r.writer.on), "who last wrote it cannot be read"],
-    [KINDS.includes(r.kind), "it is neither an episode nor a short video"],
+    [KINDS.includes(r.kind) || (r.kind === null && isObject(r.answer) && NO_KIND_STATES.includes(r.answer.state)), "its kind cannot be read"],
     [isObject(v) && isText(v.file) && !v.file.includes("/") && isCount(v.bytes) && isNumber(v.seconds) && v.seconds >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(v.recorded) && ["video", "import"].includes(v.recordedFrom), "its video cannot be read"],
     [isObject(r.imported) && isText(r.imported.on) && isTime(r.imported.at), "where and when it was imported cannot be read"],
     [isObject(r.name) && isText(r.name.text) && typeof r.name.placeholder === "boolean", "its name cannot be read"],
@@ -158,11 +207,19 @@ export function episodeFault(r) {
     [r.brand === undefined || r.brand === null || (isObject(r.brand) && (r.brand.logo === undefined || isPicture(r.brand.logo))), "its logo cannot be read"],
     [Array.isArray(r.reels) && r.reels.every(isReel), "its Reels cannot be read"],
     [isObject(r.libraries) && Object.values(r.libraries).every(isText), "its libraries cannot be read"],
-    [r.finished === null || (isObject(r.finished) && Number.isInteger(r.finished.revision) && r.finished.revision >= 1 && isTime(r.finished.at) && isText(r.finished.on)), "whether it is finished cannot be read"]
+    [r.finished === null || (isObject(r.finished) && Number.isInteger(r.finished.revision) && r.finished.revision >= 1 && isTime(r.finished.at) && isText(r.finished.on)), "whether it is finished cannot be read"],
+    [optional(r.answer, isAnswer), "its answer cannot be read"],
+    [r.label === undefined || typeof r.label === "string", "its label cannot be read"],
+    [r.fingerprint === undefined || typeof r.fingerprint === "string", "its fingerprint cannot be read"],
+    [optional(r.versionOf, isText), "which episode it is a version of cannot be read"],
+    [optional(r.session, isSession), "its session mark cannot be read"],
+    [optional(r.reading, isReading), "its reading by Claude cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";
-}
+};
+/** What is wrong with a record, in plain words: "" when it is a whole record of a layout this brimm-video reads. */
+export const episodeFault = faultFor(RECORD_VERSION);
 
 /** The text a record file holds: the record, two spaces to a level, and a line end. */
 export const recordText = (record) => JSON.stringify(record, null, 2) + "\n";
@@ -227,9 +284,11 @@ export function recordNumbers(folder) {
   return names.map((n) => RECORD_NAME.exec(n)).filter(Boolean).map((m) => Number(m[1])).sort((a, b) => b - a);
 }
 
-/** A record file, read: the record when it is whole and its rev is its number, and `newer` when it is of a layout later than
-    this brimm-video's, which is read for its id and rev alone. null otherwise. */
-function recordIn(folder, n) {
+/** A record file, read by a brimm-video that knows the layouts up to `known`: the record when it is whole and its rev is its
+    number, and `newer` when it is of a layout later than that, which is read for its id and rev alone. null otherwise. A
+    record of a later layout is the record, and is not passed over for an older one, as one that is not whole is: the older
+    one shows the episode as it stood before the other Mac changed it. */
+function recordIn(folder, n, known) {
   let record;
   try {
     record = JSON.parse(readFileSync(recordFile(folder, n), "utf8"));
@@ -237,8 +296,8 @@ function recordIn(folder, n) {
     return null;
   }
   if (!isObject(record) || record.rev !== n) return null;
-  if (Number.isInteger(record.version) && record.version > RECORD_VERSION) return /^e-\d{8}-[0-9a-f]{6}$/.test(record.id) ? { record, newer: true } : null;
-  return episodeFault(record) ? null : { record };
+  if (Number.isInteger(record.version) && record.version > known) return /^e-\d{8}-[0-9a-f]{6}$/.test(record.id) ? { record, newer: true } : null;
+  return faultFor(known)(record) ? null : { record };
 }
 
 /** Read the episode in `folder`: {record, file}, the record with the highest number that reads whole, and `newer: true` when
@@ -246,8 +305,9 @@ function recordIn(folder, n) {
     record's or a timeline's alike (code CONFLICTED), since the record may then not say what the folder holds. A folder with
     no whole record is an import that has not finished (code NONE). A record above the one read that is not whole yet, as
     while Dropbox brings it over, is passed over here, and stops a write (writeEpisode). With `pastCopies`, which `resolve`
-    alone gives, the conflicted copies are passed over, and the newest whole record is read as if they were not there. */
-export function readEpisode(folder, { pastCopies = false } = {}) {
+    alone gives, the conflicted copies are passed over, and the newest whole record is read as if they were not there. `known`
+    is the newest layout this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. */
+export function readEpisode(folder, { pastCopies = false, known = RECORD_VERSION } = {}) {
   let names;
   try {
     names = everything(folder);
@@ -257,7 +317,7 @@ export function readEpisode(folder, { pastCopies = false } = {}) {
   const copies = conflictedIn(names);
   if (copies.length && !pastCopies) return { why: conflictWhy(copies), code: "CONFLICTED" };
   for (const n of recordNumbers(folder)) {
-    const read = recordIn(folder, n);
+    const read = recordIn(folder, n, known);
     if (read) return { record: read.record, file: recordFile(folder, n), ...(read.newer ? { newer: true } : {}) };
   }
   return { why: "it has no whole record, so its import has not finished, or it is not an episode", code: "NONE" };
@@ -323,7 +383,8 @@ export function writeEpisode(folder, record, { expectRev, writeText, writer, hom
   const copies = conflictedCopies(folder);
   if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });
-  // A record once written at layout 2 stays at 2: a Mac that knows only 1 would push its Reels without what layout 2 draws.
+  // A record once written at layout 2 or 3 stays there: a Mac that knows only 1 would push its Reels without what layout 2
+  // draws, and one that knows only 2 would go on with an episode whose answer or kind it cannot see.
   const next = { ...record, version: Math.max(Number.isInteger(record.version) ? record.version : 1, layoutOf(record)), rev: expectRev + 1, writer };
   const fault = episodeFault(next);
   if (fault) throw Object.assign(new Error(`the episode's record was not written, because ${fault}`), { code: "FAULT" });

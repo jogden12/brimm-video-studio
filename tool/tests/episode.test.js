@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -84,6 +84,17 @@ describe("a new episode's record", () => {
     assert.deepEqual(newEpisode({ ...IMPORTED, title }).title, title);
     assert.equal(episodeFault({ ...newEpisode({ ...IMPORTED, title }), rev: 1 }), "");
   });
+  it("has the fields of layout 3 only when the import gives them, so a record made today is the record of version 1", () => {
+    const today = newEpisode(IMPORTED);
+    for (const key of ["answer", "label", "fingerprint", "versionOf", "session", "reading"]) assert.equal(key in today, false, key);
+    const answer = { state: "needs your answer", guess: "finished", seen: "wide, 42:10, 2 retakes", came: "camera" };
+    const light = newEpisode({ ...IMPORTED, kind: null, answer, label: "Video of 22 Oct, 10:40 (Mac Studio)", fingerprint: "a1b2c3", versionOf: "e-20261001-0a0b0c" });
+    assert.deepEqual([light.kind, light.answer, light.label, light.fingerprint, light.versionOf], [null, answer, "Video of 22 Oct, 10:40 (Mac Studio)", "a1b2c3", "e-20261001-0a0b0c"]);
+    assert.equal(light.version, 3, "a record that needs layout 3 says so");
+    assert.equal(episodeFault({ ...light, rev: 1 }), "");
+    const some = newEpisode({ ...IMPORTED, kind: null, answer });
+    for (const key of ["label", "fingerprint", "versionOf"]) assert.equal(key in some, false, key);
+  });
   it("is sound once written, as an episode with Reel candidates or a short video with none", () => {
     assert.equal(episodeFault(RECORD), "");
     assert.equal(episodeFault({ ...newEpisode({ ...IMPORTED, kind: "short video", reels: [] }), rev: 1 }), "");
@@ -110,7 +121,7 @@ describe("a moment in the record", () => {
 
 describe("reading an episode's record", () => {
   it("keeps each record in record/, numbered with four digits", () => {
-    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 2, "/E/x/record/0007.json"]);
+    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 3, "/E/x/record/0007.json"]);
   });
   it("gives back the record with the highest number, whole, with any field this version does not know kept as it was", () => {
     const t = setup();
@@ -140,9 +151,33 @@ describe("reading an episode's record", () => {
   });
   it("reads a record of a newer layout, and says so, without checking the fields it does not know", () => {
     const t = setup();
-    const newer = { version: 3, id: RECORD.id, rev: 1, somethingNew: true };
+    const newer = { version: RECORD_VERSION + 1, id: RECORD.id, rev: 1, somethingNew: true };
     t.store(newer);
     assert.deepEqual(readEpisode(t.folder), { record: newer, file: recordFile(t.folder, 1), newer: true });
+    t.done();
+  });
+  it("refuses a record of a layout this Mac does not know, by name, and does not give it an older record in its place", () => {
+    // A Mac on layout 2 stands in through `known`. Its folder holds a layout-1 record, then the layout-3 record another Mac wrote.
+    const t = setup();
+    const unanswered = { ...RECORD, rev: 2, version: 3, kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10, 2 retakes", came: "camera" }, label: "Video of 22 Oct, 10:40 (Mac Studio)" };
+    t.store(RECORD);
+    t.store(unanswered);
+    const before = t.files();
+    assert.equal(episodeFault(unanswered), "", "this Mac reads it");
+    assert.deepEqual(readEpisode(t.folder), { record: unanswered, file: recordFile(t.folder, 2) });
+    const stoodIn = readEpisode(t.folder, { known: 2 });
+    assert.deepEqual(stoodIn, { record: unanswered, file: recordFile(t.folder, 2), newer: true }, "the newest record, marked as newer, not record 1");
+    assert.notEqual(stoodIn.record.rev, RECORD.rev);
+    assert.equal(faultFor(2)(unanswered), "it is version 3, and this brimm-video reads versions 1 to 2");
+    assert.deepEqual(t.files(), before, "reading writes nothing");
+    assert.deepEqual(t.written, []);
+    t.done();
+  });
+  it("still passes over a record that is not whole, whatever layout this Mac stands in for", () => {
+    const t = setup();
+    t.store(RECORD);
+    t.store({ ...RECORD, rev: 2, kind: "reel" });
+    assert.deepEqual(readEpisode(t.folder, { known: 2 }), { record: RECORD, file: recordFile(t.folder, 1) });
     t.done();
   });
   it("says which field of version 1 cannot be read", () => {
@@ -150,7 +185,7 @@ describe("reading an episode's record", () => {
       [null, "it is not an episode's record"],
       [{ ...RECORD, id: "Pricing talk" }, "its id cannot be read"],
       [{ ...RECORD, writer: { commit: "c709b57" } }, "who last wrote it cannot be read"],
-      [{ ...RECORD, kind: "reel" }, "it is neither an episode nor a short video"],
+      [{ ...RECORD, kind: "reel" }, "its kind cannot be read"],
       [{ ...RECORD, video: { ...RECORD.video, recordedFrom: "guess" } }, "its video cannot be read"],
       [{ ...RECORD, video: { ...RECORD.video, file: "media/Pricing talk.mp4" } }, "its video cannot be read"],
       [{ ...RECORD, imported: { on: "Mac Studio", at: "today" } }, "where and when it was imported cannot be read"],
@@ -249,7 +284,7 @@ describe("writing an episode's record", () => {
   });
   it("never writes a record of a newer layout, and says this Mac needs updating", () => {
     const t = setup();
-    const newer = { version: 3, id: RECORD.id, rev: 1 };
+    const newer = { version: RECORD_VERSION + 1, id: RECORD.id, rev: 1 };
     t.store(newer);
     assert.throws(() => writeEpisode(t.folder, newer, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "Jason has a newer brimm-video. Ask him to update this Mac.", code: "NEWER" });
     assert.deepEqual(t.written, []);
@@ -258,7 +293,7 @@ describe("writing an episode's record", () => {
   it("writes nothing that could not be read back, and nothing without the rev it was read at", () => {
     const t = setup();
     const opts = { writeText: t.writeText, writer: WRITER, home: t.home };
-    assert.throws(() => writeEpisode(t.folder, { ...newEpisode(IMPORTED), kind: "reel" }, { ...opts, expectRev: 0 }), { message: "the episode's record was not written, because it is neither an episode nor a short video", code: "FAULT" });
+    assert.throws(() => writeEpisode(t.folder, { ...newEpisode(IMPORTED), kind: "reel" }, { ...opts, expectRev: 0 }), { message: "the episode's record was not written, because its kind cannot be read", code: "FAULT" });
     assert.throws(() => writeEpisode(t.folder, newEpisode(IMPORTED), { ...opts, expectRev: 0, writer: undefined }), { message: "the episode's record was not written, because who last wrote it cannot be read" });
     assert.throws(() => writeEpisode(t.folder, newEpisode(IMPORTED), { ...opts }), { message: "the episode's record was not written, because the rev it was read at was not given" });
     assert.deepEqual(t.written, []);

@@ -8,7 +8,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.js";
-import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
+import { RECORD_VERSION, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
 import { writePending } from "../filing.js";
@@ -300,7 +300,7 @@ describe("node edit.js open", () => {
   it("does not open a record of a newer layout, since opening writes the claim, and says this Mac needs updating", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
     assert.equal(r.code, 1);
     assert.deepEqual(r.said, ["2026-10-13 Talk (Mac Studio) was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac."]);
@@ -755,7 +755,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
   it("5. lists an episode written by a newer brimm-video by its folder, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
     assert.ok(r.text.includes(`  ${FOLDER}\n    Written by a newer brimm-video: Jason updates this Mac before it is changed here.`), r.text);
@@ -823,7 +823,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
   it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     assert.equal((await t.run("push", "talk")).code, 1);
     t.done();
   });
