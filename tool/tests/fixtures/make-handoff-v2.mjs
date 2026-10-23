@@ -6,8 +6,8 @@
 // The fixtures are its output, committed. tests/contract.test.js pins their sha256 and checks that they are what this makes.
 // Changing a word here changes the contract with BRIMM Ops: brimm-operations keeps a copy of each file, so a session there
 // copies them again before the hashes in the test are set.
-// Everything in them is made up: the episode is "Pricing: what to charge?", the one hand-off version 1's fixtures use, and
-// nothing is any real person's or client's words. A session's principles hold no names.
+// Everything in them is made up: the episodes are about what to charge, as hand-off version 1's fixtures are, and nothing is any
+// real person's or client's words. A session's principles hold no names.
 import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,7 +53,9 @@ const MADE_BY = { commit: "c709b57" };
 /** A record as the builder reads it: its kind, its name, and the day it was recorded and where that day was read from. */
 const record = ({ kind, name, recorded, recordedFrom }) => ({ version: 3, kind, name: { text: name, placeholder: false }, video: { recorded, recordedFrom } });
 
-// ---- A finished video, as its editor sent it: "Pricing: what to charge?". Two Reel suggestions; Reel 2 was made from the second.
+// ---- A finished video, as its editor sent it: "Pricing talk", named for the dropped file. Two Reel suggestions; Reel 2 was made
+// from the second.
+const FINISHED_ID = "e-20261022-a41d7e";
 const FINISHED_CUES = timed([
   [3.2, "Welcome to the show. Today we are going to talk about"],
   [3.0, "pricing, and how to decide what to charge."],
@@ -80,12 +82,12 @@ const finished = () => {
   const second = stretchOf(cues, 11, 15);
   return buildHandoffV2({
     ...MADE_BY,
-    record: record({ kind: "finished", name: "Pricing: what to charge?", recorded: "2026-10-22", recordedFrom: "video" }),
-    id: "e-20261022-3fa9c1",
+    record: record({ kind: "finished", name: "Pricing talk", recorded: "2026-10-22", recordedFrom: "video" }),
+    id: FINISHED_ID,
     revision: 1,
     made: "2026-10-22T15:02:11-04:00",
     madeOn: "Sallie's laptop",
-    // The dropped file is the editor's, and is the main video as it is.
+    // The dropped file is the editor's, and is the main video as it is. A finished video is named for it.
     main: { file: "Pricing talk.mov", seconds: videoLength(cues), srt: srtOf(cues) },
     suggestions: [
       { n: 1, ...stretchOf(cues, 4, 8), stretches: [stretchOf(cues, 4, 8)], first: "Most people price", last: "the work is worth.", why: "It stands alone: one claim, the reason for it, and the line that ties them together.", point: "A price is a message about what the work is worth, not a guess about the market." },
@@ -93,15 +95,15 @@ const finished = () => {
     ],
     // Reel 2 was made from suggestion 2 and took its number. Suggestion 1 has no Reel.
     reels: [
-      { n: 2, title: "Stop discounting your best work", file: "Pricing- what to charge- reel 2 v3 3fa9c1.mp4", seconds: lengthOf(cues, 11, 15), inMain: second, srt: srtOf(cues, 11, 15), fromSuggestion: 2 }
+      { n: 2, title: "Stop discounting your best work", file: "Pricing talk reel 2 v3 a41d7e.mp4", seconds: lengthOf(cues, 11, 15), inMain: second, srt: srtOf(cues, 11, 15), fromSuggestion: 2 }
     ]
   });
 };
 
 // ---- A raw video, as its final render: "Pricing: when to raise it?". Suggestions 1 and 3, and the words drawn on its picture.
-// Suggestion 1 is made of two stretches, with an aside between them that the suggestion leaves out. Suggestion 2 was read once
-// and left out of the hand-off, since its words were cut from the final video, but Reel 2 was made from it and keeps its number,
-// so its place in the main is not found. Reel 4 was made from times she gave: a fresh number, no suggestion, and no words on its
+// Suggestion 1 is made of two stretches a short pause apart: on the final clock only cut words fall between kept stretches, so
+// no kept caption lies between them. Suggestion 2 was read once and left out of the hand-off, since its words were cut from the
+// final video, but Reel 2 was made from it and keeps its number, so its place in the main is not found. Reel 4 was made from times she gave: a fresh number, no suggestion, and no words on its
 // picture (an empty title).
 const RAW_CUES = timed([
   [3.3, "Hi, I'm Sallie, and today we're talking about when to"],
@@ -114,13 +116,13 @@ const RAW_CUES = timed([
   [3.8, "When you raise a price, tell people early and plainly.", 0.5],
   [3.0, "Say what is changing, say when it starts,"],
   [2.9, "and thank the people who have been with you."],
-  [2.8, "And yes, it will feel awkward the first time.", 0.3],
-  [3.3, "Keep the old price for anyone who is mid-project,", 0.2],
+  [3.3, "Keep the old price for anyone who is mid-project,", 0.3],
   [3.0, "so nobody feels caught out. Then move on."],
   [3.6, "People ask me what percent is fair. Here is my answer.", 0.5],
   [3.0, "Raise it until you hear a little hesitation,"],
   [3.5, "then stay right there for a month. If the hesitation"],
-  [2.3, "goes away, you can go higher."],
+  [3.4, "goes away, you can go higher. If it gets louder,"],
+  [3.0, "come back down a little and keep going from there."],
   [2.8, "That's it for today. Thanks for watching,", 0.5],
   [2.4, "and I'll see you in the next one."]
 ]);
@@ -134,8 +136,8 @@ const CUT_CUES = timed([
 
 const raw = () => {
   const cues = RAW_CUES;
-  const one = [stretchOf(cues, 7, 9), stretchOf(cues, 11, 12)];
-  const three = stretchOf(cues, 13, 16);
+  const one = [stretchOf(cues, 7, 9), stretchOf(cues, 10, 11)];
+  const three = stretchOf(cues, 12, 16);
   return buildHandoffV2({
     ...MADE_BY,
     record: record({ kind: "raw", name: "Pricing: when to raise it?", recorded: "2026-10-20", recordedFrom: "video" }),
@@ -148,7 +150,7 @@ const raw = () => {
     onPicture: ["Sallie Ogden", "Founder, The BRIMM"],
     suggestions: [
       { n: 1, start: one[0].start, end: one[1].end, stretches: one, first: "When you raise a price", last: "Then move on.", why: "Two short stretches that read as one: how to announce a price change, and who keeps the old price.", point: "Raise a price early and plainly, and keep the old one for work already started." },
-      { n: 3, ...three, stretches: [three], first: "People ask me what", last: "you can go higher.", why: "One question, one answer, and a rule that can be tried this week.", point: "Raise a price until people hesitate, hold it for a month, then decide." }
+      { n: 3, ...three, stretches: [three], first: "People ask me what", last: "keep going from there.", why: "One question, one answer, and a rule that can be tried this week.", point: "Raise a price until people hesitate, hold it for a month, then go higher or come back down a little." }
     ],
     reels: [
       { n: 2, title: "Do not wait for everyone else", file: "Pricing- when to raise it- reel 2 v1 c4e5a7.mp4", seconds: lengthOf(CUT_CUES, 0, 3), srt: srtOf(CUT_CUES), fromSuggestion: 2 },
@@ -212,7 +214,7 @@ const SESSION_BODY = {
     { n: 2, text: "Decide once, then stop re-deciding." }
   ],
   reelsToFilm: [
-    { n: 1, idea: "Why price is a message", words: "Your price tells people what to expect before you have said a word about the work.", why: "It was said more than any other point, and it stands alone.", principle: 1 },
+    { n: 1, idea: "Why price is a message", words: "Before anyone has read about what you do, your price has already told them how much to expect from it.", why: "It was said more than any other point, and it stands alone.", principle: 1 },
     { n: 2, idea: "The day after you raise a price", words: "The day after you raise a price, change nothing. Same warmth, same work, same you.", why: "A calming note that belongs to no one principle.", principle: null }
   ]
 };
@@ -230,13 +232,13 @@ const session = () => buildHandoffV2({
   ]
 });
 
-// ---- A session that replaces a finished video: "Pricing: what to charge?" was handed off as finished (revision 1) and then
+// ---- A session that replaces a finished video: "Pricing talk" was handed off as finished (revision 1) and then
 // corrected to a session. It is the finished video's id, one revision on, with nothing in it yet: the page redacts the earlier
 // revision's words in place when it takes this one.
 const sessionReplacing = () => buildHandoffV2({
   ...MADE_BY,
   record: record({ kind: "session", name: "Session, 2026-10-22", recorded: "2026-10-22", recordedFrom: "video" }),
-  id: "e-20261022-3fa9c1",
+  id: FINISHED_ID,
   revision: 2,
   made: "2026-10-22T16:40:05-04:00",
   madeOn: "Sallie's laptop"

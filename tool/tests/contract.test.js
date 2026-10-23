@@ -16,13 +16,21 @@ const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const read = (name) => JSON.parse(fixture(name).toString("utf8"));
 
+/** The captions of an .srt: where each begins and ends in seconds, and its words. */
+const cuesOf = (srt) => [...srt.matchAll(/(\d+):(\d{2}):(\d{2}),(\d{3}) --> (\d+):(\d{2}):(\d{2}),(\d{3})\n ([^\n]+)\n/g)].map((m) => ({
+  start: Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000,
+  end: Number(m[5]) * 3600 + Number(m[6]) * 60 + Number(m[7]) + Number(m[8]) / 1000,
+  words: m[9]
+}));
+const near = (a, b) => Math.abs(a - b) < 0.0005;
+
 /** Hand-off version 2's fixtures and the sha256 of each, as brimm-operations last copied them. */
 const PINNED_V2 = {
-  "handoff-v2-finished.json": "b7622ccd2512312b0e742df16f951de03c5bbdf4d5749bdfb870fc46e93b642e",
-  "handoff-v2-raw.json": "8caa067433cac5d62cf71979eaa2e88b37331f5d40b37d1a02c21e6f1d2fa781",
-  "handoff-v2-session.json": "515e2b4a6565f149d5ae24c9e7dba71224d185a98764ff6f61fe158db0844dc0",
+  "handoff-v2-finished.json": "7c597e74b53e9865cc2156166ee528503d5bf217730d261ae67c09604fac968f",
+  "handoff-v2-raw.json": "6dd251eff72c483b93f17a495977510c2346f4b88c63d4e13e0ca81554901159",
+  "handoff-v2-session.json": "c34761be3c7800303bc974a2a555617624ed4d5a51369f7c05616c0807b7c6f3",
   "handoff-v2-short-video.json": "ffd0129ab711ca15280ec2a20a9b32e43856856a6bb1f8b281d198ed11946ac7",
-  "handoff-v2-session-replacing.json": "6b2c2a01e25a32ee02a7aadf8bd3ee3b59120dd4641f073c4665e0eef5fcf9ca"
+  "handoff-v2-session-replacing.json": "921a8bd762938601ad063b5adb13f290f267705486969da1757451b78042580f"
 };
 
 describe("the contract with BRIMM Ops: hand-off version 2's fixtures are pinned", () => {
@@ -68,6 +76,36 @@ describe("what each version 2 fixture shows the page", () => {
     assert.equal(finished.session, null);
     assert.equal("title" in finished.video, false);
   });
+  it("finished: named for the dropped file, and with an id whose short form is not version 1's", () => {
+    assert.equal(finished.video.name, "Pricing talk");
+    assert.equal(finished.main.file, "Pricing talk.mov");
+    const v1 = [read("handoff-v1.json").episode.id, read("handoff-v1-short-video.json").episode.id].map((id) => id.slice(-6));
+    for (const h of [finished, raw, session, short, replacing]) assert.ok(!v1.includes(h.video.id.slice(-6)), h.video.id);
+  });
+  it("every suggestion is 15 to 90 seconds of kept words, and its first and last words are the captions' at its ends", () => {
+    for (const h of [finished, raw]) {
+      const cues = cuesOf(h.main.srt);
+      for (const s of h.suggestions) {
+        const kept = s.stretches.reduce((sum, t) => sum + (t.end - t.start), 0);
+        assert.ok(kept >= 15 && s.end - s.start <= 90, `${h.video.kind} suggestion ${s.n} keeps ${kept} seconds`);
+        const opens = cues.find((c) => near(c.start, s.start));
+        const closes = cues.find((c) => near(c.end, s.end));
+        assert.ok(opens && opens.words.startsWith(s.first), `${h.video.kind} suggestion ${s.n} opens with ${s.first}`);
+        assert.ok(closes && closes.words.endsWith(s.last), `${h.video.kind} suggestion ${s.n} closes with ${s.last}`);
+      }
+    }
+  });
+  it("raw: a suggestion's stretches meet or sit a short pause apart, with no kept caption between them", () => {
+    const cues = cuesOf(raw.main.srt);
+    for (const s of raw.suggestions) {
+      s.stretches.forEach((t, i) => {
+        if (i === 0) return;
+        const gap = t.start - s.stretches[i - 1].end;
+        assert.ok(gap >= 0 && gap <= 0.5, `suggestion ${s.n}: ${gap} seconds between its stretches`);
+        assert.deepEqual(cues.filter((c) => c.end > s.stretches[i - 1].end + 0.0005 && c.start < t.start - 0.0005), []);
+      });
+    }
+  });
   it("raw: the words drawn on the main picture, and a suggestion of two stretches", () => {
     assert.equal(raw.video.kind, "raw");
     assert.deepEqual(raw.main.onPicture, ["Sallie Ogden", "Founder, The BRIMM"]);
@@ -108,6 +146,10 @@ describe("what each version 2 fixture shows the page", () => {
     assert.ok(reelsToFilm.some((f) => f.principle === null) && reelsToFilm.some((f) => f.principle !== null));
     assert.equal(JSON.stringify(session).includes("source_context"), false);
   });
+  it("session: no Reel idea's words are the cut Reel's captions word for word", () => {
+    const said = cuesOf(session.reels[0].srt).map((c) => c.words).join(" ");
+    for (const f of session.session.reelsToFilm) assert.ok(!said.includes(f.words) && !f.words.includes(said), `Reel idea ${f.n}`);
+  });
   it("short video: the main video only, with no suggestions and no reels key at all", () => {
     assert.equal(short.video.kind, "short video");
     assert.equal("suggestions" in short, false);
@@ -140,7 +182,10 @@ describe("what each version 2 fixture shows the page", () => {
 });
 
 describe("the fixtures are what make-handoff-v2.mjs writes from the builder, byte for byte", () => {
-  const made = fixtures();
+  let made;
+  before(() => {
+    made = fixtures();
+  });
   it("makes the five that are pinned, and no other", () => {
     assert.deepEqual(Object.keys(made).sort(), Object.keys(PINNED_V2).sort());
   });

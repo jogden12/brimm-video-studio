@@ -1,7 +1,7 @@
 // The hand-off file, version 2: what brimm-video gives BRIMM Ops for a finished video, a raw video, a session or an iPhone clip,
 // in one file that a person drops on the BRIMM Ops page (spec section 8, agreed with the page's own session). Its tests, and the
-// four fixtures in tests/fixtures that brimm-operations keeps a copy of, are the contract between the two: change neither
-// without changing both. The page refuses a session's hand-off for any key it does not know, so the writer writes only the
+// five fixtures in tests/fixtures that brimm-operations keeps a copy of (one for each kind, and handoff-v2-session-replacing,
+// a session that replaces a finished video's id), are the contract between the two: change neither without changing both. The page refuses a session's hand-off for any key it does not know, so the writer writes only the
 // keys the contract names, and the check refuses any other.
 // Version 1, in handoff.js, is unchanged and still read by the page.
 // Nothing here touches a disk or runs a program.

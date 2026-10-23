@@ -1,5 +1,5 @@
 // The hand-off file, version 2: what brimm-video gives BRIMM Ops for a finished video, a raw video, a session or an iPhone clip
-// (spec section 8, as agreed with the page's own session). These tests, and the four fixtures made from the same builder, are
+// (spec section 8, as agreed with the page's own session). These tests, and the five fixtures made from the same builder, are
 // the contract between the two: the page copies the fixtures, and refuses a session's hand-off for any key it does not know.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
