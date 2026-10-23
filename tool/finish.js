@@ -321,7 +321,11 @@ export function handoffIdOf(root, record) {
     { folder, record }. This only reads. */
 export function nextRevision(root, found) {
   const view = viewOf(root);
-  const { chain, first } = walk(view, found.record, found.folder);
+  return revisionIn(view, walk(view, found.record, found.folder));
+}
+
+/** nextRevision, in a view of Episodes already made, for a chain already walked (`walked`, as walk gives it). */
+function revisionIn(view, { chain, first }) {
   let most = 0;
   const finished = (record) => {
     if (record.finished && Number.isInteger(record.finished.revision)) most = Math.max(most, record.finished.revision);
@@ -337,6 +341,25 @@ export function nextRevision(root, found) {
   }
   for (const folder of folders) most = Math.max(most, lastRevision(join(folder, "final"), first));
   return most + 1;
+}
+
+/** Where the next hand-off of a video goes, as every hand-off writer asks it (finishEpisode, finishNow, saveSpellings, and
+    Part F's writers), from one reading of Episodes: { v2, refusal, id, revision }. `found` is { folder, record }, the record's
+    own episode folder and the record as the writer has it. This only reads.
+    - `v2` is whether it is written as version 2 (writesV2For: this Mac's settings, or a version 2 hand-off on file).
+    - Version 1 is under the episode's own id, one revision above its record's last finish and every hand-off of that id in its
+      own final/ and history/ (lastRevision), as it has always been: nothing else in Episodes is read, and nothing is refused.
+    - Version 2 is under the video's first version's id (handoffIdOf), one revision above every one written for that id on this
+      Mac (nextRevision). `refusal` is why it cannot be written, in plain words, after which the writer writes nothing, or "":
+      a gap in the chain of the video's versions (chainGapWords). On a refusal, `id` and `revision` are null, since they would
+      not be the chain's. */
+export function handoffTarget({ root, settings }, { folder, record }) {
+  const v2 = writesV2For(settings, folder, record);
+  if (!v2) return { v2, refusal: "", id: record.id, revision: Math.max((record.finished && record.finished.revision) || 0, lastRevision(join(folder, "final"), record.id)) + 1 };
+  const view = viewOf(root);
+  const walked = walk(view, record, folder);
+  if (walked.gap) return { v2, refusal: chainGapWords(record, walked.gap), id: null, revision: null };
+  return { v2, refusal: "", id: walked.first, revision: revisionIn(view, walked) };
 }
 
 /** Is there a record of the episode numbered above `n`? */
@@ -526,15 +549,15 @@ export async function finishNow(ctx, found, deps = {}) {
     //   know (phase V's own finish maps them).
     // - Version 1 is under the episode's own id, one revision more than any before it, in the record or in final/.
     // A video already handed off as version 2 is handed off as version 2 again, whatever the setting says now (writesV2For).
-    const v2 = writesV2For(ctx.settings, found.folder, record);
-    const gap = v2 ? chainGap(ctx.root, record) : null;
-    if (gap) {
-      failed.push(chainGapWords(record, gap));
+    // Which version, the id, the revision, and a refusal, are handoffTarget's, as every hand-off writer asks them.
+    const target = handoffTarget(ctx, { folder: found.folder, record });
+    if (target.refusal) {
+      failed.push(target.refusal);
       return result();
     }
+    const { v2, revision } = target;
     const main = parts.find((p) => p.key === "main");
     const mainWords = main.words || wordsOfCaptions(main.srt);
-    const revision = v2 ? nextRevision(ctx.root, { folder: found.folder, record }) : Math.max((record.finished && record.finished.revision) || 0, lastRevision(finalDir, record.id)) + 1;
     const reels = parts.filter((p) => p.reel).sort((a, b) => a.reel - b.reel).map((p) => {
       const reel = (record.reels || []).find((r) => r.n === p.reel) || {};
       const title = String(reel.title || "").trim();
@@ -545,7 +568,7 @@ export async function finishNow(ctx, found, deps = {}) {
     });
     if (failed.length) return result();
     const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
-    const handoff = v2 ? buildHandoffV2({ ...given, id: handoffIdOf(ctx.root, record), onPicture: onPictureOf(record) }) : buildHandoff(given);
+    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: onPictureOf(record) }) : buildHandoff(given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);

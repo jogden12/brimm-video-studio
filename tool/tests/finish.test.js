@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, writesV2For } from "../finish.js";
+import { finishNow, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, writesV2For } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { recordFile, recordText } from "../episode.js";
@@ -1291,6 +1291,63 @@ describe("spell, after a finish with hand-off version 2", () => {
     assert.equal(r.code, 0, r.text);
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.version, handoff.video.id, handoff.revision, handoffFaultV2(handoff)], [2, FIRST, 5, ""]);
+    t.done();
+  });
+});
+
+// Where a video's next hand-off goes (handoffTarget), which every hand-off writer asks, from one reading of Episodes: whether it
+// is version 2, why it cannot be written, if it cannot, its id and its revision.
+describe("where a video's next hand-off goes", () => {
+  /** The made-up first version, handed off as version 2 at revision 3, and a new version of it, which once handed itself off as
+      version 1 under its own id at revision 2 (before the switch), as its record says. */
+  const versions = (t) => {
+    const old = original(t);
+    lay(old.folder, "final/a.brimm-ops.json", handoffOf(2, ID, 3));
+    const next = later(t, SECOND, ID, { finished: { revision: 2, at: "2026-10-21T10:00:00-05:00", on: "Mac Studio" } });
+    lay(next.folder, "final/b.brimm-ops.json", handoffOf(1, SECOND, 2));
+    return { old, next };
+  };
+  it("is, for version 1, the episode's own id at its own next revision, and refuses nothing, with or without a gap", () => {
+    for (const settings of [{}, { handoffVersion: 1 }, undefined]) {
+      const t = setup();
+      const { old, next } = versions(t);
+      assert.deepEqual(handoffTarget({ root: t.root, settings }, next), { v2: false, refusal: "", id: SECOND, revision: 3 });
+      rmSync(old.folder, { recursive: true });
+      assert.deepEqual(handoffTarget({ root: t.root, settings }, next), { v2: false, refusal: "", id: SECOND, revision: 3 }, "version 1 never asks for the chain");
+      t.done();
+    }
+  });
+  it("is, for version 2, the first version's id, one above every revision written for it", () => {
+    const t = setup();
+    const { next } = versions(t);
+    assert.deepEqual(handoffTarget({ root: t.root, settings: { handoffVersion: 2 } }, next), { v2: true, refusal: "", id: ID, revision: 4 });
+    assert.equal(nextRevision(t.root, next), 4);
+    t.done();
+  });
+  it("refuses, for version 2, a gap in the chain, by the video's label, and gives no id and no revision", () => {
+    const t = setup();
+    const { old, next } = versions(t);
+    rmSync(old.folder, { recursive: true });
+    const record = { ...next.record, label: LABEL };
+    assert.deepEqual(handoffTarget({ root: t.root, settings: { handoffVersion: 2 } }, { ...next, record }), { v2: true, refusal: chainGapWords(record, { id: ID, reason: "missing" }), id: null, revision: null });
+    t.done();
+  });
+  it("is version 2 for a video whose last hand-off on file is version 2, whatever the setting says", () => {
+    const t = setup();
+    const { next } = versions(t);
+    lay(next.folder, "final/c.brimm-ops.json", handoffOf(2, ID, 4));
+    const record = { ...next.record, finished: { ...next.record.finished, revision: 4, handoff: "final/c.brimm-ops.json" } };
+    assert.deepEqual(handoffTarget({ root: t.root, settings: { handoffVersion: 1 } }, { ...next, record }), { v2: true, refusal: "", id: ID, revision: 5 });
+    t.done();
+  });
+  it("writes nothing and calls nothing", () => {
+    const t = setup();
+    const { next } = versions(t);
+    const tree = () => listAll(t.dir).map((rel) => [rel, statSync(join(t.dir, rel)).size, statSync(join(t.dir, rel)).mtimeMs]);
+    const before = tree();
+    for (const settings of [{}, { handoffVersion: 2 }]) handoffTarget({ root: t.root, settings }, next);
+    assert.deepEqual(tree(), before);
+    assert.deepEqual([t.clones, t.calls, t.opened], [[], [], []]);
     t.done();
   });
 });

@@ -39,7 +39,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, lastRevision, chainGap, chainGapWords, cannotFinish, handoffIdOf, nextRevision, writesV2For } from "./finish.js";
+import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -1272,12 +1272,12 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // or version 2 when the hand-off on file is version 2 already (writesV2For). Version 1 needs a name, and an approved title for
   // all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished video's name is its file's);
   // it is written under the video's first version's id, so a gap in the chain of its versions is refused here, before the claim
-  // is written, as the detached part refuses it before anything is copied.
-  const v2 = writesV2For(ctx.settings, found.folder, record);
+  // is written, as the detached part refuses it before anything is copied (finish.js handoffTarget, which every writer asks).
+  const target = handoffTarget(ctx, { folder: found.folder, record });
+  const { v2 } = target;
   if (record.name && record.name.placeholder && (!v2 || kindOfRecord(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
-  const gap = v2 ? chainGap(ctx.root, record) : null;
-  if (gap) stops.push(chainGapWords(record, gap));
+  if (target.refusal) stops.push(target.refusal);
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
@@ -2305,15 +2305,15 @@ async function saveSpellings(ctx, found, spellings, done) {
     // video's first version's id, above every revision written for that id on this Mac (finish.js nextRevision), and only when
     // the chain of the video's versions can be followed to its first: on a gap nothing is written, the spelling included.
     // Version 1 is under the episode's own id, and a revision is never used twice, even one a finish left in final/ without
-    // writing its record (finish.js lastRevision).
+    // writing its record (finish.js lastRevision). Which version, the id, the revision and a refusal are finish.js
+    // handoffTarget's, as every hand-off writer asks them.
     const onFile = JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8"));
-    const v2 = writesV2For(ctx.settings, found.folder, record);
-    const gap = v2 ? chainGap(ctx.root, record) : null;
-    if (gap) return refuse(ctx, chainGapWords(record, gap));
-    const revision = v2 ? nextRevision(ctx.root, { folder: found.folder, record }) : Math.max(finished.revision, lastRevision(join(found.folder, "final"), record.id)) + 1;
+    const target = handoffTarget(ctx, { folder: found.folder, record });
+    if (target.refusal) return refuse(ctx, target.refusal);
+    const { v2, revision } = target;
     const at = localStamp(new Date(ctx.now()));
     const given = { record, srts, revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit };
-    const handoff = v2 ? respelledHandoffV2(onFile, { ...given, id: handoffIdOf(ctx.root, record), spellings: spelledWith.main || [] }) : respelledHandoff(onFile, given);
+    const handoff = v2 ? respelledHandoffV2(onFile, { ...given, id: target.id, spellings: spelledWith.main || [] }) : respelledHandoff(onFile, given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) return refuse(ctx, `The hand-off could not be made again (${fault.replace(/\.$/, "")}). Nothing was changed.`);
     writes.push([finished.handoff, handoffText(handoff)]);
