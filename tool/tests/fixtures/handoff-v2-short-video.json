@@ -1,0 +1,24 @@
+{
+  "format": "brimm-video hand-off",
+  "version": 2,
+  "revision": 1,
+  "made": "2026-10-22T09:30:00-04:00",
+  "madeOn": "Sallie's laptop",
+  "madeBy": "brimm-video c709b57",
+  "video": {
+    "id": "e-20261021-6e90b3",
+    "kind": "short video",
+    "name": "Know your costs",
+    "recorded": "2026-10-21",
+    "recordedFrom": "import"
+  },
+  "main": {
+    "file": "Know your costs main v1 6e90b3.mp4",
+    "seconds": 11.22,
+    "srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n2\n00:00:02,600 --> 00:00:05,000\n costs. It is very, very important.\n\n3\n00:00:05,300 --> 00:00:08,900\n Write down what each job takes, in time and in money,\n\n4\n00:00:08,900 --> 00:00:11,100\n and only then pick a price.\n\n",
+    "onPicture": [
+      "Know your costs"
+    ]
+  },
+  "session": null
+}

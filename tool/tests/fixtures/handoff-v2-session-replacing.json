@@ -1,0 +1,21 @@
+{
+  "format": "brimm-video hand-off",
+  "version": 2,
+  "revision": 2,
+  "made": "2026-10-22T16:40:05-04:00",
+  "madeOn": "Sallie's laptop",
+  "madeBy": "brimm-video c709b57",
+  "video": {
+    "id": "e-20261022-a41d7e",
+    "kind": "session",
+    "name": "Session, 2026-10-22",
+    "recorded": "2026-10-22",
+    "recordedFrom": "video"
+  },
+  "reels": [],
+  "session": {
+    "principles": [],
+    "recurringPrinciples": [],
+    "reelsToFilm": []
+  }
+}
