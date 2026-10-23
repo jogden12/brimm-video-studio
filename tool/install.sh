@@ -148,6 +148,13 @@ find_program() {
   done
   return 1
 }
+# Whether the node at $1 is older than 22, which the tool needs: gives 0 when it is, and with "say" as the second word says so too,
+# as a refusal does. The one place its version is looked at.
+node_old() {
+  if "$1" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then return 1; fi
+  [[ "${2-}" != say ]] || say "Node here is $("$1" --version), and the tool needs 22 or later. Run: brew upgrade node"
+  return 0
+}
 # The value of a setting at the top of the JSON that settings.js writes, read from the standard input: nothing when there is none.
 json_field() { plutil -extract "$1" raw -o - - 2>/dev/null || true; }
 # Claude Code, where unedited.js finds it when a launch agent runs it: along the agent's own PATH, and then in .local/bin in
@@ -299,11 +306,17 @@ if [[ "$machined" == "yes" ]]; then
     fi
   done
   # Node reads and checks this Mac's settings, so it is needed before anything is changed, when there are settings to read or the
-  # switch's options are given. A Mac with none, told none, is set up as it always was: Homebrew installs node, and the settings
-  # are written once it is here.
+  # switch's options are given. A node older than 22 cannot do it, and counts as none. A Mac with no settings, told none, is set
+  # up as it always was: Homebrew installs node, or the real run refuses an old one, and the settings are written once it is here.
   node="$(find_program node || true)"
-  if [[ -z "$node" && ( ${#switch_options[@]} -gt 0 || -e "$SETTINGS_FILE" ) ]]; then
-    say "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again."
+  settings_node="$node"
+  if [[ -n "$node" ]] && node_old "$node"; then settings_node=""; fi
+  if [[ -z "$settings_node" && ( ${#switch_options[@]} -gt 0 || -e "$SETTINGS_FILE" ) ]]; then
+    if [[ -n "$node" ]]; then
+      node_old "$node" say
+    else
+      say "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again."
+    fi
     say ""
     say "Nothing was changed."
     exit 2
@@ -318,16 +331,10 @@ if [[ "$machined" == "yes" ]]; then
   # (a value that will not do, what is not built yet, and a switch of the drop folder while the old folder holds work). Its
   # answer is the settings shown below, and the drop folder is the one they name: --drop, else the settings', else Unedited Video.
   planned=""
-  if [[ -n "$node" ]]; then
-    if ! "$node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
-      say "Node here is $("$node" --version), and the tool needs 22 or later. Run: brew upgrade node"
-      say ""
-      say "Nothing was changed."
-      exit 2
-    fi
+  if [[ -n "$settings_node" ]]; then
     # What it says is its standard output alone, which is read below: anything node says on its standard error, a warning or why
     # it could not run, goes to this one's own output as it comes (fd 3), and is never taken for the settings.
-    if ! { planned="$("$node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)"; } 3>&1; then
+    if ! { planned="$("$settings_node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)"; } 3>&1; then
       say "$planned"
       say ""
       say "Nothing was changed."
@@ -523,8 +530,7 @@ if [[ ${#need[@]} -gt 0 ]]; then "$brew" install "${need[@]}"; fi
 ffmpeg="$(find_program ffmpeg)"
 whisper="$(find_program whisper-cli whisper-cpp)"
 node="$(find_program node)"
-if ! "$node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
-  say "Node here is $("$node" --version), and the tool needs 22 or later. Run: brew upgrade node"
+if node_old "$node" say; then
   exit 1
 fi
 

@@ -1046,13 +1046,63 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Drop/Mac Studio`])]);
     d.done();
   });
-  it("refuses plainly when the node here is older than 22, which cannot read the settings", () => {
+  /** A node that says it is `version` and says no more: `-e` is the installer's own check of it, which fails for an old one. */
+  const NODE_OF = (version) => `case "$1" in\n  --version) echo v${version} ;;\n  -e) exit ${Number(version.split(".")[0]) >= 22 ? 0 : 1} ;;\nesac\n`;
+  const OLD_NODE = "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node";
+  it("treats a node older than 22 as no node when the settings are to be read and checked: refused before any change, with the node's own words", () => {
     const d = box();
-    const r = askWith({ onPath: { node: 'case "$1" in\n  --version) echo v20.1.0 ;;\n  -e) exit 1 ;;\nesac\n' } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
-    assert.deepEqual([r.status, r.out], [2, "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node\n\nNothing was changed.\n"]);
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+      const r = askWith({ onPath: { node: NODE_OF("20.1.0") }, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
+      assert.deepEqual([r.status, r.out], [2, `${OLD_NODE}\n\nNothing was changed.\n`], args.join(" "));
+      assert.deepEqual([r.left, r.ran, r.agents], [settings ? SETTINGS_LEFT : [], "", []]);
+    }
     d.done();
   });
-  it("still refuses a drop folder another Mac's marker names, in the folder the settings name", () => {
+  it("goes on as it always did with a node older than 22 when there are no settings to read and no option of the switch: the print shows the plan whole", () => {
+    const d = box();
+    const r = askWith({ onPath: { node: NODE_OF("20.1.0") } }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE) });
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Unedited Video/Mac Studio`])]);
+    // The agent is shown with the node found, old as it is: that one is looked at again when the Mac is set up for real.
+    assert.ok(r.agents[0].ProgramArguments[0].startsWith(dirname(r.home)), r.agents[0].ProgramArguments[0]);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+    assert.doesNotMatch(r.out, /Node here is/);
+    d.done();
+  });
+  it("writes the check of node's version once, and the real run's refusal of an old node uses it, where it was", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    assert.equal(text.split("process.versions.node.split").length - 1, 1, "the check of node's version, once");
+    assert.equal(text.split("the tool needs 22 or later").length - 1, 1, "and what is said of it, once");
+    // The real run says it, with exit 1, after the programs are installed, as it did.
+    assert.ok(text.indexOf('if node_old "$node" say; then\n  exit 1\nfi') > text.indexOf('if [[ ${#need[@]} -gt 0 ]]; then "$brew" install "${need[@]}"; fi'), "the real run's refusal");
+  });
+  it("tells an old node from a new one, and says so only when asked: its own lines run alone in zsh", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-node-"));
+    try {
+      const fn = (() => {
+        const t = readFileSync(INSTALL, "utf8");
+        const at = t.indexOf("\nnode_old() {");
+        assert.ok(at >= 0, "node_old(), in install.sh");
+        return t.slice(at + 1, t.indexOf("\n}\n", at) + 3);
+      })();
+      const say = 'say() { print -r -- "$@"; }\n';
+      const nodeAt = (name, version) => {
+        writeFileSync(join(dir, name), `#!/bin/sh\n${NODE_OF(version)}`);
+        chmodSync(join(dir, name), 0o755);
+        return join(dir, name);
+      };
+      const run = (script) => spawnSync("/bin/zsh", ["-c", `set -euo pipefail\n${say}${fn}${script}`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      const old = nodeAt("old", "20.1.0");
+      const fresh = nodeAt("new", "22.3.0");
+      assert.deepEqual(((r) => [r.status, r.stdout])(run(`node_old "${old}" && print old\nprint -r -- went on`)), [0, "old\nwent on\n"]);
+      assert.deepEqual(((r) => [r.status, r.stdout])(run(`node_old "${fresh}" && print old\nprint -r -- went on`)), [0, "went on\n"]);
+      assert.deepEqual(((r) => [r.status, r.stdout])(run(`node_old "${old}" say && print old`)), [0, `${OLD_NODE}\nold\n`]);
+      assert.deepEqual(((r) => [r.status, r.stdout])(run(`node_old "${fresh}" say && print old\nprint -r -- went on`)), [0, "went on\n"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });  it("still refuses a drop folder another Mac's marker names, in the folder the settings name", () => {
     const d = box();
     const drop = d.folder("Drop");
     writeFileSync(join(drop, ".brimm-watched-by"), "Sallie's laptop\n");
@@ -1063,7 +1113,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   it("asks settings.js before it says anything or changes anything, and has write told the same options, in the real run", () => {
     const text = readFileSync(INSTALL, "utf8");
     // The check is made where the Mac's own folders are worked out, before the summary.
-    const planAt = text.indexOf('"$node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
+    const planAt = text.indexOf('"$settings_node" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"');
     assert.ok(planAt > 0, "plan, in install.sh");
     assert.ok(planAt < text.indexOf('say "The unedited-video tool"'), "the check is made before the summary");
     assert.ok(planAt < text.indexOf('drop="$root/$drop_name/$machine"'), "and before the drop folder is worked out");
