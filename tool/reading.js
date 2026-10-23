@@ -567,9 +567,10 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
     ...(seen.skipped ? [seen.skipped] : []),
     ...(read.problems.length ? [`${counted(read.problems.length, "part")} of Claude's reply could not be used: ${names.txt} says which.`] : [])
   ];
-  // Her decisions were of the items it replaces: they are let go with them.
+  // Her decisions were of the items it replaces: they are let go with them, and so is a client's agreement noted for one of them
+  // (`agreed`, by the number of a Reel idea that is set aside), since a new item must not inherit an agreement never given.
   const change = (r) => {
-    const { decided, edits, ...mark } = isObject(r.session) ? r.session : {};
+    const { decided, edits, agreed, ...mark } = isObject(r.session) ? r.session : {};
     return { ...r, session: mark, reading: { kind: "session", model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", principles: names.json } };
   };
   const onPut = () => {
