@@ -312,7 +312,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const notice = /const noticeOf = \(name\) => `Claude has read \$\{name\}: say "([^"]+)"`/.exec(source("reading.js"));
     const mark = /: say "(clear the session mark)"\./.exec(source("edit.js"));
     assert.ok(notice && mark, "the words to say are not where they were");
-    for (const phrase of [notice[1], mark[1]]) assert.ok(skill.split("\n").some((line) => line.toLowerCase().startsWith(`| "${phrase.toLowerCase()}" |`)), phrase);
+    // Each begins its row's "She says" cell; her own plain words for it may follow there.
+    for (const phrase of [notice[1], mark[1]]) assert.ok(skill.split("\n").some((line) => /^\| "[^|]*\|/.test(line) && line.toLowerCase().startsWith(`| "${phrase.toLowerCase()}"`)), phrase);
   });
   it("runs behind, then episodes, then the cards, at the start of each session, and episodes then the cards for what's waiting", () => {
     const start = sectionOf(skill, "## At the start of each session");
@@ -324,7 +325,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     for (const text of [skill, files["CLAUDE.md"]]) assert.match(text, /Never rate, report or share a chat about a session/);
   });
   it("tells her before a dialog command what the dialog asks of her, and afterwards only what edit.js said (Ruling 23)", () => {
-    for (const [start, command, click] of [['"The client agreed to Reel 2"', '`reel "<label>" 2 --client-agreed`', '"They agreed"'], ['"Clear the session mark"', '`kind "<label>" <kind> --private no --again --clear-session`', '"Clear it"']]) {
+    for (const [start, command, click] of [['"The client agreed to Reel 2"', '`reel "<label>" 2 --client-agreed`', '"They agreed"'], [`"Clear the session mark" / "It isn't a session" / "Take the session mark off"`, '`kind "<label>" <kind> --private no --again --clear-session`', '"Clear it"']]) {
       const row = rowOf(start);
       assert.ok(row.includes(command), row);
       const before = row.slice(0, row.indexOf(command));
@@ -339,6 +340,15 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(sessions.includes("Never say a dialog is open once a command has returned, and never say the mark is cleared or the agreement noted unless edit.js says so after the dialog has closed."), sessions);
     assert.doesNotMatch(sessions, /Never say a dialog is open, the mark cleared or the agreement noted unless/);
     assert.doesNotMatch(skill, /tell her a dialog is open/i);
+  });
+  it("clears a session mark in her own words, telling her first that the dialog shows the label, and that she clicks within a minute (Ruling 30)", () => {
+    // F8a's dialog opens with the video's label, then the spec's question; a click too late is "Not cleared … click within a minute".
+    const row = rowOf(`"Clear the session mark" / "It isn't a session" / "Take the session mark off"`);
+    const command = row.indexOf('`kind "<label>" <kind> --private no --again --clear-session`');
+    assert.ok(command > 0, row);
+    const before = row.slice(0, command);
+    for (const words of ["finished by your editor, raw with retakes or an iPhone clip, never a session", "it shows the video's label first, then asks whether to clear its session mark, so she checks it is the video she means",
+      'she clicks "Clear it" herself, within a minute', "Claude cannot press it", "Return presses Cancel"]) assert.ok(before.includes(words), words);
   });
   it("says a hand-off was shown in Finder only when edit.js says it showed one (Ruling 23)", () => {
     for (const start of ["The spellings card", '"It was a session after all"', '"Done"']) {
