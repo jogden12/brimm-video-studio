@@ -1572,3 +1572,46 @@ describe("the highest number ever given to a suggestion or a Reel of a video", (
     t.done();
   });
 });
+
+// A video's id on the BRIMM Ops page never changes across its revisions (spec 2026-10-22, section 8), and a session's words are
+// redacted by it. When a video handed off as version 2 under one id is linked since to an earlier version, its versions lead to
+// another id: a hand-off under that one would start the video afresh on the page. That is refused, by the video's label.
+describe("a hand-off of a video whose versions now lead to another id than the one it went to the page under", () => {
+  const moved = (from, to) => `${LABEL} went to the BRIMM Ops page under ${from}, but its versions now lead to ${to}: ask Jason. Nothing was written.`;
+  it("is refused by spell, by the quick part of finish at once, and by its detached part, and nothing is written", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    firstCut(t);
+    const found = await asked(t, { ...EDITED, label: LABEL });
+    assert.equal((await finishNow(t.ctx, found)).ok, true);
+    assert.equal(handoffIn(found).video.id, ID);
+    // Her answer is given again: the video is a new version of the first cut.
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, versionOf: FIRST }));
+    const before = episodesTree(t);
+    const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+    assert.deepEqual([r.code, r.text], [1, moved(ID, FIRST)]);
+    const said = t.said().split("\n").length;
+    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 1);
+    assert.deepEqual(t.said().split("\n").slice(said), [moved(ID, FIRST)], "at once: no part line, no folder");
+    assert.deepEqual(episodesTree(t), before, "final/ and the record as they were");
+    // A hand-off set aside into history/ is one the page holds as well. The detached part refuses it too.
+    const t2 = setup();
+    handoffVersion(t2, 2);
+    firstCut(t2);
+    const found2 = await asked(t2, { ...EDITED, versionOf: FIRST, label: LABEL, ...OPEN });
+    lay(found2.folder, "history/2026-10-21 09.00 Pricing- what to charge-.brimm-ops.json", handoffOf(2, ID, 1));
+    const before2 = episodesTree(t2);
+    const result = await finishNow(t2.ctx, found2);
+    assert.deepEqual(result.failed, [moved(ID, FIRST)]);
+    assert.deepEqual(episodesTree(t2), before2);
+    // A hand-off of version 1, under the episode's own id as version 1 always was, is not one it went to the page under as
+    // version 2.
+    rmSync(join(found2.folder, "history"), { recursive: true });
+    lay(found2.folder, "history/2026-10-21 09.00 Pricing- what to charge-.brimm-ops.json", { ...handoffOf(1, ID, 1), reels: [] });
+    assert.equal((await finishNow(t2.ctx, found2)).ok, true);
+    t.done();
+    t2.done();
+  });
+});

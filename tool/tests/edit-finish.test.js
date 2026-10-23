@@ -235,6 +235,12 @@ describe("finish, the part that looks and asks, for a video already handed off a
   const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
   const ON_FILE = "final/Pricing- what to charge-.brimm-ops.json";
   const FIXTURES = { 1: "handoff-v1", 2: "handoff-v2-finished" };
+  /** The contract's hand-off of `version`, as the made-up episode's own: under its id, which it went to the page under. */
+  const ownHandoff = (version) => {
+    const handoff = JSON.parse(readFileSync(new URL(`./fixtures/${FIXTURES[version]}.json`, import.meta.url), "utf8"));
+    for (const who of [handoff.episode, handoff.video]) if (who) who.id = ID;
+    return JSON.stringify(handoff, null, 2) + "\n";
+  };
   /** The made-up edit finished before, its hand-off of `version` on file in final/ (none when `version` is not given), the
       setting at 1, and Final Cut's files in From Final Cut. */
   const handedOff = (version, more = {}, text = null) => {
@@ -246,7 +252,7 @@ describe("finish, the part that looks and asks, for a video already handed off a
     const found = episodeFor(t, { record: { ...EDITED, title: null, finished, ...more } });
     if (version || text !== null) {
       mkdirSync(join(found.folder, "final"), { recursive: true });
-      writeFileSync(join(found.folder, ON_FILE), text !== null ? text : readFileSync(new URL(`./fixtures/${FIXTURES[version]}.json`, import.meta.url), "utf8"));
+      writeFileSync(join(found.folder, ON_FILE), text !== null ? text : ownHandoff(version));
     }
     return { t, found };
   };

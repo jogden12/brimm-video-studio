@@ -152,13 +152,13 @@ function versionOf(record, part, name) {
   const push = (Array.isArray(pushed) ? pushed : []).find((p) => String(p.project).normalize("NFC") === own);
   return push ? push.v : undefined;
 }
-/** The files in a folder whose names end in `ending`, as paths from it, at any depth when `deep`. A folder is read on its own,
-    one at a time, so that one which cannot be read, or has gone, is passed over and loses only its own files. [] when the
-    folder itself cannot be read. */
+/** The files in a folder whose names end in `ending`, as paths from it, in order, at any depth when `deep`. A folder is read on
+    its own, one at a time, so that one which cannot be read, or has gone, is passed over and loses only its own files. [] when
+    the folder itself cannot be read. */
 const namesIn = (dir, deep, ending) => {
   let entries = [];
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   } catch (e) {
     return [];
   }
@@ -423,6 +423,9 @@ const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "ses
         session's words by the id, and this hand-off, under the same id and above the session's revision, would bring them
         back. A session's own hand-off (Part F's empty session revision) is the session's, and is not refused for it. The
         video is named by its label, else "This video", never by its name.
+      - a version 2 hand-off in its own final/ or history/ under another id than the chain's first: the video went to the page
+        under that id, which never changes across its revisions (spec 2026-10-22, section 8), and its versions lead elsewhere
+        now, as after her answer linked it, or an earlier version of it, to another video since. Both ids are said.
       On a refusal, `id` and `revision` are null and `taken` is empty, since no hand-off is to be written under them. */
 export function handoffTarget({ root, settings }, { folder, record }) {
   const v2 = writesV2For(settings, folder, record);
@@ -434,17 +437,26 @@ export function handoffTarget({ root, settings }, { folder, record }) {
   const set = setOf(view, walked);
   const who = record.label || "This video";
   if (kindOf(record) !== "session" && set.members.some((one) => unclearedSession(one.record))) return refused(`${who} is a version of a client or group session: ask Jason. Nothing was written.`);
-  // Each folder's hand-offs are read once, for the revision and for the numbers taken.
+  // Each folder's hand-offs are read once, for the id it went under, the revision and the numbers taken.
   const read = new Map();
   const handoffsAt = (at) => {
-    if (!read.has(at)) read.set(at, handoffsBeside(join(at, "final")));
-    return read.get(at);
+    const key = resolve(at);
+    if (!read.has(key)) read.set(key, handoffsBeside(join(at, "final")));
+    return read.get(key);
   };
-  const own = resolve(folder || (view.find(record.id) || {}).folder || "");
+  const ownFolder = folder || (view.find(record.id) || {}).folder || null;
+  const own = ownFolder ? resolve(ownFolder) : null;
+  // A version 2 hand-off in its own final/ or history/ under an id other than the one its versions lead to now: the video went
+  // to the page under that id, which never changes (one set aside since, as by a corrected kind, is the page's still).
+  const went = ownFolder ? handoffsAt(ownFolder).find((h) => h.version === VERSION_2 && h.video && isId(h.video.id) && h.video.id !== walked.first) : undefined;
+  if (went) return refused(`${who} went to the BRIMM Ops page under ${went.video.id}, but its versions now lead to ${walked.first}: ask Jason. Nothing was written.`);
   const taken = new Set();
   for (const at of set.folders) if (resolve(at) !== own) for (const h of handoffsAt(at)) if (handoffFor(h, walked.first)) numbersOf(h).forEach((n) => taken.add(n));
   return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first, handoffsAt), taken: [...taken].sort((a, b) => a - b) };
 }
+
+/** Is this an id brimm-video gives an episode? Only such an id is ever said of a hand-off: it names no one. */
+const isId = (id) => typeof id === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(id);
 
 /** Is there a record of the episode numbered above `n`? */
 function laterRecord(folder, n) {
