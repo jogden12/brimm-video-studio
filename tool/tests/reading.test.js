@@ -12,17 +12,19 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { localStamp, recordFile, recordText } from "../episode.js";
-import { episodeWork, pendingFolder } from "../settings.js";
+import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
 import { readResult, resultFile } from "../detached.js";
 import { writePending } from "../filing.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, roughCaptions, keptSpans, roughCutArgs, streamsOf } from "../cuts.js";
 import { applyDecisions } from "../notes.js";
 import { requestFor } from "../readings.js";
 import { stretchesOf } from "../reframe.js";
-import { CLAUDE_MODEL } from "../unedited.js";
+import { CLAUDE_MODEL, AGAIN_MS } from "../unedited.js";
 import { readReels, reelsFile, previewSteps, REELS_VERSION } from "../reels.js";
-import { READ_LOOK_MS } from "../reading.js";
-import { LATE_CHECK_MS } from "../dropbox.js";
+import { READ_LOOK_MS, READ_HOLD_MS } from "../reading.js";
+import { LATE_CHECK_MS, lateCheck } from "../dropbox.js";
+import { writeStatus } from "../importing.js";
+import { READ_POLL_MS } from "../edit.js";
 import { sessionLabel } from "../kinds.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
@@ -70,7 +72,7 @@ const ACCOUNT = "sallie@example.com (BRIMM)";
 /** Claude Code as a stand-in: `claude auth status` says the account, and a call prints `reply` as its result. Each request it is
     given goes into `asks`. `ended` stands for a call that does not work. */
 const claudeOf = (reply, asks, ended = null) => (args, asked) => {
-  if (args[0] === "auth") return { code: 0, stderr: "", stdout: JSON.stringify(STATUS) };
+  if (args.includes("auth")) return { code: 0, stderr: "", stdout: JSON.stringify(STATUS) };
   asks.push(asked.input);
   if (ended) return ended;
   return { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: typeof reply === "string" ? reply : JSON.stringify(reply) }) };
@@ -123,7 +125,7 @@ const onWaits = (t, ms, then) => {
 };
 
 /** The calls of Claude Code that asked Claude something (not `auth status`). */
-const calls = (t) => t.calls.filter((c) => c.cmd === "CLAUDE" && c.args[0] !== "auth");
+const calls = (t) => t.calls.filter((c) => c.cmd === "CLAUDE" && !c.args.includes("auth"));
 
 /** The renders folder of the made-up episode on this Mac, and the rough cut's file there. */
 const renderOf = (t) => join(episodeWork(t.home, FOLDER), "renders", `${NAME} – version 0.mp4`);
@@ -216,7 +218,7 @@ describe("read, a finished video", () => {
   it("keeps the account as \"\" when claude auth status cannot be read, and reads all the same", async () => {
     const { t, found } = reading("finished");
     const claude = t.ctx.deps.run;
-    t.ctx.deps.run = async (cmd, args, asked) => (cmd === "CLAUDE" && args[0] === "auth" ? { code: 1, stderr: "not signed in", stdout: "" } : claude(cmd, args, asked));
+    t.ctx.deps.run = async (cmd, args, asked) => (cmd === "CLAUDE" && args.includes("auth") ? { code: 1, stderr: "not signed in", stdout: "" } : claude(cmd, args, asked));
     assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
     assert.equal(reread(found).reading.account, "");
     t.done();
@@ -539,5 +541,348 @@ describe("a Reel with no crops yet, which every reader that needs crops refuses"
   });
   it("previewSteps", () => {
     assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 }, n: 3 }), { message: NOT_MADE(3) });
+  });
+});
+
+// --- Fix round 1 (the reviews of F5) ---
+
+/** A pending late check of this Mac's for the made-up episode, due 10 minutes from now, with `over` laid on it. */
+const pendingFor = (t, found, over = {}) => writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: VIDEO, bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...over });
+/** The pending late check made, as the import makes it: taken away. */
+const checkMade = (t) => rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
+/** What the record says once the other Mac took the video over and answered it a client or group session. */
+const sessionOver = (rev, by = "Sallie's laptop") => ({ rev, kind: "session", name: { text: sessionLabel("2026-10-14"), placeholder: false }, session: { marked: AT, on: by, teachings: null, cleared: null }, editing: { by, since: AT } });
+/** Claude Code as a stand-in whose call does `then(n)` on its nth call before it replies, and whose `auth status` does
+    `onAuth()`; each request goes into `asks`. */
+const claudeDoing = (t, reply, asks, { then = () => {}, onAuth = () => {}, first = null } = {}) => {
+  const run = t.ctx.deps.run;
+  t.ctx.deps.run = async (cmd, args, asked) => {
+    if (cmd !== "CLAUDE") return run(cmd, args, asked);
+    t.calls.push({ cmd, args, cwd: asked && asked.cwd });
+    if (args.includes("auth")) {
+      await onAuth(args, asked);
+      return { code: 0, stderr: "", stdout: JSON.stringify(STATUS) };
+    }
+    asks.push(asked.input);
+    await then(asks.length);
+    if (first && asks.length === 1) return first;
+    return { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: false, result: JSON.stringify(reply) }) };
+  };
+};
+const ERRED = { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: true, result: "it could not go on" }) };
+const READ_ALREADY = `${NAME} was read already for this answer. Nothing was asked of Claude.`;
+
+describe("read's result, written once what it read is in (fix 1)", () => {
+  it("lets kind, waiting in the foreground, say what Claude found before the late check, and status say the run is still at work", async () => {
+    const waitingAnswer = { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera", match: null };
+    const { t, found, notices } = reading("finished", { over: { kind: null, answer: waitingAnswer, editing: null } });
+    // The late check of what the reading put in waits until the test lets it go; kind's polls let the run go on meanwhile.
+    let release;
+    const held = new Promise((done) => {
+      release = done;
+    });
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      if (ms === LATE_CHECK_MS) await held;
+      if (ms === READ_POLL_MS) await new Promise((done) => setImmediate(done));
+      await wait(ms);
+    };
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    let run = null;
+    t.ctx.deps.start = (cmd, args) => {
+      run = editMain(args.slice(1), { ...t.ctx.deps, say: () => {} });
+    };
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.equal(r.code, 0, r.text);
+    const said = r.said[r.said.length - 1];
+    assert.match(said, new RegExp(`^${LABEL.replace(/[()]/g, "\\$&")}: read put in what it made [^;]+ ago; the late check of its copies is still to come\\. Made: Reel suggestions 1 to 2, 2 spellings to check\\.`), said);
+    assert.match(said, /Say "what did Claude find\?"$/);
+    assert.deepEqual(notices, [NOTICE]);
+    const early = readResult(t.home, FOLDER, "read");
+    assert.equal(early.early, true);
+    // status, meanwhile: the run is still at work, and what it put in is said.
+    const status = await on(t.ctx.deps, "status");
+    assert.ok(status.said.includes(`${FOLDER}: read is running.`), status.text);
+    assert.ok(status.said.some((line) => line.startsWith(`${FOLDER}: read put in what it made`) && line.includes("still to come")), status.text);
+    // A conflicted copy of reels.json lands before the late check: the late check's result adds what it found, and only that.
+    writeFileSync(join(found.folder, "reels (Sallie's laptop's conflicted copy 2026-10-20).json"), "{}");
+    release();
+    assert.equal(await run, 1);
+    const final = readResult(t.home, FOLDER, "read");
+    assert.equal(final.early, undefined);
+    assert.equal(final.started, early.started);
+    assert.deepEqual(final.made, early.made);
+    assert.deepEqual(final.failed.slice(0, early.failed.length), early.failed);
+    assert.ok(final.failed.slice(early.failed.length).some((f) => /^reels\.json has a conflicted copy in the episode/.test(f)), final.failed.join(" | "));
+    t.done();
+  });
+});
+
+describe("read reads the record again right before every call to Claude (fix 2, fix 6)", () => {
+  it("before the second try, after the record became a session during the first", async () => {
+    const asks = [];
+    const { t, found } = reading("finished");
+    claudeDoing(t, FINISHED_REPLY, asks, { first: ERRED, then: (n) => n === 1 && writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), ...sessionOver(2) })) });
+    const r = await on(t.ctx.deps, ...readArgs("finished"));
+    assert.equal(r.code, 1);
+    assert.equal(asks.length, 1);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [SESSION_LATER]);
+    assert.equal(reread(found).rev, 2);
+    t.done();
+  });
+  it("after the account is read, for a finished video and an iPhone clip alike", async () => {
+    for (const kind of ["finished", "short video"]) {
+      const asks = [];
+      const { t, found } = reading(kind);
+      claudeDoing(t, REPLIES[kind], asks, { onAuth: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), ...sessionOver(2) })) });
+      const r = await on(t.ctx.deps, ...readArgs(kind));
+      assert.equal(r.code, 1, kind);
+      assert.deepEqual([asks.length, reread(found).rev], [0, 2], kind);
+      assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [SESSION_LATER], kind);
+      t.done();
+    }
+  });
+  it("and refuses a newer record Dropbox is still bringing over, while a raw reading waited for the late check", async () => {
+    const { t, found, asks } = reading("raw");
+    pendingFor(t, found);
+    onWaits(t, READ_LOOK_MS, () => {
+      // The other Mac's session answer after a take-over: only the start of record 2 is here yet.
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), ...sessionOver(2) }).slice(0, 40));
+      checkMade(t);
+    });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.equal(asks.length, 0);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [`Dropbox is still bringing a newer record of ${NAME} over, so Claude did not read it.`]);
+    t.done();
+  });
+  it("and puts nothing in when the record changed while Claude was asked (intoEpisode's expected rev)", async () => {
+    const asks = [];
+    const { t, found, notices } = reading("finished");
+    claudeDoing(t, FINISHED_REPLY, asks, { then: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, name: { text: "Pricing, renamed", placeholder: false } })) });
+    const r = await on(t.ctx.deps, ...readArgs("finished"));
+    assert.equal(r.code, 1);
+    assert.equal(reread(found).rev, 2);
+    assert.ok(!existsSync(join(found.folder, "reels.json")));
+    assert.deepEqual(notices, []);
+    assert.ok(readResult(t.home, FOLDER, "read").failed.some((f) => /changed on the other Mac meanwhile/.test(f)), readResult(t.home, FOLDER, "read").failed.join(" | "));
+    t.done();
+  });
+});
+
+describe("read waits for the import's late check whenever it would replace a file that check looks at (fix 3)", () => {
+  it("a finished reading of a video the full import filed, whose reels.json the late check still watches", async () => {
+    const IMPORT_REELS = JSON.stringify(reelsFile({ video: VIDEO, by: "import", made: AT, candidates: [{ n: 1, start: 6.07, end: 21.097, ranges: [{ start: 6.07, end: 21.097, crop: { x: 0, y: 0, w: 405, h: 720, found: true } }], seconds: 15.027, fits: { fits: true }, title: "Know your costs", reason: "r", point: "", words: "", phrases: [], preview: null }] }), null, 2) + "\n";
+    const { t, found, asks } = reading("finished", { over: { version: 2, kind: "finished" }, files: { ...LIGHT_FILES, "reels.json": IMPORT_REELS } });
+    const workCopy = join(t.work, "reels.json");
+    writeFileSync(workCopy, IMPORT_REELS);
+    const entries = [{ from: workCopy, to: join(found.folder, "reels.json"), bytes: Buffer.byteLength(IMPORT_REELS) }];
+    pendingFor(t, found, { work: t.work, entries, lastCopy: t.now() - 60000 });
+    let looks = 0;
+    onWaits(t, READ_LOOK_MS, () => {
+      looks += 1;
+      assert.equal(readFileSync(join(found.folder, "reels.json"), "utf8"), IMPORT_REELS, "reels.json is the import's while its check is to come");
+      assert.equal(asks.length, 0);
+      if (looks === 2) {
+        // The import makes its late check, which finds reels.json as it put it, and takes its pending check away.
+        assert.deepEqual(lateCheck(entries, { clone: (from, to) => writeFileSync(to, readFileSync(from)), sameDisk: () => true }), []);
+        checkMade(t);
+      }
+    });
+    const r = await on(t.ctx.deps, ...readArgs("finished"));
+    assert.equal(r.code, 0, r.text);
+    assert.equal(looks, 2);
+    const now = readFileSync(join(found.folder, "reels.json"), "utf8");
+    assert.equal(JSON.parse(now).by, "read");
+    assert.equal(reread(found).files["reels.json"], Buffer.byteLength(now));
+    t.done();
+  });
+});
+
+describe("resolve never prints the account a reading kept (fix 4)", () => {
+  it("shows the reading row without it", async () => {
+    const { t, found } = reading("finished");
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    const theirs = { ...reread(found), writer: { commit: "c709b57", on: "Sallie's laptop" } };
+    delete theirs.reading;
+    writeFileSync(join(found.folder, "record", "0002 (Sallie's laptop's conflicted copy 2026-10-20).json"), recordText(theirs));
+    const r = await on(t.ctx.deps, "resolve", FOLDER);
+    assert.doesNotMatch(r.text, /sallie@example\.com|account/i);
+    assert.ok(r.said.some((line) => /Reading/.test(line) && /finished/.test(line)), r.text);
+    t.done();
+  });
+});
+
+describe("one reading for each answer (fix 5)", () => {
+  it("refuses a second reading of the same answer, asking and replacing nothing", async () => {
+    const { t, found, asks } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const before = snapshot(found);
+    const r = await on(t.ctx.deps, ...readArgs("raw", 0));
+    assert.equal(r.code, 1);
+    assert.deepEqual([asks.length, snapshot(found)], [1, before]);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [READ_ALREADY]);
+    t.done();
+  });
+  it("reads a video answered again since its last reading", async () => {
+    const { t, asks } = reading("finished", { over: { reading: { kind: "raw", model: CLAUDE_MODEL, at: "2026-10-19T09:00:00-05:00", on: "Mac Studio", account: "", outcome: "read" } } });
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    assert.equal(asks.length, 1);
+    t.done();
+  });
+});
+
+describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6, fix 11)", () => {
+  /** The status of an import of the video at work on the other Mac, written as of now. */
+  const importing = (t) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 2, import: "x1", video: VIDEO, bytes: 13, seconds: 23.423, step: "Waiting for the late check", at: localStamp(new Date(t.now())) }, (to, text) => writeFileSync(to, text));
+  it("waits while it is at work, and reads once it is done", async () => {
+    const { t, asks } = reading("raw");
+    importing(t);
+    let looks = 0;
+    onWaits(t, READ_LOOK_MS, () => {
+      looks += 1;
+      if (looks < 3) importing(t);
+      else rmSync(join(t.root, "Episodes", ".importing"), { recursive: true, force: true });
+    });
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    assert.deepEqual([looks, asks.length], [3, 1]);
+    t.done();
+  });
+  it("and says why, asking nothing, when it is still at work after READ_HOLD_MS", async () => {
+    const { t, asks } = reading("raw");
+    importing(t);
+    let looks = 0;
+    onWaits(t, READ_LOOK_MS, () => {
+      looks += 1;
+      if (looks > READ_HOLD_MS / READ_LOOK_MS + 5) throw new Error("it waited past READ_HOLD_MS");
+      importing(t);
+    });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.deepEqual([looks, asks.length], [READ_HOLD_MS / READ_LOOK_MS, 0]);
+    assert.match(readResult(t.home, FOLDER, "read").failed[0], /^The import of this episode has not finished on Sallie's laptop yet: it is at "Waiting for the late check"\./);
+    t.done();
+  });
+});
+
+describe("the raw reading's version 0 (fix 7, fix 8, fix 9)", () => {
+  it("holds Claude's graphic ideas on its timeline", async () => {
+    const { t, found } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /Graphic idea: A chart of what it costs/);
+    t.done();
+  });
+  it("opens the rough cut only once what it read is in the episode", async () => {
+    const { t, found } = reading("raw");
+    const opened = [];
+    t.ctx.deps.openApp = (app, file) => opened.push([app, file, reread(found).rev]);
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    assert.deepEqual(opened, [["QuickTime Player", renderOf(t), 2]]);
+    t.done();
+  });
+  it("when the put fails after the render: opens nothing, posts no notice, and says where the rough cut is kept", async () => {
+    const { t, found, notices } = reading("raw");
+    const run = t.ctx.deps.run;
+    t.ctx.deps.run = async (cmd, args, asked) => {
+      // The other Mac renames it while the rough cut is made.
+      if (cmd === "FFMPEG") writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, name: { text: "Pricing, renamed", placeholder: false } }));
+      return run(cmd, args, asked);
+    };
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.deepEqual([t.opened, notices, reread(found).rev], [[], [], 2]);
+    assert.ok(existsSync(renderOf(t)));
+    const result = readResult(t.home, FOLDER, "read");
+    assert.equal(result.ok, false);
+    assert.ok(result.failed.includes(`The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${NAME} – version 0.mp4".`), result.failed.join(" | "));
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(FOLDER.replace(/[()]/g, "\\$&")));
+    t.done();
+  });
+  it("sets the import's plan and its cut log aside in history/ before the first reading replaces them", async () => {
+    const { t, found } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const aside = listAll(found.folder).filter((rel) => rel.startsWith("history/"));
+    assert.equal(aside.length, 2, aside.join(", "));
+    const of = (ending) => readFileSync(join(found.folder, aside.find((rel) => rel.endsWith(ending))), "utf8");
+    assert.equal(of(" Pricing talk.cut-plan.json"), LIGHT_FILES["Pricing talk.cut-plan.json"]);
+    assert.equal(of(" Pricing talk.cut-plan.txt"), LIGHT_FILES["Pricing talk.cut-plan.txt"]);
+    for (const rel of aside) assert.equal(reread(found).files[rel], statSync(join(found.folder, rel)).size, rel);
+    t.done();
+  });
+});
+
+describe("fix 10 and fix 11", () => {
+  it("names a clip it left out by Claude's own numbering, and numbers the suggestions with no gap, on from the highest given", async () => {
+    const reply = { ...RAW_REPLY, clips: [{ from: "zz", to: "p5", hook: "h", why: "w" }, { from: "p4", to: "p5", hook: "What this is about", why: "It says it.", point: "Pricing." }, { from: "p7", to: "p9", hook: "Costs", why: "One point.", point: "Costs." }] };
+    const { t, found } = reading("raw", { reply });
+    mkdirSync(join(found.folder, "history"), { recursive: true });
+    writeFileSync(join(found.folder, "history", "2026-10-19 reels.json"), JSON.stringify({ format: "brimm-video reels", version: 1, video: VIDEO, by: "import", made: AT, highest: 4, candidates: [] }));
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.map((c) => c.n), [5, 6]);
+    const text = readFileSync(join(found.folder, "Pricing talk.reel-suggestions.txt"), "utf8");
+    assert.match(text, /- Claude's clip 1 was left out: the plan has no phrase "zz"\./);
+    assert.doesNotMatch(text, /(^|\n)- Clip \d/);
+    t.done();
+  });
+  it("numbers on with no gap past a suggestion that comes to less than one picture", async () => {
+    const tiny = { id: "p10", start: 22.0, end: 22.005, keep: true, kind: "keep", why: "", text: "Bye.", words: [] };
+    const plan = { ...PLAN, phrases: [...PLAN.phrases, tiny] };
+    const reply = { ...FINISHED_REPLY, suggestions: [{ from: "p10", to: "p10", why: "Short.", point: "" }, FINISHED_REPLY.suggestions[0]] };
+    const { t, found } = reading("finished", { reply, files: { ...LIGHT_FILES, "Pricing talk.cut-plan.json": JSON.stringify(plan, null, 2) + "\n" } });
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.map((c) => [c.n, c.reason]), [[1, "It is the whole talk in brief."]]);
+    t.done();
+  });
+  it("refuses a preview of a candidate with no crops, numbered or not", () => {
+    assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 } }), { message: "This Reel is not made yet: make it first." });
+  });
+  it("reads the account in the run's own empty folder, with no settings file read", async () => {
+    const asks = [];
+    let seen = null;
+    const { t } = reading("finished");
+    claudeDoing(t, FINISHED_REPLY, asks, { onAuth: (args, asked) => {
+      seen = { args, cwd: asked.cwd, inIt: readdirSync(asked.cwd) };
+    } });
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    assert.deepEqual(seen.args, ["--setting-sources", "", "auth", "status", "--json"]);
+    assert.deepEqual(seen.inIt, []);
+    t.done();
+  });
+  it("checks again, after the late check, that readings are on", async () => {
+    const { t, found, asks } = reading("raw");
+    pendingFor(t, found);
+    onWaits(t, READ_LOOK_MS, () => {
+      writeSettings(t.home, { readings: false });
+      checkMade(t);
+    });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.equal(asks.length, 0);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [READINGS_OFF]);
+    t.done();
+  });
+  it("is asked a second time when the first try fails, and reads", async () => {
+    const asks = [];
+    const { t, found } = reading("finished");
+    claudeDoing(t, FINISHED_REPLY, asks, { first: ERRED });
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    assert.equal(asks.length, 2);
+    assert.ok(t.waits.includes(AGAIN_MS));
+    assert.equal(reread(found).reading.outcome, "read");
+    t.done();
+  });
+  it("never puts the account in its log or its result", async () => {
+    const { t } = reading("finished");
+    const r = await on(t.ctx.deps, ...readArgs("finished"));
+    assert.equal(r.code, 0);
+    assert.doesNotMatch(r.text + readFileSync(resultFile(t.home, FOLDER, "read"), "utf8"), /sallie@example\.com/);
+    t.done();
+  });
+  it("refuses --kind session for a video that is not one", async () => {
+    const { t, asks } = reading("finished");
+    const r = await on(t.ctx.deps, ...readArgs("session"));
+    assert.equal(r.code, 1);
+    assert.deepEqual([asks.length, readResult(t.home, FOLDER, "read").failed], [0, [SESSION_LATER]]);
+    t.done();
   });
 });

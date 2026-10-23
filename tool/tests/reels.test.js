@@ -171,7 +171,8 @@ describe("the preview of a Reel candidate", () => {
     assert.throws(refused([]), { message: "A preview needs at least one stretch to show." });
     assert.throws(refused([{ start: 5, end: 5, crop: crop(0) }]), { message: "A stretch must end after it starts, at times in seconds: this one runs from 5 to 5." });
     assert.throws(refused([{ start: 10, end: 12, crop: crop(0) }, { start: 11, end: 14, crop: crop(0) }]), { message: "The stretches must be in rising order and must not overlap: the one from 11 to 14 starts before the one before it ends." });
-    assert.throws(refused([{ start: 10, end: 12 }]), { message: "Each stretch of a preview needs its crop: the one from 10 to 12 has none." });
+    // A stretch with no crop beside one with its own; a candidate with no crop at all is one not made yet (tests/reading.test.js).
+    assert.throws(refused([{ start: 1, end: 2, crop: crop(0) }, { start: 10, end: 12 }]), { message: "Each stretch of a preview needs its crop: the one from 10 to 12 has none." });
     assert.throws(refused([{ start: 10, end: 10.01, crop: crop(0) }]), { message: "A stretch must hold at least one picture: the one from 10 to 10.01 holds none at 30 a second." });
     assert.throws(refused([{ start: 10, end: 12, crop: crop(0) }], ""), { message: "A preview needs the video's frame rate, and this one cannot be read: " });
   });

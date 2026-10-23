@@ -120,10 +120,11 @@ const listed = (path) => `file '${String(path).replace(/'/g, "'\\''")}'`;
       and given its own when it is whole.
     `video` is the raw video, `ranges` the candidate's stretches, `fps` and `duration` as previewStretches takes them, and
     `size` the picture's {width, height} as it is shown. Anything previewStretches refuses is refused, and so is a size that
-    cannot be read. `n` is the candidate's number: a candidate with no crops yet, which a reading suggested (reels.json
-    version 2), is refused first, in the words of every reader that needs crops (notMadeWords). */
+    cannot be read. A candidate with no crops yet, which a reading suggested (reels.json version 2), is refused first, in the
+    words of every reader that needs crops (notMadeWords), by its number `n` when it is given; one with a crop on some stretches
+    and not on others says which stretch has none. */
 export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null, n }) {
-  if (n !== undefined && uncropped({ ranges })) throw new Error(notMadeWords(n));
+  if (Array.isArray(ranges) && ranges.length && ranges.every((range) => !(range && range.crop))) throw new Error(notMadeWords(n));
   if (!(size && Number.isInteger(size.width) && size.width > 0 && Number.isInteger(size.height) && size.height > 0)) throw new Error(`A preview needs the size of the video's picture, and this one cannot be read: ${size && size.width} by ${size && size.height}`);
   const stretches = previewStretches({ ranges, fps, duration });
   const most = perPart(size);
@@ -196,8 +197,8 @@ export const REELS_VERSION = 2;
     stretch at all is not one: it has nothing to show, and says so in its own words. */
 export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candidate.ranges.some((range) => !(range && range.crop));
 
-/** What a command that needs a Reel's crops says of a candidate that is not made yet. */
-export const notMadeWords = (n) => `Reel ${n} is not made yet: say "make Reel ${n}" first.`;
+/** What a command that needs a Reel's crops says of a candidate that is not made yet, by its number `n`, or with none. */
+export const notMadeWords = (n) => (n === undefined ? "This Reel is not made yet: make it first." : `Reel ${n} is not made yet: say "make Reel ${n}" first.`);
 
 /** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment
     `made`, at version 2 when a candidate has no crops (uncropped), and at version 1 otherwise.

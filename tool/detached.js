@@ -37,11 +37,17 @@ function holder(home, folder) {
   }
 }
 
-/** The command a detached run is at for an episode on this Mac, or "" when none is: a lock whose run is no longer running
-    was left by a run that died, and counts as none. */
-export function runningCommand(home, folder, alive = isRunning) {
+/** The detached run at work on an episode on this Mac, { pid, command }, or null when none is: a lock whose run is no longer
+    running was left by a run that died, and counts as none. */
+export function runningRun(home, folder, alive = isRunning) {
   const held = holder(home, folder);
-  return held && alive(held.pid) ? held.command : "";
+  return held && alive(held.pid) ? { pid: held.pid, command: held.command } : null;
+}
+
+/** The command a detached run is at for an episode on this Mac, or "" when none is (runningRun). */
+export function runningCommand(home, folder, alive = isRunning) {
+  const run = runningRun(home, folder, alive);
+  return run ? run.command : "";
 }
 
 /** Write a file whole on this Mac's own disk: under a name of this run's own, then renamed, which is safe there. */
@@ -154,7 +160,11 @@ export function releaseEpisodeLock(lock, text) {
     each line of the result is written as, which `status` prints into Sallie's chat: for a video not yet answered, or a session,
     the line with nothing of the video's names in it (edit.js), and for any other the line as it is. An error of its own, as a
     folder in BRIMM Video Work that cannot be made or a result that cannot be written, names the episode's folder: it is thrown
-    said through `clean` too, so that nothing of it reaches the log or the chat otherwise. */
+    said through `clean` too, so that nothing of it reaches the log or the chat otherwise.
+    `work` is given { early }: a run whose own work is done before it ends (a reading, whose copies have their late check still
+    to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and with
+    this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the run
+    ends. An early result that cannot be written costs nothing: the final one is still written. */
 export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
   const lock = lockOf(home, folder);
   /** The error `e` as `clean` says it: the same error when that changes nothing, as for every episode today. */
@@ -173,14 +183,22 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
   if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
+  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
+  const early = (done) => {
+    try {
+      writeWhole(resultFile(home, folder, command), JSON.stringify({ ...resultOf(done), early: true, pid: process.pid }, null, 2) + "\n");
+    } catch (e) {
+      // The final result is written all the same.
+    }
+  };
   let done;
   try {
     keepAwake(process.pid);
-    done = await work();
+    done = await work({ early });
   } catch (e) {
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
-  const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" };
+  const result = resultOf(done);
   if (done.takeOver) result.takeOver = { ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
   let failure = null;
   try {

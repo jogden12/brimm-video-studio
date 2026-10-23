@@ -39,7 +39,7 @@ import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, epi
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
-import { startDetached, runDetached, runningCommand, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
+import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
@@ -1121,10 +1121,15 @@ function nextOf(ctx, folder, r) {
 
 /** What a detached run's result `r` says of the episode `shown`, in one line: when it ended, what it made, what it could not do,
     and `next`, what to say next. Each of them as `clean` says it. `status` says it for every result, and `kind` for the reading
-    it waited for. */
-function ranLine(ctx, shown, r, clean, next) {
+    it waited for. An early result (detached.js runDetached), which a reading writes once what it read is in the episode, says
+    when it put that in, and that the late check of its copies is still to come while its run is at work (`live`), or that the
+    run stopped before it was made. */
+function ranLine(ctx, shown, r, clean, next, live = false) {
   const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
-  return `${shown}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
+  const when = r.early
+    ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "the late check of its copies is still to come" : "it stopped before the late check of its copies was made"}`
+    : `ended ${ageText(ctx.now() - r.ended)} ago`;
+  return `${shown}: ${r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
 }
 
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
@@ -1173,7 +1178,8 @@ export async function status(ctx, rest) {
     const e = episodeAt(ctx, folder);
     const shown = listedAs(ctx, e);
     const clean = cleanFor(ctx, e);
-    const command = runningCommand(ctx.home, folder, ctx.alive);
+    const run = runningRun(ctx.home, folder, ctx.alive);
+    const command = run ? run.command : "";
     if (command) lines.push(`${shown}: ${command} is running.`);
     let results = [];
     try {
@@ -1183,10 +1189,12 @@ export async function status(ctx, rest) {
     }
     for (const file of results) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
-      if (!r || r.command === command) continue;
+      // The result of a command at work now is an older run's, and is not said; but the early result its own run wrote is.
+      const own = Boolean(r) && r.early === true && Boolean(run) && r.command === command && r.pid === run.pid;
+      if (!r || (r.command === command && !own)) continue;
       // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
       // left out.
-      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r)));
+      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own));
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -1966,7 +1974,8 @@ function studioStale(ctx) {
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the
     same. When either side is a video not yet answered, or a session (gate.js gated), only who has it open, its finish, its
     hand-over, how far its main video was shown and the sizes of its files are said, a file named without the video's name;
-    every other field that differs is named alone, as [what, null, null], and what it holds is never said into the chat. */
+    every other field that differs is named alone, as [what, null, null], and what it holds is never said into the chat. The
+    account a reading was made on (`reading.account`) is never said, whatever the record. */
 function recordDifferences(a, b) {
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
@@ -1985,8 +1994,10 @@ function recordDifferences(a, b) {
   const as = (v) => (v === undefined || v === null || (Array.isArray(v) && !v.length) ? "none" : JSON.stringify(v));
   const fields = (x, y, skip) => [...new Set([...Object.keys(x || {}), ...Object.keys(y || {})])].filter((k) => !skip.includes(k)).sort();
   const reelOf = (r, n) => (r.reels || []).find((x) => x.n === n);
+  // Claude's reading, but for the account it was read on, which is never said into the chat.
+  const reading = (r) => (r.reading !== null && typeof r.reading === "object" && !Array.isArray(r.reading) ? Object.fromEntries(Object.entries(r.reading).filter(([k]) => k !== "account")) : r.reading);
   const others = [
-    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(a[k]), as(b[k])]),
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
     ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
     ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
   ];
@@ -2444,7 +2455,7 @@ async function read(ctx, rest) {
     notify: ctx.deps.notify || banner, ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.progress ? { progress: ctx.deps.progress } : {}),
     ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), kind, rev
   };
-  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "read", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => readEpisodeNow(ctx, { name: found.name, folder: found.folder, record: found.read.record }, deps));
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "read", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ early }) => readEpisodeNow(ctx, { name: found.name, folder: found.folder, record: found.read.record }, { ...deps, early }));
   if (result.taking || result.running) {
     ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
     return 1;
@@ -3285,7 +3296,7 @@ async function answerKind(ctx, found, plan, began) {
   for (;;) {
     const result = readResult(ctx.home, found.name, "read");
     if (result && (!previous || result.ended !== previous.ended || result.started !== previous.started)) {
-      say(ranLine(ctx, name, result, (text) => text, result.next));
+      say(ranLine(ctx, name, result, (text) => text, result.next, result.early === true && runningCommand(ctx.home, found.name, ctx.alive) === "read"));
       return result.ok ? 0 : 1;
     }
     if (ctx.now() - waitFrom >= budget) break;

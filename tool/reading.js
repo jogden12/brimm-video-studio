@@ -22,12 +22,12 @@ import { keptSpans, roughRate, roughCaptions, planText, probeArgs, factsOf, stre
 import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
-import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
 import { commitOf } from "./filing.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { timelineFor } from "./timeline.js";
-import { episodeWork, runsFolder } from "./settings.js";
+import { episodeWork, runsFolder, readSettings } from "./settings.js";
 import { fileSafe, shortId, timelineFile } from "./names.js";
 import { askOnce, roughCut, intoEpisode, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
 import { noProgress } from "./progress.js";
@@ -66,14 +66,17 @@ const sentence = (part) => `${String(part).replace(/\.$/, "")}.`;
 
 /** Why the run cannot go on with the episode's `record` as the answer it was started for (`kind`, `rev`), in plain words, or "":
     a session, which is read only for its teachings; one whose kind is not the kind any more (or that has none, as a video not
-    answered); one whose session mark is not cleared (the gate's own predicate); one whose answer Dropbox undid (its rev is below
-    the answer's); one another Mac has open (its claim); and one whose last change on this Mac Dropbox took away. Each names the
-    video as edit.js does (shownName). */
+    answered); one whose session mark is not cleared (the gate's own predicate); one read already for this answer (one reading
+    for each answer: its `reading.at` is not before `answer.at`, or either cannot be read; `kind … --again` sets an old reading
+    aside); one whose answer Dropbox undid (its rev is below the answer's); one another Mac has open (its claim); and one whose
+    last change on this Mac Dropbox took away. Each names the video as edit.js does (shownName). */
 function notAsAnswered(record, { kind, rev, machine, home }) {
   const name = shownName(record);
   if (kindOf(record) === "session") return SESSION_LATER;
   if (kindOf(record) !== kind) return `${name} is no longer answered as ${KIND_SAID[kind]}, so Claude did not read it. Nothing was changed.`;
   if (gated(record)) return `${name} is marked a client or group session, so Claude did not read it. Nothing was changed.`;
+  const answeredAt = isObject(record.answer) ? Date.parse(record.answer.at) : NaN;
+  if (record.reading !== undefined && record.reading !== null && !(isObject(record.reading) && Date.parse(record.reading.at) < answeredAt)) return `${name} was read already for this answer. Nothing was asked of Claude.`;
   if (record.rev < rev) return `Dropbox undid the answer for ${name}, so Claude did not read it. Say what it is again.`;
   const held = heldElsewhere(record, machine);
   if (held) return `${held.by} has ${name} open, so Claude did not read it. Nothing was changed.`;
@@ -81,10 +84,13 @@ function notAsAnswered(record, { kind, rev, machine, home }) {
 }
 
 /** The account Claude Code is signed in to on this Mac, as `claude auth status` says it: "<email> (<organisation>)", or the email
-    alone, or "" when it cannot be read. It is run as the call is, through `run`. It is kept in the record, and never printed. */
-async function accountOf({ run, tools }) {
+    alone, or "" when it cannot be read. It is run as the call is, through `run`, in a new empty folder `folder` of the run's own,
+    and with the call's one option that applies to it, reading no settings file (--setting-sources ""). It is kept in the
+    record, and never printed. */
+async function accountOf({ run, tools }, folder) {
   try {
-    const ended = await run(tools.claude, ["auth", "status", "--json"], { limit: ACCOUNT_MS, out: 100000 });
+    mkdirSync(folder, { recursive: true });
+    const ended = await run(tools.claude, ["--setting-sources", "", "auth", "status", "--json"], { cwd: folder, limit: ACCOUNT_MS, out: 100000 });
     if (ended.outOfTime || ended.code !== 0) return "";
     const told = JSON.parse(ended.stdout);
     if (!isObject(told)) return "";
@@ -174,18 +180,27 @@ function offersFor(spellings, record) {
   return spellings.filter((s) => !known.has(s.heard) && !seen.has(s.heard) && Boolean(seen.add(s.heard)));
 }
 
+
+/** Claude's clips, as clipRanges names one it left out ("Clip 1 was left out: …", "… it overlaps clip 2."), named so that their
+    numbers, which are Claude's own, are not taken for the numbers the reading gives the suggestions it keeps. */
+const claudesClip = (line) => String(line).replace(/^Clip (\d+) was left out: /, "Claude's clip $1 was left out: ").replace(/overlaps clip (\d+)\./, "overlaps Claude's clip $1.");
+
 /** Read the episode `found` ({ folder, name, record }, as findEpisode found it) as `deps.kind` (finished, raw, short video), the
     answer of rev `deps.rev`: the detached run's work. Resolves { ok, made, failed, next }, the run's result, in plain words that
     name the episode by its name (shownName) and never quote Claude's reply or the transcript. `ctx` is edit.js's (this Mac's
     settings, home, root, isWhole, openApp, and its deps for timelineFor), and `deps` are the run's: `run` and `tools` (the
     programs, Claude Code among them), `wait`, `now`, `log`, `notify` (the import's notice), `readAll` (how a file is brought over),
-    and the rule's options, as askAgain is given them. Nothing is asked of Claude, and nothing written, when:
-    - this Mac's readings are off, or it is a session (read only for its teachings, in a later step);
-    - the record is not the answer it was started for (notAsAnswered), at the start, while it waits, or just before the call;
-    - Claude Code is not on this Mac; for a raw video, the import still holds it (importHold) and that does not clear within
-      READ_HOLD_MS, or clears only by a person's hand; or a file it reads is not on this Mac and cannot be brought over.
-    When Claude cannot be asked, nothing is written either. Otherwise what it read goes in by the rule, with the record, and the
-    notice is posted once it is in, before the late check is waited for. */
+    `early` (runDetached's, for the result once what it read is in), and the rule's options, as askAgain is given them. Nothing
+    is asked of Claude, and nothing written, when:
+    - this Mac's readings are off, at the start or after a wait for the import (its settings are read again then), or it is a
+      session (read only for its teachings, in a later step);
+    - the record is not the answer it was started for (notAsAnswered: read already for this answer among them), at the start,
+      after each look while it waits, and right before each try of the call; or a newer record is still coming over;
+    - Claude Code is not on this Mac; the import still holds the video (importHold), for a raw reading, and for a finished one
+      that would replace a file the import put in (reels.json, its suggestions), and that does not clear within READ_HOLD_MS,
+      or clears only by a person's hand; or a file it reads is not on this Mac and cannot be brought over.
+    When Claude cannot be asked, nothing is written either. Otherwise what it read goes in by the rule, with the record; then the
+    rough cut opens, the notice is posted and the result is written early, before the late check is waited for. */
 export async function readEpisodeNow(ctx, found, deps) {
   const { kind, rev } = deps;
   const home = ctx.home;
@@ -194,6 +209,8 @@ export async function readEpisodeNow(ctx, found, deps) {
   const now = () => (deps.now || ctx.now)();
   const whole = deps.isWhole || ctx.isWhole || ((path) => isWhole(path));
   const stop = (why, next = "") => ({ ok: false, made: [], failed: [why], next });
+  /** Whether this Mac's readings are off, as its settings say now: read again from its disk, or as the run was given them. */
+  const readingsOff = () => (readSettings(home).settings || ctx.settings).readings === false;
   if (ctx.settings.readings === false) return stop(READINGS_OFF);
   if (kind === "session") return stop(SESSION_LATER);
   const asWas = { kind, rev, machine: ctx.machine, home };
@@ -203,18 +220,24 @@ export async function readEpisodeNow(ctx, found, deps) {
   const name = shownName(record);
   const named = `${name} (${shortId(record.id)})`;
   if (!deps.tools.claude) return stop("Claude Code is not installed on this Mac, so Claude cannot read it.");
-  /** The record read again: { record } while it is still the answer, or { why }. */
+  /** The record read again: { record } while it is still the answer, and no newer one is coming over; or { why }. */
   const again = () => {
     const read = readEpisode(found.folder);
     if (!read.record) return { why: `The record of ${name} cannot be read now (${String(read.why).replace(/\.$/, "")}), so Claude did not read it.` };
     if (read.newer) return { why: `${name} was written by a newer brimm-video meanwhile, so Claude did not read it. Ask Jason to update this Mac.` };
+    // A record file above the one read, which Dropbox is still bringing over, may be another Mac's answer, or its session mark.
+    if ((recordNumbers(found.folder)[0] || 0) > read.record.rev) return { why: `Dropbox is still bringing a newer record of ${name} over, so Claude did not read it.` };
     const why = notAsAnswered(read.record, asWas);
     return why ? { why } : { record: read.record };
   };
+  const video = record.video.file;
+  const stem = basename(video, extname(video));
 
-  // A raw reading replaces the plan, the cut log and the rough cut's captions, which the import's late check looks at: it waits
-  // while that check is still to come, and asks nothing and writes nothing meanwhile.
-  if (kind === "raw") {
+  // A reading that replaces a file the import's late check looks at waits while that check is still to come, and asks nothing
+  // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), and a finished one when
+  // the import put in a reels.json or suggestions (as the full import does).
+  const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
+  if (replaces) {
     let waited = 0;
     for (;;) {
       const hold = importHold({ root: ctx.root, home, machine: ctx.machine, record, now: now() });
@@ -227,16 +250,15 @@ export async function readEpisodeNow(ctx, found, deps) {
       if (read.why) return stop(read.why);
       record = read.record;
     }
+    if (readingsOff()) return stop(READINGS_OFF);
   }
 
-  // The files it reads: the plan, and for a raw video the video, its captions and its words, which the rough cut and its
-  // timeline are made of. One Dropbox has not brought over yet is read through, so that it does.
-  const video = record.video.file;
-  const stem = basename(video, extname(video));
+  // The files it reads: the plan, and for a raw video the video, its captions, its words and its cut log, which the rough cut,
+  // its timeline and what is set aside are made of. One Dropbox has not brought over yet is read through, so that it does.
   const planRel = `${stem}.cut-plan.json`;
-  const wordsRel = `${stem}.words.json`;
-  const need = [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...(existsSync(join(found.folder, wordsRel)) ? [wordsRel] : [])] : [])];
-  const gone = need.find((rel) => !existsSync(join(found.folder, rel)));
+  const there = (rel) => existsSync(join(found.folder, rel));
+  const need = [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...[`${stem}.words.json`, `${stem}.cut-plan.txt`].filter(there)] : [])];
+  const gone = need.find((rel) => !there(rel));
   if (gone) return stop(`${gone} is not in the episode's folder, so Claude did not read ${name}.`);
   const bring = deps.readAll || readThrough;
   for (const rel of need.filter((r) => !whole(join(found.folder, r)))) {
@@ -256,22 +278,21 @@ export async function readEpisodeNow(ctx, found, deps) {
     return stop(`The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude did not read it.`);
   }
   const facts = isObject(plan.facts) ? plan.facts : {};
-
-  // Just before the call, the record is read again: the kind, the session mark and the claim are still the answer's.
-  const before = again();
-  if (before.why) return stop(before.why);
-  record = before.record;
-  const account = await accountOf(deps);
   const about = { video, duration: Number.isFinite(facts.duration) ? facts.duration : record.video.seconds };
   const request = requestFor(kind, plan, about);
   const work = join(runsFolder(home), `read-${process.pid}-${now()}`);
   mkdirSync(work, { recursive: true });
   try {
+    // The account first: the record is read again after it, right before each try of the call.
+    const account = await accountOf(deps, join(work, "account"));
     log(`${named}: Claude is asked to read it as ${KIND_SAID[kind]}.`);
     let read = null;
     let why = "";
     for (let n = 1; n <= CLAUDE_TRIES && !read; n++) {
       if (n > 1) await wait(AGAIN_MS);
+      const still = again();
+      if (still.why) return stop(still.why);
+      record = still.record;
       const got = await askOnce(request, join(work, `claude-${n}`), deps, { read: (reply) => readReading(kind, reply, about), nothing: nothingRead, quote: false }).catch((e) => ({ why: `the work stopped (${(e && e.code) || "an error"})` }));
       if (got.read) read = got.read;
       else {
@@ -304,7 +325,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   // What of Claude's reply could not be used: said in the files she reads, and counted, never quoted, in the result.
   let unused = [...read.problems];
   let candidates = [];
-  let rendered = null;
+  let render = null;
   let planLast = "";
   const reeled = kind === "finished" || kind === "raw";
   // Numbers are never given twice under one video's id: a reading numbers on from the highest ever given (finish.js).
@@ -326,13 +347,22 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   }
 
   if (kind === "raw") {
+    // The import's plan, the rules' alone, and its cut log are set aside in history/ by the rule, put in before the reading
+    // replaces them, so that a raw reading made again can start from them.
+    if (!plan.claude) {
+      const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
+      for (const ending of [".cut-plan.json", ".cut-plan.txt"]) {
+        const at_ = join(folder, `${stem}${ending}`);
+        if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
+      }
+    }
     // The plan changed by Claude's decisions with the pauses the import kept (pausesOfPlan), so a cut falls where the rules'
     // cuts fall, and its suggestions taken from the plan as it then is.
     const pauses = pausesOfPlan(plan);
     const applied = applyDecisions(plan, read.decisions, pauses);
     const next = applied.plan;
     const picked = clipRanges(next, read.suggestions, pauses);
-    unused = [...unused, ...applied.ignored, ...picked.ignored];
+    unused = [...unused, ...applied.ignored, ...picked.ignored.map(claudesClip)];
     const points = new Map(read.suggestions.map((s) => [s.n, s.point]));
     const kept = number(picked.clips.map((clip) => ({ ranges: clip.ranges, phrases: next.phrases.filter((p) => p.keep && p.start < clip.end && p.end > clip.start), why: clip.why, point: points.get(clip.n), hook: clip.hook, check: clip.check, clip })));
     candidates = kept.map((k) => k.candidate);
@@ -341,27 +371,26 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     const changes = (next.changes || []).length;
     const spans = keptSpans(next.ranges, roughRate(facts));
     const roughSrt = roughCaptions(next.phrases, spans);
+    // The plan as the import writes it: it keeps the pauses, and what Claude made of it, its ideas for graphics among them,
+    // which the timeline marks.
+    const claude = { decisions: read.decisions, graphics: read.graphics, ignored: unused, clips: clips.map((clip) => ({ ...clip, files: [] })) };
+    const readPlan = { ...plan, phrases: next.phrases, ranges: next.ranges, kept: next.kept, cut: next.cut, by: next.by || plan.by || "rules", ...(next.changes ? { changes: next.changes } : {}), claude };
     text(notesFile, notesText({ notes: read.notes, graphics: read.graphics, problems: unused }, next, clips));
     text(`${stem}.rough-cut.srt`, roughSrt);
     text(`${stem}.rough-cut.transcript.txt`, stampedText(roughSrt));
     text(`${stem}.cut-plan.txt`, planText(next, readPlanNote(changes, notesFile)));
     // The rough cut, rendered as version 0, and the timeline it is made from, as the main video's timeline is built (timelineFor).
     const v0 = timelineFile({ part: "main", v: 0 });
-    const timeline = await timelineFor({ folder, name: found.name, record }, "main", ctx, { build: true, plan: next }).catch((e) => ({ why: `the work stopped (${(e && e.code) || "an error"})` }));
+    const timeline = await timelineFor({ folder, name: found.name, record }, "main", ctx, { build: true, plan: readPlan }).catch((e) => ({ why: `the work stopped (${(e && e.code) || "an error"})` }));
     if (timeline.xml) {
       text(v0, timeline.xml);
-      const render = await renderRough(ctx, found, deps, { record, plan: next, facts, work, named, name, log, now });
-      if (render.why) failed.push(`The rough cut could not be made: ${sentence(render.why)}`);
-      else {
-        rendered = { v: 0, how: "render", at: render.at, on: ctx.machine, file: v0, opened: render.opened };
-        made.push("the rough cut, version 0");
-        if (render.notOpened) failed.push(`The rough cut could not be opened in QuickTime Player: ${sentence(render.notOpened)}`);
-      }
+      const rendered = await renderRough(ctx, found, deps, { record, plan: next, facts, work, named, name, log, now });
+      if (rendered.why) failed.push(`The rough cut could not be made: ${sentence(rendered.why)}`);
+      else render = { ...rendered, file: v0 };
     } else failed.push(`The rough cut could not be made: its timeline could not be built (${String(timeline.why || `Dropbox is still bringing ${timeline.coming} over`).replace(/\.$/, "")}).`);
-    // The plan as the import writes it, put in last of the files: it keeps the pauses, and what Claude made of it.
-    const claude = { decisions: read.decisions, graphics: read.graphics, ignored: unused, clips: clips.map((clip) => ({ ...clip, files: [] })) };
-    planLast = JSON.stringify({ ...plan, phrases: next.phrases, ranges: next.ranges, kept: next.kept, cut: next.cut, by: next.by || plan.by || "rules", ...(next.changes ? { changes: next.changes } : {}), claude }, null, 2) + "\n";
-    made.unshift("the cut plan as Claude read it", "Claude's notes");
+    // The plan is put in last of the files, as the import writes it last.
+    planLast = JSON.stringify(readPlan, null, 2) + "\n";
+    made.push("the cut plan as Claude read it", "Claude's notes", ...(render ? ["the rough cut, version 0"] : []));
   }
 
   if (reeled) {
@@ -377,20 +406,31 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   if (spellingCount) made.push(`${counted(spellingCount, "spelling")} to check`);
   if (unused.length) failed.push(`${counted(unused.length, "part")} of Claude's reply could not be used${reeled ? `: ${stem}.reel-suggestions.txt says which` : ""}.`);
 
+  // Version 0 of the main video is the rough cut, rendered, made from edit/main.v0.fcpxml; it counts as shown once it has opened
+  // in QuickTime Player, which it does as soon as the record holding it is in (onPut), at the moment `opened` says.
   const change = (r) => ({
     ...r,
     ...(reeled ? { reels: [...(Array.isArray(r.reels) ? r.reels : []).filter((reel) => reel.status !== "candidate"), ...reelEntries(candidates)] } : {}),
     offers: { ...(isObject(r.offers) ? r.offers : {}), spellings: offered(r) },
     reading: { kind, model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", ...(kind === "short video" ? { about: read.about } : {}) },
-    ...(rendered ? { main: { ...r.main, pushed: [rendered, ...(Array.isArray(r.main.pushed) ? r.main.pushed : []).filter((p) => p.v !== 0)] } } : {})
+    ...(render ? { main: { ...r.main, pushed: [{ v: 0, how: "render", at: render.at, on: ctx.machine, file: render.file, opened: localStamp(new Date(now())) }, ...(Array.isArray(r.main.pushed) ? r.main.pushed : []).filter((p) => p.v !== 0)] } } : {})
   });
-  // Its notice goes out once what it read is in the episode, before the wait for the late check.
+  const okNow = () => !failed.some((f) => f.startsWith("The rough cut"));
+  // Once what it read is in: the rough cut opens, the notice goes out, and the result is written early, before the late check.
   const onPut = () => {
+    if (render) {
+      try {
+        ctx.openApp("QuickTime Player", render.to);
+      } catch (e) {
+        failed.push(`The rough cut could not be opened in QuickTime Player: ${sentence(e.message || e)}`);
+      }
+    }
     try {
       (deps.notify || (() => {}))(noticeOf(name));
     } catch (e) {
       // A notice is a courtesy: the result says the same.
     }
+    if (deps.early) deps.early({ ok: okNow(), made, failed: [...failed], next: FOUND });
   };
   const file = record.video.file;
   // An iPhone clip's reading changes the record alone: it is written by the rule, as a command that writes only the record writes
@@ -404,7 +444,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
       const why = e.code === "CHANGED" ? "this episode changed while Claude read it" : String(e.message).replace(/\.$/, "");
       return { ok: false, made: [], failed: [...failed, `Nothing was written: ${why}.`], next: AGAIN };
     }
-    onPut();
+    try {
+      (deps.notify || (() => {}))(noticeOf(name));
+    } catch (e) {
+      // A notice is a courtesy: the result says the same.
+    }
     log(`${named}: read.`);
     return { ok: true, made, failed, next: FOUND };
   }
@@ -412,15 +456,19 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
   const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);
-  if (!into.put) return { ok: false, made: [], failed: [...failed, ...problems], next: AGAIN };
+  if (!into.put) {
+    // Nothing of it is in the episode, nor opened: the rough cut stays on this Mac, named as the episode is named.
+    const kept = render ? [`The rough cut of ${name} is kept on this Mac, in BRIMM Video Work, as "${basename(render.to)}".`] : [];
+    return { ok: false, made: [], failed: [...failed, ...problems, ...kept], next: AGAIN };
+  }
   log(`${named}: read.`);
-  return { ok: !into.problems.length && !failed.some((f) => f.startsWith("The rough cut")), made, failed: [...failed, ...problems], next: FOUND };
+  return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: FOUND };
 }
 
 /** Render a raw video's rough cut on this Mac, as version 0 of its main video: today's ffmpeg rough cut (unedited.js roughCut,
     cuts.js roughCutArgs) of the plan `plan`, into BRIMM Video Work, `<folder>/renders/<name> – version 0.mp4`, never into
-    Dropbox; then opened in QuickTime Player. ffprobe is asked first which streams the video has, and whether it is the video
-    the plan was made of. Resolves { at, opened, notOpened } or { why }. */
+    Dropbox. ffprobe is asked first which streams the video has, and whether it is the video the plan was made of. It is opened
+    once the reading is in the episode, not here. Resolves { at, to } or { why }. */
 async function renderRough(ctx, found, deps, { record, plan, facts, work, named, name, log, now }) {
   const video = join(found.folder, record.video.file);
   try {
@@ -436,13 +484,7 @@ async function renderRough(ctx, found, deps, { record, plan, facts, work, named,
     const files = filesOf(join(work, "render"), { name: named, log });
     const why = await roughCut(video, to, { plan, facts, spans: keptSpans(plan.ranges, roughRate(facts)), streams: streamsOf(printed) }, { ...deps, files, log: () => {}, progress: deps.progress || noProgress });
     if (why) return { why };
-    const at = localStamp(new Date(now()));
-    try {
-      ctx.openApp("QuickTime Player", to);
-      return { at, opened: localStamp(new Date(now())) };
-    } catch (e) {
-      return { at, opened: null, notOpened: String(e.message || e) };
-    }
+    return { at: localStamp(new Date(now())), to };
   } catch (e) {
     return { why: `the work stopped (${(e && e.code) || "an error"})` };
   }
