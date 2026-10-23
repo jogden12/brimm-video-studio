@@ -1677,3 +1677,13 @@ describe("spell, for a finished video that is now a session or not answered", ()
     }
   });
 });
+
+describe("the README, of version 1's revision", () => {
+  it("says that a version 1 hand-off's revision is above the ones set aside into history/ too, which came with the settings unchanged", () => {
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const v1 = readme.split("\n").find((line) => line.startsWith("**The hand-off**, `final/<name>.brimm-ops.json`, version 1"));
+    assert.ok(v1, "the README's paragraph on version 1");
+    assert.match(v1, /`revision`[^.]*`history\/`/);
+    assert.match(v1, /settings unchanged/);
+  });
+});
