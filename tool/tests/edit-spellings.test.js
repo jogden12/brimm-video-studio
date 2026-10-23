@@ -120,6 +120,10 @@ const SAME_FAULT = '"Sallie" is spelled that way already.';
 const WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What a finished video's first hand-off says of the suggestion Claude gave no reason for. */
 const LEFT3 = "Suggestion 3 is left out of the hand-off: it has no reason.";
+/** What is said when a file the hand-off is made from is not whole here yet: by what it is, never by its file name. */
+const BRINGING = (what) => `Dropbox is still bringing ${what} over: say it again in a minute.`;
+const OLD = "2026-10-20T14:00:00-05:00";
+const NEWER = "2026-10-21T10:00:00-05:00";
 const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
 
 /** One of the contract's fixtures, which BRIMM Ops keeps a copy of. */
@@ -217,7 +221,7 @@ describe("spell … offers none, for a finished video, with this Mac handing off
     const record = reread(found);
     assert.deepEqual(record.finished, {
       revision: 1, at: localStamp(new Date(t.now())), on: "Mac Studio", handoff: `final/${HANDOFF}`,
-      parts: { main: { v: 0, file: "final/Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 23.423, spellings: [], noHandEdits: true, import: true } }
+      parts: { main: { v: 0, file: "final/Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 23.423, spellings: [], noHandEdits: true, import: true, kind: "finished" } }
     });
     for (const rel of [HANDOFF, "Pricing talk.srt", "Pricing talk.transcript.txt"]) assert.equal(record.files[`final/${rel}`], statSync(join(found.folder, "final", rel)).size, rel);
     assert.deepEqual(record.spellings, []);
@@ -329,6 +333,59 @@ describe("spell … offers all, or some, for a finished video", () => {
     assert.equal(r.code, 0, r.text);
     assert.match(r.text, /Not kept: You have "Ogdin" spelled "Ogden Smith" already\. "Sallie" is spelled that way already\./);
     assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden Smith"], ["pricing", "Pricing"]]);
+    t.done();
+  });
+});
+
+// A reading counts only when it is the current one: made after her answer, as the kind the video is now (the inverse of
+// reading.js notAsAnswered). `kind … --again` keeps the old reading and its offers in the record while a new one is made.
+describe("spell … offers, with a reading that is not the current one", () => {
+  const reading = (over) => ({ kind: "finished", model: "m", at: AT, on: "Mac Studio", account: "", outcome: "read", ...over });
+  const NOT_READ = `Claude has not read ${NAME} yet, so it has offered no spellings.`;
+  /** The made-up recording answered as `kind`, its record holding offers and `held` as the reading. */
+  const holding = (kind, held) => {
+    const t = setup({ programs: { FFPROBE: rawProbe } });
+    handoffVersion(t, 2);
+    const found = episodeFor(t, { record: answered(kind, { offers: { spellings: SPELLINGS }, reading: held }), files: LIGHT_FILES });
+    return { t, found };
+  };
+  for (const [what, kind, held] of [
+    ["a raw video's reading, older than her answer, on a video answered as finished since", "finished", reading({ kind: "raw", at: OLD })],
+    ["a finished video's reading, not older, on a video answered as an iPhone clip since", "short video", reading()],
+    ["a reading of the right kind, older than her answer", "finished", reading({ at: OLD })]
+  ]) {
+    it(`offers nothing from ${what}, and writes nothing`, async () => {
+      const { t, found } = holding(kind, held);
+      const before = tree(t);
+      for (const ask of [[], ["none"], ["all"], ["1"]]) {
+        const r = await on(t.ctx.deps, "spell", FOLDER, "offers", ...ask);
+        assert.deepEqual([r.code, r.text], [1, NOT_READ], ask.join(" "));
+      }
+      assert.deepEqual(tree(t), before);
+      assert.equal(existsSync(join(found.folder, "final")), false);
+      assert.deepEqual(t.calls, []);
+      t.done();
+    });
+  }
+  it("offers its spellings once the record holds a reading of its kind from after her answer, the answer's own moment included", async () => {
+    for (const at of [AT, NEWER]) {
+      const { t } = holding("finished", reading({ at }));
+      const r = await on(t.ctx.deps, "spell", FOLDER, "offers");
+      assert.equal(r.said[0], `Claude offers these spellings for ${NAME}:`);
+      t.done();
+    }
+  });
+  it("owes no hand-off for an answer given to an old reading, and counts it for none", async () => {
+    // Answered under the reading at AT; her answer is given again later as the same kind: that reading is older than the answer.
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "1")).code, 0);
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, finished: null, answer: { ...now.answer, at: NEWER } }));
+    const card = await on(t.ctx.deps, "spell", FOLDER, "offers");
+    assert.deepEqual([card.code, card.text], [1, NOT_READ]);
+    const added = await on(t.ctx.deps, "spell", FOLDER, "add", "pricing", "Pricing");
+    assert.equal(added.code, 0, added.text);
+    assert.equal(added.text, '"pricing" is spelled "Pricing" now, in every caption.', "no hand-off is owed to an answer of an old reading");
     t.done();
   });
 });
@@ -522,6 +579,138 @@ describe("spell … offers, for a raw video", () => {
   });
 });
 
+describe("spell, for a short video as today's import makes one", () => {
+  // Today's import makes short videos too, and shows them in Final Cut: kind "short video", but no answer of hers, no reading, no
+  // offers. Their words are the words of every Final Cut video, as they were before the switch.
+  const legacy = () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { kind: "short video", name: { text: "Hello clip", placeholder: false } } });
+    return { t, found };
+  };
+  const SHOW = 'Say "show it in Final Cut" to see it.';
+  it("says one spelling as it always has, with the way to see it in Final Cut", async () => {
+    const { t } = legacy();
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.deepEqual([r.code, r.text], [0, `"Ogdin" is spelled "Ogden" now, in every timeline's captions. ${SHOW}`]);
+    t.done();
+  });
+  it("says a drop as it always has", async () => {
+    const { t } = legacy();
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden")).code, 0);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
+    assert.deepEqual([r.code, r.text], [0, `"Ogdin" is as the transcriber writes it again. ${SHOW}`]);
+    t.done();
+  });
+  it("says several pairs in the same words, with the way to see them in Final Cut", async () => {
+    const { t, found } = legacy();
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden", "pricing", "Pricing");
+    assert.deepEqual([r.code, r.text], [0, `Spelled now, in every timeline's captions: ${OGDEN} and ${PRICING}. ${SHOW}`]);
+    assert.equal(reread(found).rev, found.record.rev + 1, "one record for the two");
+    t.done();
+  });
+  it("writes no hand-off of its own: it is a Final Cut video, finished by finish", async () => {
+    const { t, found } = legacy();
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden")).code, 0);
+    assert.equal(existsSync(join(found.folder, "final")), false);
+    t.done();
+  });
+});
+
+describe("a later spell, when the video was answered again since its hand-off was written", () => {
+  /** A finished video whose hand-off was written from the import, and then answered as `kind` (a new answer, later than the reading). */
+  async function answeredAgain(kind) {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, kind, answer: { ...now.answer, at: NEWER } }));
+    t.calls.length = 0;
+    return { t, found };
+  }
+  for (const kind of ["raw", "short video", "finished"]) {
+    it(`${kind === "finished" ? "remakes it as ever when it was answered as finished again, and a new reading is still to come" : `records the spelling and leaves the hand-off as it is, for a video now answered as ${kind}`}`, async () => {
+      const { t, found } = await answeredAgain(kind);
+      const files = ["final/Pricing talk.srt", "final/Pricing talk.transcript.txt", `final/${HANDOFF}`];
+      const was = files.map((rel) => text(found, rel));
+      const finished = reread(found).finished;
+      const add = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+      assert.equal(add.code, 0, add.text);
+      if (kind === "finished") {
+        assert.match(add.text, /the hand-off is made again as revision 2/);
+        assert.equal(handoffIn(found).video.kind, "finished");
+      } else {
+        assert.equal(add.text, `${NAME}: spelled. Its hand-off waits for its new reading.`);
+        assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden"]]);
+        assert.deepEqual(files.map((rel) => text(found, rel)), was, "final/ as it was");
+        assert.deepEqual(reread(found).finished, finished);
+        const drop = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
+        assert.deepEqual([drop.code, drop.text], [0, `${NAME}: spelled. Its hand-off waits for its new reading.`]);
+        assert.deepEqual(reread(found).spellings, []);
+        assert.deepEqual(files.map((rel) => text(found, rel)), was);
+        assert.deepEqual(t.calls, [], "nothing shown again");
+        // Its suggestions are the finished video's still, and a clip's hand-off has none to lose.
+        assert.equal(handoffIn(found).video.kind, "finished");
+        assert.ok(handoffIn(found).suggestions.length > 0);
+      }
+      t.done();
+    });
+  }
+});
+
+describe("a later spell, when the hand-off on file is gone or cannot be read", () => {
+  /** The hand-off written by an answer of none, and then `spoil` done to it. */
+  async function spoiled(spoil) {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const first = handoffIn(found);
+    spoil(found);
+    t.calls.length = 0;
+    t.started.length = 0;
+    return { t, found, first };
+  }
+  /** The record as the other Mac or Dropbox left it: a record of the next rev with `files` changed. */
+  const listing = (found, change) => {
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, files: change(now.files) }));
+  };
+  const remade = async ({ t, found, first }) => {
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /the hand-off is made again as revision 2/);
+    const handoff = handoffIn(found);
+    assert.deepEqual([handoff.revision, handoff.video.id, handoffFaultV2(handoff)], [2, ID, ""]);
+    assert.deepEqual(handoff.suggestions, first.suggestions.map((s) => ({ ...s, last: s.last.replace("Ogdin", "Ogden") })));
+    assert.match(handoff.main.srt, /Sallie Ogden\./);
+    assert.deepEqual(t.started, [], "no bring for a file that is made again");
+    assert.equal(reread(found).finished.revision, 2);
+    assert.equal(reread(found).files[`final/${HANDOFF}`], statSync(join(found.folder, "final", HANDOFF)).size);
+    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", HANDOFF)] }]);
+  };
+  it("makes it again as the next revision when it is missing though the record lists it", async () => {
+    await remade(await spoiled((found) => rmSync(join(found.folder, "final", HANDOFF))));
+  });
+  it("makes it again when it is missing and the record does not list it either", async () => {
+    await remade(await spoiled((found) => {
+      rmSync(join(found.folder, "final", HANDOFF));
+      listing(found, ({ [`final/${HANDOFF}`]: gone, ...rest }) => rest);
+    }));
+  });
+  it("makes it again when it cannot be read as a hand-off", async () => {
+    await remade(await spoiled((found) => {
+      writeFileSync(join(found.folder, "final", HANDOFF), "{ this is not a hand-off");
+      listing(found, (files) => ({ ...files, [`final/${HANDOFF}`]: Buffer.byteLength("{ this is not a hand-off") }));
+    }));
+  });
+  it("still waits for a hand-off on file that Dropbox has not finished bringing, which is not one that is gone", async () => {
+    const { t, found } = await spoiled((found) => writeFileSync(join(found.folder, "final", HANDOFF), "{"));
+    const before = tree(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.deepEqual([r.code, r.text], [1, BRINGING("the hand-off")]);
+    assert.equal(t.started.length, 1);
+    assert.deepEqual(tree(t), before);
+    t.done();
+  });
+});
+
 describe("spell … offers, with this Mac handing off version 1", () => {
   it("records the spellings and the answer, says the hand-off waits for the switch, and writes nothing in final/", async () => {
     for (const version of [1, null]) {
@@ -623,6 +812,20 @@ describe("spell … offers, where the hand-off would go", () => {
     assert.equal(existsSync(join(found.folder, "final")), false);
     t.done();
   });
+  it("refuses a later spell, writing nothing, when the chain of the video's versions has a gap since the hand-off was written", async () => {
+    const { t, found } = await readOf("finished", { over: { versionOf: FIRST } });
+    const first = firstCut(t);
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    rmSync(first.folder, { recursive: true });
+    t.calls.length = 0;
+    const before = tree(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.deepEqual([r.code, r.text], [1, `${SHOWN} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`]);
+    assert.deepEqual(tree(t), before);
+    assert.deepEqual(reread(found).spellings, []);
+    assert.deepEqual(t.calls, []);
+    t.done();
+  });
   it("still records the answer under version 1, whatever the chain: it asks for no chain", async () => {
     const { t, found } = await readOf("finished", { version: 1, over: { versionOf: FIRST } });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
@@ -649,7 +852,7 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     const { t, found } = await readOf("finished");
     rmSync(join(found.folder, "Pricing talk.srt"));
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
-    assert.deepEqual([r.code, r.text], [1, "Dropbox is bringing the import's captions over to this Mac. Say it again when it is done. Nothing was changed."]);
+    assert.deepEqual([r.code, r.text], [1, BRINGING("the import's captions")]);
     assert.equal(t.started.length, 1);
     assert.equal(reread(found).offers.answered, undefined);
     t.done();
@@ -658,7 +861,7 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     const { t, found } = await readOf("finished");
     t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.srt");
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
-    assert.deepEqual([r.code, r.text], [1, "Dropbox is bringing the import's captions over to this Mac. Say it again when it is done. Nothing was changed."]);
+    assert.deepEqual([r.code, r.text], [1, BRINGING("the import's captions")]);
     assert.equal(t.started.length, 1);
     assert.equal(reread(found).offers.answered, undefined);
     assert.equal(existsSync(join(found.folder, "final")), false);
@@ -670,10 +873,100 @@ describe("spell … offers, when the hand-off cannot be made or the record canno
     const before = tree(t);
     t.ctx.deps.isWhole = (path) => !path.endsWith("final/Pricing talk.srt");
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
-    assert.deepEqual([r.code, r.text], [1, "Dropbox is bringing the import's captions over to this Mac. Say it again when it is done. Nothing was changed."]);
+    assert.deepEqual([r.code, r.text], [1, BRINGING("the final captions")]);
     assert.equal(t.started.length, 1);
     assert.deepEqual(tree(t), before);
     assert.deepEqual(reread(found).spellings, []);
+    t.done();
+  });
+  it("refuses captions on this Mac that are not the size the record lists, as one Dropbox is still bringing over or put an older one back of, and starts a bring", async () => {
+    const { t, found } = await readOf("finished");
+    const listed = reread(found).files["Pricing talk.srt"];
+    const short = "1\n00:00:06,070 --> 00:00:07,040\n Welcome to the show.\n\n";
+    assert.ok(Buffer.byteLength(short) < listed);
+    writeFileSync(join(found.folder, "Pricing talk.srt"), short);
+    const before = tree(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.deepEqual([r.code, r.text], [1, BRINGING("the import's captions")]);
+    assert.equal(t.started.length, 1);
+    assert.deepEqual(tree(t), before);
+    assert.equal(reread(found).offers.answered, undefined);
+    assert.equal(existsSync(join(found.folder, "final")), false);
+    // The same, the other way round, and for the Reel suggestions.
+    writeFileSync(join(found.folder, "Pricing talk.srt"), IMPORT_SRT + "\n");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).text, BRINGING("the import's captions"));
+    writeFileSync(join(found.folder, "Pricing talk.srt"), IMPORT_SRT);
+    const reels = text(found, "reels.json");
+    writeFileSync(join(found.folder, "reels.json"), reels.slice(0, reels.length - 30));
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).text, BRINGING("the Reel suggestions"));
+    assert.equal(existsSync(join(found.folder, "final")), false);
+    t.done();
+  });
+  it("names what is not whole by what it is, for the captions and the final files together", async () => {
+    const { t } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    t.ctx.deps.isWhole = (path) => !/Pricing talk\.(srt|transcript\.txt)$/.test(path);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.equal(r.text, BRINGING("the import's captions, the final captions and the final transcript"));
+    t.done();
+  });
+  it("puts each final file back as it was when the record of a later spell cannot be written", async () => {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const files = ["final/Pricing talk.srt", "final/Pricing talk.transcript.txt", `final/${HANDOFF}`];
+    const was = files.map((rel) => text(found, rel));
+    const rev = reread(found).rev;
+    const clone = t.ctx.deps.clone;
+    t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith(HANDOFF) && text(found, `final/${HANDOFF}`) !== was[2]) writeFileSync(join(found.folder, "record", `${String(reread(found).rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...reread(found), rev: reread(found).rev + 1 }));
+    };
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, "Nothing was written: this episode changed on the other Mac: open it again.");
+    assert.deepEqual(files.map((rel) => text(found, rel)), was);
+    assert.equal(reread(found).rev, rev + 1, "only the other Mac's record is new");
+    assert.deepEqual(reread(found).spellings, []);
+    t.done();
+  });
+  it("names what it could not put back, and says to tell Jason, instead of saying nothing was written", async () => {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const was = text(found, `final/${HANDOFF}`);
+    const clone = t.ctx.deps.clone;
+    let failing = false;
+    t.ctx.deps.clone = (from, to) => {
+      if (failing && to.endsWith("final/Pricing talk.srt")) throw new Error("the disk is full");
+      clone(from, to);
+      if (to.endsWith(HANDOFF) && text(found, `final/${HANDOFF}`) !== was) {
+        failing = true;
+        writeFileSync(join(found.folder, "record", `${String(reread(found).rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...reread(found), rev: reread(found).rev + 1 }));
+      }
+    };
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.equal(r.code, 1, r.text);
+    assert.equal(r.text, "Nothing was written: this episode changed on the other Mac: open it again. The final captions could not be put back as it was. Tell Jason: the episode needs him.");
+    assert.equal(text(found, `final/${HANDOFF}`), was, "what could be put back was");
+    t.done();
+  });
+  it("leaves alone a final file that is not the copy this spell made any more, and says so", async () => {
+    const { t, found } = await readOf("finished");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "none")).code, 0);
+    const was = text(found, `final/${HANDOFF}`);
+    const clone = t.ctx.deps.clone;
+    t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith(HANDOFF) && text(found, `final/${HANDOFF}`) !== was) {
+        // The other Mac's own copy of the captions comes across, and its record.
+        writeFileSync(join(found.folder, "final", "Pricing talk.srt"), "the other Mac's captions");
+        writeFileSync(join(found.folder, "record", `${String(reread(found).rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...reread(found), rev: reread(found).rev + 1 }));
+      }
+    };
+    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /^Nothing was written: this episode changed on the other Mac: open it again\. The final captions could not be put back as it was\. Tell Jason: the episode needs him\.$/);
+    assert.equal(text(found, "final/Pricing talk.srt"), "the other Mac's captions", "not written over");
+    assert.equal(text(found, `final/${HANDOFF}`), was);
     t.done();
   });
   it("takes its files out of final/ again when the record cannot be written, and keeps no answer", async () => {
@@ -706,6 +999,30 @@ describe("spell, while a reading or a finish is still at work", () => {
     assert.equal(r.code, 0, r.text);
     assert.equal(handoffIn(found).revision, 1);
     t.done();
+  });
+  it("refuses while a reading runs for a video that holds no reading yet, and for one that holds an older reading than her answer or another kind's", async () => {
+    const reading = (over) => ({ kind: "finished", model: "m", at: AT, on: "Mac Studio", account: "", outcome: "read", ...over });
+    for (const [what, kind, held] of [
+      ["no reading at all", "finished", undefined],
+      ["a reading from before her answer", "finished", reading({ at: OLD })],
+      ["a reading of another kind", "short video", reading()],
+      ["a raw video's reading from before her answer", "raw", reading({ kind: "raw", at: OLD })]
+    ]) {
+      const t = setup({ programs: { FFPROBE: rawProbe } });
+      handoffVersion(t, 2);
+      const found = episodeFor(t, { record: answered(kind, { offers: { spellings: SPELLINGS }, ...(held ? { reading: held } : {}) }), files: LIGHT_FILES });
+      mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+      writeFileSync(join(episodeWork(t.home, FOLDER), "episode.lock"), JSON.stringify({ pid: 4242, command: "read" }));
+      const deps = { ...t.ctx.deps, alive: (pid) => pid === 4242 };
+      const before = tree(t);
+      for (const ask of [["add", "Ogdin", "Ogden"], ["drop", "Ogdin"], ["offers", "all"], ["offers", "none"]]) {
+        const r = await on(deps, "spell", FOLDER, ...ask);
+        assert.equal(r.text, 'read is running for this episode. Say "how far is it?", and try again when it is done.', `${what}: ${ask.join(" ")}`);
+      }
+      assert.deepEqual(tree(t), before, what);
+      assert.equal(existsSync(join(found.folder, "final")), false, what);
+      t.done();
+    }
   });
   it("still refuses while a finish runs, and while a reading runs for a video that has no reading yet", async () => {
     const { t, found } = await readOf("finished");

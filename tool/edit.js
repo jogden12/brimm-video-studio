@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, madeFromImport, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
+import { finishNow, finishFinished, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGapWords } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2599,24 +2599,42 @@ function shownAfter(stamp, ms) {
 /** What is said when the hand-off waits for the switch, and when it is written. */
 const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
 const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
-/** A finished video and an iPhone clip have no Final Cut, and nothing of them is shown there. */
-const hasFinalCut = (record) => !["finished", "short video"].includes(recordKind(record));
+/** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
+    her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
+const hasFinalCut = (record) => {
+  const kind = recordKind(record);
+  if (kind === "short video") return !(record.answer !== null && typeof record.answer === "object");
+  return kind !== "finished";
+};
 /** Spellings as they are said in a row: "a" as "b", "c" as "d" and "e" as "f". */
 const pairsSaid = (pairs) => listed(pairs.map(([heard, meant]) => `"${heard}" as "${meant}"`));
 
+/** The reading the record holds when it is the current one, or null: one made after her answer (not before it), as the kind the
+    video is now. `kind … --again` keeps the reading and its offers in the record while the new one is made, and a video answered
+    again as another kind holds the old kind's: neither is a reading of this answer (the inverse of reading.js notAsAnswered). A
+    time that cannot be read is not after. */
+function currentReading(record) {
+  const reading = record.reading;
+  if (reading === null || typeof reading !== "object" || record.answer === null || typeof record.answer !== "object") return null;
+  return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === recordKind(record) ? reading : null;
+}
+
 /** The spellings Claude's reading offered, each { heard, spelled, why }, as the card numbers them (by their place in the record,
-    so that a spelling added meanwhile changes no number); null when the video has not been read. */
+    so that a spelling added meanwhile changes no number); null when the video has not been read, by a reading that counts
+    (currentReading). */
 function offersOf(record) {
-  if (!record.reading) return null;
+  if (!currentReading(record)) return null;
   const offered = record.offers && Array.isArray(record.offers.spellings) ? record.offers.spellings : [];
   return offered.map((o) => ({ heard: String((o && o.heard) ?? ""), spelled: String((o && o.spelled) ?? ""), why: typeof (o && o.why) === "string" ? o.why : "" }));
 }
 
 /** Her answer to the offers of the reading the record holds, { reading, at, on, applied, left }, or null while they are not
-    answered. An answer is of one reading: a reading made again (its `at` is another) has offers of its own. */
+    answered. An answer is of one reading, the current one (currentReading): a reading made again (its `at` is another) has offers
+    of its own. */
 function answerOf(record) {
   const answer = record.offers && record.offers.answered;
-  return answer && record.reading && answer.reading === record.reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
+  const reading = currentReading(record);
+  return answer && reading && answer.reading === reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
 }
 
 /** Is the hand-off of a finished video or an iPhone clip owed: its offers are answered, and it is not written yet? */
@@ -2638,8 +2656,7 @@ async function importHandoff(ctx, found, record, done) {
   if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}`);
   if (wrote.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: wrote.coming });
-    const what = listed([...new Set(wrote.coming.map((rel) => (rel.endsWith(".srt") ? "captions" : rel === REELS_FILE ? "Reel suggestions" : "hand-off")))]);
-    return refuse(ctx, `Dropbox is bringing the import's ${what} over to this Mac. Say it again when it is done. Nothing was changed.`);
+    return refuse(ctx, `Dropbox is still bringing ${listed([...new Set(wrote.coming.map(whatIs))])} over: say it again in a minute.`);
   }
   if (wrote.why) return refuse(ctx, wrote.why);
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
@@ -2666,7 +2683,13 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   // The hand-off of a finished video or an iPhone clip is made from the import's own captions (finish.js finishFinished): it is
   // written at the first spell once its offers are answered, and made again from the captions at every one after, so that a
   // spelling dropped or changed is dropped or changed in it too. Which refusals apply is that function's.
-  if (madeFromImport(record) || (!finished && handoffOwed(record))) return importHandoff(ctx, found, record, done);
+  if (madeFromImport(record)) {
+    // Only while the video is the kind its hand-off was made as: answered again as another kind, the spelling is kept and the
+    // hand-off waits for the new reading (`kind … --again` sets this one aside).
+    if (importKind(record) === recordKind(record)) return importHandoff(ctx, found, record, done);
+    return save(ctx, found, record, `${shownName(record)}: spelled. Its hand-off waits for its new reading.`);
+  }
+  if (!finished && handoffOwed(record)) return importHandoff(ctx, found, record, done);
   if (!finished) return save(ctx, found, record, [done, later].filter(Boolean).join(" "));
   // A client or group session, and a video not yet answered, are refused at once, as finish refuses them (finish.js
   // cannotFinish), before any file in final/ is named or read, and nothing is written, the spelling included: none of a
@@ -2862,7 +2885,7 @@ async function answerOffers(ctx, found, words) {
   const applied = chosen.map((i) => offers[i]);
   let next = record.spellings || [];
   for (const o of applied) next = withSpelling(next, o.heard, o.spelled);
-  const answer = { reading: record.reading.at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
+  const answer = { reading: currentReading(record).at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
   const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
   return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later: recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : "" });
 }
@@ -2887,9 +2910,10 @@ async function spell(ctx, rest) {
   }
   if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
   // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here. A
-  // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes.
+  // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes; but only
+  // once the record holds the current reading: one from before her answer is one a new reading is still to replace.
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring" && !(running === "read" && got.record.reading)) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
   const fc = hasFinalCut(got.record);
   if (verb === "drop") {
     const heard = more[0];

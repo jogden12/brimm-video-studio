@@ -8,10 +8,10 @@ import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rename
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, finishFinished, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
+import { finishNow, finishFinished, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
-import { recordFile, recordText } from "../episode.js";
+import { recordFile, recordText, acceptRev } from "../episode.js";
 import { clearRuns } from "../filing.js";
 import { noProgress } from "../progress.js";
 import { runsFolder, writeSettings } from "../settings.js";
@@ -2118,6 +2118,44 @@ describe("spell, for a finished video that is now a session whose mark she clear
   });
 });
 
+// A finished video's Reel suggestions as its hand-off holds them: the whole video is kept, so each is one stretch of the video's own
+// clock, its candidate's range, to the hundredth of a second and within the video (the raw video's, which suggestionsOnClock maps
+// through its cuts by its words, is another matter).
+describe("suggestionsFrom: a finished video's Reel suggestions for its hand-off", () => {
+  const c = (n, start, end, over = {}) => ({ n, ranges: [{ start, end }], first: "Welcome to the", last: "so much, Sallie Ogdin", reason: "It stands alone.", point: "A point.", ...over });
+  it("gives each candidate as one stretch, to the hundredth of a second, as the hand-off's other times are", () => {
+    const { list, left } = suggestionsFrom({ candidates: [c(1, 1.234, 4.999), c(4, 10.005, 12.5)], seconds: 23.423 });
+    assert.deepEqual(left, []);
+    assert.deepEqual(list, [
+      { n: 1, start: 1.23, end: 5, stretches: [{ start: 1.23, end: 5 }], first: "Welcome to the", last: "so much, Sallie Ogdin", why: "It stands alone.", point: "A point." },
+      { n: 4, start: 10.01, end: 12.5, stretches: [{ start: 10.01, end: 12.5 }], first: "Welcome to the", last: "so much, Sallie Ogdin", why: "It stands alone.", point: "A point." }
+    ]);
+  });
+  it("clamps an end that runs past the video to the video's length, to the hundredth", () => {
+    const { list } = suggestionsFrom({ candidates: [c(1, 20, 23.5), c(2, 20, 23.423)], seconds: 23.423 });
+    assert.deepEqual(list.map((x) => [x.start, x.end, x.stretches[0].end]), [[20, 23.42, 23.42], [20, 23.42, 23.42]]);
+  });
+  it("leaves out one whose times are no stretch of the video, saying so, and keeps the others", () => {
+    const { list, left } = suggestionsFrom({ candidates: [c(1, 24, 30), c(2, 23.42, 25), c(3, -1, 4), c(4, 5, 5.001), c(5, 2, 6)], seconds: 23.423 });
+    // Past the end; starting where the video ends; starting before it; shorter than a hundredth of a second.
+    assert.deepEqual(list.map((x) => x.n), [5]);
+    assert.deepEqual(left, [1, 2, 3, 4].map((n) => `Suggestion ${n} is left out of the hand-off: its times are not a stretch of the video.`));
+  });
+  it("passes over, without a word, one the record dropped and one with no stretch", () => {
+    const { list, left } = suggestionsFrom({ candidates: [c(1, 1, 4), c(2, 5, 8), { ...c(3, 0, 0), ranges: [] }, c(4, 9, 12)], dropped: [2], seconds: 23.423 });
+    assert.deepEqual([list.map((x) => x.n), left], [[1, 4], []]);
+  });
+  it("spells the first and last words with the show's names and the episode's spellings, and not the reason or the point", () => {
+    const { list } = suggestionsFrom({ candidates: [c(1, 1, 4, { first: "Sally says", last: "so much, Sallie Ogdin", reason: "Sallie Ogdin says it.", point: "Ogdin" })], spellings: [["Ogdin", "Ogden"]], seconds: 23.423 });
+    assert.deepEqual([list[0].first, list[0].last, list[0].why, list[0].point], ["Sallie says", "so much, Sallie Ogden", "Sallie Ogdin says it.", "Ogdin"]);
+  });
+  it("leaves out one with no first words, no last words, no reason or no point, saying which, since the page needs all four", () => {
+    const { list, left } = suggestionsFrom({ candidates: [c(1, 1, 4, { first: " " }), c(2, 5, 8, { last: "" }), c(3, 9, 12, { reason: undefined }), c(4, 13, 16, { point: "" }), c(5, 17, 20)], seconds: 23.423 });
+    assert.deepEqual(list.map((x) => x.n), [5]);
+    assert.deepEqual(left, ["first words", "last words", "reason", "point"].map((what, i) => `Suggestion ${i + 1} is left out of the hand-off: it has no ${what}.`));
+  });
+});
+
 // A finished video's or an iPhone clip's hand-off, once its spellings are answered (spec 2026-10-22, section 3): written in the
 // shape finish writes (record.finished, the transcripts in final/, the hand-off last), from the import's own captions, with no
 // Final Cut, no render and no transcriber. handoffTarget is asked first, then the hand-off is built and checked, then
@@ -2127,10 +2165,13 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
   const CAPTIONS = "1\n00:00:01,000 --> 00:00:04,000\n Welcome to the show.\n\n2\n00:00:05,000 --> 00:00:09,000\n Thank you so much, Sallie.\n\n";
   /** The made-up recording as an answered finished video (or `record`'s kind), its import's captions beside it. */
   const video = (t, record = {}, captions = CAPTIONS) => {
-    const found = episodeAs(t, { id: ID, name: "2026-10-22 Talk (Mac Studio)", record: { kind: "finished", label: LABEL, ...record } });
+    const found = episodeAs(t, { id: ID, name: "2026-10-22 Talk (Mac Studio)", record: { kind: "finished", label: LABEL, ...(captions !== null ? { files: { [`${SHOT}.srt`]: Buffer.byteLength(captions) } } : {}), ...record } });
     if (captions !== null) writeFileSync(join(found.folder, `${SHOT}.srt`), captions);
     return found;
   };
+  /** A Reel suggestion as a reading writes it into reels.json, and the file, put beside the captions. */
+  const CANDIDATE = { n: 1, start: 1, end: 4, ranges: [{ start: 1, end: 4 }], seconds: 3, title: "", reason: "It stands alone.", point: "A point.", first: "Welcome to the show", last: "to the show", preview: null };
+  const reelsOf = (found, candidates = [CANDIDATE]) => writeFileSync(join(found.folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 2, video: "Talk.mp4", by: "read", made: "2026-10-22T09:00:00-05:00", highest: Math.max(0, ...candidates.map((c) => c.n)), candidates }));
   /** The programs it ran: none but `open`. */
   const ran = (t) => t.calls.map((c) => c.cmd);
   it("writes final/ and record.finished as finish does, the hand-off last, shows it in Finder, and runs nothing else", async () => {
@@ -2238,7 +2279,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     const first = firstCut(t);
     lay(first.folder, "final/Talk, first cut.brimm-ops.json", handoffOf(2, FIRST, 3));
     const found = video(t, { versionOf: FIRST });
-    writeFileSync(join(found.folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 2, video: "Talk.mp4", by: "read", made: "2026-10-22T09:00:00-05:00", highest: 1, candidates: [{ n: 1, start: 1, end: 4, ranges: [{ start: 1, end: 4 }], seconds: 3, title: "", reason: "It stands alone.", point: "A point.", first: "Welcome to the show", last: "to the show", preview: null }] }));
+    reelsOf(found);
     const before = episodesTree(t);
     const done = await finishFinished(t.ctx, found, { record: found.record });
     assert.deepEqual(done, { why: `${SHOT}'s hand-off would give suggestion 1 again: another version of the video gave that number already, and a number is never given twice within a video. Ask Jason. Nothing was written.` });
@@ -2266,7 +2307,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
       t.done();
     }
   });
-  it("lets go the claim this Mac holds, as finish does, and leaves another Mac's alone", async () => {
+  it("lets go the claim this Mac holds, as finish does", async () => {
     const t = setup();
     handoffVersion(t, 2);
     const found = video(t, { editing: { by: "Mac Studio", since: "2026-10-22T09:00:00-05:00" } });
@@ -2274,6 +2315,69 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.equal(reread(found).editing, null);
     t.done();
   });
+  it("leaves another Mac's claim as it is: the command that asks has refused already when another Mac holds the episode", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const held = { by: "Sallie's laptop", since: "2026-10-22T09:00:00-05:00" };
+    const found = video(t, { editing: held });
+    assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+    assert.deepEqual(reread(found).editing, held);
+    t.done();
+  });
+  it("refuses a hand-off made as another kind than the video is now, writing nothing: it waits for its new reading", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = video(t);
+    assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+    const now = { ...found, record: { ...reread(found), kind: "short video" } };
+    const before = episodesTree(t);
+    assert.deepEqual(await finishFinished(t.ctx, now, { record: now.record }), { why: `${SHOT}'s hand-off was made as another kind than it is now: it waits for its new reading. Nothing was written.` });
+    assert.deepEqual(episodesTree(t), before);
+    t.done();
+  });
+  it("refuses when Dropbox undid this Mac's last change to the episode, writing nothing, and goes through when it is said again", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = video(t);
+    acceptRev(t.home, ID, found.record.rev + 3);
+    const before = episodesTree(t);
+    assert.deepEqual(await finishFinished(t.ctx, found, { record: found.record }), { why: `Dropbox undid this Mac's last change to ${SHOT}. Say it again. Nothing was written.` });
+    assert.deepEqual(episodesTree(t), before);
+    assert.deepEqual(t.calls, []);
+    assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+    t.done();
+  });
+  it("refuses a hand-off made again that would give a number again which another version of the video has given since, writing nothing", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const first = firstCut(t);
+    const found = video(t, { versionOf: FIRST });
+    reelsOf(found);
+    assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+    // The first version's hand-off, with suggestions 1 and 2, comes to this Mac after this one was written.
+    lay(first.folder, "final/Talk, first cut.brimm-ops.json", handoffOf(2, FIRST, 3));
+    const now = { ...found, record: reread(found) };
+    const before = episodesTree(t);
+    t.calls.length = 0;
+    const done = await finishFinished(t.ctx, now, { record: { ...now.record, spellings: [["Sallie", "Sally"]] } });
+    assert.deepEqual(done, { why: `${SHOT}'s hand-off would give suggestion 1 again: another version of the video gave that number already, and a number is never given twice within a video. Ask Jason. Nothing was written.` });
+    assert.deepEqual(episodesTree(t), before);
+    assert.deepEqual(t.calls, []);
+    t.done();
+  });
+  it("makes the hand-off again when the one on file is gone, as the next revision, with no bring", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = video(t);
+    assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+    rmSync(join(found.folder, "final", "Talk.brimm-ops.json"));
+    const now = { ...found, record: reread(found) };
+    const done = await finishFinished(t.ctx, now, { record: now.record });
+    assert.deepEqual([done.ok, done.revision, done.same], [true, 2, false]);
+    assert.equal(JSON.parse(readFileSync(join(found.folder, "final", "Talk.brimm-ops.json"), "utf8")).revision, 2);
+    t.done();
+  });
+
   it("writes nothing into final/ that the record could not then take: the files go out again, and the hand-off is not shown", async () => {
     const t = setup();
     handoffVersion(t, 2);
@@ -2290,6 +2394,26 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.deepEqual(t.inFinal(found), []);
     assert.deepEqual(t.calls, []);
     t.done();
+  });
+});
+
+const LEGACY_ADD = '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling until it is shown in Final Cut, Shared and finished again.';
+// A short video as today's import makes one is shown in Final Cut, and finished there: its spell says what every Final Cut video's
+// says, with the way to see it, and what is kept until it is Shared again.
+describe("spell, after a finish, for a short video as today's import makes one", () => {
+  it("says what a Final Cut video's spell says: the way to see it in Final Cut, and the hand-off made again", async () => {
+    for (const version of [undefined, 2]) {
+      const t = setup();
+      if (version) handoffVersion(t, version);
+      const found = await asked(t, { ...EDITED, kind: "short video" });
+      assert.equal((await finishNow(t.ctx, found)).ok, true);
+      const add = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
+      assert.deepEqual([add.code, add.text], [0, LEGACY_ADD]);
+      const drop = await command(t, "spell", FOLDER, "drop", "Sallie");
+      assert.equal(drop.code, 0, drop.text);
+      assert.match(drop.text, /^"Sallie" is as the transcriber writes it again\. Say "show it in Final Cut" to see it\. /);
+      t.done();
+    }
   });
 });
 

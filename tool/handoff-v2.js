@@ -129,7 +129,7 @@ const KEPT_IN_100 = 70;
 const OPENING_WORDS = 4;
 /** A time to the hundredth of a second, as inMain (handoff.js) gives its times: a sum such as 4.35 * 100 comes to 434.99999…,
     which is still 4.35. */
-const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
+export const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
 
 /** A raw video's Reel suggestions on the final main video's clock (spec section 8, "One suggestion shape"). `suggestions` are
     as they are stored, `{ n, start, end, stretches, first, last, why, point }` in seconds of the raw video, and `words` the

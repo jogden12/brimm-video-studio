@@ -14,7 +14,7 @@ import { firstWordsMatch } from "./parts.js";
 import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final-transcript.js";
 import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
-import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, VERSION_2 } from "./handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, undone, acceptRev } from "./episode.js";
 import { gated } from "./gate.js";
@@ -945,19 +945,34 @@ export async function finishNow(ctx, found, deps = {}) {
 
 // --- The hand-off of a finished video or an iPhone clip, made from the import's own captions (spec 2026-10-22, section 3) ---
 
-/** A time to the hundredth of a second, as the hand-off's other times are. */
-const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
-
 /** The words of a finished video's own record that say its hand-off was made from the import (finishFinished), not from a
     Share of Final Cut: its main part is marked `import`. Such a hand-off is made again from the import's captions, whatever a
     spelling is then, since they are all still there. */
 export const madeFromImport = (record) => Boolean(record && record.finished && record.finished.parts && record.finished.parts.main && record.finished.parts.main.import === true);
 
+/** The kind a hand-off made from the import was made as, "finished" or "short video" (its main part keeps it), or "" for a record
+    whose hand-off was not made so. A video answered as another kind since is not that hand-off's any more. */
+export const importKind = (record) => (madeFromImport(record) ? String(record.finished.parts.main.kind || "") : "");
+
+/** What a file of the hand-off is, in words for a person and never by its file name; `rel` is its path from the episode's folder. */
+export function whatIs(rel) {
+  if (rel === REELS_FILE) return "the Reel suggestions";
+  if (rel.endsWith(".brimm-ops.json")) return "the hand-off";
+  if (rel.endsWith(".transcript.txt")) return "the final transcript";
+  return rel.startsWith("final/") ? "the final captions" : "the import's captions";
+}
+
+/** Some things as they are said in a row: "a", "a and b", "a, b and c". */
+const saidList = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
+
 /** A finished video's Reel suggestions as the hand-off holds them (spec section 8, "One suggestion shape"): from the candidates
     of reels.json, each a stretch of the video in seconds of its own clock, one stretch, `{ n, start, end, stretches, first,
     last, why, point }`, its first and last words spelled with `spellings`. A candidate the record dropped, and one with no stretch,
     is passed over; one with no first words, last words, reason or point, or whose times are no stretch of a video `seconds`
-    long, is left out, and `left` says so in plain words, since the page needs all of those. { list, left }. */
+    long, is left out, and `left` says so in plain words, since the page needs all of those. { list, left }.
+    This is not suggestionsOnClock (handoff-v2.js), which maps a raw video's suggestions through its cuts by the words it kept:
+    nothing of a finished video is cut, so its clock is the video's own, each suggestion is the one stretch its candidate is
+    (already put on whole pictures by the reading), and no word file is needed to give it. */
 export function suggestionsFrom({ candidates, dropped = [], seconds, spellings = [] }) {
   const list = [];
   const left = [];
@@ -980,20 +995,26 @@ export function suggestionsFrom({ candidates, dropped = [], seconds, spellings =
 
 /** Write the hand-off of a finished video or an iPhone clip, from the import's own captions, once its spellings are answered
     (edit.js spell … offers), in the shape finishNow writes: the captions and their plain text in final/, the hand-off last, and
-    the record with `finished` (revision, handoff, and a `main` part marked `import`), the claim this Mac holds let go; then the
-    hand-off is shown in Finder, through the program runner. There is no Final Cut, no render and no transcriber. The captions
-    are the import's `<stem>.srt` with the show's names and the episode's spellings; the suggestions are those of reels.json.
-    When the record already says the hand-off was made so, it is made again as the next revision, the same file, from the import's
-    captions again, so that a spelling dropped or changed is dropped or changed in the final transcripts as well; a hand-off
-    that would come out as it is stays as it is, and only the record is written.
-    `found` is { folder, name, record } as the commands have it, and `record` the record to write, `found.record` when it is not
-    given: `found.record` with what the command changed (its spellings, the answer to the offers). Before anything is looked at, cannotFinish refuses a session and a
-    video not yet answered; then handoffTarget says where it goes (and whether it is written at all), the hand-off is built and
-    checked (handoffFaultV2), and numbersTakenWords is asked. Nothing is written, in final/ or the record, unless all of that
-    is well. Resolves one of:
+    the record with `finished` (revision, handoff, and a `main` part marked `import`, with the kind it was made as), the claim this
+    Mac holds let go; then the hand-off is shown in Finder, through the program runner. There is no Final Cut, no render and no
+    transcriber. The captions are the import's `<stem>.srt` with the show's names and the episode's spellings; the suggestions
+    are those of reels.json.
+    `found` is { folder, name, record }, as the commands have it, and `record` the record to write: when it is not given,
+    `found.record`; the command gives it with what it changed (its spellings, the answer to the offers). It is written over
+    `found.record`, the record on disk, whose rev it is written after.
+    When the record already says its hand-off was made so (madeFromImport), it is made again as the next revision, the same file,
+    from the import's captions again, so that a spelling dropped or changed is dropped or changed in the final transcripts too.
+    The hand-off on file is read for the Reels made here that it holds, and to tell whether the new one comes out as it is, when
+    it stays as it is and only the record is written; one that is gone, or cannot be read, is made again whole.
+    Every file it hands off or replaces must be here, whole, and the size the record lists (a file the record does not list is
+    not held to a size): otherwise it writes nothing and says which are to be brought over.
+    Before anything is looked at, cannotFinish refuses a session and a video not yet answered; then handoffTarget says where it
+    goes (and whether it is written at all), the hand-off is built and checked (handoffFaultV2), and numbersTakenWords is asked.
+    Nothing is written, in final/ or the record, unless all of that is well. Resolves one of:
     - { waits: true }: this Mac does not hand off version 2 yet. Nothing was written.
-    - { why }: why it was not written, in plain words, with "Nothing was written." or "Nothing was changed.".
-    - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first.
+    - { why }: why it was not written, in plain words, with "Nothing was written." or "Nothing was changed.". When files it had
+      put in could not be put back as they were, it says which and to tell Jason.
+    - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first (whatIs says what each is).
     - { ok: true, revision, handoff, left, same }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
       says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written. */
 export async function finishFinished(ctx, found, { record = found.record } = {}) {
@@ -1002,36 +1023,57 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   if (refused) return { why: refused };
   const kind = kindOf(record);
   if (kind !== "finished" && kind !== "short video") return { why: `${who} is a raw video: its hand-off is made when it is finished in Final Cut. Nothing was written.` };
+  const prior = madeFromImport(record) ? record.finished : null;
+  if (prior && importKind(record) !== kind) return { why: `${who}'s hand-off was made as another kind than it is now: it waits for its new reading. Nothing was written.` };
   const target = handoffTarget(ctx, { folder: found.folder, record });
   if (!target.v2) return { waits: true };
   if (target.refusal) return { why: target.refusal };
 
   const folder = found.folder;
-  const prior = madeFromImport(record) ? record.finished : null;
   const listed = (rel) => rel in (record.files || {});
   const stem = basename(record.video.file, extname(record.video.file));
   const captionsRel = `${stem}.srt`;
-  // What it is made from, here and whole: the import's captions, the reels.json of the reading (a finished video's suggestions),
-  // and, when it is made again, the hand-off on file.
-  // The final files it replaces are read first, to be put back as they were if the record cannot be written, so they are whole too.
-  const wanted = [captionsRel, ...(kind === "finished" ? [REELS_FILE] : []), ...(prior ? [prior.handoff] : [])];
+  /** How a file stands: "gone" when it is not there, "wrong" when it is there but not whole or not the size the record lists,
+      "here" otherwise. */
+  const standing = (rel) => {
+    let size = null;
+    try {
+      size = statSync(join(folder, rel)).size;
+    } catch (e) {
+      return "gone";
+    }
+    return ctx.isWhole(join(folder, rel)) && (!listed(rel) || record.files[rel] === size) ? "here" : "wrong";
+  };
+  // What it is made from: the import's captions and, for a finished video, the reels.json of the reading; and what it replaces,
+  // which is read first, to be put back as it was if the record cannot be written. A file the record lists that is not here is
+  // one Dropbox is still bringing; one it does not list was never there, which only the captions cannot be without. The hand-off
+  // on file is the exception: gone, it is made again.
+  const needed = [captionsRel, ...(kind === "finished" ? [REELS_FILE] : [])];
   const replaced = prior ? [`final/${stem}.srt`, `final/${stem}.transcript.txt`] : [];
-  const absent = [...wanted, ...replaced].filter((rel) => !existsSync(join(folder, rel)));
-  const missing = wanted.find((rel) => absent.includes(rel) && !listed(rel) && rel !== REELS_FILE);
-  if (missing) return { why: missing === captionsRel ? `${who} has no captions from the import to hand off. Nothing was written.` : `${missing} is not in the episode's folder, so the hand-off cannot be made again. Nothing was changed.` };
-  const coming = [...wanted, ...replaced].filter((rel) => (absent.includes(rel) ? listed(rel) : !ctx.isWhole(join(folder, rel))));
+  if (standing(captionsRel) === "gone" && !listed(captionsRel)) return { why: `${who} has no captions from the import to hand off. Nothing was written.` };
+  const coming = [...needed, ...replaced, ...(prior ? [prior.handoff] : [])].filter((rel) => {
+    const state = standing(rel);
+    return state === "wrong" || (state === "gone" && listed(rel) && rel !== prior?.handoff);
+  });
   if (coming.length) return { coming };
   let imported = "";
   let reels = null;
   let onFile = null;
   try {
     imported = readFileSync(join(folder, captionsRel), "utf8");
-    if (kind === "finished" && existsSync(join(folder, REELS_FILE))) reels = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
-    if (prior) onFile = JSON.parse(readFileSync(join(folder, prior.handoff), "utf8"));
+    if (kind === "finished" && standing(REELS_FILE) === "here") reels = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
   } catch (e) {
     return { why: `${who}'s files could not be read (${e.code || "they are not what they should be"}). Nothing was written.` };
   }
   if (reels && reels.why) return { why: `${who}'s list of Reel suggestions cannot be used: ${reels.why.replace(/\.$/, "")}. Nothing was written.` };
+  if (prior && standing(prior.handoff) === "here") {
+    try {
+      const read = JSON.parse(readFileSync(join(folder, prior.handoff), "utf8"));
+      if (read !== null && typeof read === "object" && !Array.isArray(read)) onFile = read;
+    } catch (e) {
+      // It cannot be read as a hand-off: it is made again whole.
+    }
+  }
 
   const spellings = Array.isArray(record.spellings) ? record.spellings : [];
   const shows = spelledCaptions(imported, []);
@@ -1057,23 +1099,29 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     return { why: `${gone} Nothing was written.` };
   }
   const handoffRel = prior ? prior.handoff : `final/${fileSafe(record.name.text)}.brimm-ops.json`;
-  const finishedNow = (revision, when) => ({ revision, at: when, on: ctx.machine, handoff: handoffRel, parts: { main: { v: 0, file: `final/${record.video.file}`, bytes: record.video.bytes, seconds, spellings: held, noHandEdits: true, import: true } } });
+  const finishedNow = (revision, when) => ({ revision, at: when, on: ctx.machine, handoff: handoffRel, parts: { main: { v: 0, file: `final/${record.video.file}`, bytes: record.video.bytes, seconds, spellings: held, noHandEdits: true, import: true, kind } } });
   const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
   const work = join(runsFolder(ctx.home), `first-hand-off-${process.pid}-${ctx.now()}`);
   const same = Boolean(onFile) && JSON.stringify({ ...onFile, revision: 0, made: "", madeOn: "", madeBy: "" }) === JSON.stringify({ ...handoff, revision: 0, made: "", madeOn: "", madeBy: "" });
   const release = record.editing && record.editing.by === ctx.machine && !prior ? { editing: null } : {};
   const finalDir = join(folder, "final");
   const madeDir = !existsSync(finalDir);
+  /** Each file put in: where, what was there before (null when nothing), and the copy this call put there. */
   const before = [];
   const put = textWriter({ work, ...opts });
-  /** Each final file put back as it was, or taken away if this call made it. */
+  /** Each final file put back as it was, or taken away if this call made it, each on its own, and only while it is still the copy
+      this call put in: another Mac's is left as it is. Gives back what could not be put back as it was, by what it is. */
   const putBack = () => {
-    for (const [to, was] of before.reverse()) {
+    const lost = [];
+    for (const { to, rel, was, ours } of [...before].reverse()) {
       try {
-        if (was === null) rmSync(to, { force: true });
+        const now = existsSync(to) ? readFileSync(to, "utf8") : null;
+        if (now === was) continue;
+        if (now !== null && now !== ours) lost.push(whatIs(rel));
+        else if (was === null) rmSync(to, { force: true });
         else put(to, was, { replace: true });
       } catch (e) {
-        // What could not be put back is left; the record was not written, so the next try writes it again.
+        lost.push(whatIs(rel));
       }
     }
     if (madeDir) {
@@ -1083,6 +1131,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
         // It is not empty, or not there.
       }
     }
+    return lost;
   };
   const files = {};
   try {
@@ -1090,11 +1139,11 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     if (!same) {
       // The hand-off last, as finish copies it.
       const ordered = [[`final/${stem}.srt`, srt], [`final/${stem}.transcript.txt`, txt], [handoffRel, handoffText(handoff)]];
-      for (const [rel, text] of ordered) {
+      for (const [rel, ours] of ordered) {
         const to = join(folder, rel);
         const there = existsSync(to);
-        before.push([to, there ? readFileSync(to, "utf8") : null]);
-        files[rel] = put(to, text, { replace: there }).bytes;
+        before.push({ to, rel, was: there ? readFileSync(to, "utf8") : null, ours });
+        files[rel] = put(to, ours, { replace: there }).bytes;
       }
     }
     const next = {
@@ -1105,9 +1154,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     };
     writeEpisode(folder, next, { expectRev: found.record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
   } catch (e) {
-    putBack();
-    if (e.code === "CHANGED") return { why: "Nothing was written: this episode changed on the other Mac: open it again." };
-    return { why: `Nothing was written: ${String(e.message || e.code || "a file could not be put in").replace(/\.$/, "")}.` };
+    const lost = putBack();
+    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(e.message || e.code || "a file could not be put in").replace(/\.$/, "");
+    return { why: `Nothing was written: ${why}.${lost.length ? ` ${capital(saidList([...new Set(lost)]))} could not be put back as it was. Tell Jason: the episode needs him.` : ""}` };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
