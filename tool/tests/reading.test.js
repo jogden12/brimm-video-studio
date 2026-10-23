@@ -213,6 +213,14 @@ describe("read, a finished video", () => {
     assert.ok(!t.waits.includes(READ_LOOK_MS));
     t.done();
   });
+  it("keeps the account as \"\" when claude auth status cannot be read, and reads all the same", async () => {
+    const { t, found } = reading("finished");
+    const claude = t.ctx.deps.run;
+    t.ctx.deps.run = async (cmd, args, asked) => (cmd === "CLAUDE" && args[0] === "auth" ? { code: 1, stderr: "not signed in", stdout: "" } : claude(cmd, args, asked));
+    assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
+    assert.equal(reread(found).reading.account, "");
+    t.done();
+  });
   it("leaves out of the offers a spelling the episode has already", async () => {
     const { t, found } = reading("finished", { over: { spellings: [["Sally", "Sallie"]] } });
     assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
@@ -289,6 +297,22 @@ describe("read, a raw video", () => {
     assert.deepEqual(record.offers.spellings, RAW_REPLY.spellings);
     assert.equal(record.reading.kind, "raw");
     assert.deepEqual(notices, [NOTICE]);
+    t.done();
+  });
+  it("still puts in what it read when the rough cut cannot be made, with no version 0, and says so", async () => {
+    const { t, found } = reading("raw");
+    const run = t.ctx.deps.run;
+    t.ctx.deps.run = async (cmd, args, asked) => (cmd === "FFMPEG" ? { code: 1, stderr: "Conversion failed!" } : run(cmd, args, asked));
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.main.pushed, record.reading.kind, t.opened], [2, [], "raw", []]);
+    assert.ok(!existsSync(renderOf(t)));
+    assert.ok(existsSync(join(found.folder, "edit", "main.v0.fcpxml")));
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8")).ranges, JSON.parse(JSON.stringify(applyDecisions(PLAN, RAW_REPLY.decisions, HEARD).plan.ranges)));
+    const result = readResult(t.home, FOLDER, "read");
+    assert.equal(result.ok, false);
+    assert.ok(result.failed.some((f) => /^The rough cut could not be made: ffmpeg stopped \(Conversion failed!\)\.$/.test(f)), result.failed.join(" | "));
     t.done();
   });
   it("waits, asking and replacing nothing, while the import's late check still holds the video, and reads it once the check is made", async () => {
