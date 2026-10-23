@@ -26,6 +26,21 @@ describe("whether a watched folder is this Mac's drop folder", () => {
     assert.equal(episodeMode("/Users/jasonogden/Dropbox/BRIMM VIDEO Transfer/Unedited Video Transfer", SETTINGS), false);
     assert.equal(episodeMode(`${ROOT}/Unedited Video/Sallie's laptop`, SETTINGS), false);
   });
+  // A Mac whose settings say Drop watches Drop/<Mac>. If the import still took the old folder for the drop folder, it would file
+  // each video the old way, renaming it into a folder for the day inside Dropbox, which the rule for Dropbox forbids.
+  it("is, when this Mac's settings name Drop, for Drop/<this Mac>, and no longer for Unedited Video/<this Mac>", () => {
+    const drop = { ...SETTINGS, drop: "Drop" };
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, drop), true);
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio/`, drop), true);
+    assert.equal(episodeMode(`${ROOT}/Unedited Video/Mac Studio`, drop), false);
+    assert.equal(episodeMode(`${ROOT}/Drop/Sallie's laptop`, drop), false);
+  });
+  it("is as it was when the settings name Unedited Video or no drop folder: Drop/<this Mac> is then no drop folder of this Mac's", () => {
+    for (const settings of [SETTINGS, { ...SETTINGS, drop: "Unedited Video" }]) {
+      assert.equal(episodeMode(`${ROOT}/Unedited Video/Mac Studio`, settings), true);
+      assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, settings), false);
+    }
+  });
 });
 
 describe("the kind of episode a video makes", () => {

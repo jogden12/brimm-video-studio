@@ -4073,6 +4073,41 @@ describe("what the final review found in the episode import", () => {
     assert.deepEqual(t.logs, [`This is a drop folder for episodes (${join(t.drop, ".brimm-watched-by")} names Mac Studio), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`]);
     t.done();
   });
+  // The switch names Drop: a folder directly in BRIMM Video/Drop/ is a drop folder as one in BRIMM Video/Unedited Video/ is, and
+  // the log names the folder it is in.
+  it("takes a folder directly in BRIMM Video/Drop for a drop folder too, even with no marker in it, and the log names the folder it is in", async () => {
+    const t = episodic();
+    const drop = join(t.root, "Drop", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    t.deps.settings = null;
+    assert.deepEqual(await uneditedFolder(drop, t.deps), []);
+    assert.deepEqual([readdirSync(drop), t.calls], [["Talk.mov"], []]);
+    assert.deepEqual(t.logs, ["This is a drop folder for episodes (it is in BRIMM Video/Drop), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac."]);
+    // The old one says where it is, too.
+    t.logs.length = 0;
+    assert.deepEqual(await uneditedFolder(t.drop, t.deps), []);
+    assert.deepEqual(t.logs, ["This is a drop folder for episodes (it is in BRIMM Video/Unedited Video), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac."]);
+    t.done();
+  });
+  it("does not work the old drop folder the old way either once this Mac's settings name Drop, and imports Drop/<this Mac> as episodes", async () => {
+    const t = episodic();
+    const drop = join(t.root, "Drop", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    writeFileSync(join(t.drop, "Old.mov"), "video");
+    t.deps.settings = { ...t.deps.settings, drop: "Drop" };
+    assert.deepEqual(await uneditedFolder(t.drop, t.deps), []);
+    assert.deepEqual([readdirSync(t.drop), t.calls], [["Old.mov"], []]);
+    t.logs.length = 0;
+    const [r] = await uneditedFolder(drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, "2026-10-13 Talk (Mac Studio)"]);
+    assert.deepEqual(t.folders(), ["2026-10-13 Talk (Mac Studio)"]);
+    // Nothing in Dropbox is renamed or moved into a folder for the day, as the old way does: the late check, which this run
+    // waited for, took the video out, and nothing else is in the drop folder.
+    assert.deepEqual(readdirSync(drop), []);
+    t.done();
+  });
 });
 
 describe("what the lead's review of PR 11 found in the import", () => {
