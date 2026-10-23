@@ -333,6 +333,8 @@ describe("the light import", () => {
 - [ ] **Step 4: Run** `cd tool && node --test`. Expected: PASS.
 - [ ] **Step 5: Commit** `git commit -m "Reel suggestions mapped onto the final main video's clock"`
 
+**Note (Part H's branch review, 2026-10-23):** under version 2, a raw video finished in Final Cut carries no `suggestions` until V4 maps them onto the final clock with `suggestionsOnClock`. Whether to pull that forward is Jason's call.
+
 ### Task H4: Revisions across ids, versions and both formats
 
 **Files:**
