@@ -785,7 +785,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const t = mac({ import: "light", readings: false, handoffVersion: 2, later: { x: 1 } });
     const before = t.held();
     assert.equal(await t.run("plan", ...t.told, "--drop", "Drop"), 0);
-    assert.equal(t.said.length, 1);
+    // The settings, then, each on a line of its own for the installer to read without parsing JSON, the drop folder as it is and as it
+    // would be.
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Unedited Video", "The drop folder will be: Drop"]);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: t.root, checkout: CHECKOUT, import: "light", readings: false, handoffVersion: 2, later: { x: 1 }, drop: "Drop" });
     assert.equal(t.held(), before);
     // It is what write then writes, to the letter.
@@ -802,10 +804,23 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT];
     assert.equal(await run("plan", ...told), 0);
     assert.equal(t.said[0], JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT }, null, 2));
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
     t.said.length = 0;
     assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "full", "--drop", "Unedited Video"), 0);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "full", drop: "Unedited Video" });
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
     assert.equal(existsSync(settingsFile(t.home)), false);
+    t.done();
+  });
+  it("plan says the drop folder the file names as the one it is now, and as it will be, so that a Mac on Drop run again stays on it", async () => {
+    const t = mac({ drop: "Drop", later: "\u0000" });
+    assert.equal(await t.run("plan", ...t.told), 0);
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Drop", "The drop folder will be: Drop"]);
+    assert.equal(JSON.parse(t.said[0]).later, "\u0000");
+    t.said.length = 0;
+    // Told the other, it says both.
+    assert.equal(await t.run("plan", ...t.told, "--drop", "Unedited Video"), 0);
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Drop", "The drop folder will be: Unedited Video"]);
     t.done();
   });
   it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
@@ -938,7 +953,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       put(t.folder(), "Talk.mov");
       // Not told, told what it is already, and told Unedited Video when the file says none: it stays as it is.
       await t.run("plan", ...t.told);
-      assert.equal(JSON.parse(t.said.at(-1)).drop, undefined);
+      assert.equal(JSON.parse(t.said.at(-3)).drop, undefined);
       t.said.length = 0;
       assert.equal(await t.run("write", ...t.told, "--drop", "Unedited Video"), 0);
       assert.deepEqual(t.said, [`Written: ${t.file}`]);

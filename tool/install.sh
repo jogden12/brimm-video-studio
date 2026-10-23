@@ -155,8 +155,6 @@ node_old() {
   [[ "${2-}" != say ]] || say "Node here is $("$1" --version), and the tool needs 22 or later. Run: brew upgrade node"
   return 0
 }
-# The value of a setting at the top of the JSON that settings.js writes, read from the standard input: nothing when there is none.
-json_field() { plutil -extract "$1" raw -o - - 2>/dev/null || true; }
 # Claude Code, where unedited.js finds it when a launch agent runs it: along the agent's own PATH, and then in .local/bin in
 # the home folder, where Claude Code's own installer puts it. This shell's PATH may lead to one the agent never sees. A test
 # names a stand-in in BRIMM_CLAUDE, so that no test runs the Claude Code of the Mac it runs on.
@@ -341,11 +339,26 @@ if [[ "$machined" == "yes" ]]; then
       exit 2
     fi
   fi
-  drop_name="$(print -rn -- "$planned" | json_field drop)"
-  drop_name="${drop_name:-Unedited Video}"
-  # The folder the settings name now, from which this run would switch: its folder is left as it is.
-  old_drop_name="$({ json_field drop < "$SETTINGS_FILE"; } 2>/dev/null || true)"
-  old_drop_name="${old_drop_name:-Unedited Video}"
+  # The drop folder as it is now and as it will be are the last two lines of what it says, each as it says them, which are read as
+  # lines and never as JSON: what cannot be read refuses, and is never taken for Unedited Video. The settings are the lines above.
+  old_drop_name="Unedited Video"
+  drop_name="Unedited Video"
+  if [[ -n "$settings_node" ]]; then
+    plan_lines=("${(@f)planned}")
+    now_line="${plan_lines[-2]-}"
+    will_line="${plan_lines[-1]-}"
+    old_drop_name="${now_line#The drop folder is now: }"
+    drop_name="${will_line#The drop folder will be: }"
+    if [[ "$now_line" != "The drop folder is now: "* || "$will_line" != "The drop folder will be: "* ]] ||
+       [[ "$old_drop_name" != ("Drop"|"Unedited Video") || "$drop_name" != ("Drop"|"Unedited Video") ]]; then
+      say "The installer could not read what settings.js said of the drop folder, so it changed nothing. It said:"
+      say "$planned"
+      say ""
+      say "Nothing was changed."
+      exit 2
+    fi
+    planned="${(F)plan_lines[1,-3]}"
+  fi
   drop="$root/$drop_name/$machine"
   marker="$drop/.brimm-watched-by"
   if [[ -f "$marker" ]]; then

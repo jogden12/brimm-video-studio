@@ -202,8 +202,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                (by label where there is one), and what to do first
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
-                               say what write would write, whole, as JSON, or why it would refuse it.
-                               Nothing is written. install.sh asks this before it changes anything
+                               say what write would write, whole, as JSON, and then the drop folder as it is now and as it
+                               will be, a line each, or why it would refuse it. Nothing is written. install.sh asks this
+                               before it changes anything
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
@@ -278,13 +279,13 @@ function planned(home, rest, now) {
   // The drop folder is Unedited Video until the file says Drop.
   const from = held.drop === "Drop" ? "Drop" : "Unedited Video";
   const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
-  if (from === to) return { settings, fields: told.fields };
+  if (from === to) return { settings, fields: told.fields, from, to };
   const light = lightImport(held) || lightImport(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
       const { work, imported, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
-      if (!work.length && !imported.length && !unreadable.length) return { settings, fields: told.fields };
+      if (!work.length && !imported.length && !unreadable.length) return { settings, fields: told.fields, from, to };
       const head = work.length || imported.length ? "and work is not finished in the old one:" : "and the old one could not be looked at:";
       return {
         code: 1,
@@ -324,7 +325,8 @@ function write(home, rest, say, now) {
   });
 }
 
-/** `plan`: the settings `write` would write, whole, as JSON, and nothing written; or the lines `write` would refuse by. Gives the
+/** `plan`: the settings `write` would write, whole, as JSON, then the drop folder now and as it will be, each on a line of its
+    own, and nothing written; or the lines `write` would refuse by. Gives the
     number it ends with, or a promise of it when the drop folder changes. */
 function plan(home, rest, say, now) {
   return afterwards(planned(home, rest, now), (result) => {
@@ -333,6 +335,9 @@ function plan(home, rest, say, now) {
       return result.code;
     }
     say(JSON.stringify(result.settings, null, 2));
+    // The drop folder as it is and as it would be, each on a line of its own, for install.sh, which reads them without parsing JSON.
+    say(`The drop folder is now: ${result.from}`);
+    say(`The drop folder will be: ${result.to}`);
     return 0;
   });
 }

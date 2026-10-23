@@ -580,11 +580,10 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of a setting in the JSON that
-    // settings.js writes (json_field, which comes first), of Final Cut Pro's own Info.plist and of what Claude Code says of its
-    // sign-in.
+    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of Final Cut Pro's own
+    // Info.plist and of what Claude Code says of its sign-in. None reads what settings.js says: that is read as lines.
     const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
-    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : line.includes('plutil -extract "$1" raw -o - -') ? "settings" : / -o - - /.test(line) ? "Claude" : line)), ["settings", "agent", "agent", "Final Cut", "Claude", "Claude"]);
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Final Cut", "Claude", "Claude"]);
   });
 });
 
@@ -1033,6 +1032,40 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const fresh = askWith({ bare: true }, "--print", "--machine", "Mac Studio", d.root);
     assert.equal(fresh.status, 0, fresh.out);
     assert.ok(fresh.out.includes("\n  Programs to install with Homebrew:  ffmpeg whisper-cpp node\n"), fresh.out);
+    d.done();
+  });
+  it("keeps a Mac on its drop folder whatever else its settings hold: a field that JSON writes as an escape does not make it fall back to Unedited Video", () => {
+    const d = box();
+    // The installer read the drop folder back out of the JSON with plutil, which could not read this one, and fell back quietly:
+    // the settings it printed said Drop, and the launch agent it showed watched Unedited Video.
+    const r = askWith({ settings: d.mine({ drop: "Drop", later: "\u0000" }) }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), drop: "Drop", later: "\u0000" });
+    assert.deepEqual(r.agents.map(held), [agent(r, [`${d.root}/Drop/Mac Studio`])]);
+    assert.ok(r.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), r.out);
+    assert.doesNotMatch(r.out, /The old drop folder/);
+    d.done();
+  });
+  it("refuses, and changes nothing, when what settings.js said of the drop folder cannot be read: it never falls back to Unedited Video", () => {
+    const d = box();
+    const said = (lines) => `printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}\n`;
+    const answers = (lines) => `if [ "$2" = plan ]; then ${said(lines)}exit 0; fi\nexec "${process.execPath}" "$@"\n`;
+    const cannot = (lines) => ["The installer could not read what settings.js said of the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
+    for (const lines of [
+      ["{", '  "version": 1', "}"],
+      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere"],
+      ["{", '  "version": 1', "}", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
+      ["nothing of the kind"]
+    ]) {
+      const r = askWith({ onPath: { node: answers(lines) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+      assert.deepEqual([r.status, r.out], [2, cannot(lines)], lines.join(" | "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    // What it says whole is read: its own two lines, and the settings above them are what is shown.
+    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    assert.equal(good.status, 0, good.out);
+    assert.deepEqual(shown(good), { version: 1 });
+    assert.ok(good.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), good.out);
     d.done();
   });
   it("takes the settings from what settings.js says, and not from what node says of itself on its standard error: a warning is shown and changes nothing", () => {
