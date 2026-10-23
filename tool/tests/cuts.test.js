@@ -42,7 +42,7 @@ describe("when a file says it was recorded", () => {
 
 describe("the facts about a file", () => {
   it("are its length, the size and frame rate of its picture, and whether it has sound", () => {
-    assert.deepEqual(factsOf(probed()), { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 });
+    assert.deepEqual(factsOf(probed()), { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } });
   });
   it("say when the sound starts, counted from the first picture", () => {
     assert.equal(factsOf(probed({ sound: { start_time: "0.021333" } })).soundStart, 0.021);
@@ -50,8 +50,16 @@ describe("the facts about a file", () => {
     assert.equal(factsOf(probed({ picture: { start_time: "1.400000" }, sound: { start_time: "1.400000" } })).soundStart, 0);
   });
   it("say so when there is no sound, or no picture", () => {
-    assert.deepEqual(factsOf(probed({ sound: null })), { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: false, soundStart: 0 });
-    assert.deepEqual(factsOf(probed({ picture: null })), { duration: 23.423, width: 0, height: 0, fps: "", sound: true, soundStart: 0 });
+    assert.deepEqual(factsOf(probed({ sound: null })), { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: false, soundStart: 0, device: { make: "", model: "" } });
+    assert.deepEqual(factsOf(probed({ picture: null })), { duration: 23.423, width: 0, height: 0, fps: "", sound: true, soundStart: 0, device: { make: "", model: "" } });
+  });
+  it("name the device that made the file, from the make and model tags a phone writes, and are empty when the file names none", () => {
+    const made = (tags) => JSON.stringify({ ...JSON.parse(probed()), format: { ...JSON.parse(probed()).format, tags } });
+    assert.deepEqual(factsOf(made({ "com.apple.quicktime.make": "Apple", "com.apple.quicktime.model": "iPhone 15 Pro" })).device, { make: "Apple", model: "iPhone 15 Pro" });
+    assert.deepEqual(factsOf(made({ "com.apple.quicktime.make": "Apple" })).device, { make: "Apple", model: "" });
+    assert.deepEqual(factsOf(made({ creation_time: "2026-10-01T15:04:05.000000Z" })).device, { make: "", model: "" });
+    assert.deepEqual(factsOf(made({ "com.apple.quicktime.make": 7, "com.apple.quicktime.model": null })).device, { make: "", model: "" });
+    assert.deepEqual(factsOf(probed()).device, { make: "", model: "" });
   });
   it("do not take the cover of a sound file for a picture", () => {
     const f = factsOf(probed({ picture: { width: 600, height: 600, disposition: { attached_pic: 1 } } }));

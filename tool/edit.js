@@ -167,12 +167,21 @@ const plainly = (text) => String(text || "").normalize("NFC").toLowerCase();
 /** Some things as they are said in a row: "a", "a and b", "a, b and c". */
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
 
+/** An episode whose record a newer brimm-video wrote, as it is named: by its short id alone, "an episode a newer brimm-video
+    wrote (3fa9c1)". Never by its folder, whose name may be a client's: that record may be a session or a video not yet
+    answered, and this brimm-video cannot read the label a newer one names it by. */
+const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
+
+/** What a command says of an episode a newer brimm-video wrote, and does nothing more with it. */
+const newerWords = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
     fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
     renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
     whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
-    every command but `resolve` refuses it. */
+    every command but `resolve` refuses it. In the lists of episodes it says, one a newer brimm-video wrote is named by its
+    short id alone (newerName). */
 export function findEpisode(ctx, said) {
   // An import that has not finished has no whole record, and is not an episode yet.
   const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
@@ -190,9 +199,10 @@ export function findEpisode(ctx, said) {
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
   const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byId.length ? byId : byWords;
+  const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
   if (fits.length === 1) return fits[0];
-  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => e.name))}. Say which.` };
-  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map((e) => e.name))}.` : "There are no episodes yet." };
+  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
+  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
 }
 
 /** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
@@ -243,9 +253,10 @@ function folderSize(folder) {
 }
 
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
-    late check. Only those whose video `fits`, when it is given. */
+    late check. Only those whose video `fits`, when it is given. A video that is held in the drop folder, not imported, is no
+    import: the list of the videos waiting says why it waits. */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video)).map(({ status }) => {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
     if (state === "failed") return `  ${status.video}: its import failed on ${status.machine}: ${status.failed}`;
     if (state === "problem") return `  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`;
@@ -256,7 +267,7 @@ function importLines(ctx, fits = () => true) {
 
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
-    archived episode is left out. */
+    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). */
 export async function episodes(ctx) {
   const { say } = ctx;
   const shown = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) }))
@@ -272,8 +283,7 @@ export async function episodes(ctx) {
         continue;
       }
       if (read.newer) {
-        say(`  ${name}`);
-        say("    Written by a newer brimm-video: Jason updates this Mac before it is changed here.");
+        say(`  ${capital(newerName(r))}: Jason updates this Mac before it is changed here.`);
         continue;
       }
       const kind = r.kind === "short video" ? "a short video" : "an episode";
@@ -369,7 +379,7 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(`${found.name} was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac.`);
+    ctx.say(newerWords(read.record));
     return { code: newerEnds };
   }
   return { found, record: read.record };
@@ -982,11 +992,19 @@ export async function retry(ctx, rest) {
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
     return 1;
   }
-  const held = episodeHolding({ root: ctx.root, video, bytes: statSync(join(drop, video)).size });
+  const bytes = statSync(join(drop, video)).size;
+  const held = episodeHolding({ root: ctx.root, video, bytes });
   if (held) return lateCheckOwed(ctx, video, held);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
   const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  // A video the import holds in the folder on purpose, a Zoom download, is held again however often it is tried: its status
+  // says why, and what to do. The status of a held video that is another file now is of no use, and is taken away below.
+  const left = mine.find((s) => importState(s.status, ctx.now()) === "held" && s.status.bytes === bytes);
+  if (left) {
+    say(`${video} is held: ${left.status.held}`);
+    return 1;
+  }
   const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
   const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
   if (!again.length && running) {
@@ -998,6 +1016,7 @@ export async function retry(ctx, rest) {
     const state = importState(status, ctx.now());
     if (state === "failed") return `which failed: ${String(status.failed).replace(/\.$/, "")}`;
     if (state === "problem") return "whose late check found a problem";
+    if (state === "held") return "which was held, as another file";
     return `which stopped at ${status.step}`;
   };
   const items = again.map(({ status }) => `${status.import || "one with no id"}, ${how(status)}`);
@@ -2031,12 +2050,19 @@ const keptOrWait = (ctx, found, record) => {
 
 /** `ask "<episode>"`: Claude asked again for the episode's Reel candidates, detached (`ask --now "<episode folder>"`, which
     askAgain does, in unedited.js), since it can take minutes. It refuses a short video, a Mac without Claude Code, an
-    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says. */
+    episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says.
+    Both parts refuse an episode a newer brimm-video wrote, by its short id alone. */
 async function ask(ctx, rest) {
   if (rest[0] === "--now") {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
       ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      return 1;
+    }
+    // A record a newer brimm-video wrote may be a session or a video not yet answered, whose fields this one cannot read: it is
+    // named by its short id alone, nothing is asked of Claude, and nothing is written, not even the result of a run.
+    if (found.read.newer) {
+      ctx.say(newerWords(found.read.record));
       return 1;
     }
     const deps = {

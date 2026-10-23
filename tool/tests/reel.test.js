@@ -3,7 +3,7 @@
 // (reel.js). Further down: phase 3's own project of a Reel, the list of candidates (reels), and ask.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync as copyFile, existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync as copyFile, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { reelTimeline } from "../reel.js";
 import { pushReel, editMain } from "../edit.js";
@@ -579,7 +579,7 @@ describe("ask, when something fails half-way (from the review)", () => {
 // part, which asks Claude nothing and changes nothing.
 import { writeStatus } from "../importing.js";
 import { writePending } from "../filing.js";
-import { acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
+import { RECORD_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
 const askedBoth = async (p) => {
@@ -1966,5 +1966,80 @@ describe("ask, what it refuses (from the review)", () => {
     assert.ok(p.t.said().includes(why), p.t.said());
     assert.deepEqual(r.failed, [why]);
     p.t.done();
+  });
+});
+
+describe("ask, and a video not yet answered or a session (Part L's review)", () => {
+  const AT = "2026-10-20T15:00:00-05:00";
+  /** The episode's record written again at layout 3, with `more` laid over it, as the switch's record holds it. */
+  const relayout = (found, more) => {
+    const at = join(found.folder, "record", "0001.json");
+    const record = JSON.parse(readFileSync(at, "utf8"));
+    writeFile(at, JSON.stringify({ ...record, version: 3, ...more }, null, 2) + "\n");
+  };
+  const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
+  const SESSION = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+  // Nothing of an unanswered video goes to Claude until she says what it is, and a session's words go only to its own reading.
+  it("refuses a video waiting for its answer, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
+    const r = await askedBoth(p);
+    const why = "This video is waiting for its answer: say what it is first.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  it("refuses a client or group session whose mark is not cleared, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION });
+    const r = await askedBoth(p);
+    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  it("refuses a session that has no mark at all, as one whose mark is not cleared, both parts, and asks nothing", async () => {
+    const p = askable();
+    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20" });
+    const r = await askedBoth(p);
+    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  // A newer brimm-video may have written a session or a video not yet answered: its detached part, which a stopped run or a
+  // person may start by the folder's name, names it by its short id alone, as every other command does, and goes no further.
+  it("refuses, in its detached part, an episode a newer brimm-video wrote, by its short id alone, and asks nothing and writes nothing", async () => {
+    const p = askable();
+    relayout(p.found, { version: RECORD_VERSION + 1 });
+    const { id } = JSON.parse(readFileSync(join(p.found.folder, "record", "0001.json"), "utf8"));
+    /** Every file in the episode's folder, with its size. */
+    const listing = () => readdirSync(p.found.folder, { recursive: true }).sort().map((n) => [n, statSync(join(p.found.folder, n)).size]);
+    const before = listing();
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+    assert.equal(p.t.said(), `That is an episode a newer brimm-video wrote (${id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`);
+    assert.deepEqual([p.t.calls.filter((c) => c.cmd === "CLAUDE").length, readResult(p.t.home, FOLDER, "ask"), listing()], [0, null, before]);
+    p.t.done();
+  });
+  // An answered video, and a session whose mark is cleared, are not refused for what they are: the checks after those come to
+  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse.
+  it("lets an answered video, and a session whose mark is cleared, on to the checks that come after", async () => {
+    for (const [what, more] of [
+      ["an answered video", { kind: "finished", answer: ANSWERED }],
+      ["a session whose mark is cleared", { kind: "finished", answer: ANSWERED, label: "Session, 2026-10-20", session: { ...SESSION, cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } } }]
+    ]) {
+      const p = askable();
+      relayout(p.found, more);
+      rmSync(join(p.found.folder, "Pricing talk.cut-plan.json"));
+      const r = await askedBoth(p);
+      const why = "Pricing talk.mp4 has no cut plan here, so Claude cannot be asked.";
+      assert.deepEqual([r.quick, r.started, r.now, r.claude, r.rev], [1, 0, 1, 0, 1], what);
+      assert.ok(p.t.said().includes(why), `${what}: ${p.t.said()}`);
+      assert.deepEqual(r.failed, [why], what);
+      p.t.done();
+    }
   });
 });

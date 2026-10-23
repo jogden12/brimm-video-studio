@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { nameEpisode, titleEpisode, pickReels, dropReels, editMain } from "../edit.js";
-import { recordFile, recordText } from "../episode.js";
+import { RECORD_VERSION, recordFile, recordText } from "../episode.js";
 import { writtenFile } from "../settings.js";
 import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
 
@@ -64,7 +64,7 @@ describe("what every record command does first", () => {
   it("ends with 1 on a record of a newer layout", async () => {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, version: 3, rev: 2 }));
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, version: RECORD_VERSION + 1, rev: 2 }));
     assert.equal(await editMain(["name", FOLDER, "Pricing"], t.ctx.deps), 1);
     assert.equal(await editMain(["title", FOLDER, "--words", "Hello"], t.ctx.deps), 1);
     assert.equal(await editMain(["reel", "pick", FOLDER, "1"], t.ctx.deps), 1);

@@ -2,7 +2,7 @@
 // decisions, and what is written for the editor. No test here runs Claude, a program or a video.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { notesRequest, readNotes, applyDecisions, clipRanges, notesText } from "../notes.js";
+import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "../notes.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText } from "../cuts.js";
 import { fitReel, storyParts } from "../reframe.js";
 import { TOLD, PAUSES } from "./fixtures.js";
@@ -371,9 +371,54 @@ describe("the plan, changed by Claude's decisions", () => {
   });
 });
 
+describe("the pauses a plan on disk keeps", () => {
+  /** A plan as it comes back from its file. */
+  const onDisk = (plan) => JSON.parse(JSON.stringify(plan));
+  /** Claude keeps everything the rules cut: the case that needs to know where ffmpeg heard silence beside those phrases. */
+  const keepAll = PLAN.phrases.filter((p) => !p.keep).map((p) => ({ id: p.id, keep: true, why: "She means it." }));
+  it("are the ones the plan was made from, as the import wrote them", () => {
+    assert.deepEqual(pausesOfPlan(onDisk({ ...PLAN, pauses: HEARD })), HEARD);
+    assert.deepEqual(pausesOfPlan({ pauses: [] }), []);
+  });
+  it("are undefined for a plan made before they were kept in it, or one whose list is not a list of pauses", () => {
+    for (const plan of [PLAN, {}, null, undefined, { ...PLAN, pauses: null }, { ...PLAN, pauses: "some" }, { ...PLAN, pauses: { 0: [1, 2] } }, { ...PLAN, pauses: [[1]] }, { ...PLAN, pauses: [[1, "2"]] }, { ...PLAN, pauses: [[1, null]] }, { ...PLAN, pauses: [{ start: 1, end: 2 }] }]) {
+      assert.equal(pausesOfPlan(plan), undefined, JSON.stringify(plan && plan.pauses));
+    }
+  });
+  it("leave a plan made before they were kept in it to applyDecisions and clipRanges as they go by what the plan shows", () => {
+    const old = onDisk(PLAN);
+    assert.deepEqual(applyDecisions(old, keepAll, pausesOfPlan(old)), applyDecisions(old, keepAll));
+    const long = talk(16);
+    assert.deepEqual(clipRanges(long.plan, [clip("p2", "p15")], pausesOfPlan(long.plan)), clipRanges(long.plan, [clip("p2", "p15")]));
+  });
+  it("change the plan as they changed it at import: Claude keeping what the rules cut gets the same ranges from a plan read back", () => {
+    const at = applyDecisions(PLAN, keepAll, HEARD);
+    const back = onDisk({ ...PLAN, pauses: HEARD });
+    const later = applyDecisions(back, keepAll, pausesOfPlan(back));
+    assert.deepEqual(later.plan.ranges, at.plan.ranges);
+    assert.deepEqual(later.plan.changes, at.plan.changes);
+    assert.deepEqual([later.plan.kept, later.plan.cut], [17.965, 5.458]);
+    // Without them it is not the same: whole silences are kept beside the phrases Claude restores.
+    assert.notDeepEqual(applyDecisions(onDisk(PLAN), keepAll, []).plan.ranges, at.plan.ranges);
+  });
+  it("are the same when the last of them never ended and was written as lasting to the end of the video", () => {
+    const never = [...HEARD.slice(0, -1), [HEARD[HEARD.length - 1][0], Infinity]];
+    assert.equal(never.length, HEARD.length);
+    assert.deepEqual(applyDecisions(PLAN, keepAll, HEARD).plan.ranges, applyDecisions(PLAN, keepAll, never).plan.ranges);
+    assert.deepEqual(clipRanges(PLAN, [clip("p7", "p9")], HEARD), clipRanges(PLAN, [clip("p7", "p9")], never));
+  });
+  it("cut a Story of a clip where they were cut at import", () => {
+    const long = talk(16);
+    const back = onDisk({ ...long.plan, pauses: long.pauses });
+    const [made] = clipRanges(long.plan, [clip("p2", "p15")], long.pauses).clips;
+    assert.deepEqual(clipRanges(back, [clip("p2", "p15")], pausesOfPlan(back)).clips[0], made);
+    assert.deepEqual(made.story.map((part) => [part.start, part.end]), [[5.3, 60.5], [60.5, 82.2]]);
+  });
+});
+
 describe("the plan, changed without the pauses at hand", () => {
-  // The plan on disk does not hold the pauses. The ranges that were cut as silence show where silence was heard, and that is
-  // all the plan needs wherever the rules kept the phrases on both sides.
+  // A plan made before the pauses were kept in it does not hold them. The ranges that were cut as silence show where silence
+  // was heard, and that is all the plan needs wherever the rules kept the phrases on both sides.
   /** Words said one after the other from `from` seconds on, each taking 0.2 seconds. */
   const at = (line, from) => line.split(" ").map((w, i) => ({ w, start: Math.round((from + i * 0.2) * 10) / 10, end: Math.round((from + (i + 1) * 0.2) * 10) / 10 }));
   const cut = (id) => [{ id, keep: false, why: "It trails off." }];

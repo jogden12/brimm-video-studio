@@ -6,8 +6,9 @@ import { rangesOf, KEPT_SIDE } from "./cuts.js";
 
 /** The pauses of a recording, as its phrases show them: a phrase starts or ends on a pause's edge where there is one, and two
     phrases with no pause between them touch (cuts.js phrasesOf). So each gap between two phrases is a pause, and so is the
-    time before the first and after the last. The cut plan keeps the phrases and not the pauses ffmpeg heard; a gap that held
-    a sound with no words to it (a cough between two pauses) is taken as one pause here. */
+    time before the first and after the last. They are taken from the phrases, and not from the pauses ffmpeg heard, which a
+    plan keeps in its `pauses` only since 2026-10-22 (notes.js pausesOfPlan): a plan made before has none. A gap that held a
+    sound with no words to it (a cough between two pauses) is taken as one pause here. */
 export function pausesOf(phrases, duration) {
   const pauses = [];
   let at = 0;
@@ -55,10 +56,10 @@ export function cutPhrases(phrases, cuts = []) {
 
 /** The ranges of the whole recording, as the cuts asked for leave them, kept and cut alike, each with its reason, as a plan's
     are (the joins' notes are made from them). With no cut asked for, they are the plan's own, untouched: the plan made them
-    from the pauses ffmpeg heard, which it does not keep, so a sound with no words to it (a lead-in, a cough, a tail) is kept
-    where it was. With cuts, only the stretch around each phrase a cut changed is made again, by the import's own rangesOf on
-    the pauses the phrases show: from the start of the phrase before it to the end of the phrase after it. Everything else is
-    the plan's own. */
+    from the pauses ffmpeg heard, so a sound with no words to it (a lead-in, a cough, a tail) is kept where it was. With cuts,
+    only the stretch around each phrase a cut changed is made again, by the import's own rangesOf on the pauses the phrases
+    show (not on the plan's `pauses`, which a plan made before they were kept in it lacks): from the start of the phrase
+    before it to the end of the phrase after it. Everything else is the plan's own. */
 export function rangesWith({ plan, cuts = [] }) {
   if (!cuts.length) return plan.ranges;
   const duration = plan.facts.duration;

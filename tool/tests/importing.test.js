@@ -62,6 +62,13 @@ describe("an import's status file", () => {
     assert.equal(statusFault({ ...STATUS, problem: "Pricing talk.rough-cut.mp4 is short: 10 bytes of 30" }), "");
     assert.equal(statusFault({ ...STATUS, seconds: null, step: "Waiting to start" }), "");
   });
+  it("says why a video is held and not imported, when it is", () => {
+    assert.equal(statusFault({ ...STATUS, seconds: null, step: "Held", held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }), "");
+  });
+  it("names the video by the label of a light import, when it has one", () => {
+    assert.equal(statusFault({ ...STATUS, label: "Video of 20 Oct, 15:00 (Mac Studio)" }), "");
+    for (const label of ["", 3, null, ["Video"]]) assert.equal(statusFault({ ...STATUS, label }), "its label cannot be read", JSON.stringify(label));
+  });
   it("is not written when a field is missing or wrong, and says which", () => {
     const t = setup();
     const broken = [
@@ -75,7 +82,9 @@ describe("an import's status file", () => {
       [{ ...STATUS, step: "" }, "it names no step"],
       [{ ...STATUS, at: "a minute ago" }, "when it was written cannot be read"],
       [{ ...STATUS, failed: "" }, "why the import failed cannot be read"],
-      [{ ...STATUS, problem: 3 }, "the problem it found cannot be read"]
+      [{ ...STATUS, problem: 3 }, "the problem it found cannot be read"],
+      [{ ...STATUS, held: "" }, "why the video is held cannot be read"],
+      [{ ...STATUS, held: 3 }, "why the video is held cannot be read"]
     ];
     for (const [status, why] of broken) assert.equal(statusFault(status), why);
     assert.throws(() => writeStatus(t.root, { ...STATUS, step: "" }, t.writeText), { message: "the import's status was not written, because it names no step" });
@@ -144,6 +153,11 @@ describe("where an import has got to, by its status", () => {
     assert.deepEqual([importState(ago(1, { failed: "ffmpeg stopped" }), NOW), importState(ago(600, { failed: "ffmpeg stopped" }), NOW)], ["failed", "failed"]);
     assert.deepEqual([importState(ago(1, { problem: "edit/main.v0.fcpxml is missing" }), NOW), importState(ago(600, { problem: "edit/main.v0.fcpxml is missing" }), NOW)], ["problem", "problem"]);
   });
+  it("is held when the video was left where it is on purpose, however old the status is", () => {
+    assert.deepEqual([importState(ago(1, { held: "Zoom downloads wait." }), NOW), importState(ago(600, { held: "Zoom downloads wait." }), NOW)], ["held", "held"]);
+    // A failure or a problem says more than a hold does.
+    assert.equal(importState(ago(1, { held: "Zoom downloads wait.", failed: "ffmpeg stopped" }), NOW), "failed");
+  });
 });
 
 describe("whether a status holds its video, so that it is not imported again", () => {
@@ -151,6 +165,9 @@ describe("whether a status holds its video, so that it is not imported again", (
     assert.equal(holdsVideo(ago(1), NOW), true);
     assert.equal(holdsVideo(ago(600, { failed: "ffmpeg stopped" }), NOW), true);
     assert.equal(holdsVideo(ago(600, { problem: "edit/main.v0.fcpxml is missing" }), NOW), true);
+  });
+  it("holds it for as long as it is held, however old the status is", () => {
+    assert.equal(holdsVideo(ago(600, { held: "Zoom downloads wait." }), NOW), true);
   });
   it("does not hold it once the import has stopped, or when the status could not be read", () => {
     assert.equal(holdsVideo(ago(10), NOW), false);
@@ -165,6 +182,7 @@ describe("a status that a crash left behind", () => {
   it("is never one that failed or found a problem, one still running, one the other Mac wrote, or one that could not be read", () => {
     assert.equal(leftByCrash(ago(600, { failed: "ffmpeg stopped" }), NOW, "Mac Studio"), false);
     assert.equal(leftByCrash(ago(600, { problem: "edit/main.v0.fcpxml is missing" }), NOW, "Mac Studio"), false);
+    assert.equal(leftByCrash(ago(600, { held: "Zoom downloads wait." }), NOW, "Mac Studio"), false);
     assert.equal(leftByCrash(ago(9), NOW, "Mac Studio"), false);
     assert.equal(leftByCrash(ago(600), NOW, "Sallie's laptop"), false);
     assert.equal(leftByCrash(null, NOW, "Mac Studio"), false);

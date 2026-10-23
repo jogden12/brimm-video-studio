@@ -8,7 +8,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.js";
-import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
+import { RECORD_VERSION, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
 import { writePending } from "../filing.js";
@@ -300,10 +300,10 @@ describe("node edit.js open", () => {
   it("does not open a record of a newer layout, since opening writes the claim, and says this Mac needs updating", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
     assert.equal(r.code, 1);
-    assert.deepEqual(r.said, ["2026-10-13 Talk (Mac Studio) was last written by a newer brimm-video. Jason has a newer brimm-video. Ask him to update this Mac."]);
+    assert.deepEqual(r.said, ["That is an episode a newer brimm-video wrote (000001). Jason has a newer brimm-video. Ask him to update this Mac."]);
     t.done();
   });
   it("names the episodes when it cannot tell which is meant, and how it is used when none is named", async () => {
@@ -568,6 +568,43 @@ describe("node edit.js bring, status and retry", () => {
     assert.deepEqual([r.code, r.said, t.started], [1, ["Talk.mov is being imported now, at Making the rough cut. The panel shows how far it is."], []]);
     t.done();
   });
+  // A Zoom download in a light drop folder is held, until phase Z: its status says why (importing.js, held).
+  const ZOOM = "GMT20261013-142933_Recording_gvo_1280x720.mp4";
+  const HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  it("episodes says why a held video waits in the drop folder, and neither it nor status lists it as an import", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "video");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null }, 600);
+    // How long it has waited is from when it came into the folder, which a test cannot set: so the clock is set from it.
+    t.deps.now = () => statSync(join(drop(t), ZOOM)).ctimeMs + 2 * 3600000;
+    const r = await t.run("episodes");
+    assert.ok(r.text.includes(`Waiting in the drop folders:\n  ${ZOOM}, in Mac Studio's, for 2 hours: ${HELD}`), r.text);
+    assert.ok(!r.text.includes("Imports:") && !r.text.includes("being imported") && !r.text.includes("stopped on"), r.text);
+    const s = await t.run("status");
+    assert.ok(!s.text.includes(ZOOM) && !s.text.includes("being imported"), s.text);
+    t.done();
+  });
+  it("retry says a held video is held, and why, and does nothing: trying again would hold it again", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "video");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null, bytes: 5 }, 600);
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", ZOOM);
+    assert.deepEqual([r.code, r.said, kicked, t.started], [1, [`${ZOOM} is held: ${HELD}`], 0, []]);
+    assert.equal(readdirSync(join(t.episodes, ".importing")).length, 1);
+    t.done();
+  });
+  it("retry takes away the status of a held video that is another file now, and asks the launch agent to look", async () => {
+    const t = setup();
+    writeFileSync(join(drop(t), ZOOM), "another recording");
+    status(t, ZOOM, { held: HELD, step: "Held", seconds: null, bytes: 5 }, 600);
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", ZOOM);
+    assert.deepEqual([r.code, kicked, readdirSync(join(t.episodes, ".importing"))], [0, 1, []]);
+    t.done();
+  });
   it("retry names the videos in the drop folder when it cannot find the one said", async () => {
     const t = setup();
     writeFileSync(join(drop(t), "Talk.mov"), "video");
@@ -752,13 +789,13 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.ok(r.text.includes(`  ${FOLDER}.fcpbundle: 2.0 MB`), r.text);
     t.done();
   });
-  it("5. lists an episode written by a newer brimm-video by its folder, without reading its fields", async () => {
+  it("5. lists an episode written by a newer brimm-video by its short id alone, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.includes(`  ${FOLDER}\n    Written by a newer brimm-video: Jason updates this Mac before it is changed here.`), r.text);
+    assert.ok(r.text.includes("Episodes, newest first:\n  An episode a newer brimm-video wrote (000001): Jason updates this Mac before it is changed here.\n"), r.text);
     t.done();
   });
   it("6. says the offline step at the first open that completes, even when a bring came first, and only once", async () => {
@@ -823,7 +860,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
   it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
     const t = setup();
     const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: 3, id: "e-20261013-000001", rev: 2 }));
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     assert.equal((await t.run("push", "talk")).code, 1);
     t.done();
   });
@@ -1005,5 +1042,44 @@ describe("reading a library's Settings.plist", () => {
     assert.deepEqual(readPlist(file), { backupLocation: true, backupsEnabled: true, libraryID: true });
     assert.equal(readPlist(join(dir, "none.plist")), null);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("an episode a newer brimm-video wrote, named by its short id alone (Part L's review)", () => {
+  // A newer brimm-video may have written a session or a video not yet answered, whose folder's name is a client's: this one
+  // cannot read its label, so it names the episode by its short id, and never by its folder.
+  const JANE = "2026-10-20 Coaching call Jane Doe (Mac Studio)";
+  const NEWER = "an episode a newer brimm-video wrote (000002)";
+  /** An episode of today's, and one whose newest record a newer brimm-video wrote, in a folder named for a client. */
+  const both = () => {
+    const t = setup();
+    t.episode("2026-10-14 Sales call (Mac Studio)");
+    const { path } = t.episode(JANE);
+    writeFileSync(recordFile(path, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: "e-20261013-000002", rev: 2 }));
+    return t;
+  };
+  it("is listed by episodes by its short id", async () => {
+    const t = both();
+    const r = await t.run("episodes");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.text.startsWith(`Episodes, newest first:\n  An episode a newer brimm-video wrote (000002): Jason updates this Mac before it is changed here.\n  Talk (a placeholder name): an episode of 2:00, in 2026-10-14 Sales call (Mac Studio), id 000001\n`), r.text);
+    assert.ok(!r.text.includes("Jane"), r.text);
+    t.done();
+  });
+  it("is refused by open by its short id, found by its id or by words", async () => {
+    const t = both();
+    for (const said of ["000002", "coaching"]) {
+      const r = await t.run("open", said);
+      assert.deepEqual([r.code, r.said], [1, ["That is an episode a newer brimm-video wrote (000002). Jason has a newer brimm-video. Ask him to update this Mac."]], said);
+    }
+    t.done();
+  });
+  it("is named by its short id in the list of the episodes when none fits, and when more than one does", async () => {
+    const t = both();
+    const none = await t.run("open", "budget");
+    assert.deepEqual([none.code, none.said], [1, [`No episode fits "budget". The episodes are: ${NEWER} and 2026-10-14 Sales call (Mac Studio).`]]);
+    const two = await t.run("open", "call");
+    assert.deepEqual([two.code, two.said], [1, [`More than one episode fits "call": ${NEWER} and 2026-10-14 Sales call (Mac Studio). Say which.`]]);
+    t.done();
   });
 });
