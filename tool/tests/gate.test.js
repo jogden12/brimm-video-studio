@@ -205,9 +205,9 @@ describe("gateFor, a Reel cut from a session", () => {
 });
 
 describe("printWhy, what `show` may not print into the chat", () => {
-  it("refuses a video waiting for its answer, and one left alone, in words that name no episode", () => {
+  it("refuses a video waiting for its answer, and one left alone (in words that say so), in words that name no episode", () => {
     assert.equal(printWhy(unanswered), "Its words are not shown in the chat while it waits for its answer.");
-    assert.equal(printWhy({ kind: null, answer: { state: "not for brimm-video" } }), "Its words are not shown in the chat while it waits for its answer.");
+    assert.equal(printWhy({ kind: null, answer: { state: "not for brimm-video" } }), "Its words are not shown in the chat: you said to leave this video.");
     assert.equal(printWhy({}), "Its words are not shown in the chat while it waits for its answer.");
   });
   it("refuses a session whose mark is not cleared, whatever this Mac's training gate says", () => {

@@ -82,7 +82,7 @@ const GUARD_STALE_MS = 10000;
       so one run alone takes a free lock;
     - a lock whose run is not running is taken away only by the run that holds the takeover guard (taken by a hard link too),
       and only when its text is still, word for word, the dead run's: no live run's lock is ever taken away. */
-function takeEpisodeLock(lock, command, alive) {
+export function takeEpisodeLock(lock, command, alive) {
   const text = JSON.stringify({ pid: process.pid, command, nonce: randomUUID() });
   const mine = `${lock}.${process.pid}.${randomUUID().slice(0, 8)}`;
   const guard = `${lock}.takeover`;
@@ -141,7 +141,7 @@ function takeEpisodeLock(lock, command, alive) {
 
 /** Let the episode's lock go, when it is still this run's own (its text is the one taken): a lock some other run holds is
     never taken away. */
-function releaseEpisodeLock(lock, text) {
+export function releaseEpisodeLock(lock, text) {
   if (textOf(lock) === text) rmSync(lock, { force: true });
 }
 

@@ -29,10 +29,11 @@ const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac ye
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
 const PENDING = "Dropbox is still bringing this episode's record over: say it again in a moment.";
 const NOT_SHOWN_WAITING = "Its words are not shown in the chat while it waits for its answer.";
+const NOT_SHOWN_LEFT = "Its words are not shown in the chat: you said to leave this video.";
 const NOT_SHOWN_SESSION = "A client or group session's words are not shown in the chat.";
 /** The gate's own refusals, and with them what `show` itself holds back from a record the gate lets it run for. */
 const GATE_REFUSALS = [WAITING, LEFT_ALONE, NOT_FOR_SESSION, TEACHINGS_OFF, REEL_NOT_AGREED, PENDING];
-const REFUSALS = [...GATE_REFUSALS, NOT_SHOWN_WAITING, NOT_SHOWN_SESSION];
+const REFUSALS = [...GATE_REFUSALS, NOT_SHOWN_WAITING, NOT_SHOWN_LEFT, NOT_SHOWN_SESSION];
 
 const ANSWER = { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" };
 const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
@@ -473,11 +474,11 @@ describe("show, which prints a file of an episode into the chat", () => {
     }
   });
   it("prints nothing of a video waiting for its answer, or one left alone, and starts no bring, in words that name no episode", async () => {
-    for (const record of [UNANSWERED_RECORD, LEFT_RECORD]) {
+    for (const [record, why] of [[UNANSWERED_RECORD, NOT_SHOWN_WAITING], [LEFT_RECORD, NOT_SHOWN_LEFT]]) {
       const { t, found } = shown(record);
       for (const kind of Object.keys(WORDS)) {
         const r = await on(t.ctx.deps, "show", FOLDER, kind);
-        assert.deepEqual([r.code, r.said, t.started], [1, [NOT_SHOWN_WAITING], []], kind);
+        assert.deepEqual([r.code, r.said, t.started], [1, [why], []], kind);
         assert.ok(!r.text.includes("Jane") && !r.text.includes(FOLDER), r.text);
       }
       assert.equal(reread(found).rev, 1);

@@ -39,7 +39,7 @@ import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, epi
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
-import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
+import { startDetached, runDetached, runningCommand, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
@@ -2886,6 +2886,9 @@ async function cut(ctx, rest) {
 export const READ_WAIT_MS = 90000;
 /** How often `kind` looks for the reading's result while it waits. */
 export const READ_POLL_MS = 1000;
+/** The most a `kind` takes in the foreground, from the moment it starts: the wait for the claim and the wait for the reading
+    together, so that a command that waited the claim's 20 seconds does not run into the two minutes Claude Code gives it. */
+export const COMMAND_BUDGET_MS = 100000;
 
 /** What she says a video is, and how the record keeps it: an iPhone clip is a "short video", as it always was, so that the
     places that test for one keep working. */
@@ -2897,11 +2900,32 @@ const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private 
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
+const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
 const ASK_FOR_TEACHINGS = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
-const NOT_ON_THIS_MAC = "The video is not on this Mac yet: Dropbox is still bringing it over. Say it again in a minute.";
+const ONLINE_ONLY = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
+const OFFLINE = "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.";
 
 /** Why the other Mac, `by`, stops `name` from being answered or left now. */
 const beingAnswered = (name, by) => `${name} is being answered on ${by}. Nothing was changed.`;
+/** What is said when the record changed under an answer that was being written: nothing more is done. */
+const changedMeanwhile = (name) => `${name} changed meanwhile: say your answer again.`;
+
+/** The lock `kind` and `leave` hold for an episode on this Mac, for the whole of their run: two answers for one video started
+    on one Mac, the second inside the first's wait for Dropbox, would each find the claim this Mac wrote and go on. It is not
+    the lock of a detached run (detached.js), which the reading it starts holds. */
+const answerLockOf = (home, folder) => join(episodeWork(home, folder), "answer.lock");
+
+/** Take the answer lock of the episode in `folder` for `command`: { file, text } to give back to releaseEpisodeLock, or null when
+    another answer holds it. A lock whose run is gone (`ctx.alive`) is taken over; the lock of this very process is never gone. */
+function takeAnswerLock(ctx, folder, command) {
+  mkdirSync(episodeWork(ctx.home, folder), { recursive: true });
+  const file = answerLockOf(ctx.home, folder);
+  const took = takeEpisodeLock(file, command, (pid) => pid === process.pid || ctx.alive(pid));
+  return took.taken ? { file, text: took.text } : null;
+}
+
+/** Why an answer cannot be written for the episode `name` now, as every command says it. */
+const busyWhy = (name) => `Another answer for ${name} is being written on this Mac: say it again in a moment.`;
 
 /** The episodes on this Mac, each { name, record }, by their records alone, as findEpisode knows them: the record in force, and
     none for an episode that has no whole record. */
@@ -2936,25 +2960,82 @@ function lateCheckAt(ctx, record) {
   return working ? now + LATE_CHECK_MS : null;
 }
 
+/** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, versionOf, target }) when its record
+    is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and `plan.target`,
+    the video this is a new version of, is looked for the first time it is asked. In this order:
+    - an answered video, without --again; a session not cleared, answered as anything but a session (by her click on a dialog
+      alone, which is another command), or as one;
+    - a video that may be a session, answered as anything else without --not-a-session: one the import saw came from Zoom or is
+      sound alone, a Zoom download by its file's name (a record from before the switch has no answer to say so), and one whose
+      facts the import could not read, until she has answered it;
+    - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
+      videos have is not taken for either); a session not cleared is a version of only by a session;
+    - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
+      since, which a new answer that is not one cannot be a version of;
+    - the other Mac's claim, and a detached run at work on the episode. */
+function answerWhy(ctx, found, record, plan) {
+  const name = shownName(record);
+  const { stored } = plan;
+  const was = recordKind(record);
+  if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
+  if (was !== null && gated(record)) return stored === "session" ? `${name} is a client or group session already.` : MARK_STAYS;
+  const answer = record.answer;
+  const came = answer ? answer.came : undefined;
+  const maybe = came === "zoom" || came === "sound" || isZoomName(record.video.file) || (Boolean(answer) && came === null && answer.state !== "answered");
+  if (maybe && stored !== "session" && !plan.notASession) return ASK_IF_SESSION;
+  if (plan.versionOf && !plan.target) {
+    const id = plan.versionOf;
+    const named = recordsHere(ctx).filter((e) => e.record.id === id || String(e.record.id).slice(-6) === id).filter((e) => recordKind(e.record) !== null && !e.record.archived);
+    const exact = named.filter((e) => e.record.id === id);
+    if (!exact.length && new Set(named.map((e) => e.record.id)).size > 1) return `More than one video on this Mac has the short id ${id}: say its whole id.`;
+    const picked = exact[0] || named[0];
+    if (picked && picked.record.id === record.id) return `${name} cannot be a version of itself.`;
+    if (!picked) return `No answered video on this Mac has the id ${id}.`;
+    if (stored !== "session" && gated(picked.record)) return SESSION_TARGET;
+    plan.target = picked;
+  }
+  // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8).
+  if (handedOff(found.folder, record)) {
+    if (plan.target && plan.target.record.id !== (record.versionOf || null)) {
+      const older = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
+      const place = record.versionOf ? `a version of ${older ? shownName(older.record) : `an episode (${String(record.versionOf).slice(-6)})`}` : "a video of its own";
+      return `${name} has already gone to the BRIMM Ops page as ${place}: ask Jason.`;
+    }
+    if (!plan.target && record.versionOf && stored !== "session") {
+      const kept = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
+      if (kept && gated(kept.record)) return SESSION_TARGET;
+    }
+  }
+  const held = heldElsewhere(record, ctx.machine);
+  if (held) return beingAnswered(name, held.by);
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+  return "";
+}
+
 /** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>] [--not-a-session] [--again]`: her answer to
     "what is this video?" (spec 2026-10-22, section 2). Both answers are needed, and they agree: a session with yes, anything
-    else with no. In order:
-    - a video answered already is refused without --again; a session not cleared is answered again only by her click on a
-      dialog (clearing its mark is another command); one that came from Zoom, or is sound alone, is answered as anything but a
-      session only with --not-a-session, once she has been asked whether it is one;
-    - --version-of names the answered video on this Mac this one is a new version of, by its id or short id: it is the only
-      way versionOf is set, never the import's guess. A video already handed off keeps the one it has, and is not given another;
-    - the other Mac's claim refuses it, as does a run at work on the episode; otherwise the video is claimed as `open` does:
-      the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again, so that two Macs cannot answer it at
-      once (before the wait or after it, the other Mac's claim stops it);
+    else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it, and in
+    order (answerWhy says why not):
+    - the checks of answerWhy, which read the record and the Macs, and refuse an answered video, a session not cleared, a video
+      that may be a session, a --version-of that names no video it can, a video already handed off that would be given another
+      version, the other Mac's claim, and a run at work;
+    - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
+      so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
+      the checks are made again on it, right before the answer is written;
     - the answer is one write: its kind, who answered, where and when, whether it is private, the video it is a version of (and
       that video's spellings, which she confirmed there), and for a session its mark and its name, which is its label, so that
-      nothing made from the name holds a client's. The claim stays on the record, so that the reading runs under it;
-    - the reading is started detached (`read`), for every kind but a session, whose reading starts with its teachings, unless
-      this Mac's settings say readings are off: the answer is kept, since the gate runs on it. A raw video's reading waits for
-      the import's late check, so it is not waited for here; any other is waited for up to READ_WAIT_MS, and what it found is
-      said as `status` says a result, or else a notice will come. */
+      nothing made from the name holds a client's. The claim stays on the record, so that the reading runs under it, except a
+      session's, which is let go in the same write: no reading runs under it, and the other Mac must not be kept from it;
+    - the reading is started detached (`read`, given the kind and the rev the answer's record holds, so that its run can refuse
+      a record that no longer says them), for every kind but a session, whose reading starts with its teachings, unless this
+      Mac's settings say readings are off: the answer is kept, since the gate runs on it. The record is read once more first, and
+      must still be the answer. A raw video's reading waits for the import's late check, so it is not waited for here; any other is
+      waited for, up to READ_WAIT_MS and COMMAND_BUDGET_MS from when this began, and what it found is said as `status` says a
+      result, or else a notice will come.
+    A video answered as anything but a session is no longer one whose names are kept from the chat. */
 export async function kindCommand(ctx, rest) {
+  const began = ctx.now();
   const { say } = ctx;
   const { words, flags } = flagsOf(rest, ["private", "version-of"]);
   const asked = String(words[words.length - 1] || "").toLowerCase();
@@ -2971,40 +3052,38 @@ export async function kindCommand(ctx, rest) {
   }
   const got = episodeFor(ctx, words.slice(0, -1), { newerEnds: 1 });
   if (!got.found) return got.code;
-  const { found, record } = got;
-  const stored = ANSWER_KEPT[asked];
+  const lock = takeAnswerLock(ctx, got.found.name, "kind");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), versionOf: versionOf ? versionOf[0].trim() : "", target: null }, began);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** What `kind` does once it holds the answer lock of the episode `found`: see kindCommand. */
+async function answerKind(ctx, found, plan, began) {
+  const { say } = ctx;
+  const { stored, given } = plan;
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    say(notRead(ctx, { ...found, read }));
+    return 1;
+  }
+  if (read.newer) {
+    say(newerWhy(read.record));
+    return 1;
+  }
+  const { record } = read;
   const name = shownName(record);
-  const was = recordKind(record);
-  if (was !== null && !flags.again) return refuse(ctx, `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`);
-  if (was !== null && gated(record)) return refuse(ctx, stored === "session" ? `${name} is a client or group session already.` : MARK_STAYS);
-  const came = record.answer && record.answer.came;
-  if ((came === "zoom" || came === "sound") && stored !== "session" && !flags["not-a-session"]) return refuse(ctx, ASK_IF_SESSION);
-  // The video this is a new version of, among the answered videos on this Mac that are not archived.
-  let target = null;
-  if (versionOf) {
-    const id = versionOf[0].trim();
-    const named = recordsHere(ctx).filter((e) => e.record.id === id || String(e.record.id).slice(-6) === id).filter((e) => recordKind(e.record) !== null && !e.record.archived);
-    if (named.some((e) => e.record.id === record.id)) return refuse(ctx, `${name} cannot be a version of itself.`);
-    target = named.find((e) => e.record.id === id) || named[0] || null;
-    if (!target) return refuse(ctx, `No answered video on this Mac has the id ${id}.`);
-    if (stored !== "session" && gated(target.record)) return refuse(ctx, "That video is a client or group session, so this new version is one too: answer it as a session.");
-  }
-  // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8).
-  const handed = handedOff(found.folder, record);
-  if (handed && target && target.record.id !== (record.versionOf || null)) {
-    const older = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
-    const place = record.versionOf ? `a version of ${older ? shownName(older.record) : `an episode (${String(record.versionOf).slice(-6)})`}` : "a video of its own";
-    return refuse(ctx, `${name} has already gone to the BRIMM Ops page as ${place}: ask Jason.`);
-  }
-  const held = heldElsewhere(record, ctx.machine);
-  if (held) return refuse(ctx, beingAnswered(name, held.by));
-  const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) return refuse(ctx, `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`);
+  const why = answerWhy(ctx, found, record, plan);
+  if (why) return refuse(ctx, why);
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   // The claim, as open makes it. The record read again is the one the answer is written on.
   let base = record;
   if (!record.editing || record.editing.by !== ctx.machine) {
     if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return 1;
-    await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
+    await wait(CLAIM_WAIT_MS);
     const again = readEpisode(found.folder);
     if (!again.record) {
       say(notRead(ctx, { ...found, read: again }));
@@ -3020,22 +3099,32 @@ export async function kindCommand(ctx, rest) {
       say(beingAnswered(name, again.record.editing.by));
       return 1;
     }
+    // Nothing is written on a claim but the answer: any record on top of it, even one that keeps the claim, is not the claim this
+    // command wrote.
+    if (again.record.rev !== record.rev + 1) {
+      say(changedMeanwhile(name));
+      return 1;
+    }
+    if (!(await (ctx.deps.online || online)())) say(OFFLINE);
     base = again.record;
+    const late = answerWhy(ctx, found, base, plan);
+    if (late) return refuse(ctx, late);
   }
   const at = localStamp(new Date(ctx.now()));
   const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
   const next = { ...base, kind: stored, answer };
-  if (!handed) {
-    next.versionOf = target ? target.record.id : null;
-    if (target) {
+  if (!handedOff(found.folder, base)) {
+    next.versionOf = plan.target ? plan.target.record.id : null;
+    if (plan.target) {
       const own = base.spellings || [];
-      next.spellings = [...(target.record.spellings || []).filter(([heard]) => !own.some(([h]) => h === heard)), ...own];
+      next.spellings = [...(plan.target.record.spellings || []).filter(([heard]) => !own.some(([h]) => h === heard)), ...own];
     }
   }
   if (stored === "session") {
     const taken = recordsHere(ctx).filter((e) => e.record.id !== record.id && (e.record.kind === "session" || e.record.session)).map((e) => (e.record.name && e.record.name.text) || "");
     next.session = { marked: at, on: ctx.machine, teachings: null, cleared: null };
     next.name = { text: sessionLabel(record.video.recorded, taken), placeholder: false };
+    next.editing = null;
   }
   if ((await save(ctx, { ...found, record: base }, next, "")) !== 0) return 1;
   if (stored === "session") {
@@ -3044,27 +3133,44 @@ export async function kindCommand(ctx, rest) {
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     return 0;
   }
+  // Answered as anything else, its names are no longer kept from the chat: it is named by its folder and its files as any episode is.
+  if (ctx.hidden) {
+    ctx.hidden.names.length = 0;
+    ctx.hidden.keep.length = 0;
+  }
   if (ctx.settings.readings === false) {
     say(`${name}: answered. Readings are off on this Mac: ask Jason.`);
     return 0;
   }
+  // Right before the reading is started the record is the answer written, and nothing is at work on the episode.
+  const wrote = readEpisode(found.folder);
+  if (!wrote.record || wrote.record.rev !== base.rev + 1 || wrote.record.kind !== stored) {
+    say(changedMeanwhile(name));
+    return 1;
+  }
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) {
+    say(`${name}: answered, but ${running} is running for it, so Claude's reading was not started. Say your answer again with --again when it has finished.`);
+    return 1;
+  }
   const previous = readResult(ctx.home, found.name, "read");
-  const holdsUntil = stored === "raw" ? lateCheckAt(ctx, base) : null;
-  startDetached(ctx, { command: "read", folder: found.name });
+  const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
+  startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
   if (holdsUntil !== null) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
     return 0;
   }
   // The reading's result is the one this run left, not an older one: a reading that was done before is told apart by when it ended.
-  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
-  const began = ctx.now();
+  // It is waited for within the time this command has left of COMMAND_BUDGET_MS.
+  const waitFrom = ctx.now();
+  const budget = Math.min(READ_WAIT_MS, COMMAND_BUDGET_MS - (waitFrom - began));
   for (;;) {
     const result = readResult(ctx.home, found.name, "read");
     if (result && (!previous || result.ended !== previous.ended || result.started !== previous.started)) {
       say(ranLine(ctx, name, result, (text) => text, result.next));
       return result.ok ? 0 : 1;
     }
-    if (ctx.now() - began >= READ_WAIT_MS) break;
+    if (ctx.now() - waitFrom >= budget) break;
     await wait(READ_POLL_MS);
   }
   say(`Claude is still reading ${name}. A notice will come on this Mac when it is done: then say "what did Claude find?"`);
@@ -3072,40 +3178,59 @@ export async function kindCommand(ctx, rest) {
 }
 
 /** `leave "<video>"`: a video still waiting for its answer is left alone, as not for brimm-video: it is listed apart and never
-    asked about again. It can still be answered later by `kind`. An answered video is refused; so is a video the other Mac is
-    answering. */
+    asked about again. It can still be answered later by `kind`. It holds the answer lock of the episode while it writes, as `kind`
+    does, and reads the record under it. An answered video is refused; so is a video the other Mac is answering, which `leave`
+    does not claim. */
 export async function leaveCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
-  const { found, record } = got;
-  const name = shownName(record);
-  if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
-  if (record.answer && record.answer.state === "not for brimm-video") {
-    ctx.say(`${name} is left already. It is not asked about again.`);
-    return 0;
+  const { found } = got;
+  const lock = takeAnswerLock(ctx, found.name, "leave");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    const read = readEpisode(found.folder);
+    if (!read.record) {
+      ctx.say(notRead(ctx, { ...found, read }));
+      return 1;
+    }
+    if (read.newer) {
+      ctx.say(newerWhy(read.record));
+      return 1;
+    }
+    const { record } = read;
+    const name = shownName(record);
+    if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
+    if (record.answer && record.answer.state === "not for brimm-video") {
+      ctx.say(`${name} is left already. It is not asked about again.`);
+      return 0;
+    }
+    const held = heldElsewhere(record, ctx.machine);
+    if (held) return refuse(ctx, beingAnswered(name, held.by));
+    const answer = { ...record.answer, state: "not for brimm-video", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())) };
+    return await save(ctx, { ...found, record }, { ...record, answer }, `${name}: left. It is not asked about again.`);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
   }
-  const held = heldElsewhere(record, ctx.machine);
-  if (held) return refuse(ctx, beingAnswered(name, held.by));
-  const answer = { ...record.answer, state: "not for brimm-video", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())) };
-  return save(ctx, { ...found, record }, { ...record, answer }, `${name}: left. It is not asked about again.`);
 }
 
 /** `which "<video>"`: open the episode's video in QuickTime Player on this Mac, so that she can see which video it is. It says
-    nothing else of the video, and brings nothing over: a video Dropbox has not brought yet is said to be on its way. */
+    nothing else of the video, and brings nothing over: on the Mac that did not import it the file is online-only, and QuickTime
+    Player has Dropbox bring it over first, which is said. */
 export async function whichCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = got;
+  const name = shownName(record);
   const video = join(found.folder, record.video.file);
-  if (!ctx.isWhole(video)) return refuse(ctx, NOT_ON_THIS_MAC);
+  const here = ctx.isWhole(video);
   try {
     ctx.openApp("QuickTime Player", video);
   } catch (e) {
-    return refuse(ctx, String(e.message));
+    return refuse(ctx, `${name}: ${e.message}`);
   }
-  ctx.say(`Opened ${shownName(record)} in QuickTime Player on this Mac.`);
+  ctx.say(`Opened ${name} in QuickTime Player on this Mac.${here ? "" : ` ${ONLINE_ONLY}`}`);
   return 0;
 }
 

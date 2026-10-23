@@ -6,9 +6,10 @@
 // stand-in that is started and asserted, never run.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
+import { askBlocked, clockAt } from "../unedited.js";
 import { claimed, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { lockOf, resultFile } from "../detached.js";
@@ -16,7 +17,6 @@ import { writePending } from "../filing.js";
 import { writeStatus } from "../importing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
-import { clockAt } from "../unedited.js";
 import { setup, episodeFor, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -44,6 +44,7 @@ const BOTH = "Say both answers: what it is, and whether it is a private session 
 const DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ZOOM = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARKED = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
+const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const NOT_YET = "The video is not on this Mac yet: Dropbox is still bringing it over. Say it again in a minute.";
 const SESSION_NEXT = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
@@ -84,6 +85,13 @@ function addEpisode(t, { folder = OTHER_FOLDER, id = OTHER_ID, file = "Coaching 
   writeFileSync(recordFile(dir, 1), recordText({ ...first, rev: 1, ...WAITING, ...over }));
   return { folder: dir, name: folder, record: readEpisode(dir).record };
 }
+
+/** The words a detached `read` is started with: the folder, and the kind and rev the answer's record holds. */
+const readArgs = (kind, rev) => ["read", "--now", FOLDER, "--kind", kind, "--rev", String(rev)];
+/** The lock `kind` and `leave` hold for an episode on this Mac, in its work folder. */
+const answerLock = (t) => join(episodeWork(t.home, FOLDER), "answer.lock");
+/** What every Mac's `alive` says in these tests: only the processes named, and always this one. */
+const aliveIs = (...pids) => (pid) => pids.includes(pid);
 
 /** What changed in the record, and what started: nothing. */
 const untouched = (t, found, rev = 1) => assert.deepEqual([reread(found).rev, t.started, t.waits], [rev, [], []]);
@@ -175,7 +183,7 @@ describe("kind: an answered video, and the wrong answer for how it came", () => 
     assert.equal(r.code, 0, r.text);
     const record = reread(found);
     assert.deepEqual([record.kind, record.rev, record.answer.at, record.answer.by], ["raw", 3, AFTER_CLAIM, "Mac Studio"]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3)]);
     t.done();
   });
   it("answers a video left alone as an unanswered one, without --again", async () => {
@@ -400,9 +408,13 @@ describe("kind: a client or group session", () => {
     assert.deepEqual(record.session, { marked: AFTER_CLAIM, on: "Mac Studio", teachings: null, cleared: null });
     assert.deepEqual(record.name, { text: label, placeholder: false });
     assert.deepEqual([record.kind, record.answer.state, record.answer.private], ["session", "answered", "yes"]);
-    // The claim record had neither the kind, nor the mark, nor the name: all three came in the one write that answered.
+    // The claim record had neither the kind, nor the mark, nor the name: all three came in the one write that answered, which is
+    // the third record and the last. The video is let go in it too: no reading runs under a session's claim.
     const claim = JSON.parse(readFileSync(recordFile(found.folder, 2), "utf8"));
     assert.deepEqual([claim.kind, claim.session, claim.name.text], [null, undefined, "Pricing talk"]);
+    assert.deepEqual(readdirSync(join(found.folder, "record")), ["0001.json", "0002.json", "0003.json"]);
+    const answered = JSON.parse(readFileSync(recordFile(found.folder, 3), "utf8"));
+    assert.deepEqual([answered.kind, answered.answer.state, answered.session, answered.name, answered.editing], ["session", "answered", record.session, record.name, null]);
     assert.deepEqual([t.started, t.opened], [[], []]);
     assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
     t.done();
@@ -477,7 +489,7 @@ describe("kind: the reading", () => {
       waiting(t);
       const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
       assert.equal(r.code, 0, `${word}: ${r.text}`);
-      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args.slice(1)]), [[process.execPath, ["read", "--now", FOLDER]]], word);
+      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args.slice(1)]), [[process.execPath, readArgs(word === "clip" ? "short video" : word, 3)]], word);
       assert.equal(t.started[0][1][0], "/checkout/tool/edit.js");
       t.done();
     }
@@ -516,23 +528,32 @@ describe("kind: the reading", () => {
     assert.deepEqual([r.code, r.said], [1, [`${LABEL}: read ended 0 minutes ago. Not done: Claude could not be asked.`]]);
     t.done();
   });
-  it("gives up after ninety seconds, and says a notice will come", async () => {
+  it("gives up when the wait for the claim and the wait for the reading together make a hundred seconds, and says a notice will come", async () => {
     const t = setup();
     waiting(t);
     const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
     assert.deepEqual([r.code, r.said], [0, [STILL(LABEL)]]);
     assert.equal(t.waits[0], CLAIM_WAIT_MS);
     assert.equal(t.waits.slice(1).every((ms) => ms === 1000), true);
-    assert.equal(t.waits.slice(1).reduce((sum, ms) => sum + ms, 0), 90000);
+    assert.equal(t.waits.slice(1).reduce((sum, ms) => sum + ms, 0), 80000);
+    assert.equal(t.waits.reduce((sum, ms) => sum + ms, 0), 100000);
     t.done();
   });
-  it("sees a result that comes at the very end of the ninety seconds", async () => {
+  it("waits ninety seconds for the reading when it made no wait for the claim: this Mac has the video open already", async () => {
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false }, editing: { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" } } });
+    const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
+    assert.deepEqual([r.code, r.said], [0, [STILL(NAME)]]);
+    assert.deepEqual([t.waits.length, t.waits.reduce((sum, ms) => sum + ms, 0)], [90, 90000]);
+    t.done();
+  });
+  it("sees a result that comes at the very end of the time it waits", async () => {
     const t = setup();
     waiting(t);
     let polls = 0;
     duringWaits(t, 1000, () => {
       polls += 1;
-      if (polls === 90) leaveResult(t);
+      if (polls === 80) leaveResult(t);
     });
     const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
     assert.deepEqual([r.code, r.said], [0, [`${LABEL}: read ended 0 minutes ago. Made: notes.txt.`]]);
@@ -591,7 +612,7 @@ describe("kind: a raw reading waits for the import's late check", () => {
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     const due = clockAt(Date.parse(AT) - 5 * 60 * 1000 + LATE_CHECK_MS);
     assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${due}, when the import has checked its copies.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3)]);
     assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
     t.done();
   });
@@ -915,12 +936,12 @@ describe("which", () => {
     untouched(t, found);
     t.done();
   });
-  it("says the video is not here yet when Dropbox has not brought it over, opens nothing and brings nothing", async () => {
+  it("opens a video that is not whole on this Mac anyway, and says Dropbox brings it over first: it is online-only here", async () => {
     const t = setup();
     const found = waiting(t);
     const r = await on({ ...t.ctx.deps, isWhole: () => false }, "which", LABEL);
-    assert.deepEqual([r.code, r.said], [1, [NOT_YET]]);
-    assert.deepEqual([t.opened, t.started], [[], []]);
+    assert.deepEqual([r.code, r.said], [0, [`Opened ${LABEL} in QuickTime Player on this Mac. It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.`]]);
+    assert.deepEqual([t.opened, t.started], [[["QuickTime Player", join(found.folder, "Pricing talk.mp4")]], []]);
     untouched(t, found);
     t.done();
   });
@@ -940,7 +961,7 @@ describe("which", () => {
     const t = setup();
     waiting(t);
     const r = await on({ ...t.ctx.deps, openApp: () => { throw new Error("QuickTime Player could not be opened (no such app)"); } }, "which", LABEL);
-    assert.deepEqual([r.code, r.said], [1, ["QuickTime Player could not be opened (no such app)"]]);
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL}: QuickTime Player could not be opened (no such app)`]]);
     t.done();
   });
   it("says nothing of the video's file or folder when QuickTime Player's own words name them", async () => {
@@ -952,7 +973,7 @@ describe("which", () => {
     const r = await on({ ...t.ctx.deps, openApp: named }, "which", LABEL);
     assert.equal(r.code, 1);
     assert.doesNotMatch(r.text, /Pricing/);
-    assert.match(r.text, /^QuickTime Player could not be opened/);
+    assert.match(r.text, new RegExp(`^${LABEL.replace(/[()]/g, "\\$&")}: QuickTime Player could not be opened`));
     t.done();
   });
   it("finds a video by its label alone, never by words of its file", async () => {
@@ -966,7 +987,7 @@ describe("which", () => {
 });
 
 describe("a video left alone, in the gate's own words", () => {
-  const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+  const LEFT = LEFT_WORDS;
   it("is refused by ask and by open in words that do not say it is waiting for its answer", async () => {
     const t = setup();
     const found = waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
@@ -978,14 +999,26 @@ describe("a video left alone, in the gate's own words", () => {
     untouched(t, found);
     t.done();
   });
-  it("still lets kind, leave, which and show run for it", async () => {
+  it("still lets which, show, leave and kind run for it, and they do what they do", async () => {
     const t = setup();
-    waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
-    for (const [name, ...words] of [["which", LABEL], ["show", LABEL, "plan"], ["leave", LABEL]]) {
-      const r = await on(t.ctx.deps, name, ...words);
-      assert.ok(!r.text.includes(LEFT), `${name}: ${r.text}`);
-    }
+    const found = waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
+    const which = await on(t.ctx.deps, "which", LABEL);
+    assert.deepEqual([which.code, which.said, t.opened.length], [0, [`Opened ${LABEL} in QuickTime Player on this Mac.`], 1]);
+    const show = await on(t.ctx.deps, "show", LABEL, "plan");
+    assert.deepEqual([show.code, show.said], [1, ["Its words are not shown in the chat: you said to leave this video."]]);
+    const leave = await on(t.ctx.deps, "leave", LABEL);
+    assert.deepEqual([leave.code, leave.said], [0, [`${LABEL} is left already. It is not asked about again.`]]);
+    assert.equal(reread(found).rev, 1);
+    const kind = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.equal(kind.code, 0, kind.text);
+    assert.deepEqual([reread(found).kind, reread(found).answer.state], ["finished", "answered"]);
     t.done();
+  });
+  it("has askBlocked and show's words say so too, not that it waits for its answer", () => {
+    const left = { kind: null, answer: { state: "not for brimm-video" }, label: LABEL };
+    const asked = (record) => askBlocked({ folder: "/none", record, root: "/none", home: "/none", machine: "Mac Studio" });
+    assert.deepEqual(asked(left), { why: LEFT_WORDS });
+    assert.deepEqual(asked({ ...left, answer: { state: "needs your answer" } }), { why: "This video is waiting for its answer: say what it is first." });
   });
   it("says a video waiting for its answer is waiting, as before", async () => {
     const t = setup();
@@ -1002,6 +1035,292 @@ describe("a video left alone, in the gate's own words", () => {
     const result = JSON.parse(readFileSync(resultFile(t.home, FOLDER, "ask"), "utf8"));
     assert.deepEqual(result.failed, [LEFT]);
     assert.ok(existsSync(resultFile(t.home, FOLDER, "ask")));
+    t.done();
+  });
+});
+
+describe("kind and leave: one answer at a time on a Mac (fix round 1, 1)", () => {
+  /** A `kind` for the same video started on this Mac inside the first one's wait for the claim: its { code, said }. */
+  async function nested(t, first, second) {
+    let inner = null;
+    let fired = false;
+    duringWaits(t, CLAIM_WAIT_MS, async () => {
+      if (fired) return;
+      fired = true;
+      inner = await on(t.ctx.deps, "kind", LABEL, ...second);
+    });
+    const outer = await on(t.ctx.deps, "kind", LABEL, ...first);
+    return { outer, inner };
+  }
+  const BUSY = `Another answer for ${LABEL} is being written on this Mac: say it again in a moment.`;
+  it("refuses a second answer started while the first waits for its claim: finished, then a session, writes the first alone and starts one reading", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const { outer, inner } = await nested(t, ["finished", "--private", "no"], ["session", "--private", "yes"]);
+    assert.deepEqual([inner.code, inner.said], [1, [BUSY]]);
+    assert.equal(outer.code, 0, outer.text);
+    const record = reread(found);
+    assert.deepEqual([record.kind, record.session, record.rev], ["finished", undefined, 3]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("finished", 3)]);
+    t.done();
+  });
+  it("refuses a second answer started while a session is being marked: the session is marked and nothing is read", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const { outer, inner } = await nested(t, ["session", "--private", "yes"], ["finished", "--private", "no"]);
+    assert.deepEqual([inner.code, inner.said], [1, [BUSY]]);
+    assert.equal(outer.code, 0, outer.text);
+    assert.deepEqual([reread(found).kind, reread(found).session.cleared, t.started], ["session", null, []]);
+    t.done();
+  });
+  it("refuses the same answer twice, and starts one reading", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const { outer, inner } = await nested(t, ["raw", "--private", "no"], ["raw", "--private", "no"]);
+    assert.deepEqual([inner.code, inner.said], [1, [BUSY]]);
+    assert.equal(outer.code, 0, outer.text);
+    assert.deepEqual([reread(found).rev, t.started.length], [3, 1]);
+    t.done();
+  });
+  it("refuses a leave started inside an answer's wait, and an answer started inside a leave's", async () => {
+    const t = setup();
+    const found = waiting(t);
+    let inner = null;
+    duringWaits(t, CLAIM_WAIT_MS, async () => {
+      inner = await on(t.ctx.deps, "leave", LABEL);
+    });
+    assert.equal((await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no")).code, 0);
+    assert.deepEqual([inner.code, inner.said], [1, [BUSY]]);
+    assert.equal(reread(found).kind, "raw");
+    // A leave takes the lock for the whole of its run, however short: an answer started as it writes is refused.
+    const t2 = setup();
+    const found2 = waiting(t2);
+    const clone = t2.ctx.deps.clone;
+    let started = null;
+    t2.ctx.deps.clone = (from, to) => {
+      if (!started) started = on(t2.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+      clone(from, to);
+    };
+    assert.equal((await on(t2.ctx.deps, "leave", LABEL)).code, 0);
+    const during = await started;
+    assert.deepEqual([during.code, during.said], [1, [BUSY]]);
+    assert.deepEqual([reread(found2).kind, reread(found2).answer.state], [null, "not for brimm-video"]);
+    assert.ok(!existsSync(answerLock(t2)));
+    t.done();
+    t2.done();
+  });
+  it("lets go of its lock when it ends, however it ends", async () => {
+    const t = setup();
+    waiting(t);
+    assert.equal((await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no")).code, 0);
+    assert.ok(!existsSync(answerLock(t)), "after an answer");
+    // Answered already: refused after the lock was taken.
+    assert.equal((await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no")).code, 1);
+    assert.ok(!existsSync(answerLock(t)), "after a refusal");
+    t.done();
+  });
+  it("takes over a lock left by a run that is gone", async () => {
+    const t = setup();
+    const found = waiting(t);
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(answerLock(t), JSON.stringify({ pid: 4242, command: "kind", nonce: "left behind" }));
+    const r = await on({ ...t.ctx.deps, alive: aliveIs() }, "kind", LABEL, "finished", "--private", "no");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).kind, "finished");
+    assert.ok(!existsSync(answerLock(t)));
+    t.done();
+  });
+  it("refuses while another process that is running holds it, and changes and starts nothing", async () => {
+    const t = setup();
+    const found = waiting(t);
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(answerLock(t), JSON.stringify({ pid: 4242, command: "kind", nonce: "alive" }));
+    for (const argv of [["kind", LABEL, "finished", "--private", "no"], ["leave", LABEL]]) {
+      const r = await on({ ...t.ctx.deps, alive: aliveIs(4242) }, ...argv);
+      assert.deepEqual([r.code, r.said], [1, [BUSY]], argv[0]);
+    }
+    untouched(t, found);
+    assert.ok(existsSync(answerLock(t)), "the other run's lock stays");
+    t.done();
+  });
+  it("refuses when the record read again after the wait is not the claim it wrote: it changed meanwhile", async () => {
+    const t = setup();
+    const found = waiting(t);
+    // The record after the claim is written on by a change that keeps the claim: it is no longer the one written.
+    duringWaits(t, CLAIM_WAIT_MS, () => {
+      const mine = reread(found);
+      writeFileSync(recordFile(found.folder, mine.rev + 1), recordText({ ...mine, rev: mine.rev + 1, answer: { ...mine.answer, state: "not for brimm-video" }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    });
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} changed meanwhile: say your answer again.`]]);
+    assert.deepEqual([reread(found).kind, reread(found).answer.state, reread(found).rev, t.started], [null, "not for brimm-video", 3, []]);
+    t.done();
+  });
+  it("looks again just before it writes: a run that came to work on the episode in the wait stops the answer", async () => {
+    const t = setup();
+    const found = waiting(t);
+    duringWaits(t, CLAIM_WAIT_MS, () => {
+      mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+      writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "bring" }));
+    });
+    const r = await on({ ...t.ctx.deps, alive: aliveIs(4242) }, "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual([r.code, r.said], [1, [`bring is running for ${LABEL} (${SHORT}) already. Say it again when it has finished.`]]);
+    assert.deepEqual([reread(found).kind, reread(found).rev, t.started], [null, 2, []]);
+    t.done();
+  });
+  it("looks again just before it starts the reading: a record written on its answer stops the run", async () => {
+    const t = setup();
+    const found = waiting(t);
+    // Dropbox brings the other Mac's next record the moment this Mac's answer is in place.
+    const clone = t.ctx.deps.clone;
+    t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith("0003.json")) writeFileSync(recordFile(found.folder, 4), recordText({ ...JSON.parse(readFileSync(to, "utf8")), rev: 4, kind: "raw", writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    };
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} changed meanwhile: say your answer again.`]]);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
+  it("starts the reading with the kind and the rev of the answer's record, so that its run can refuse a record that no longer says them", async () => {
+    const t = setup();
+    const found = waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "clip", "--private", "no");
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", "short video", "--rev", "3"]]);
+    assert.equal(reread(found).rev, 3);
+    t.done();
+  });
+});
+
+describe("kind: a session lets the video go (fix round 1, 2)", () => {
+  it("leaves the video with nobody editing it, so that the other Mac's name and release are not refused for the claim", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const laptop = otherMac(t);
+    const marked = await on(laptop.deps, "kind", LABEL, "session", "--private", "yes");
+    assert.equal(marked.code, 0, marked.text);
+    const label = reread(found).name.text;
+    assert.equal(reread(found).editing, null);
+    const released = await on(t.ctx.deps, "release", label);
+    assert.deepEqual(released.said, [`This Mac does not have ${label} open, so there is nothing to hand over.`]);
+    const named = await on(t.ctx.deps, "name", label, "A name of her own");
+    assert.equal(named.code, 0, named.text);
+    t.done();
+  });
+  it("keeps the claim on every other kind, as before: the reading runs under it", async () => {
+    const t = setup();
+    const found = waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.equal(reread(found).editing.by, "Mac Studio");
+    t.done();
+  });
+});
+
+describe("kind: the version it is of, and how it came (fix round 1, 4 to 6)", () => {
+  const SESSION_OF = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: MARK, name: { text: "Session, 2026-10-14", placeholder: false }, label: "Video of 14 Oct, 09:12 (Mac Studio)" };
+  it("refuses a kept versionOf, of a video handed off, that names a video since marked a session, unless this is a session too", async () => {
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false } } });
+    const added = addEpisode(t);
+    writeFileSync(recordFile(added.folder, 2), recordText({ ...readEpisode(added.folder).record, rev: 2, kind: "raw", answer: { ...ANSWERED }, versionOf: ID, finished: { revision: 1, at: AT, on: "Mac Studio" } }));
+    // The older video is marked a session afterwards.
+    const older = readEpisode(join(t.root, "Episodes", FOLDER)).record;
+    writeFileSync(recordFile(join(t.root, "Episodes", FOLDER), 2), recordText({ ...older, rev: 2, ...SESSION_OF }));
+    const refused = await on(t.ctx.deps, "kind", "Coaching call", "raw", "--private", "no", "--again");
+    assert.deepEqual([refused.code, refused.said], [1, ["That video is a client or group session, so this new version is one too: answer it as a session."]]);
+    assert.deepEqual([readEpisode(added.folder).record.rev, t.started, t.waits], [2, [], []]);
+    const allowed = await on(t.ctx.deps, "kind", "Coaching call", "session", "--private", "yes", "--again");
+    assert.equal(allowed.code, 0, allowed.text);
+    assert.equal(readEpisode(added.folder).record.versionOf, ID);
+    t.done();
+  });
+  it("refuses a short id that two answered videos have, and takes the whole id of either", async () => {
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false } } });
+    const other = "e-20261012-3fa9c1";
+    addEpisode(t, { folder: "2026-10-12 Elsewhere (Mac Studio)", id: other, file: "Elsewhere.mov", over: { kind: "raw", answer: ANSWERED, label: "Video of 12 Oct, 09:00 (Mac Studio)" } });
+    // An unanswered video with the same short id does not make it ambiguous.
+    addEpisode(t, { folder: "2026-10-11 Third (Mac Studio)", id: "e-20261011-3fa9c1", file: "Third.mov", over: { label: "Video of 11 Oct, 09:00 (Mac Studio)" } });
+    const added = addEpisode(t);
+    const ambiguous = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--version-of", "3fa9c1");
+    assert.deepEqual([ambiguous.code, ambiguous.said], [1, ["More than one video on this Mac has the short id 3fa9c1: say its whole id."]]);
+    assert.deepEqual([readEpisode(added.folder).record.rev, t.waits], [1, []]);
+    for (const id of [ID, other]) {
+      const t2 = setup();
+      episodeFor(t2, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false } } });
+      addEpisode(t2, { folder: "2026-10-12 Elsewhere (Mac Studio)", id: other, file: "Elsewhere.mov", over: { kind: "raw", answer: ANSWERED, label: "Video of 12 Oct, 09:00 (Mac Studio)" } });
+      const there = addEpisode(t2);
+      assert.equal((await on(t2.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--version-of", id)).code, 0, id);
+      assert.equal(readEpisode(there.folder).record.versionOf, id);
+      t2.done();
+    }
+    t.done();
+  });
+  it("asks whether it is a session of a pre-switch record whose video has a Zoom download's name, answered again as anything else", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { video: { file: "GMT20261013-142933_Recording_1280x720.mp4", bytes: 1, seconds: 23, recorded: "2026-10-14", recordedFrom: "video" }, files: {}, name: { text: "Coaching", placeholder: false } } });
+    for (const word of ["raw", "finished", "clip"]) {
+      const r = await on(t.ctx.deps, "kind", "Coaching", word, "--private", "no", "--again");
+      assert.deepEqual([r.code, r.said], [1, [ZOOM]], word);
+    }
+    untouched(t, found);
+    const given = await on(t.ctx.deps, "kind", "Coaching", "raw", "--private", "no", "--again", "--not-a-session");
+    assert.equal(given.code, 0, given.text);
+    t.done();
+  });
+  it("asks whether it is a session when the import could not read how the video came (came null), until she has answered", async () => {
+    const t = setup();
+    const found = waiting(t, { answer: { ...ANSWER, came: null, guess: null, seen: "" } });
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    assert.deepEqual([r.code, r.said], [1, [ZOOM]]);
+    untouched(t, found);
+    assert.equal((await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--not-a-session")).code, 0);
+    // Answered, it is not asked again: she was asked.
+    const again = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again");
+    assert.equal(again.code, 0, again.text);
+    assert.equal(reread(found).kind, "finished");
+    t.done();
+  });
+  it("does not ask of a pre-switch record with an ordinary name, answered again twice", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { name: { text: NAME, placeholder: false } } });
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again")).code, 0);
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again")).code, 0);
+    assert.equal(reread(found).kind, "raw");
+    t.done();
+  });
+});
+
+describe("kind: as open does it, and the time it takes (fix round 1, 7 and 10)", () => {
+  it("warns, as open does, that the other Mac will not see the claim when this Mac seems to be offline, and still claims", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const r = await on({ ...t.ctx.deps, online: async () => false }, "kind", LABEL, "finished", "--private", "no");
+    assert.equal(r.said[0], "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).kind, "finished");
+    t.done();
+  });
+  it("says nothing of being offline when it is online, or when it made no claim", async () => {
+    const t = setup();
+    waiting(t);
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.ok(!r.text.includes("offline"), r.text);
+    t.done();
+  });
+  it("lets the names of a video go once it is answered as anything but a session, so that the result line reads as status would", async () => {
+    const t = setup();
+    waiting(t);
+    duringWaits(t, 1000, () => leaveResult(t, { made: ["Pricing talk.edit-notes.txt"] }));
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual([r.code, r.said], [0, [`${LABEL}: read ended 0 minutes ago. Made: Pricing talk.edit-notes.txt.`]]);
+    t.done();
+  });
+  it("keeps them from a session's lines", async () => {
+    const t = setup();
+    waiting(t);
+    const r = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes");
+    assert.doesNotMatch(r.text, /Pricing/);
     t.done();
   });
 });
