@@ -12,6 +12,9 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, wri
 import { basename, dirname, extname, join } from "node:path";
 import { localDay } from "./shared/text.js";
 import { writtenFile } from "./settings.js";
+import { fileSafe } from "./names.js";
+// gate.js takes kindOf from here: each is used only when called, so neither needs the other to have been read first.
+import { gated } from "./gate.js";
 
 /** The folder of an episode's records. */
 export const RECORD_DIR = "record";
@@ -123,13 +126,29 @@ export function kindOf(r) {
 /** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
     session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
     and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its
-    own), or by its short id when it has none; every other record by its name, as today. A session's name is its label: F3
-    sets it in the same write as the mark, and F7 checks any rename. A record that has no name to give, as a conflicted copy
-    that is not whole may be, is named by its short id. */
+    own), or by its short id when it has none; every other record by its name, as today. It fails closed for every record the
+    gate holds (gate.js gated): a session is named by its name, which is its label (F3 sets it in the same write as the mark,
+    and F7 checks any rename), but never by a name that is still its file's; and a record of another kind whose session mark is
+    not cleared is named by its label, and either of them, with no label, as "a client or group session (<short id>)". A
+    record that has no name to give, as a conflicted copy that is not whole may be, is named by its short id. */
 export function shownName(r) {
   const short = isObject(r) && typeof r.id === "string" ? r.id.slice(-6) : "";
-  if (kindOf(r) === null) return isObject(r) && isText(r.label) ? r.label : `a video not yet answered (${short})`;
-  return isObject(r.name) && isText(r.name.text) ? r.name.text : `an episode (${short})`;
+  const label = isObject(r) && isText(r.label) ? r.label : "";
+  if (kindOf(r) === null) return label || `a video not yet answered (${short})`;
+  const name = isObject(r.name) && isText(r.name.text) ? r.name.text : "";
+  if (!gated(r)) return name || `an episode (${short})`;
+  if (r.kind === "session" && name && !filesName(r)) return name;
+  return label || `a client or group session (${short})`;
+}
+
+/** Whether a record's name is still its video file's: a placeholder, or the file's name, with or without its ending and in the
+    file-safe form, whatever its case. */
+function filesName(r) {
+  if (r.name.placeholder === true) return true;
+  const file = isObject(r.video) && isText(r.video.file) ? r.video.file : "";
+  const stem = basename(file, extname(file));
+  const same = (a, b) => a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase();
+  return Boolean(file) && [file, stem, fileSafe(stem)].some((n) => same(n, r.name.text));
 }
 
 /** The layout a record is written at: 3 once it holds anything of the switch (a kind other than "episode" or "short video",

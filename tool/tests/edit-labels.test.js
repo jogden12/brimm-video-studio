@@ -7,19 +7,20 @@
 // Nothing here runs a real program or touches Dropbox: each test has a root and a home of its own, and the programs are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
-import { episodeWork, workFolder, writeSettings } from "../settings.js";
+import { episodeWork, fromFinalCutFolder, workFolder, writeSettings } from "../settings.js";
 import { readStatuses, writeStatus } from "../importing.js";
-import { readResult, resultFile } from "../detached.js";
-import { sessionLabel } from "../kinds.js";
-import { uneditedFolder } from "../unedited.js";
+import { readResult, resultFile, runDetached } from "../detached.js";
+import { sessionLabel, withoutNames } from "../kinds.js";
+import { uneditedFolder, uneditedFolders } from "../unedited.js";
 import { noProgress } from "../progress.js";
 import { probed, TOLD, SRT, PAUSES } from "./fixtures.js";
-import { setup, FOLDER, NAME } from "./episodes.js";
+import { setup, episodeFor, FOLDER, NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 
 /** Run a command of edit.js by its deps: { code, said }, with each line it said. */
@@ -112,7 +113,8 @@ async function todaySays(setting) {
     for (const words of TODAY_ASKED[name]) {
       const t = today(setting);
       const r = await on(depsOf(t), name, ...words);
-      says[[name, ...words].join(" ")] = [r.code, ...r.said.map((line) => line.split(t.dir).join("<dir>").split(String(process.pid)).join("<pid>"))];
+      const pid = new RegExp(String.raw`(?<!\d)${process.pid}(?!\d)`, "g");
+      says[[name, ...words].join(" ")] = [r.code, ...r.said.map((line) => line.split(t.dir).join("<dir>").replace(pid, "<pid>"))];
       t.done();
     }
   }
@@ -347,7 +349,8 @@ describe("findEpisode, for a video named by its label", () => {
     clientEpisode(t, { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED } });
     const ctx = ctxOf(t);
     assert.equal(findEpisode(ctx, "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and 2026-10-18 Pricing talk (Mac Studio).`);
-    assert.equal(findEpisode(ctx, "2026").why, `More than one episode fits "2026": ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and 2026-10-18 Pricing talk (Mac Studio). Say which.`);
+    // A gated video is never found by words of its folder or its name: "2026" fits the answered episode alone.
+    assert.equal(findEpisode(ctx, "2026").name, "2026-10-18 Pricing talk (Mac Studio)");
     t.done();
   });
   it("names a conflicted episode by the label of a gated record, read past the copies or a copy's own, and one a newer brimm-video wrote by its short id", () => {
@@ -414,7 +417,7 @@ describe("a command the gate lets through, for a gated video", () => {
     const r = await on(t.ctx.deps, "resolve", LABEL);
     assert.equal(r.code, 0, r.said.join("\n"));
     assert.equal(r.said[0], `Dropbox kept two versions of record/0001.json in ${LABEL}:`);
-    for (const what of ["Name", "Label", "Video"]) assert.ok(r.said.includes(`  ${what}: A and B differ, and neither is shown here.`), r.said.join("\n"));
+    for (const what of ["Name", "Label", "Video"]) assert.ok(r.said.includes(`  ${what}: they differ.`), r.said.join("\n"));
     assert.doesNotMatch(r.said.join("\n"), /Jane|15:01|Coaching/);
     t.done();
   });
@@ -454,7 +457,7 @@ describe("episodes, on a Mac that does the light import", () => {
     writeSettings(t.home, { import: "light" });
     clientEpisode(t, { over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
     const said = await listing(t);
-    assert.deepEqual(said.slice(0, 3), ["No episodes yet.", "Left alone, not for brimm-video:", `  ${LABEL}: a video of 2:00, id a1b2c3`]);
+    assert.deepEqual(said.slice(0, 3), ["Left alone, not for brimm-video:", `  ${LABEL}: a video of 2:00, id a1b2c3`, "On this Mac:"]);
     t.done();
   });
   it("names a gated episode with a conflicted copy by its label, and its files that are not right without the video's name; a newer one by its id", async () => {
@@ -591,7 +594,8 @@ describe("status, and the result files of detached runs, for a gated video", () 
     clientEpisode(t);
     oldResult(t);
     const r = await on(depsOf(t), "status");
-    assert.deepEqual(r.said, [`${LABEL} (a1b2c3): bring ended 2 hours ago. Made: the video.transcript.txt. Not done: the video.words.json could not be read (EIO). Every file of the video is here. Say "open the video".`]);
+    // What a run left before the video was gated says what to say next by its name: that is dropped, and so is its folder.
+    assert.deepEqual(r.said, [`${LABEL} (a1b2c3): bring ended 2 hours ago. Made: the video.transcript.txt. Not done: the video.words.json could not be read (EIO).`]);
     t.done();
   });
   it("names the result the gate leaves for a refused --now run by the label and short id", async () => {
@@ -724,7 +728,8 @@ describe("the light import's match of a new version", () => {
 describe("the walk: every command, for a video imported lightly from a file named for a client", () => {
   /** What each command is given, as Claude runs it, with `label` where the episode goes: and with no words. The detached runs are
       given the episode's folder, as edit.js starts them, and the label too. Every command is here: nothing is left out of the
-      walk. `open 2026` and `open nothing fits this` have the lists of episodes said. */
+      walk. `open 2026` fits the answered episode alone, since a gated one is never found by words, and `open nothing fits this`
+      has the list of episodes said. */
   const walkWords = (label) => ({
     episodes: [[]],
     open: [[label], [], ["2026"], ["nothing fits this"]],
@@ -803,7 +808,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     assert.ok(episodes.includes(`  ${LABEL}: a video waiting for your answer, of 2:00, id ${short}`), episodes.join("\n"));
     assert.ok(episodes.includes(`  ${NAME}: an episode of 0:23, in ${FOLDER}, id 3fa9c1`), episodes.join("\n"));
     assert.ok(episodes.includes(`  The library of ${LABEL} (${short}): 9 bytes`), episodes.join("\n"));
-    assert.deepEqual(seen["waiting for its answer: open 2026"], [`More than one episode fits "2026": ${LABEL} (${short}) and ${FOLDER}. Say which.`]);
+    assert.ok(!seen["waiting for its answer: open 2026"].some((line) => line.includes(LABEL)), seen["waiting for its answer: open 2026"].join("\n"));
     assert.deepEqual(seen["waiting for its answer: open nothing fits this"], [`No episode fits "nothing fits this". The episodes are: ${LABEL} (${short}) and ${FOLDER}.`]);
     assert.deepEqual(seen[`waiting for its answer: release ${LABEL}`], [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`]);
     assert.deepEqual(seen[`a session, teachings off: release ${SESSION}`], [`This Mac does not have ${SESSION} open, so there is nothing to hand over.`]);
@@ -811,5 +816,309 @@ describe("the walk: every command, for a video imported lightly from a file name
     assert.ok(seen["waiting for its answer: status"].some((line) => line.startsWith(`${LABEL} (${short}): bring ended`)), seen["waiting for its answer: status"].join("\n"));
     rmSync(snap, { recursive: true, force: true });
     w.t.done();
+  });
+});
+
+// --- Fix round 1 ---
+
+const WAITING = "This video is waiting for its answer: say what it is first.";
+const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
+
+/** Have `fs[name]` refuse every path under `under` with EACCES, as a full disk or a folder that cannot be written does, while
+    `work` runs: the ES modules' own bindings of fs follow the replacement. The error names the path, as Node's own does. */
+async function refusing(name, under, work, only = () => true) {
+  const real = fs[name];
+  fs[name] = (path, ...rest) => {
+    if (String(path).startsWith(under) && only(String(path))) throw Object.assign(new Error(`EACCES: permission denied, ${name === "mkdirSync" ? "mkdir" : "open"} '${path}'`), { code: "EACCES", errno: -13, path: String(path) });
+    return real(path, ...rest);
+  };
+  syncBuiltinESMExports();
+  try {
+    return await work();
+  } finally {
+    fs[name] = real;
+    syncBuiltinESMExports();
+  }
+}
+
+/** The paths readFileSync is given while `work` runs. */
+async function readsDuring(work) {
+  const real = fs.readFileSync;
+  const paths = [];
+  fs.readFileSync = (path, ...rest) => {
+    paths.push(String(path));
+    return real(path, ...rest);
+  };
+  syncBuiltinESMExports();
+  try {
+    await work();
+  } finally {
+    fs.readFileSync = real;
+    syncBuiltinESMExports();
+  }
+  return paths;
+}
+
+describe("a Mac whose own import is not light, beside one that imports lightly (fix 1)", () => {
+  /** Sallie's laptop, with no import setting, while the Mac Studio imports lightly into the same BRIMM Video: the client's video
+      filed as an episode and still in the Mac Studio's drop folder for its late check, its status saying so with its label. */
+  function laptop() {
+    const t = setup({ machine: "Sallie's laptop" });
+    clientEpisode(t);
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, VIDEO), "video");
+    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    return t;
+  }
+  it("names the other Mac's waiting videos by their labels, or their sizes, and never by their files", async () => {
+    const t = laptop();
+    failedStatus(t);
+    // One held by the gated episode, whose status is gone; and one no import has seen yet, which is named as today.
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Call with Joe Bloggs.mov"), "video");
+    clientEpisode(t, { folder: "2026-10-19 Call with Joe Bloggs (Mac Studio)", video: "Call with Joe Bloggs.mov", id: "e-20261019-0c0c0c", label: "Video of 19 Oct, 10:00 (Mac Studio)" });
+    writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Pricing talk again.mov"), "video");
+    const said = (await on(depsOf(t), "episodes")).said;
+    const at = said.indexOf("Waiting in the drop folders:");
+    assert.deepEqual(said.slice(at, at + 5), [
+      "Waiting in the drop folders:",
+      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until its late check passes, or for a person to delete.",
+      `  ${SECOND_LABEL}, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the sound could not be read from the file (a file: Invalid data found when processing input). Say "try it again" to import it again.`,
+      `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`,
+      "  Pricing talk again.mov, in Mac Studio's, for 0 minutes"
+    ]);
+    assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);
+    t.done();
+  });
+  it("retry names a video of its own drop folder by its label, or by its size when a gated episode holds it, and the rest as today", async () => {
+    const t = setup({ machine: "Sallie's laptop" });
+    const drop = join(t.root, "Unedited Video", "Sallie's laptop");
+    mkdirSync(drop, { recursive: true });
+    clientEpisode(t);
+    for (const name of [VIDEO, SECOND, "Pricing talk again.mov"]) writeFileSync(join(drop, name), "video");
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, import: "k3j9x", video: SECOND, bytes: 5, seconds: null, step: "Reading the sound", at: AT, label: SECOND_LABEL, failed: "the sound could not be read" }, writeText);
+    const r = await on(depsOf(t), "retry", "nothing fits this");
+    assert.deepEqual(r.said, [`No video in this Mac's drop folder fits "nothing fits this". It holds: ${SECOND_LABEL}, a video of 5 bytes and Pricing talk again.mov.`]);
+    t.done();
+  });
+  it("walks every command there with nothing of the client's names in what it says or writes", async () => {
+    const t = setup({ machine: "Sallie's laptop" });
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED } });
+    // The Mac Studio imports the client's video lightly, from its own home, into the BRIMM Video both Macs share.
+    const studio = join(t.dir, "studio");
+    const imported = await importLightly(t, VIDEO, { deps: { home: studio } });
+    for (const line of [...imported.logs, ...imported.notes]) assert.doesNotMatch(line, SECRET, line);
+    const { record } = readEpisode(lightFolder(t));
+    // Its late check is still to come, so the video is in the Mac Studio's drop folder, and its status says so; a second failed
+    // there, and a third is being imported.
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    writeFileSync(join(drop, VIDEO), "video");
+    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    failedStatus(t);
+    writeFileSync(join(drop, `${STEM} part 3.mov`), "video");
+    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9z", video: `${STEM} part 3.mov`, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00", label: "Video of 20 Oct, 14:58 (Mac Studio)" }, writeText);
+    // This Mac brought its files over once, before it was a video waiting for its answer, and has a library of it.
+    oldResult(t);
+    library(t);
+    const label = record.label;
+    for (const name of COMMAND_NAMES) {
+      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], free: [[]] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
+      for (const given of words) {
+        const before = resultsIn(t.home);
+        const r = await on(depsOf(t), name, ...given);
+        assert.doesNotMatch(r.said.join("\n"), SECRET, `${name} ${given.join(" ")}\n${r.said.join("\n")}`);
+        for (const [file, text] of resultsIn(t.home)) if (before.get(file) !== text) assert.doesNotMatch(text, SECRET, `${name}: ${file}`);
+      }
+    }
+    const episodes = (await on(depsOf(t), "episodes")).said;
+    assert.ok(episodes.includes(`  ${LABEL}: a video waiting for your answer, of 2:00, id ${record.id.slice(-6)}`), episodes.join("\n"));
+    t.done();
+  });
+});
+
+describe("an error that leaves a command for a gated video (fix 2)", () => {
+  it("is said through the names' filter, as the work stopping, and the command ends with 1", async () => {
+    // A session's finish, with teachings on, makes this Mac's From Final Cut first, which cannot be made.
+    const t = setup();
+    writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
+    clientEpisode(t, { over: SESSION_OVER });
+    const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, "finish", SESSION));
+    assert.equal(r.code, 1);
+    assert.equal(r.said[r.said.length - 1], "The work stopped (EACCES).");
+    assert.doesNotMatch(r.said.join("\n"), SECRET);
+    t.done();
+  });
+  it("leaves a command for an answered episode exactly as today: thrown", async () => {
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED } });
+    await refusing("mkdirSync", workFolder(t.home), () => assert.rejects(on(t.ctx.deps, "finish", FOLDER), (err) => err.code === "EACCES" && err.message.includes("From Final Cut")));
+    t.done();
+  });
+  it("ends a detached run that cannot make its folder in BRIMM Video Work with no name of the video, and no rejection", async () => {
+    for (const argv of [["bring", "--now", LABEL], ["bring", "--now", LIGHT_FOLDER], ["ask", "--now", LIGHT_FOLDER]]) {
+      const t = setup();
+      writeSettings(t.home, { import: "light" });
+      clientEpisode(t);
+      mkdirSync(workFolder(t.home), { recursive: true });
+      const r = await refusing("mkdirSync", workFolder(t.home), () => on(t.ctx.deps, ...argv));
+      assert.deepEqual([r.code, r.said], [1, [WAITING, "The work stopped (EACCES)."]], argv.join(" "));
+      t.done();
+    }
+  });
+  it("runDetached says its own errors through `clean`: the folder it could not make, and the result it could not write", async () => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-labels-run-"));
+    const clean = (text) => withoutNames(text, [LIGHT_FOLDER], [], { paths: false });
+    const run = (more = {}) => runDetached({ home, folder: LIGHT_FOLDER, command: "bring", alive: () => false, keepAwake: () => {}, clean, ...more }, async () => ({ ok: true, made: [], failed: [], next: "" }));
+    mkdirSync(workFolder(home), { recursive: true });
+    await refusing("mkdirSync", workFolder(home), () => assert.rejects(run(), (err) => err.code === "EACCES" && !SECRET.test(err.message)));
+    await refusing("writeFileSync", workFolder(home), () => assert.rejects(run(), (err) => err.code === "EACCES" && !SECRET.test(err.message)), (path) => path.includes(".result.json"));
+    // With no `clean`, as for every other episode, the error is Node's own, as today.
+    await refusing("mkdirSync", workFolder(home), () => assert.rejects(runDetached({ home, folder: LIGHT_FOLDER, command: "bring", alive: () => false, keepAwake: () => {} }, async () => ({ ok: true })), (err) => err.message.includes(LIGHT_FOLDER)));
+    rmSync(home, { recursive: true, force: true });
+  });
+  it("the light import's top level logs why its work on a folder stopped with no name of a video in it", async () => {
+    const t = setup();
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, VIDEO), "video");
+    const logs = [];
+    const deps = {
+      run: async () => ({ code: 1, stderr: "" }), tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/m", home: t.home, lockDir: join(t.dir, "locks"),
+      settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", import: "light" }, light: true, log: (line) => logs.push(line), wait: async () => {}, alive: () => false,
+      // Something nobody foresaw, which names the video's file, stops the folder's work.
+      keepAwake: () => {
+        throw new Error(`${join(drop, VIDEO)} could not be kept awake`);
+      }
+    };
+    assert.equal(await uneditedFolders([drop], deps), 1);
+    assert.ok(logs.some((line) => line.startsWith("The work on this folder stopped (")), logs.join("\n"));
+    for (const line of logs) assert.doesNotMatch(line, SECRET, line);
+    t.done();
+  });
+});
+
+describe("the names a gated video had before (fix 3)", () => {
+  it("keeps a name she gave it, in its file-safe form, and the projects pushed by it, out of a session's lines", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
+    const folder = join(t.root, "Episodes", "2026-10-20 IMG_4411 (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    writeFileSync(join(folder, "IMG_4411.MOV"), "video");
+    const base = newEpisode({ id: "e-20261020-a1b2c3", machine: "Mac Studio", at: AT, video: { file: "IMG_4411.MOV", bytes: 5, seconds: 120, created: null }, kind: "raw", writer: { commit: "c709b57", on: "Mac Studio" }, files: { "IMG_4411.MOV": 5 }, answer: ANSWERED });
+    const project = "Jane Doe- her pricing main v1 a1b2c3";
+    const raw = { ...base, rev: 1, name: { text: "Jane Doe: her pricing", placeholder: false }, main: { ...base.main, pushed: [{ v: 1, at: AT, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project, asked: null }] } };
+    writeFileSync(recordFile(folder, 1), recordText(raw));
+    writeFileSync(recordFile(folder, 2), recordText({ ...raw, ...SESSION_OVER, rev: 2 }));
+    for (const name of [`${project}.mov`, `${project} 2.mov`]) writeFileSync(join(fromFinalCutFolder(t.home), name), "a finished video");
+    for (const argv of [["finish", SESSION], ["release", SESSION], ["resolve", SESSION]]) {
+      const r = await on(t.ctx.deps, ...argv);
+      assert.doesNotMatch(r.said.join("\n"), /Jane|pricing/i, `${argv.join(" ")}\n${r.said.join("\n")}`);
+    }
+    t.done();
+  });
+});
+
+describe("findEpisode takes back what its lists say (fix 4)", () => {
+  it("finds a gated video by \"<label> (<short id>)\", whatever its case and spacing", () => {
+    const t = setup();
+    const first = clientEpisode(t);
+    const second = clientEpisode(t, { folder: "2026-10-20 Intake Bob Roe (Mac Studio)", video: "Intake Bob Roe.mov", id: "e-20261020-d4e5f6" });
+    const ctx = ctxOf(t);
+    assert.equal(findEpisode(ctx, LABEL).why, `More than one episode fits "${LABEL}": ${LABEL} (d4e5f6) and ${LABEL} (a1b2c3). Say which.`);
+    assert.equal(findEpisode(ctx, `${LABEL} (a1b2c3)`).name, first.name);
+    assert.equal(findEpisode(ctx, ` video of 20 oct,  15:00 (mac studio) (D4E5F6)`).name, second.name);
+    t.done();
+  });
+});
+
+describe("resolve, for a gated video (fix 5)", () => {
+  it("says only which of its fields differ, but for who has it open, its finish, its hand-over, how far it was shown and its files' sizes", async () => {
+    const t = setup();
+    const e = clientEpisode(t, { over: { ...SESSION_OVER, title: { text: "Jane says no to the discount", from: "claude", approved: false }, spellings: [["jane", "Jane"]] } });
+    conflictedRecord(e.folder, { title: { text: "Jane's other title", from: "person", approved: true }, spellings: [["jane", "Jayne"]], editing: { by: "Sallie's laptop", since: AT } });
+    const r = await on(t.ctx.deps, "resolve", SESSION);
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.ok(r.said.includes("  Who has it open: A: nobody; B: Sallie's laptop"), r.said.join("\n"));
+    assert.ok(r.said.includes("  Title: they differ."), r.said.join("\n"));
+    assert.ok(r.said.includes("  Spellings: they differ."), r.said.join("\n"));
+    assert.doesNotMatch(r.said.join("\n"), /Jane|Jayne|discount/);
+    t.done();
+  });
+});
+
+describe("a gated video is found by its label and ids alone (fix 6)", () => {
+  it("is never found by words in its folder or its name, by a command or by status", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    clientEpisode(t);
+    oldResult(t);
+    const release = await on(depsOf(t), "release", "jane");
+    assert.deepEqual(release.said, [`No episode fits "jane". The episodes are: ${LABEL} (a1b2c3).`]);
+    failedStatus(t);
+    assert.deepEqual((await on(depsOf(t), "status", "jane")).said, ["Nothing is running, and nothing is waiting."]);
+    // By its label, status finds both.
+    assert.equal((await on(depsOf(t), "status", SECOND_LABEL)).said.length, 2);
+    t.done();
+  });
+});
+
+describe("the say filter's names (fix 7)", () => {
+  it("leaves the gate's words and the tool's own whole for a video whose file is named 1, a, Main or Session", async () => {
+    for (const stem of ["1", "a", "Main", "Session"]) {
+      const t = setup();
+      writeSettings(t.home, { import: "light" });
+      clientEpisode(t, { folder: `2026-10-20 ${stem} (Mac Studio)`, video: `${stem}.mov` });
+      assert.deepEqual((await on(t.ctx.deps, "open", LABEL)).said, [WAITING], stem);
+      assert.deepEqual((await on(t.ctx.deps, "release", LABEL)).said, [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`], stem);
+      t.done();
+      const u = setup();
+      clientEpisode(u, { folder: `2026-10-20 ${stem} (Mac Studio)`, video: `${stem}.mov`, over: SESSION_OVER });
+      assert.deepEqual((await on(u.ctx.deps, "open", SESSION)).said, [NOT_FOR_SESSION], stem);
+      u.done();
+    }
+  });
+  it("leaves a path that is not the video's readable, and keeps the net on for a session whose name is its file's", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light", sessionTeachings: TEACHINGS });
+    clientEpisode(t, { over: { ...SESSION_OVER, name: { text: STEM, placeholder: true } } });
+    const r = await on(t.ctx.deps, "finish", LABEL);
+    assert.ok(r.said.some((line) => line.includes(fromFinalCutFolder(t.home))), r.said.join("\n"));
+    assert.doesNotMatch(r.said.join("\n"), SECRET);
+    t.done();
+  });
+});
+
+describe("shownName fails closed (fix 9)", () => {
+  const base = newEpisode({ id: "e-20261020-a1b2c3", machine: "Mac Studio", at: AT, video: { file: VIDEO, bytes: 5, seconds: 120, created: null }, kind: "raw", writer: { commit: "c", on: "Mac Studio" }, answer: ANSWERED, label: LABEL });
+  const marked = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+  it("names a record of another kind with a session mark not cleared by its label, or as a session by its short id", () => {
+    assert.equal(shownName({ ...base, session: marked }), LABEL);
+    assert.equal(shownName({ ...base, label: undefined, session: marked }), "a client or group session (a1b2c3)");
+    assert.equal(shownName({ ...base, session: { ...marked, cleared: { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" } } }), STEM);
+  });
+  it("never names a session by a name that is still its file's", () => {
+    assert.equal(shownName({ ...base, ...SESSION_OVER, name: { text: STEM, placeholder: true } }), LABEL);
+    assert.equal(shownName({ ...base, ...SESSION_OVER, label: undefined, name: { text: STEM, placeholder: false } }), "a client or group session (a1b2c3)");
+  });
+});
+
+describe("the edges of fix round 1 (fix 10)", () => {
+  it("names the folder of a detached run whose episode is gone by its day and Mac alone", async () => {
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED } });
+    for (const command of ["bring", "ask", "finish"]) {
+      const r = await on(t.ctx.deps, command, "--now", LIGHT_FOLDER);
+      assert.deepEqual(r.said, [`No episode fits an episode of 2026-10-20 from the Mac Studio whose record cannot be read. The episodes are: ${FOLDER}.`], command);
+    }
+    t.done();
+  });
+  it("reads no record of a gated video's history that is not whole on this Mac", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    const e = clientEpisode(t);
+    rewrite(e.folder, { label: LABEL });
+    const reads = await readsDuring(() => on({ ...t.ctx.deps, isWhole: (path) => !path.endsWith("/record/0001.json") }, "release", LABEL));
+    assert.ok(!reads.some((path) => path.endsWith("/record/0001.json")), reads.join("\n"));
+    t.done();
   });
 });

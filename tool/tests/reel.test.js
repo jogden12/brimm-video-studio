@@ -583,8 +583,10 @@ import { RECORD_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } f
 import { askBlocked } from "../unedited.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
-const askedBoth = async (p) => {
-  const quick = await editMain(["ask", "Pricing"], p.t.ctx.deps);
+/** Ask, both parts, of the episode `p`: the quick part as Claude names it, by `said` (a gated video by its label, since words
+    of its folder never find it), and the detached part by its folder, as edit.js starts it. */
+const askedBoth = async (p, said = "Pricing") => {
+  const quick = await editMain(["ask", said], p.t.ctx.deps);
   const started = p.t.started.length;
   const before = existsSync(join(p.found.folder, "reels.json")) ? readFileSync(join(p.found.folder, "reels.json"), "utf8") : null;
   const now = await editMain(["ask", "--now", FOLDER], p.t.ctx.deps);
@@ -1988,7 +1990,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   it("refuses a video waiting for its answer, both parts, and asks nothing", async () => {
     const p = askable();
     relayout(p.found, UNANSWERED);
-    const r = await askedBoth(p);
+    const r = await askedBoth(p, UNANSWERED.label);
     const why = "This video is waiting for its answer: say what it is first.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.equal(p.t.said(), `${why}\n${why}`);
@@ -1998,7 +2000,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   it("refuses a client or group session whose mark is not cleared, both parts, and asks nothing", async () => {
     const p = askable();
     relayout(p.found, MARKED);
-    const r = await askedBoth(p);
+    const r = await askedBoth(p, MARKED.label);
     const why = "This is a client or group session: that is not done for one.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.equal(p.t.said(), `${why}\n${why}`);
@@ -2016,7 +2018,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   it("refuses a session that has no mark at all, as one whose mark is not cleared, both parts, and asks nothing", async () => {
     const p = askable();
     relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20" });
-    const r = await askedBoth(p);
+    const r = await askedBoth(p, "Session, 2026-10-20");
     // Through editMain the gate (gate.js) refuses first, a record of kind "session" with no mark being a session not cleared,
     // and a --now it refuses leaves a result in its words.
     const why = "This is a client or group session: that is not done for one.";

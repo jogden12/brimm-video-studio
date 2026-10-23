@@ -227,22 +227,30 @@ export function heldBy({ root, video, bytes, now = Date.now() }) {
   return "";
 }
 
-/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size.
-    "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its label and short
-    id (shownName): its folder holds the file's name, which may be a client's. */
-export function episodeHolding({ root, video, bytes }) {
+/** The episode whose whole record names the video `video`, of `bytes` bytes: { name, record }, by its folder's name, or null
+    when none does. */
+export function holdingOf({ root, video, bytes }) {
   const episodes = episodesFolder(root);
   let names = [];
   try {
     names = readdirSync(episodes).filter((n) => !n.startsWith("."));
   } catch (e) {
-    return "";
+    return null;
   }
   for (const name of names.sort()) {
     const { record } = readEpisode(join(episodes, name));
-    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return `already imported as ${gated(record) ? `${shownName(record)} (${record.id.slice(-6)})` : name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return { name, record };
   }
-  return "";
+  return null;
+}
+
+/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size
+    (holdingOf). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
+    label and short id (shownName): its folder holds the file's name, which may be a client's. */
+export function episodeHolding({ root, video, bytes }) {
+  const held = holdingOf({ root, video, bytes });
+  if (!held) return "";
+  return `already imported as ${gated(held.record) ? `${shownName(held.record)} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,

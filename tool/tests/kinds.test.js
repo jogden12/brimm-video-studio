@@ -250,3 +250,39 @@ describe("withoutNames, a line about a video named by its label", () => {
     assert.equal(withoutNames(`${LABEL} and 1.mov`, namesOf("1.mov"), [LABEL]), `${LABEL} and the video`);
   });
 });
+
+describe("withoutNames, the names of a file named with a short or common word (F2 fix 7)", () => {
+  const LINES = [
+    "This video is waiting for its answer: say what it is first.",
+    "This is a client or group session: that is not done for one.",
+    "Teachings from sessions are not turned on for this Mac yet: ask Jason.",
+    "reel 1:00, for 3 minutes",
+    "a client or group session",
+    "Reel 1 is picked. Say \"show reel 1 in Final Cut\" to have it pushed.",
+    "edit/main.v0.fcpxml is missing, and the main video is 1.5 seconds long."
+  ];
+  it("leaves the gate's words and the tool's own lines whole for a file named 1, a, Main or Session", () => {
+    for (const stem of ["1", "a", "Main", "Session"]) for (const line of LINES) assert.equal(withoutNames(line, namesOf(`${stem}.mov`), [], { paths: false }), line, `${stem}: ${line}`);
+  });
+  it("still finds such a name as a file's, in a conflicted copy's name, and in an episode folder's", () => {
+    const names = namesOf("1.mov");
+    assert.equal(withoutNames("1.mov and 1.transcript.txt are here", names), "the video and the video.transcript.txt are here");
+    assert.equal(withoutNames("1 (Sallie's laptop's conflicted copy 2026-10-20).srt", names), "the video (Sallie's laptop's conflicted copy 2026-10-20).srt");
+    assert.equal(withoutNames("in 2026-10-20 1 (Mac Studio)", names), "in 2026-10-20 the video (Mac Studio)");
+    assert.equal(withoutNames("Session.transcript.txt, and Session on its own", namesOf("Session.mov")), "the video.transcript.txt, and the video on its own");
+  });
+  it("finds a name of several words in every form and case", () => {
+    const names = [...namesOf("Coaching call Jane Doe.mov"), "2026-10-20 Coaching call Jane Doe (Mac Studio)"];
+    for (const line of ["Coaching call Jane Doe.transcript.txt", "coaching call jane doe", "/x/Episodes/2026-10-20 Coaching call Jane Doe (Mac Studio)/edit", "Coaching call Jane Doe (Sallie's laptop's conflicted copy 2026-10-20).srt", "COACHING CALL JANE DOE.MOV"]) {
+      assert.doesNotMatch(withoutNames(line, names, [], { paths: false }), /jane|coaching/i, line);
+    }
+  });
+  it("leaves every other path alone when told not to take paths out", () => {
+    const line = "Looked in /Users/sallie/BRIMM Video Work/From Final Cut and /x/Episodes/2026-10-20 Coaching call Jane Doe (Mac Studio)/edit for: .";
+    assert.equal(withoutNames(line, ["2026-10-20 Coaching call Jane Doe (Mac Studio)"], [], { paths: false }), "Looked in /Users/sallie/BRIMM Video Work/From Final Cut and /x/Episodes/the video/edit for: .");
+  });
+  it("keeps the space between a path and a kept text after it", () => {
+    const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
+    assert.equal(withoutNames(`Looked in /a/b ${LABEL}`, [], [LABEL]), `Looked in a file ${LABEL}`);
+  });
+});

@@ -227,11 +227,14 @@ describe("the gate, wherever a command names its episode", () => {
     assert.deepEqual([r.code, r.said, reread(found).rev], [1, [WAITING], 1]);
     t.done();
   });
-  it("refuses 'open' with an unquoted name of several words on a video not yet answered", async () => {
+  it("refuses 'open' with an unquoted label of several words on a video not yet answered, which words of its folder never find", async () => {
     const t = setup();
     episodeFor(t, { record: UNANSWERED_RECORD });
-    const r = await on(t.ctx.deps, "open", "Pricing", "talk");
+    const r = await on(t.ctx.deps, "open", ...UNANSWERED_RECORD.label.split(" "));
     assert.deepEqual([r.code, r.said], [1, [WAITING]]);
+    // Words of its folder, which are its file's, find nothing (F2): what is said names it by its label alone.
+    const words = await on(t.ctx.deps, "open", "Pricing", "talk");
+    assert.deepEqual([words.code, words.said], [1, [`No episode fits "Pricing talk". The episodes are: ${UNANSWERED_RECORD.label} (3fa9c1).`]]);
     assert.deepEqual(t.started, []);
     t.done();
   });
@@ -439,7 +442,7 @@ describe("ask, with another run at work on the episode, is gated before the run 
   it("is given the gate's words first, for a video not yet answered and for a session, and the folder is named nowhere", async () => {
     for (const [record, why] of [[UNANSWERED_RECORD, WAITING], [SESSION_RECORD, NOT_FOR_SESSION]]) {
       const { t, deps } = busy(record);
-      for (const said of ["Pricing talk", FOLDER]) {
+      for (const said of [record.label, FOLDER]) {
         const r = await on(deps, "ask", said);
         assert.deepEqual([r.code, r.said], [1, [why]], said);
         assert.ok(!r.text.includes(FOLDER) && !r.text.includes("running"), r.text);
@@ -510,9 +513,14 @@ describe("reel, which a session passes only with the words of a Reel she has agr
   it("refuses 'reel pick <digits> --client-agreed' and 'reel drop <episode> 1 --client-agreed' for a session with the training gate on", async () => {
     const t = setup();
     episodeFor(t, { record: SESSION_RECORD });
-    for (const words of [["pick", "14", "--client-agreed"], ["pick", "2026", "--client-agreed"], ["drop", "14", "--client-agreed"], ["drop", FOLDER, "1", "--client-agreed"], ["pick", FOLDER, "1", "--client-agreed"]]) {
+    for (const words of [["pick", "3fa9c1", "--client-agreed"], ["drop", "3fa9c1", "--client-agreed"], ["drop", FOLDER, "1", "--client-agreed"], ["pick", FOLDER, "1", "--client-agreed"]]) {
       const r = await on(taught(t), "reel", ...words);
       assert.deepEqual([r.code, r.said], [1, [REEL_NOT_AGREED]], words.join(" "));
+    }
+    // Digits that are words of its folder, which are its file's, do not find a session at all (F2).
+    for (const words of [["pick", "14", "--client-agreed"], ["pick", "2026", "--client-agreed"], ["drop", "14", "--client-agreed"]]) {
+      const r = await on(taught(t), "reel", ...words);
+      assert.deepEqual([r.code, r.said], [1, [`No episode fits "${words[1]}". The episodes are: ${SESSION_RECORD.label} (3fa9c1).`]], words.join(" "));
     }
     assert.deepEqual(t.started, []);
     t.done();
@@ -527,9 +535,10 @@ describe("reel, which a session passes only with the words of a Reel she has agr
     assert.equal(asked("reel", [FOLDER, "make", "3"], FOLDER).why, REEL_NOT_AGREED);
     assert.equal(asked("render", [FOLDER, "reel", "2"], FOLDER).name, FOLDER);
     assert.equal(asked("reel", ["--now", FOLDER, "make", "2"], FOLDER).name, FOLDER);
-    // The episode was asked for by another word than the first: the first is a verb of today's reel, not the label.
-    assert.equal(asked("reel", ["pick", "2026", "--client-agreed"], "2026").why, REEL_NOT_AGREED);
-    assert.equal(asked("reel", [FOLDER, "make", "2"], "Pricing").why, REEL_NOT_AGREED);
+    // The episode was asked for by another word than the first: the first is a verb of today's reel, not the label. (By its
+    // short id: words of its folder do not find a session, F2.)
+    assert.equal(asked("reel", ["pick", "3fa9c1", "--client-agreed"], "3fa9c1").why, REEL_NOT_AGREED);
+    assert.equal(asked("reel", [FOLDER, "make", "2"], "3fa9c1").why, REEL_NOT_AGREED);
     t.done();
   });
 });

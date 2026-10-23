@@ -2062,6 +2062,15 @@ export async function uneditedFolder(dir, deps) {
   }
 }
 
+/** The names in a folder, or none when it cannot be read. */
+function namesIn(folder) {
+  try {
+    return readdirSync(folder);
+  } catch (e) {
+    return [];
+  }
+}
+
 export async function uneditedFolders(folders, deps) {
   const { log = () => {} } = deps;
   let code = 0;
@@ -2077,7 +2086,9 @@ export async function uneditedFolders(folders, deps) {
       const results = await uneditedFolder(folder, deps);
       if (!code && results.some((r) => !r.ok && !r.arriving)) code = 1;
     } catch (e) {
-      log(`The work on this folder stopped (${e.code || e.message}).`);
+      // In a light import, why says nothing of the file of any video in the folder, nor any path: it may be a client's.
+      const why = String(e.code || e.message);
+      log(`The work on this folder stopped (${deps.light ? withoutNames(why, namesOf(...namesIn(folder))) : why}).`);
       if (!code) code = 1;
     }
   }
@@ -2249,7 +2260,16 @@ export async function main(argv) {
     log("Run tool/install.sh to set this Mac up.");
     return 2;
   }
-  return doAsked(args, depsFor(found, log, process.env, args));
+  const deps = depsFor(found, log, process.env, args);
+  try {
+    return await doAsked(args, deps);
+  } catch (e) {
+    // A light import's error may name a video's file, as a path does: only its code is logged, and the run ends with 1. Any
+    // other is thrown as it always was.
+    if (!deps.light) throw e;
+    log(`The work stopped (${(e && e.code) || "an error"}).`);
+    return 1;
+  }
 }
 
 /** End the process with `code` once what it printed is out. A run started by the launch agent is ended so, whatever is still

@@ -152,11 +152,24 @@ function releaseEpisodeLock(lock, text) {
     that claim stands, which the result keeps. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
     work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. `clean` is what
     each line of the result is written as, which `status` prints into Sallie's chat: for a video not yet answered, or a session,
-    the line with nothing of the video's names in it (edit.js), and for any other the line as it is. */
+    the line with nothing of the video's names in it (edit.js), and for any other the line as it is. An error of its own, as a
+    folder in BRIMM Video Work that cannot be made or a result that cannot be written, names the episode's folder: it is thrown
+    said through `clean` too, so that nothing of it reaches the log or the chat otherwise. */
 export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
   const lock = lockOf(home, folder);
-  mkdirSync(episodeWork(home, folder), { recursive: true });
-  const took = takeEpisodeLock(lock, command, alive);
+  /** The error `e` as `clean` says it: the same error when that changes nothing, as for every episode today. */
+  const cleaned = (e) => {
+    const message = String(e && e.message ? e.message : e);
+    const said = clean(message);
+    return said === message ? e : Object.assign(new Error(said), e && e.code ? { code: e.code } : {});
+  };
+  let took;
+  try {
+    mkdirSync(episodeWork(home, folder), { recursive: true });
+    took = takeEpisodeLock(lock, command, alive);
+  } catch (e) {
+    throw cleaned(e);
+  }
   if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
@@ -169,11 +182,18 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
   }
   const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" };
   if (done.takeOver) result.takeOver = { ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
+  let failure = null;
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");
-  } finally {
-    releaseEpisodeLock(lock, took.text);
+  } catch (e) {
+    failure = cleaned(e);
   }
+  try {
+    releaseEpisodeLock(lock, took.text);
+  } catch (e) {
+    failure = failure || cleaned(e);
+  }
+  if (failure) throw failure;
   return result;
 }
 

@@ -39,10 +39,10 @@ import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
 import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
-import { eventName, projectName, timelineFile } from "./names.js";
+import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, expectedWords, letGoClaim, lastRevision } from "./finish.js";
@@ -146,7 +146,8 @@ export function contextFor(deps = {}) {
     root: settings.root,
     episodes: episodesFolder(settings.root),
     home,
-    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep) : line),
+    // Only the names are taken out: any other path in a line stays readable.
+    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line),
     hidden,
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
@@ -255,9 +256,13 @@ const gatedRecord = (e) => e.records.filter(recordShaped).find(gated);
     folder's name begins and ends with (names.js episodeFolderName), as "an episode of 2026-10-22 from the Mac Studio whose
     record cannot be read", and never by the rest, which is the video's file's name. */
 function unreadName(name) {
-  const m = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/.exec(name);
+  const m = FOLDER_NAME.exec(name);
   return `an episode${m ? ` of ${m[1]} from ${spokenMac(m[2])}` : ""} whose record cannot be read`;
 }
+
+/** An episode folder's name, as names.js episodeFolderName makes it: the day, the video's name and, in brackets, the Mac, with a
+    number after it when the name was taken. */
+const FOLDER_NAME = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/;
 
 /** How an episode is named in a list of several, and wherever edit.js would name it by its folder: a gated one by its label and
     its short id, since two labels may be the same (shownName); one a newer brimm-video wrote by its short id alone
@@ -277,21 +282,31 @@ function listedAs(ctx, e) {
 const calledAs = (ctx, found) => listedAs(ctx, episodeAt(ctx, found.name));
 
 /** What a line about the gated episode `e` must not hold, and what it keeps: { names, keep }. The names are its folder's, its
-    video's file and what is named from it (namesOf), and every name its records have given it, those in its record folder and
-    its conflicted copies alike; what it keeps is how it is named now (shownName) and each label its records hold. */
-function secretsOf(e) {
-  const history = recordNumbers(e.folder).map((n) => recordAt(recordFile(e.folder, n)));
-  const all = [...e.records, ...history].filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
-  const keep = [...new Set(all.flatMap((r) => [gated(r) ? shownName(r) : "", typeof r.label === "string" ? r.label : ""]).filter(Boolean))];
-  const names = [e.name, ...all.flatMap((r) => [...namesOf(r.video && r.video.file), r.name && r.name.text])].filter((n) => typeof n === "string" && n !== "" && !keep.includes(n));
-  return { names: [...new Set(names)], keep };
+    video's file and what is named from it (namesOf), every name its records have given it and that in its file-safe form, and
+    the name of every project it was pushed to Final Cut by, from the records in its record folder and its conflicted copies
+    alike; a record there that is not whole on this Mac (`ctx.isWhole`) is not read, since Dropbox would have to bring it. What
+    it keeps is how it is named now (shownName) and each label its records hold, but for a kept text that holds a name, or
+    that a name holds: so that a session whose name is still its file's does not take the name out of what is hidden. */
+function secretsOf(ctx, e) {
+  const isRecord = (r) => r !== null && typeof r === "object" && !Array.isArray(r);
+  const history = recordNumbers(e.folder).map((n) => recordFile(e.folder, n)).filter((file) => ctx.isWhole(file)).map(recordAt);
+  const all = [...e.records, ...history].filter(isRecord);
+  const labels = all.flatMap((r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""]).filter(Boolean);
+  const given = all.map((r) => (isRecord(r.name) && typeof r.name.text === "string" ? r.name.text : "")).filter((n) => n && !labels.includes(n));
+  const parts = all.flatMap((r) => [r.main, ...(Array.isArray(r.reels) ? r.reels : [])]).filter(isRecord);
+  const projects = parts.flatMap((part) => (Array.isArray(part.pushed) ? part.pushed : [])).map((p) => (isRecord(p) ? p.project : ""));
+  const names = [...new Set([e.name, ...all.flatMap((r) => namesOf(r.video && r.video.file)), ...given, ...given.map(fileSafe), ...projects])].filter((n) => typeof n === "string" && n !== "");
+  const lower = (text) => text.normalize("NFC").toLowerCase();
+  const keep = [...new Set(labels)].filter((k) => !names.some((n) => lower(k).includes(lower(n)) || lower(n).includes(lower(k))));
+  return { names, keep };
 }
 
-/** Text about the episode `e` with nothing in it of its video's names when it is gated (secretsOf), and as it is otherwise. */
-const cleanFor = (e) => {
+/** Text about the episode `e` with nothing in it of its video's names when it is gated (secretsOf), and as it is otherwise. Only
+    the names are taken out: any other path in it stays readable. */
+const cleanFor = (ctx, e) => {
   if (!isGated(e)) return (text) => text;
-  const { names, keep } = secretsOf(e);
-  return (text) => withoutNames(text, names, keep);
+  const { names, keep } = secretsOf(ctx, e);
+  return (text) => withoutNames(text, names, keep, { paths: false });
 };
 
 /** Have every line the command editMain is running says from here on hold nothing of the names of `e`, the gated episode it
@@ -300,14 +315,14 @@ const cleanFor = (e) => {
     alone. */
 function hideNames(ctx, e) {
   if (!ctx.hidden || !ctx.asked || UNSCOPED.includes(ctx.asked.command) || !isGated(e)) return;
-  const { names, keep } = secretsOf(e);
+  const { names, keep } = secretsOf(ctx, e);
   ctx.hidden.names.push(...names);
   ctx.hidden.keep.push(...keep);
 }
 
 /** What a detached run writes into its result for an episode, by what the command found (ctx.hidden): nothing of a gated
     video's names. Undefined, so that runDetached writes it as it is, for any other. */
-const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep) : undefined);
+const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : undefined);
 
 /** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
     folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
@@ -319,13 +334,14 @@ function notRead(ctx, found, said = found.name) {
   const shown = listedAs(ctx, e);
   if (shown === e.name) return `${said}: ${found.read.why}.`;
   if (!e.inForce) return `${capital(shown)}: ask Jason.`;
-  const clean = e.newer ? (text) => withoutNames(text, [e.name, ...namesOf(e.newer.video && e.newer.video.file)]) : cleanFor(e);
+  const clean = e.newer ? (text) => withoutNames(text, [e.name, ...namesOf(e.newer.video && e.newer.video.file)], [], { paths: false }) : cleanFor(ctx, e);
   return `${capital(shown)}: ${clean(found.read.why)}.`;
 }
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name; and a gated one by its label (shownName), the whole of it, whatever its case and spacing, so that a
-    label numbered " (2)" fits that video alone and the bare label the first. Gives back { folder, name, read }, where `read` is
+    label numbered " (2)" fits that video alone and the bare label the first, or by the label and short id its lists give it,
+    "<label> (3fa9c1)", and never by words, which would tell its file's name. Gives back { folder, name, read }, where `read` is
     what readEpisode gave, or { why } when no episode fits or more than one does. An episode with a conflicted copy is found
     by its own name, label and id as well, since `name` never renames its folder: by the newest whole record past the copies,
     and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
@@ -342,10 +358,17 @@ export function findEpisode(ctx, said) {
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
-  const labelled = (r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""].filter(Boolean);
+  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)").
+  const labelled = (r) => {
+    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""].filter(Boolean);
+    return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
+  };
   const byLabel = all.filter((e) => known(e).some((r) => labelled(r).some((label) => spaced(label) === spaced(said))));
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
-  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
+  // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
+  // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
+  // read here.
+  const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
   const fits = exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
   if (fits.length === 1) {
     const e = fits[0];
@@ -353,7 +376,10 @@ export function findEpisode(ctx, said) {
     return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
-  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
+  // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
+  // it is named by its day and Mac alone, as that run's log says it.
+  const asked = ctx.asked && ctx.asked.words[0] === "--now" && FOLDER_NAME.test(said) ? unreadName(said) : `"${said}"`;
+  return { why: all.length ? `No episode fits ${asked}. The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
 /** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
@@ -404,12 +430,13 @@ function folderSize(folder) {
 }
 
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
-    late check. Only those whose video `fits`, when it is given: by its file's name, or by its label. A video that is held in
+    late check. Only those whose video `fits`, when it is given: by its label when it has one, and otherwise by its file's
+    name, so that words of a file's name never tell which label is its. A video that is held in
     the drop folder, not imported, is no import: the list of the videos waiting says why it waits. A light import's status,
     which carries its video's label (Part L), is named by its label, and why it failed or what its late check found is said
     with no path or name of its file in it (withoutNames). */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && (fits(s.status.video) || (s.status.label && fits(s.status.label))) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.label || s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
     const who = status.label || status.video;
     const plain = (text) => (status.label ? withoutNames(text, namesOf(status.video), [status.label]) : text);
@@ -443,7 +470,7 @@ function episodeLines(ctx, e, left) {
   if (!e.inForce) return [`  ${capital(listedAs(ctx, e))}: ask Jason.`];
   const record = e.inForce;
   const lines = [];
-  const clean = cleanFor(e);
+  const clean = cleanFor(ctx, e);
   if (isGated(e)) {
     const named = gatedRecord(e);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : "a client or group session, of";
@@ -469,15 +496,16 @@ const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boole
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
     archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). A video not
     yet answered, or a session, is named by its label (episodeLines), and one she has left alone is listed apart, under a
-    heading of its own. On a Mac that does the light import, a video waiting in a drop folder is named by its label, or by
-    what it is and its size, and why it waits holds no name of its file; with the light import off, as always. */
+    heading of its own. A video waiting in a drop folder that a light import's status gives a label, or that a gated episode
+    holds, is named by its label, or by what it is and its size, and why it waits holds no name of its file, on either Mac; on
+    a Mac that does the light import, every video waiting is; any other, on a Mac that does not, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
   const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
   const shown = all.filter((e) => !isLeft(e));
   const left = all.filter(isLeft);
-  if (!shown.length) say("No episodes yet.");
-  else {
+  if (!shown.length && !left.length) say("No episodes yet.");
+  else if (shown.length) {
     say("Episodes, newest first:");
     for (const e of shown) for (const line of episodeLines(ctx, e, false)) say(line);
   }
@@ -488,7 +516,7 @@ export async function episodes(ctx) {
   // The videos in each Mac's drop folder.
   const drops = join(ctx.root, "Unedited Video");
   const light = lightImport(ctx.settings);
-  const statuses = light ? readStatuses(ctx.root, ctx.now()) : [];
+  const statuses = readStatuses(ctx.root, ctx.now());
   const waiting = [];
   let macs = [];
   try {
@@ -512,10 +540,13 @@ export async function episodes(ctx) {
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
       const noted = readSeen(ctx.home)[seenKey(video, found)];
       const came = noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs;
-      if (!light) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      // A video waiting here has not been answered. One a light import has a status of, with its label, or that a gated episode
+      // holds, is named by its label, which retry takes, or by what it is and its size, whichever Mac this is; and so is every
+      // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
+      const label = labelIn(statuses, video, mac);
+      const holding = holdingOf({ root: ctx.root, video, bytes: found.size });
+      if (!light && !label && !(holding && gated(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
       else {
-        // A video waiting here has not been answered: it is named by its label, which retry takes, or by what it is and its size.
-        const label = labelIn(statuses, video, mac);
         const who = label || capital(unlabelled(video, found.size));
         waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
       }
@@ -1077,7 +1108,8 @@ function nextOf(ctx, folder, r) {
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
     say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
     session, by its label and short id, and what its runs left with nothing of its video's names in it (cleanFor), a result
-    left before it became one included. */
+    left before it became one included, and with nothing said of what to say next. Words fit such an episode only when they
+    are its label or its id, and a light import's status only by its label. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -1105,14 +1137,19 @@ export async function status(ctx, rest) {
   try {
     // An episode is found by its folder's name, or by its own name as findEpisode finds it.
     const named = words.length ? findEpisode(ctx, rest.join(" ")) : {};
-    local = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".") && (fits(n) || n === named.name)).sort();
+    // A gated episode is found by its label or its ids alone (findEpisode), never by words of its folder's name.
+    local = readdirSync(workFolder(ctx.home)).filter((n) => {
+      if (n.startsWith(".") || !(n === named.name || fits(n))) return false;
+      const e = n === named.name || !words.length ? null : episodeAt(ctx, n);
+      return !e || e.newer || !isGated(e);
+    }).sort();
   } catch (e) {
     // There is no BRIMM Video Work yet.
   }
   for (const folder of local) {
     const e = episodeAt(ctx, folder);
     const shown = listedAs(ctx, e);
-    const clean = cleanFor(e);
+    const clean = cleanFor(ctx, e);
     const command = runningCommand(ctx.home, folder, ctx.alive);
     if (command) lines.push(`${shown}: ${command} is running.`);
     let results = [];
@@ -1125,7 +1162,9 @@ export async function status(ctx, rest) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
       if (!r || r.command === command) continue;
       const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
-      const next = nextOf(ctx, folder, r);
+      // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
+      // left out.
+      const next = isGated(e) ? "" : nextOf(ctx, folder, r);
       lines.push(`${shown}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`);
     }
   }
@@ -1201,16 +1240,23 @@ export async function retry(ctx, rest) {
   const statuses = readStatuses(ctx.root, ctx.now());
   const labelOf = (v) => labelIn(statuses, v, ctx.machine);
   const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
+  // A video a light import has a status of, or that a gated episode holds, is never named by its file, whichever Mac this is;
+  // and on a Mac that does the light import, none is.
+  const quiet = (v) => {
+    const holding = holdingOf({ root: ctx.root, video: v, bytes: sizeOf(v) });
+    return light || Boolean(labelOf(v)) || Boolean(holding && gated(holding.record));
+  };
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {
-    const held = light ? videos.map((v) => labelOf(v) || unlabelled(v, sizeOf(v))) : videos;
+    const held = videos.map((v) => labelOf(v) || (quiet(v) ? unlabelled(v, sizeOf(v)) : v));
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(held)}.` : "It is empty."}`);
     return 1;
   }
   const bytes = statSync(join(drop, video)).size;
   const label = labelOf(video);
-  const who = label || (light ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
-  const plain = (text) => (label || light ? withoutNames(text, namesOf(video), [label]) : text);
+  const hush = quiet(video);
+  const who = label || (hush ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
+  const plain = (text) => (hush ? withoutNames(text, namesOf(video), [label]) : text);
   const held = episodeHolding({ root: ctx.root, video, bytes });
   if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
@@ -1873,9 +1919,9 @@ function studioStale(ctx) {
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the
-    same. When either side is a video not yet answered, or a session (gate.js gated), what its name, its label and its video
-    hold is never said into the chat: only that they differ, as [what, null, null]; and a file of it is named without the
-    video's name. */
+    same. When either side is a video not yet answered, or a session (gate.js gated), only who has it open, its finish, its
+    hand-over, how far its main video was shown and the sizes of its files are said, a file named without the video's name;
+    every other field that differs is named alone, as [what, null, null], and what it holds is never said into the chat. */
 function recordDifferences(a, b) {
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
@@ -1912,7 +1958,8 @@ function recordDifferences(a, b) {
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
   const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
-  const said = names ? rows.map(([what, x, y]) => (["Name", "Label", "Video"].includes(what) ? [what, null, null] : [withoutNames(what, names), x, y])) : rows;
+  const shown = (what) => ["Who has it open", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
+  const said = names ? rows.map(([what, x, y]) => (shown(what) ? [withoutNames(what, names, [], { paths: false }), x, y] : [what, null, null])) : rows;
   // Two sides are never said to hold the same unless they do, but for their rev and who wrote them.
   return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
@@ -2028,7 +2075,7 @@ async function resolveIn(ctx, found, keep) {
       else if (copyRecord) {
         const differ = recordDifferences(record, copyRecord);
         ctx.say(differ.length ? "They differ in:" : "They hold the same.");
-        for (const [what, x, y] of differ) ctx.say(x === null ? `  ${what}: A and B differ, and neither is shown here.` : `  ${what}: A: ${x}; B: ${y}`);
+        for (const [what, x, y] of differ) ctx.say(x === null ? `  ${what}: they differ.` : `  ${what}: A: ${x}; B: ${y}`);
       }
     } else {
       const side = (s) => (s ? `${sizeText(s.size)}${s.size >= 1024 ? ` (${s.size} bytes)` : ""}, written ${shownAt(localStamp(new Date(s.mtimeMs)))}` : "not there");
@@ -2839,7 +2886,17 @@ export async function editMain(argv, deps = {}) {
   }
   // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
   // before the command goes on: the folder a detached run is given by `--now` is found by it too.
-  return run({ ...made, asked: { command, words: rest } }, rest);
+  const ctx = { ...made, asked: { command, words: rest } };
+  try {
+    return await run(ctx, rest);
+  } catch (e) {
+    // Something nobody foresaw stopped a command that found a video not yet answered, or a session: its error may name the
+    // video's file or folder, as a path does, so only its code is said, through the filter, and the command ends there. Any
+    // other is thrown as it always was.
+    if (!ctx.hidden.names.length) throw e;
+    ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
+    return 1;
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

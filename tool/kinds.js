@@ -121,20 +121,38 @@ const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A path in a line: from a "/" or "~/" that starts a word, or one just inside a quote or a bracket, up to a quote, a bracket, a
     colon or a comma with a space after it, a space and an opening bracket, a full stop at the end of a sentence, or the end of
-    the line. A path may hold spaces, as Dropbox's do, and a folder's name in it may end in a bracketed part, as an episode's
-    "(Mac Studio)" does: so it is taken to its end, and never word by word. */
-const PATH = /(^|[\s'"(\[=])~?\/(?:[^\n'"()[\]]|\([^\n'"()/]*\)(?=\/))*?(?=['")\]\n]| \((?![^\n'"()/]*\)\/)|: |, |\.?$|\.\s)/gm;
+    the line or of the text between two kept ones. A path may hold spaces, as Dropbox's do, and a folder's name in it may end in
+    a bracketed part, as an episode's "(Mac Studio)" does: so it is taken to its end, and never word by word. It never ends in a
+    space, so that one before a kept text stays. */
+const PATH = /(^|[\s'"(\[=])~?\/(?:[^\n'"()[\]]|\([^\n'"()/]*\)(?=\/))*?(?<!\s)(?=['")\]\n]| \((?![^\n'"()/]*\)\/)|: |, |\.?\s*$|\.\s)/gm;
+
+/** How a name is found in a line (withoutNames). A name of more than one word, a file's name with its ending, or a path, as a
+    whole word wherever it stands, in any case. A name of one bare word, as the file "1.mov" or "Main.mov" has, could be a word
+    of the tool's own ("reel 1", "the main video", "a client or group session"): so it is found in its own case alone, and only
+    as the start of a file's name ("1.transcript.txt", "1 (Sallie's laptop's conflicted copy 2026-10-20).srt"), in an episode
+    folder's name ("2026-10-20 1 (Mac Studio)"), and on its own when it is three characters or more and holds a letter. */
+function finderOf(name) {
+  const word = (re) => String.raw`(?<![\p{L}\p{N}])${re}(?![\p{L}\p{N}])`;
+  if (/\s|\//u.test(name) || /\.\p{L}[\p{L}\p{N}]*$/u.test(name)) return new RegExp(word(literally(name)), "giu");
+  const forms = [String.raw`(?<![\p{L}\p{N}])${literally(name)}(?=(?: \([^()\n]*\))?\.\p{L})`, String.raw`(?<=\d{4}-\d{2}-\d{2} )${literally(name)}(?= \()`];
+  if ([...name].length >= 3 && /\p{L}/u.test(name)) forms.push(word(literally(name)));
+  return new RegExp(forms.join("|"), "gu");
+}
 
 /** `text` with nothing in it of the names in `names` (namesOf: a video's file and what is named from it), each put as "the
-    video" wherever it stands as a whole word, in any case, and with each path in it put as "a file": a line about a video
-    named by its label (spec 2026-10-22, section 1). What is in `keep` stays as it is, as the label itself does when the file's
-    name is a word of it ("Video.mov"): the text is taken apart at each of them, and only the parts between are looked at. */
-export function withoutNames(text, names = [], keep = []) {
+    video" wherever it is found (finderOf), and, unless `paths` is false, with each path in it put as "a file": a line about a
+    video named by its label (spec 2026-10-22, section 1). What is in `keep` stays as it is, as the label itself does when the
+    file's name is a word of it ("Video.mov"): the text is taken apart at each of them, and only the parts between are looked
+    at. */
+export function withoutNames(text, names = [], keep = [], { paths = true } = {}) {
   const texts = (given) => [...new Set(given.filter((x) => typeof x === "string" && x !== "").map((x) => x.normalize("NFC")))].sort((a, b) => b.length - a.length);
   let parts = [{ text: String(text ?? "").normalize("NFC"), kept: false }];
   for (const k of texts(keep)) parts = parts.flatMap((p) => (p.kept ? [p] : p.text.split(k).flatMap((piece, i) => [...(i ? [{ text: k, kept: true }] : []), { text: piece, kept: false }])));
-  const found = texts(names).map((name) => new RegExp(String.raw`(?<![\p{L}\p{N}])${literally(name)}(?![\p{L}\p{N}])`, "giu"));
+  const found = texts(names).map(finderOf);
   // A name is put as a mark of its own until the paths are taken out, so that no shorter name is found in what it is put as.
-  const plain = (piece) => found.reduce((out, re) => out.replace(re, "\u0001"), piece).replace(PATH, "$1a file").replace(/\u0001/g, "the video");
+  const plain = (piece) => {
+    const named = found.reduce((out, re) => out.replace(re, "\u0001"), piece);
+    return (paths ? named.replace(PATH, "$1a file") : named).replace(/\u0001/g, "the video");
+  };
   return parts.map((p) => (p.kept ? p.text : plain(p.text))).join("");
 }
