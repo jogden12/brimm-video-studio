@@ -756,6 +756,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
   const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
   const LATE = "A video that is already imported leaves the old folder once its late check has passed: run this again after that.";
   const KEPT = "Delete each of these from the old folder by hand, then run this again.";
+  // A late check that found a problem restores from the video in the old folder, so its advice is to leave the video there.
+  const PROBLEM_HERE = "Try each of these again with retry, which makes its late check again from the video in the old folder: leave the video there, and run this again once the check has passed.";
+  const PROBLEM_GONE = "A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it.";
   /** What is said of a video an episode holds, that this Mac's import will not take out of the old folder: no late check is owed. */
   const KEPT_LINE = (name) => `  ${name}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`;
   /** The late check this Mac still owes the episode that holds `video`, as the import keeps it, and when it is due. */
@@ -1009,13 +1012,40 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const said = await refused(t, "--drop", "Drop");
       assert.deepEqual(said, [
         HEAD,
-        `  Budget.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
         `  Video of 22 Oct, 10:40 (Mac Studio): its import failed, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
         `  Talk.mov: its import failed, and its video is not in the old folder now: only its status file, in ${gone}, holds this, and a person takes it away by hand.`,
-        ADVICE
+        ADVICE,
+        // A late check's problem is not a failed import: its own line and its own advice, and no word of its status file.
+        "  Budget.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now.",
+        PROBLEM_GONE
       ]);
+      assert.ok(!said.slice(said.indexOf(ADVICE) + 1).some((line) => /status file|by hand|take the video out/.test(line)), said.join("\n"));
       // What a status says of why, which may hold a file's name, and the status files' own names are not said.
       assert.ok(!said.join("\n").includes("transcriber") && !said.join("\n").includes("(Mac Studio) 1.json") && !said.join("\n").includes("Light.mov"), said.join("\n"));
+      t.done();
+    });
+    it("says of a late check that found a problem, while its video is in the old folder, to try it again with retry and to leave the video there: the check restores from it", async () => {
+      // Taking the video out could lose the only intact copy, and the refusal would never clear: each run writes the status again.
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.status("Budget.mov", { problem: "Budget.rough-cut.mp4 is short" });
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, "  Budget.mov: it was copied in, but its late check found a problem.", PROBLEM_HERE]);
+      assert.ok(!said.some((line) => /take the video out|delete/.test(line)), said.join("\n"));
+      // A failed import keeps its own advice, after its own lines, and the problem has its own after its own.
+      put(old, "Talk.mov", "12345");
+      t.status("Talk.mov", { failed: "the sound could not be read" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  Talk.mov: its import failed.", ADVICE, "  Budget.mov: it was copied in, but its late check found a problem.", PROBLEM_HERE]);
+      t.done();
+    });
+    it("says of a late check that found a problem whose video is gone that it needs the video and that Jason looks at it, both when there are some of each", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.status("Budget.mov", { problem: "Budget.rough-cut.mp4 is short" });
+      t.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  Budget.mov: it was copied in, but its late check found a problem.", "  Talk.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now.", PROBLEM_HERE, PROBLEM_GONE]);
       t.done();
     });
     it("names a video that is there once, whether it is waiting or its import failed, and says what to do for it", async () => {
@@ -1055,6 +1085,18 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const said = await refused(t, "--drop", "Drop");
       assert.deepEqual(said, [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE]);
       assert.ok(!said.some((line) => /take|delete|retry/.test(line)), said.join("\n"));
+      t.done();
+    });
+    it("finds the late check this Mac owes whatever way the root is spelt in it: a trailing slash, or a path that goes round", async () => {
+      // filing.js and unedited.js compare roots by resolve(), and the pending late check holds the root as the import was given it.
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6);
+      for (const spelt of [`${t.root}/`, `${t.root}/../BRIMM Video`]) {
+        writePending(t.home, { version: 1, id: "e-20261022-000001", name: "2026-10-20 Budget (Mac Studio)", folder: join(t.root, "Episodes", "2026-10-20 Budget (Mac Studio)"), video: "Budget.mov", bytes: 6, seconds: 120, drop: join(old, "Budget.mov"), work: "/nowhere", entries: [], lastCopy, root: spelt, machine: "Mac Studio", planTxt: "x.cut-plan.txt" });
+        assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE], spelt);
+      }
       t.done();
     });
     it("says a video an episode holds, when this Mac owes it no late check, is imported and that nothing of its import will take it out: a person deletes it by hand, then runs the installer again", async () => {
@@ -1146,10 +1188,35 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.status("Labelled.mov", { failed: "ffprobe", label: "Video of 22 Oct, 10:40 (Mac Studio)" });
       const said = await refused(t, "--drop", "Drop");
       const gone = `, and its video is not in the old folder now: only its status file, in ${join(t.root, "Episodes", ".importing")}, holds this, and a person takes it away by hand`;
-      assert.deepEqual(said, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`, "  2 imports failed.", "  1 late check found a problem.", ADVICE]);
+      // Counted apart by whether the video is still in the old folder, which decides what is to be done: no names.
+      assert.deepEqual(said, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`, "  2 imports failed, of which 1 has the video still in the old folder.", ADVICE, "  1 late check found a problem, and its video is not in the old folder now.", PROBLEM_GONE]);
       assert.ok(!/Jane|Doe|Acme|Coaching|Sales/.test(said.join("\n")), said.join("\n"));
       // The video that is there with a status that is counted is not counted again as a video that waits.
       assert.ok(!said.some((line) => /wait/.test(line)), said.join("\n"));
+      t.done();
+    });
+    it("under the light import says, of counted failed imports and problems, how many have their video still in the old folder, one by one and all of them or none", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "A.mov");
+      t.status("A.mov", { failed: "x" });
+      t.status("Gone.mov", { failed: "x" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  2 imports failed, of which 1 has the video still in the old folder.", ADVICE]);
+      put(old, "B.mov");
+      t.status("B.mov", { failed: "x" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  3 imports failed, of which 2 have the video still in the old folder.", ADVICE]);
+      rmSync(join(old, "A.mov"));
+      rmSync(join(old, "B.mov"));
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  3 imports failed, of which none have the video still in the old folder.", ADVICE]);
+      const one = mac({ import: "light" });
+      put(one.folder(), "C.mov");
+      one.status("C.mov", { failed: "x" });
+      assert.deepEqual(await refused(one, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", ADVICE]);
+      one.status("D.mov", { problem: "y" });
+      one.status("E.mov", { problem: "y" });
+      put(one.folder(), "E.mov");
+      assert.deepEqual(await refused(one, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", ADVICE, "  2 late checks found a problem, of which 1 has the video still in the old folder.", PROBLEM_HERE, PROBLEM_GONE]);
+      one.done();
       t.done();
     });
     it("counts a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
@@ -1317,7 +1384,8 @@ describe("what --help says of write, plan and set", () => {
       "a video an episode already holds, which this Mac still owes a late check, is said to be already imported, with when the check is due, and to run the installer again after it",
       "one it owes none (the check passed, or it is a copy of an imported video) is said to be one nothing of its import will take out, for a person to delete by hand before the installer is run again",
       "an old folder or status files that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
-      "a node older than 22 counts as no node when the settings are to be checked"
+      "a node older than 22 counts as no node when the settings are to be checked",
+      "try a late check that found a problem again with `retry` and leave its video in the old folder, since the check is made again from that video"
     ]) assert.ok(paragraph.includes(said), `${said}\n---\n${paragraph}`);
   });
   it("is as the header of settings.js says, for each of the three: the line that names the command and its options is the same", () => {

@@ -969,8 +969,9 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
       `  Budget.mov: its import failed${gone}.`,
       `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`,
-      `  Talk.mov: it was copied in, but its late check found a problem${gone}.`,
       ADVICE,
+      "  Talk.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now.",
+      "A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it.",
       "",
       "Nothing was changed.",
       ""
