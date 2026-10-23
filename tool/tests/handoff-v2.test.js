@@ -3,7 +3,8 @@
 // the contract between the two: the page copies the fixtures, and refuses a session's hand-off for any key it does not know.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "../handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, suggestionsOnClock, VERSION_2 } from "../handoff-v2.js";
+import { clockOfRanges } from "../clock.js";
 import { FORMAT, handoffText } from "../handoff.js";
 import { tidyTranscript } from "../shared/transcript.js";
 
@@ -288,6 +289,38 @@ describe("handoffFaultV2, in plain words", () => {
     assert.match(at((h) => { h.suggestions[0].stretches[0] = { start: 120, end: 119 }; }), /Suggestion 1.*stretches/);
     assert.match(at((h) => { h.suggestions[0].stretches[0].words = 9; }), /Suggestion 1.*"words"/);
   });
+  it("holds a suggestion's times to the contract agreed with the page, clause by clause, each in its own words", () => {
+    // Suggestion 1 of the raw fixture runs 120 to 161.3 in two stretches, 120 to 140 and 142.5 to 161.3; no Reel, so that the
+    // main video's length can change under it.
+    const bare = () => buildHandoffV2({ ...GIVEN, record: RAW, main: MAIN, suggestions: [RAW_SUGGESTION] });
+    const at = (change) => handoffFaultV2(changed(bare, change));
+    const times = /Suggestion 1's times are not a stretch of the main video/;
+    const runs = /Suggestion 1's stretches do not run from its start to its end/;
+    const kept = /Suggestion 1's stretches are not kept stretches of the main video, in order/;
+    // 0 <= start < end <= main.seconds + 0.01
+    assert.equal(at((h) => { h.suggestions[0].start = 0; h.suggestions[0].stretches[0].start = 0; }), "");
+    assert.match(at((h) => { h.suggestions[0].start = -0.01; h.suggestions[0].stretches[0].start = -0.01; }), times);
+    assert.match(at((h) => { h.suggestions[0].start = 161.3; h.suggestions[0].stretches = [{ start: 161.3, end: 161.3 }]; }), times);
+    assert.match(at((h) => { h.suggestions[0].end = 100; h.suggestions[0].start = 120; }), times);
+    assert.equal(at((h) => { h.main.seconds = 161.3; }), "");
+    assert.equal(at((h) => { h.main.seconds = 161.295; }), "");
+    assert.match(at((h) => { h.main.seconds = 161.28; }), times);
+    assert.match(at((h) => { h.main.seconds = 130; }), times);
+    // Each stretch lies inside start and end, and start and end are the first stretch's start and the last one's end.
+    assert.match(at((h) => { h.suggestions[0].end = 150; }), runs);
+    assert.match(at((h) => { h.suggestions[0].start = 130; }), runs);
+    assert.match(at((h) => { h.suggestions[0].stretches[0].start = 119; }), runs);
+    assert.match(at((h) => { h.suggestions[0].stretches[1].end = 162; }), runs);
+    assert.match(at((h) => { h.suggestions[0].stretches[1].end = 160; }), runs);
+    // Each stretch is a stretch of the main video, in order, with none over another.
+    assert.match(at((h) => { h.suggestions[0].stretches[1].end = 5000; h.suggestions[0].end = 5000; }), times);
+    assert.match(at((h) => { h.suggestions[0].stretches = [{ start: 120, end: 150 }, { start: 140, end: 161.3 }]; }), kept);
+    assert.match(at((h) => { h.suggestions[0].stretches = [{ start: 120, end: 140 }, { start: 140, end: 140 }, { start: 140, end: 161.3 }]; }), kept);
+    assert.equal(at((h) => { h.suggestions[0].stretches = [{ start: 120, end: 140 }, { start: 140, end: 161.3 }]; }), "");
+    assert.match(at((h) => { h.suggestions[0].stretches[1].start = "142.5"; }), kept);
+    assert.match(at((h) => { h.suggestions[0].start = null; }), times);
+    assert.match(at((h) => { h.suggestions[0].end = Infinity; }), times);
+  });
   it("refuses a finished video's suggestion of more than one stretch: nothing was cut", () => {
     assert.match(handoffFaultV2(changed(finished, (h) => { h.suggestions[0].stretches = [{ start: 312.4, end: 330 }, { start: 331, end: 354.5 }]; })), /finished video.*one stretch/);
   });
@@ -426,6 +459,116 @@ describe("handoffFaultV2, in plain words", () => {
     ];
     assert.ok(faults.every((f) => f !== ""));
     assert.equal(new Set(faults).size, faults.length);
+  });
+});
+
+describe("suggestionsOnClock: a raw video's suggestions on the final main video's clock", () => {
+  /** Ten one-second words, "one" to "ten", the first starting at `from` seconds of the raw video. */
+  const ten = (from) => ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"].map((w, i) => ({ w, start: from + i, end: from + 1 + i }));
+  /** A suggestion as it is stored, in seconds of the raw video, over the ten words from `from`. */
+  const stored = (n, from) => ({ n, start: from, end: from + 10, stretches: [{ start: from, end: from + 10 }], first: "one two three", last: "eight nine ten", why: `Why ${n}.`, point: `Point ${n}.` });
+  /** The words of the recording: two of them outside the suggestion at 120, one second either side of it. */
+  const WORDS = [{ w: "before", start: 118, end: 119 }, ...ten(120), { w: "after", start: 131, end: 132 }];
+  /** The final clock of kept pieces of the raw video, each [start, end] in seconds of it. */
+  const clockOf = (...pieces) => clockOfRanges(pieces.map(([start, end]) => ({ start, end })));
+  const on = (clock, suggestions = [stored(4, 120)], words = WORDS, more = {}) => suggestionsOnClock({ suggestions, words, clock, ...more });
+
+  it("maps a suggestion with no word cut by the clock's offset, and changes none of its words, its number, its reason or its point", () => {
+    // Raw 10 to 60 is the clock's first 50 seconds, and raw 100 to 200 the next 100: raw 120 is at 70.
+    assert.deepEqual(on(clockOf([10, 60], [100, 200])), [{ n: 4, start: 70, end: 80, stretches: [{ start: 70, end: 80 }], first: "one two three", last: "eight nine ten", why: "Why 4.", point: "Point 4." }]);
+  });
+  it("keeps a suggestion with 3 of its 10 words cut, with its new start and its kept runs as stretches", () => {
+    // Cut: "one" at the start and "five" and "six" in the middle. The words around the two cuts are two stretches.
+    const [s] = on(clockOf([0, 50], [100, 120], [121, 124], [126, 200]));
+    assert.equal(s.start, 70);
+    assert.equal(s.end, 77);
+    assert.deepEqual(s.stretches, [{ start: 70, end: 73 }, { start: 73, end: 77 }]);
+    assert.equal(s.first, "two three four");
+    assert.equal(s.last, "eight nine ten");
+    assert.equal(s.n, 4);
+  });
+  it("leaves a suggestion out when 4 of its 10 words are cut: only 70 in 100 or more are kept", () => {
+    assert.deepEqual(on(clockOf([0, 120], [124, 200])), []);
+    assert.equal(on(clockOf([0, 120], [123, 200])).length, 1);
+  });
+  it("counts the words that end inside a stretch of the suggestion, and none of the words round it", () => {
+    // Its 3 last words are cut, and so is the word before it: with that one counted, 7 in 11 are kept and it would be left out.
+    const [s] = on(clockOf([0, 118], [119, 127], [130, 200]));
+    assert.equal(s.first, "one two three");
+    assert.equal(s.last, "five six seven");
+    assert.deepEqual([s.start, s.end], [119, 126]);
+    assert.deepEqual(s.stretches, [{ start: 119, end: 126 }]);
+  });
+  it("gives first and last as the final kept words, as many as the suggestion's own hold", () => {
+    // Cut: "one", "two" and "ten". It had a first of two words and a last of three.
+    const given = { ...stored(4, 120), first: "one two", last: "eight nine ten" };
+    const [s] = on(clockOf([0, 120], [122, 129], [130, 200]), [given]);
+    assert.equal(s.first, "three four");
+    assert.equal(s.last, "seven eight nine");
+    assert.deepEqual(s.stretches, [{ start: 120, end: 127 }]);
+    // A suggestion with no first or last words given gets four of each.
+    const bare = { ...stored(4, 120), first: undefined, last: "" };
+    const [t] = on(clockOf([0, 200]), [bare]);
+    assert.equal(t.first, "one two three four");
+    assert.equal(t.last, "seven eight nine ten");
+  });
+  it("starts a word that starts in what is cut where its piece starts: it never overlaps the stretch before it", () => {
+    // "seven" starts in the pause the cut leaves before it, at 125.4, and is said from 126, where its piece begins.
+    const words = ten(120).map((w) => (w.w === "seven" ? { ...w, start: 125.4 } : w));
+    const [s] = on(clockOf([0, 124], [126, 200]), [stored(4, 120)], words);
+    assert.deepEqual(s.stretches, [{ start: 120, end: 124 }, { start: 124, end: 128 }]);
+  });
+  it("gives times to the hundredth of a second", () => {
+    const words = ten(120).map((w, i) => (i === 0 ? { ...w, start: 120.126 } : i === 9 ? { ...w, end: 129.994 } : w));
+    const [s] = on(clockOf([0, 200]), [stored(4, 120)], words);
+    assert.deepEqual([s.start, s.end], [120.13, 129.99]);
+    assert.deepEqual(s.stretches, [{ start: 120.13, end: 129.99 }]);
+  });
+  it("clamps its times to the main video as a Reel's place in it is clamped, when the file is shorter than the clock", () => {
+    const [s] = on(clockOf([0, 200]), [stored(4, 120)], WORDS, { seconds: 129.5 });
+    assert.deepEqual([s.start, s.end], [120, 129.5]);
+    assert.deepEqual(s.stretches, [{ start: 120, end: 129.5 }]);
+    assert.deepEqual(on(clockOf([0, 200]), [stored(4, 120)], WORDS, { seconds: 119 }), []);
+    // With no length given, the clock's own is the main video's, and a word that ends past it is cut.
+    const [t] = on(clockOf([0, 129.5]), [stored(4, 120)]);
+    assert.equal(t.end, 129);
+    assert.equal(t.last, "seven eight nine");
+  });
+  it("keeps the order and the numbers of the suggestions, and leaves out one with no word of its own in the video", () => {
+    const given = [stored(7, 120), stored(3, 140), stored(12, 160)];
+    const words = [...ten(120), ...ten(140), ...ten(160)];
+    // The clock cuts 140 to 144: suggestion 3 has 4 of its 10 words cut, and the other two have all of theirs.
+    const done = on(clockOf([0, 140], [144, 150], [160, 170]), given, words);
+    assert.deepEqual(done.map((s) => s.n), [7, 12]);
+    assert.deepEqual(done.map((s) => [s.why, s.point]), [["Why 7.", "Point 7."], ["Why 12.", "Point 12."]]);
+    // A suggestion with no word in its stretches at all, as when none was timed there, cannot be placed.
+    assert.deepEqual(on(clockOf([0, 200]), [stored(9, 500)]), []);
+    assert.deepEqual(on(clockOf([0, 200]), []), []);
+    assert.deepEqual(on(clockOf([0, 200]), [stored(4, 120)], []), []);
+  });
+  it("writes only the keys of the contract, in its order, whatever the stored suggestion holds besides", () => {
+    const given = { ...stored(4, 120), ranges: [{ start: 120, end: 130 }], length: 10, hook: "x" };
+    const [s] = on(clockOf([0, 200]), [given]);
+    assert.deepEqual(Object.keys(s), ["n", "start", "end", "stretches", "first", "last", "why", "point"]);
+  });
+  it("takes a suggestion with no stretches as one stretch from its start to its end, and changes nothing it is given", () => {
+    const given = stored(4, 120);
+    delete given.stretches;
+    const before = JSON.parse(JSON.stringify(given));
+    const [s] = on(clockOf([10, 200]), [given]);
+    assert.deepEqual(s.stretches, [{ start: 110, end: 120 }]);
+    assert.deepEqual(given, before);
+  });
+  it("leaves out a suggestion one of whose stretches would have no length: the hand-off's check refuses such a stretch", () => {
+    // "five" is a moment, said alone between two cut words, and a stretch of it would start where it ends.
+    const words = ten(120).map((w) => (w.w === "five" ? { ...w, start: 124.5, end: 124.5 } : w));
+    assert.deepEqual(on(clockOf([0, 123], [124, 125], [126, 200]), [stored(4, 120)], words), []);
+  });
+  it("gives suggestions that the hand-off's own check passes, as the writer puts them in a raw video's hand-off", () => {
+    const suggestions = on(clockOf([0, 50], [100, 120], [121, 124], [126, 200]));
+    const h = buildHandoffV2({ ...GIVEN, record: RAW, main: MAIN, suggestions });
+    assert.equal(handoffFaultV2(h), "");
+    assert.deepEqual(h.suggestions, suggestions);
   });
 });
 

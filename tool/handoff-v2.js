@@ -8,6 +8,7 @@
 import { FORMAT } from "./handoff.js";
 import { kindOf } from "./episode.js";
 import { tidyTranscript } from "./shared/transcript.js";
+import { keptWords, lengthOf, timelineAt } from "./clock.js";
 
 export const VERSION_2 = 2;
 
@@ -105,6 +106,64 @@ export function buildHandoffV2({ record, revision, made, madeOn, commit, id, mai
   return out;
 }
 
+/** How many of a suggestion's words, in 100, the final video must keep for the suggestion to be kept (spec section 8). */
+const KEPT_IN_100 = 70;
+/** How many words `first` and `last` hold when the suggestion did not say. */
+const OPENING_WORDS = 4;
+/** A time to the hundredth of a second, as inMain (handoff.js) gives its times: a sum such as 4.35 * 100 comes to 434.99999…,
+    which is still 4.35. */
+const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
+
+/** A raw video's Reel suggestions on the final main video's clock (spec section 8, "One suggestion shape"). `suggestions` are
+    as they are stored, `{ n, start, end, stretches, first, last, why, point }` in seconds of the raw video, and `words` the
+    recording's words, `{ w, start, end }` in the same seconds (heardWords, clock.js, when a word is to start as it is said, not
+    where the word before it ended). `clock` is the final main video's, its kept pieces as clockOf or clockOfRanges give them,
+    and `seconds` how long its file is, which the clock's own length is when it is not given.
+    - A suggestion's words are those of `words` that end in one of its stretches (keptWords, clock.js); a word is kept when it
+      ends in a piece of the clock, and a kept word is where the clock puts it. A word that starts in what is cut starts where
+      its piece does.
+    - A suggestion is kept when at least 70 in 100 of its words are kept, and left out otherwise, and when it has no word at all.
+    - Its `start` and `end` are those of its first and last kept words, and its `first` and `last` are those words, as many as
+      the suggestion's own held (four when it held none): what it opens and closes with now.
+    - Its `stretches` are its runs of kept words, and only a word of its own that the clock cuts breaks a run, so that no kept
+      word lies between two of its stretches, as the page was told.
+    - Times are to the hundredth of a second and kept within the main video, as inMain's are. One that would not then be a
+      stretch of the video, a suggestion or a stretch of it with no length, leaves the suggestion out: the hand-off's check
+      (handoffFaultV2) refuses it.
+    Its number, its reason and its point are as they were, and nothing else of it is carried. What it is given is not changed. */
+export function suggestionsOnClock({ suggestions, words, clock, seconds = lengthOf(clock) }) {
+  const length = hundredths(seconds);
+  const opening = (said) => String(said ?? "").split(/\s+/).filter(Boolean).length || OPENING_WORDS;
+  const out = [];
+  for (const s of suggestions) {
+    const stretches = Array.isArray(s.stretches) && s.stretches.length > 0 ? s.stretches : [{ start: s.start, end: s.end }];
+    // Each of its words as it is on the clock, or null where the clock cuts it.
+    const placed = keptWords(words, stretches).map((word) => {
+      const piece = clock.find((p) => word.end > p.from && word.end <= p.to);
+      return piece ? { w: word.w, start: hundredths(timelineAt(clock, Math.max(word.start, piece.from))), end: Math.min(hundredths(timelineAt(clock, word.end)), length) } : null;
+    });
+    const kept = placed.filter(Boolean);
+    if (kept.length === 0 || kept.length * 100 < placed.length * KEPT_IN_100) continue;
+    const runs = [];
+    placed.forEach((word, i) => {
+      if (!word) return;
+      if (i > 0 && placed[i - 1]) runs[runs.length - 1].end = word.end;
+      else runs.push({ start: word.start, end: word.end });
+    });
+    if (!runs.every((t) => t.end > t.start)) continue;
+    out.push({
+      ...pick(s, ["n"]),
+      start: runs[0].start,
+      end: runs[runs.length - 1].end,
+      stretches: runs,
+      first: kept.slice(0, opening(s.first)).map((word) => word.w).join(" "),
+      last: kept.slice(-opening(s.last)).map((word) => word.w).join(" "),
+      ...pick(s, ["why", "point"])
+    });
+  }
+  return out;
+}
+
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const text = (v) => typeof v === "string" && v.trim() !== "";
@@ -173,7 +232,9 @@ export function handoffFaultV2(h) {
     if (extra) return extra;
     length = m.seconds;
   }
-  /** Is this a stretch of the main video? */
+  /** Is this a stretch of the main video? A suggestion's times are held to what the page agreed (spec section 8, "Suggestion
+      times"): 0 <= start < end <= main.seconds + 0.01, and its stretches in order, none over another, the first starting
+      where it starts and the last ending where it ends, which puts each inside start and end. */
   const within = (start, end) => number(start) && number(end) && start >= 0 && end > start && end <= length + 0.01;
 
   if (has(h, "suggestions")) {
