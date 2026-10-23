@@ -21,7 +21,7 @@ import { rangesWith, keptOf, croppedLike, cutPhrases } from "./recut.js";
 import { clockOf, clockOfRanges, heardWords } from "./clock.js";
 import { faceOnThisMac } from "./styles.js";
 import { spellWords } from "./spelling.js";
-import { filesProblems, layoutOf } from "./episode.js";
+import { filesProblems, isAnswered } from "./episode.js";
 import { pictureSize } from "./pictures.js";
 
 /** The folders a Mac keeps fonts in: Font Book installs a person's into the first. */
@@ -68,10 +68,10 @@ function sizeOf(path) {
 }
 
 /** Whether a record keeps the whole of its video, for reading a time on it or cutting it again: a finished video, a client or
-    group session, and an iPhone clip once it is answered (layout 3). Nothing of such a video is cut by brimm-video, whatever
-    its cut plan says of silences and retakes (the plan was made for a raw video). A raw video does not, and neither does an
-    iPhone clip from before the switch (layout 1 or 2), whose clock still comes from its plan's cuts. */
-const keepsWhole = (record) => record.kind === "finished" || record.kind === "session" || (record.kind === "short video" && layoutOf(record) === 3);
+    group session, and an iPhone clip once she has answered its card (isAnswered). Nothing of such a video is cut by brimm-video,
+    whatever its cut plan says of silences and retakes (the plan was made for a raw video). A raw video does not, and neither
+    does an iPhone clip from before the switch, whose clock still comes from its plan's cuts. */
+const keepsWhole = (record) => record.kind === "finished" || record.kind === "session" || (record.kind === "short video" && isAnswered(record));
 
 /** A plan as it would be had the whole video been kept: every phrase kept, and one kept range from 0 to the video's length that
     holds them all, in the shape of the plan's own ranges (cuts.js rangesOf). Her own cuts are then made from it as they are
@@ -92,8 +92,8 @@ function wholePlan(plan) {
     episode's folder, as a reading has it before it puts it there (reading.js); its file is still one it needs.
     A record that keeps the whole video (keepsWhole) has its ranges made from the plan with the whole video kept, her own cuts
     still taken off it; the `plan` given back is the one read, as it is, and the plan's file is never rewritten. With `clock`,
-    for reading a time, a video of layout 3 needs neither the raw video nor its captions on this Mac: a time is read from the
-    plan, the words and the stored timelines alone. Every other case needs the files a build needs. */
+    for reading a time, a video she has answered the card of needs neither the raw video nor its captions on this Mac: a time is
+    read from the plan, the words and the stored timelines alone. Every other case needs the files a build needs. */
 export function piecesOf(found, part, ctx, extra = [], given = null, { clock = false } = {}) {
   const { record } = found;
   const target = targetOf(record, part);
@@ -111,7 +111,7 @@ export function piecesOf(found, part, ctx, extra = [], given = null, { clock = f
   }
   const wordsFile = `${stem}.words.json`;
   const hasWords = existsSync(join(found.folder, wordsFile));
-  const unneeded = clock && layoutOf(record) === 3;
+  const unneeded = clock && isAnswered(record);
   const need = [...(unneeded ? [] : [name]), `${stem}.cut-plan.json`, ...(hasWords ? [wordsFile] : []), ...(part === "main" ? (unneeded ? [] : [`${stem}.srt`]) : picked ? [v0] : []), ...extra];
   const gone = need.find((f) => !existsSync(join(found.folder, f)));
   if (gone) return { why: `${gone} is not in the episode's folder.` };
@@ -122,16 +122,19 @@ export function piecesOf(found, part, ctx, extra = [], given = null, { clock = f
   if (short.length) return { why: `${found.name} is not whole in Dropbox: ${short.join(" ")}.` };
   let plan;
   let words = [];
+  let planned;
   try {
     plan = given || JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
     // Each word from when it is said: after a pause, not in it (clock.js heardWords).
     if (hasWords) words = heardWords(JSON.parse(readFileSync(join(found.folder, wordsFile), "utf8")).words, plan.phrases);
+    // The plan the ranges are made from: the plan's own, or for a video that keeps all of it the plan with all of it kept.
+    planned = keepsWhole(record) ? wholePlan(plan) : plan;
   } catch (e) {
     return { why: `${stem}.cut-plan.json or ${wordsFile} cannot be read.` };
   }
   // The plan's own ranges while no cut is asked for: a layer never cuts her video again (recut.js rangesWith). A video that keeps
   // all of it has none of the plan's: its cuts are made from the plan with the whole video kept.
-  const ranges = rangesWith({ plan: keepsWhole(record) ? wholePlan(plan) : plan, cuts: target.cuts || [] });
+  const ranges = rangesWith({ plan: planned, cuts: target.cuts || [] });
   if (part === "main") return { plan, words, hasWords, wordsFile, stem, ranges, pieces: keptOf(ranges), picked, need };
   // The note that a stretch's crop is a guess goes with it (reels.js GUESSED), as the pick wrote it.
   const base = picked
@@ -192,7 +195,7 @@ export async function timelineFor(found, part, ctx, { build = false, plan: given
     const layers = layersFor({ record, part, frame, ranges: pieces, words, face: face.face, pictures: sizes, video: { height: plan.facts.height, hdr }, lookPresets: ctx.deps.lookPresets });
     const made = part === "main"
       ? mainProject({ video, facts: plan.facts, more, plan, ranges, srt: readFileSync(join(found.folder, `${stem}.srt`), "utf8"), spellings: record.spellings, ideas: ideaNotes({ ...plan, phrases: cutPhrases(plan.phrases, target.cuts || []) }, (plan.claude && plan.claude.graphics) || []), titles: layers.titles, stills: layers.stills, look: layers.look, project: "main", event: eventName(found.name) })
-      : reelProject({ video, facts: plan.facts, candidate: { start: span.from, end: span.to, ranges: pieces }, plan, planRanges: (target.cuts || []).length ? ranges : plan.ranges, titles: layers.titles, stills: layers.stills, look: layers.look, more, project: `reel ${part.reel}`, event: eventName(found.name) });
+      : reelProject({ video, facts: plan.facts, candidate: { start: span.from, end: span.to, ranges: pieces }, plan, planRanges: ranges, titles: layers.titles, stills: layers.stills, look: layers.look, more, project: `reel ${part.reel}`, event: eventName(found.name) });
     if (made.why) return { why: `Its timeline could not be made: ${made.why}.` };
     const kept = join(found.folder, "edit", "timeline.fcpxml");
     const unworded = hasWords ? "" : `This episode has no ${wordsFile}, so no captions are drawn.`;
@@ -207,10 +210,10 @@ export async function timelineFor(found, part, ctx, { build = false, plan: given
 const newer = (a, b) => a.v > b.v || (a.v === b.v && Date.parse(a.at) > Date.parse(b.at));
 
 /** The newest version in a part's list of `pushed` versions, from either Mac: the highest number, and of two with one number the
-    later `at`; the first listed when they are the same. null for none, and for what is not a list. */
+    first listed, as the highest number alone has always chosen it. null for none, and for what is not a list. */
 export function newestOf(pushed) {
   if (!Array.isArray(pushed)) return null;
-  return pushed.reduce((best, p) => (!best || newer(p, best) ? p : best), null);
+  return pushed.reduce((best, p) => (!best || p.v > best.v ? p : best), null);
 }
 
 /** Whether the newest version a part lists, from either Mac, was rendered (`how` is "render") and not pushed: false for a push,
@@ -223,20 +226,23 @@ export function newestIsRender(record, part) {
   return Boolean(top) && top.how === "render";
 }
 
+/** Whether a render has opened in QuickTime Player (`opened` says when): a render counts as shown once it has, not when it ends. */
+const opened = (p) => typeof p.opened === "string" && p.opened.trim() !== "";
+
 /** Whether a version has been shown on this Mac, which is what a time is read on: any push, from either Mac, since a push is
     shown in Final Cut by the Mac that makes it and brought to the other; and a render only when this Mac made it and it has
-    opened in QuickTime Player (`opened`), since renders stay on the Mac that made them and one counts as shown once it has opened,
-    not when its render ends. */
-const shownHere = (ctx) => (p) => p.how !== "render" || (p.on === ctx.machine && typeof p.opened === "string" && p.opened.trim() !== "");
+    opened, since renders stay on the Mac that made them. */
+const shownHere = (ctx) => (p) => p.how !== "render" || (p.on === ctx.machine && opened(p));
 
 /** The clock a person reads a time on, for a part. For the main video of a video that keeps all of it (a finished video, a
     session, an answered clip: keepsWhole), the video's own: all of it, less the cuts she asked for, whatever versions are
     listed. For every other part, the newest version shown on this Mac (shownHere), as its stored file gives it, or the timeline
     as it is now when none was. { clock, on, pieces, words, plan } with `on` naming it for a person ("main v3", "Reel 2 v1", "the
     main video as it is now", "the video"), and `words` spelled as every timeline's captions spell them, so that words she
-    quotes are found as she reads them; or what piecesOf gives when it cannot be read. When the newest version listed is a render
-    on the other Mac, newer than the one read, `elsewhere` is { v, on } for it, for the command to say that it is there and to
-    offer to render it here: data only. A time is read without the raw video or its captions on this Mac (piecesOf, `clock`). */
+    quotes are found as she reads them; or what piecesOf gives when it cannot be read. When the other Mac has rendered a version
+    that has opened there, newer than the one read (or any, when none is), `elsewhere` is { v, on } for the newest such, for the
+    command to say that it is there and to offer to render it here: data only. A time is read without the raw video or its
+    captions on this Mac (piecesOf, `clock`). */
 export function clockFor(found, part, ctx) {
   const pieces = piecesOf(found, part, ctx, [], null, { clock: true });
   if (pieces.old) return { why: `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so a time on it cannot be read. Make this change by hand in Final Cut.` };
@@ -247,8 +253,8 @@ export function clockFor(found, part, ctx) {
   const label = part === "main" ? "main" : `Reel ${part.reel}`;
   const listed = Array.isArray(target.pushed) ? target.pushed : [];
   const top = newestOf(listed.filter(shownHere(ctx)));
-  const latest = newestOf(listed);
-  const away = latest && latest.how === "render" && latest.on !== ctx.machine && (!top || newer(latest, top)) ? { elsewhere: { v: latest.v, on: latest.on } } : {};
+  const latest = newestOf(listed.filter((p) => p.how === "render" && p.on !== ctx.machine && opened(p)));
+  const away = latest && (!top || newer(latest, top)) ? { elsewhere: { v: latest.v, on: latest.on } } : {};
   if (!top) return { ...read, clock: clockOfRanges(read.pieces), on: `${part === "main" ? "the main video" : label} as it is now`, ...away };
   const at = join(found.folder, top.file);
   if (!existsSync(at)) return { why: `${top.file} is not in the episode's folder.` };

@@ -15,6 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { FOLDER, reread } from "./episodes.js";
 import { GUESSED } from "../reels.js";
 import { clockOf, clockOfRanges } from "../clock.js";
+import { layoutOf } from "../episode.js";
 
 const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}((?: [\\w-]+="[^"]*")*)/?>`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/ ([\w-]+)="([^"]*)"/g)].map((a) => [a[1], a[2]])));
 async function on(deps, ...argv) {
@@ -286,6 +287,19 @@ describe("clockFor, for a video that keeps all of it (a finished video, a sessio
     t.done();
     spelled.t.done();
   });
+  it("keeps today's choice of version for a short video from before the switch that holds a version with a `how`: the version, not the whole video", () => {
+    for (const how of ["render", "push"]) {
+      const { t, found } = episode({ kind: "short video" });
+      const one = push(1, "2026-10-20T10:00:00-05:00");
+      const two = how === "render" ? render(2, "2026-10-20T11:00:00-05:00") : { ...push(2, "2026-10-20T11:00:00-05:00"), how };
+      const held = withPushed(found, [one, two], [[one, 1], [two, 2]]);
+      // layoutOf turns 3 for such a record, but she has answered nothing about it.
+      assert.equal(layoutOf(held.record), 3);
+      const read = clockFor(held, "main", t.ctx);
+      assert.deepEqual([read.on, read.clock], ["main v2", clipsOf(2)], how);
+      t.done();
+    }
+  });
   it("keeps the whole video of an iPhone clip only once it is answered (layout 3)", () => {
     const { t, found } = episode({ kind: "short video" });
     assert.equal(clockFor(found, "main", t.ctx).pieces.length, 3);
@@ -347,18 +361,16 @@ describe("clockFor, for a raw video's versions", () => {
     assert.deepEqual([next.on, next.clock, "elsewhere" in next], ["main v3", clipsOf(3), false]);
     t.done();
   });
-  it("reads the newest version by its number, and of two with one number by the later time", () => {
+  it("reads the newest version by its number, and of two with one number the first listed, as it always did", () => {
     const { t, found } = episode(LAYOUT_3.raw);
     const one = push(1, "2026-10-20T10:00:00-05:00");
     const here = push(2, "2026-10-20T11:00:00-05:00");
     const there = push(2, "2026-10-20T11:30:00-05:00", "Sallie's laptop");
     const files = [[one, 1], [here, 2], [there, 4]];
-    for (const pushed of [[one, here, there], [there, here, one], [here, one, there]]) {
+    for (const [pushed, n] of [[[one, here, there], 2], [[there, here, one], 4], [[here, one, there], 2]]) {
       const read = clockFor(withPushed(found, pushed, files), "main", t.ctx);
-      assert.deepEqual([read.on, read.clock], ["main v2", clipsOf(4)], pushed.map((p) => p.file).join());
+      assert.deepEqual([read.on, read.clock], ["main v2", clipsOf(n)], pushed.map((p) => p.file).join());
     }
-    const early = { ...there, at: "2026-10-20T10:30:00-05:00" };
-    assert.deepEqual(clockFor(withPushed(found, [one, here, early], files), "main", t.ctx).clock, clipsOf(2));
     t.done();
   });
   it("says a newer render of the other Mac is there when no version counts here, and reads the timeline as it is now", () => {
@@ -366,6 +378,30 @@ describe("clockFor, for a raw video's versions", () => {
     const read = clockFor(withPushed(found, [render(0, AT, "Sallie's laptop")]), "main", t.ctx);
     assert.deepEqual([read.on, read.elsewhere], ["the main video as it is now", { v: 0, on: "Sallie's laptop" }]);
     assert.equal(read.pieces.length, 3);
+    t.done();
+  });
+  it("says the newest render of the other Mac that has opened is there, though a render of this Mac that has not opened is the newest listed", () => {
+    const { t, found } = episode(LAYOUT_3.raw);
+    const one = push(1, "2026-10-20T10:00:00-05:00");
+    const theirs = render(2, "2026-10-20T11:00:00-05:00", "Sallie's laptop");
+    const mine = render(3, "2026-10-20T12:00:00-05:00", "Mac Studio", "");
+    const read = clockFor(withPushed(found, [one, theirs, mine], [[one, 1]]), "main", t.ctx);
+    assert.deepEqual([read.on, read.clock, read.elsewhere], ["main v1", clipsOf(1), { v: 2, on: "Sallie's laptop" }]);
+    // Of two on the other Mac, the newest that has opened.
+    const later = render(4, "2026-10-20T13:00:00-05:00", "Sallie's laptop");
+    const again = clockFor(withPushed(found, [one, theirs, mine, later], [[one, 1]]), "main", t.ctx);
+    assert.deepEqual(again.elsewhere, { v: 4, on: "Sallie's laptop" });
+    t.done();
+  });
+  it("does not count a render of the other Mac before it has opened there", () => {
+    const { t, found } = episode(LAYOUT_3.raw);
+    const one = push(1, "2026-10-20T10:00:00-05:00");
+    for (const unopened of [render(2, "2026-10-20T11:00:00-05:00", "Sallie's laptop", ""), { ...render(2, "2026-10-20T11:00:00-05:00", "Sallie's laptop"), opened: "  " }]) {
+      const read = clockFor(withPushed(found, [one, unopened], [[one, 1]]), "main", t.ctx);
+      assert.deepEqual([read.on, "elsewhere" in read], ["main v1", false]);
+    }
+    const none = clockFor(withPushed(found, [render(0, AT, "Sallie's laptop", "")]), "main", t.ctx);
+    assert.equal("elsewhere" in none, false);
     t.done();
   });
   it("says nothing of a render of the other Mac that is not newer than the version it reads", () => {
@@ -490,6 +526,32 @@ describe("piecesOf, for the files a timeline is built from", () => {
     t.done();
     legacy.t.done();
   });
+  it("still needs the raw video to read a clock of a video from before the switch, though it holds a version with a `how`", () => {
+    for (const kind of ["episode", "short video"]) {
+      const { t, found } = episode({ kind });
+      const held = withPushed(found, [push(1, "2026-10-20T10:00:00-05:00"), render(2, "2026-10-20T11:00:00-05:00")]);
+      assert.equal(layoutOf(held.record), 3);
+      t.ctx.isWhole = (path) => !path.endsWith(".mp4");
+      assert.deepEqual(piecesOf(held, "main", t.ctx, [], null, { clock: true }), { coming: VIDEO_FILE, bring: [VIDEO_FILE] }, kind);
+      t.done();
+    }
+  });
+  it("says in plain words that a plan it cannot use cannot be read, for a video that keeps all of it", () => {
+    const { t, found } = episode(LAYOUT_3.finished);
+    const why = { why: "Pricing talk.cut-plan.json or Pricing talk.words.json cannot be read." };
+    for (const plan of ['{"phrases":[]}', '{"facts":{"duration":9}}', "{}", "[]", "null"]) {
+      writeFileSync(join(found.folder, PLAN_FILE), plan);
+      assert.deepEqual(piecesOf(found, "main", t.ctx), why, plan);
+      assert.deepEqual(clockFor(found, "main", t.ctx), why, plan);
+    }
+    // And with no words file to have read the phrases first.
+    rmSync(join(found.folder, "Pricing talk.words.json"));
+    for (const plan of ['{"phrases":[]}', "{}", "null"]) {
+      writeFileSync(join(found.folder, PLAN_FILE), plan);
+      assert.deepEqual(piecesOf(found, "main", t.ctx), why, plan);
+    }
+    t.done();
+  });
   it("keeps the plan's own ranges for a legacy record and for a raw one, and the whole video for a finished one, with or without a clock asked for", () => {
     for (const [record, kept] of [[{}, 3], [{ kind: "short video" }, 3], [LAYOUT_3.raw, 3], [LAYOUT_3.finished, 1], [LAYOUT_3.session, 1], [LAYOUT_3["short video"], 1]]) {
       const { t, found } = episode(record);
@@ -508,6 +570,22 @@ describe("piecesOf, for the files a timeline is built from", () => {
   });
 });
 
+describe("the timeline of a Reel of a video that keeps all of it", () => {
+  const notes = async ({ t, found }) => {
+    const built = await timelineFor(found, { reel: 2 }, t.ctx);
+    assert.ok(built.xml, built.why);
+    return tags(built.xml, "marker").map((m) => m.value).filter((v) => v.startsWith("Taken out"));
+  };
+  it("has no note of what the import's plan took out between its stretches, since the video keeps all of it", async () => {
+    const before = episode();
+    const finished = episode(LAYOUT_3.finished);
+    assert.ok((await notes(before)).length > 0, "a Reel of a raw video says what the plan took out between its stretches");
+    assert.deepEqual(await notes(finished), []);
+    before.t.done();
+    finished.t.done();
+  });
+});
+
 describe("newestOf", () => {
   const entry = (v, at, over = {}) => ({ v, at, on: "Mac Studio", file: `edit/x.v${v}.fcpxml`, ...over });
   it("is the entry of the highest number, and null for none or for what is not a list", () => {
@@ -516,18 +594,15 @@ describe("newestOf", () => {
     assert.equal(newestOf([c, a]), c);
     for (const none of [[], undefined, null, "v1", 3, {}, { length: 1, 0: a }]) assert.equal(newestOf(none), null, JSON.stringify(none));
   });
-  it("takes, of two with one number, the later by the time they carry, in whichever order they are listed", () => {
+  it("takes, of two with one number, the first listed, whatever time each carries, as the highest number alone always did", () => {
     const early = entry(2, "2026-10-20T10:00:00-05:00", { on: "Mac Studio" });
-    const late = entry(2, "2026-10-20T09:30:00-06:00", { on: "Sallie's laptop" });
-    assert.equal(late.at > early.at, false, "the later moment reads earlier as text: it is compared as a time");
-    assert.equal(newestOf([early, late]), late);
+    const late = entry(2, "2026-10-20T11:30:00-05:00", { on: "Sallie's laptop" });
+    assert.equal(newestOf([early, late]), early);
     assert.equal(newestOf([late, early]), late);
-    assert.equal(newestOf([entry(1, AT), early, late]), late);
-  });
-  it("takes the first of two with the same number and time, as the highest number alone always did", () => {
-    const [a, b] = [entry(2, AT, { on: "Mac Studio" }), entry(2, AT, { on: "Sallie's laptop" })];
-    assert.equal(newestOf([a, b]), a);
-    assert.equal(newestOf([b, a]), b);
+    assert.equal(newestOf([entry(1, AT), early, late]), early);
+    const three = entry(3, "2026-10-19T10:00:00-05:00");
+    assert.equal(newestOf([late, three, early]), three);
+    assert.equal(newestOf([late, entry(1, AT), early]), late);
   });
 });
 
@@ -563,7 +638,7 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
   };
   const rough = { v: 0, how: "render", at: AT, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: AT };
   const raw = (pushed) => ({ ...LAYOUT_3.raw, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed, base: null } });
-  it("gives each suggestion's times on the rough cut she is watching, not the raw video's, and opens nothing", async () => {
+  it("gives each suggestion's times on the rough cut she is watching, not the raw video's", async () => {
     const { t } = episode(raw([rough]), {}, suggested());
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.equal(r.code, 0, r.text);
@@ -572,7 +647,7 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.equal(r.text, [
       "Reel suggestions of Pricing: what to charge?: 2, with times on main v0.",
       "",
-      "1. 0:00 to 0:03, 3 seconds. A candidate.",
+      "1. 0:00 to 0:03, 4 seconds. A candidate.",
       "   Opens with: Welcome to the show.",
       "   Closes with: talk about pricing.",
       "   Why: It says what the talk is about.",
@@ -585,7 +660,6 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
       "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
       ""
     ].join("\n"));
-    assert.deepEqual(t.opened, []);
     t.done();
   });
   it("gives the recording's own times while the rough cut's file is not whole on this Mac, and starts no bringing", async () => {
@@ -598,18 +672,38 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.deepEqual(t.started, []);
     t.done();
   });
-  it("gives the recording's own times for a raw video no version of which has been shown yet", async () => {
+  it("gives the times on the main video as it is now for a raw video no version of which has been shown yet", async () => {
     const { t } = episode(raw([]), {}, suggested());
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
-    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the main video as it is now\.\n\n1\. 0:00 to 0:03, 3 seconds\. A candidate\.\n/);
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the main video as it is now\.\n\n1\. 0:00 to 0:03, 4 seconds\. A candidate\.\n/);
     t.done();
   });
   it("gives a finished video's times on the video's own clock", async () => {
     const { t } = episode({ ...LAYOUT_3.finished }, {}, suggested());
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.equal(r.code, 0, r.text);
-    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the video\.\n\n1\. 0:06 to 0:09, 3 seconds\. A candidate\.\n/);
-    assert.match(r.text, /\n2\. 0:13 to 0:20, 7 seconds\. Picked\.\n/);
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the video\.\n\n1\. 0:06 to 0:09, 4 seconds\. A candidate\.\n/);
+    // Reel 2 is two stretches, 13.38 to 16.516 and 19.219 to 21.287, 5.204 seconds; the video keeps what lies between them too.
+    assert.match(r.text, /\n2\. 0:13 to 0:20, 5 seconds\. Picked\.\n/);
+    t.done();
+  });
+  it("gives the recording's own times when the rough cut's file holds no timeline, or cannot be opened, and does not call every suggestion cut", async () => {
+    for (const spoil of [(file) => writeFileSync(file, "not a timeline"), (file) => { rmSync(file); mkdirSync(file); }]) {
+      const { t, found } = episode(raw([rough]), {}, suggested());
+      spoil(join(found.folder, "edit", "main.v0.fcpxml"));
+      const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the recording's own clock\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
+      assert.ok(!r.text.includes("Cut now"), r.text);
+      t.done();
+    }
+  });
+  it("lists a video from before the switch as it always did, though it holds a version with a `how`", async () => {
+    const main = { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [push(1, "2026-10-20T10:00:00-05:00"), render(2, "2026-10-20T11:00:00-05:00")] };
+    const { t, found } = episode({ main }, {}, EPISODE);
+    assert.equal(layoutOf(found.record), 3);
+    const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
+    assert.match(r.text, /^Reel candidates of Pricing talk\.mp4: 2\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
     t.done();
   });
   it("lists a video from before the switch as it always did", async () => {

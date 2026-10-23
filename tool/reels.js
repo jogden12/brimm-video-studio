@@ -9,8 +9,9 @@ import { fcpxml, checkFcpxml } from "./fcpxml.js";
 import { stamp } from "./shared/text.js";
 import { basename, extname, join } from "node:path";
 import { cropsFor, stretchesOf, fitReel } from "./reframe.js";
-import { layoutOf, shownName } from "./episode.js";
+import { isAnswered, shownName } from "./episode.js";
 import { suggestionsOnClock, KEPT_IN_100 } from "./handoff-v2.js";
+import { spelled } from "./final-transcript.js";
 import { timelineAt } from "./clock.js";
 
 /** The size of a preview, in pixels: half a Reel's each way. */
@@ -294,47 +295,58 @@ function reelsNotListed(reels, record) {
   ];
 }
 
+/** A suggestion's stretches, in seconds of the video: its own, or all of it from its start to its end when it holds none. */
+const stretchesOfSuggestion = (c) => (c.ranges.length ? c.ranges : [{ start: c.start, end: c.end }]);
+
+/** The parts of a suggestion's stretches that lie in the clock's pieces, each { start, end } in seconds of the video: what the
+    clock keeps of them. Whatever lies between two stretches is none of them, even where the clock keeps it too. */
+const keptOfStretches = (c, clock) => stretchesOfSuggestion(c).flatMap((s) => clock.map((p) => ({ start: Math.max(s.start, p.from), end: Math.min(s.end, p.to) })).filter((i) => i.end > i.start));
+
+/** How many seconds a list of { start, end } holds. */
+const secondsIn = (list) => list.reduce((sum, i) => sum + i.end - i.start, 0);
+
 /** Where a suggestion lies on the clock she is reading, by its time alone, for a video with no words file: { start, end,
-    seconds, first, last } with its times on the clock, the seconds of its stretches the clock keeps, and its own first and last
-    words; or null when fewer than 70 in 100 of the seconds of its stretches lie in the clock's pieces (as for a suggestion
-    placed by its words, handoff-v2.js suggestionsOnClock), or none does. Its start and end are where the clock puts the first and
-    the last moment of it that it keeps. */
+    seconds } with its times on the clock and the seconds of its stretches the clock keeps; or null when fewer than 70 in 100 of
+    the seconds of its stretches lie in the clock's pieces (as for a suggestion placed by its words, handoff-v2.js
+    suggestionsOnClock), or none does. Its start and end are where the clock puts the first and the last moment of it that it
+    keeps. */
 function placedByTime(c, clock) {
-  const stretches = c.ranges.length ? c.ranges : [{ start: c.start, end: c.end }];
-  const inside = stretches.flatMap((s) => clock.map((p) => ({ start: Math.max(s.start, p.from), end: Math.min(s.end, p.to) })).filter((i) => i.end > i.start));
-  const length = (list) => list.reduce((sum, i) => sum + i.end - i.start, 0);
-  if (!inside.length || length(inside) * 100 < length(stretches) * KEPT_IN_100) return null;
-  return { start: timelineAt(clock, Math.min(...inside.map((i) => i.start))), end: timelineAt(clock, Math.max(...inside.map((i) => i.end))), seconds: length(inside), first: c.first, last: c.last };
+  const inside = keptOfStretches(c, clock);
+  if (!inside.length || secondsIn(inside) * 100 < secondsIn(stretchesOfSuggestion(c)) * KEPT_IN_100) return null;
+  return { start: timelineAt(clock, Math.min(...inside.map((i) => i.start))), end: timelineAt(clock, Math.max(...inside.map((i) => i.end))), seconds: secondsIn(inside) };
 }
 
 /** Where a suggestion lies on the clock she is reading (`now`, clockFor's read, with a clock): placed by its words when the
     read has the recording's words, as the hand-off places a suggestion (handoff-v2.js suggestionsOnClock, which says what it
-    keeps), and by its time otherwise. { start, end, seconds, first, last } on that clock, `first` and `last` the words it opens
-    and closes with there; or null when what it says is cut now. */
+    keeps), and by its time otherwise. { start, end, seconds, first?, last? } on that clock: `first` and `last` the words it opens
+    and closes with there, when it is placed by its words, and `seconds` those of its own stretches the clock keeps (not the
+    gap between two of them that the clock keeps too, which a run of its words bridges); or null when what it says is cut now. */
 function placedOn(c, now) {
   if (!(Array.isArray(now.words) && now.words.length)) return placedByTime(c, now.clock);
   const [one] = suggestionsOnClock({ suggestions: [{ n: c.n, start: c.start, end: c.end, stretches: c.ranges, first: c.first, last: c.last, why: c.reason, point: c.point }], words: now.words, clock: now.clock });
-  return one ? { start: one.start, end: one.end, seconds: one.stretches.reduce((sum, t) => sum + t.end - t.start, 0), first: one.first, last: one.last } : null;
+  return one ? { start: one.start, end: one.end, seconds: secondsIn(keptOfStretches(c, now.clock)), first: one.first, last: one.last } : null;
 }
 
-/** The list of the Reel suggestions of a video of the switch (layout 3): a reading's suggestions, each as it is on the clock she
-    is reading (`now`, clockFor's read), named as everything edit.js prints names the video (episode.js shownName), never by its
-    file. A short video gets no Reels. With none, why there are none, with no offer to ask Claude again. Otherwise the head
-    line says which clock the times are on, and each suggestion has its times there, its length, what it is now, the words it
-    opens and closes with there, why Claude picked it, whether it fits a Reel, its preview when it has one, and the word to
-    check. A suggestion whose words are cut now says so ("Cut now"), with the words it had. With no clock (`now` null, or a
-    read that could not be made) the times are the recording's own. */
+/** The list of the Reel suggestions of a video of the switch (a video she has answered the card of): a reading's suggestions,
+    each as it is on the clock she is reading (`now`, clockFor's read), the video named as everything edit.js prints names it
+    (episode.js shownName), never by `reels.video`, the file's name. A short video gets no Reels. With none, why there are none,
+    with no offer to ask Claude again. Otherwise the head line says which clock the times are on, and each suggestion has its
+    times there, its length, what it is now, the words it opens and closes with there, why Claude picked it, whether it fits a
+    Reel, its preview when it has one, and the word to check. A suggestion whose words are cut now says so ("Cut now"), with the
+    words it had. With no clock (`now` null, or a read that could not be made) the times are the recording's own. The words a
+    suggestion had, which the clock does not give, are spelled as the episode spells its words (spelling.js). */
 function suggestionsText(reels, record, now) {
   const name = shownName(record);
   if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
   if (!reels.candidates.length) return `There are no Reel suggestions of ${name}${reels.none ? `: ${reels.none}` : ""}.\n`;
   const status = new Map((record.reels || []).map((r) => [r.n, r.status]));
   const on = now && Array.isArray(now.clock) ? now : null;
+  const spell = (said) => (said ? spelled(said, record.spellings || []) : said);
   const blocks = reels.candidates.map((c) => {
     const state = NOW[status.get(c.n)] || NOW.candidate;
-    const where = on ? placedOn(c, on) : { start: c.start, end: c.end, seconds: c.seconds, first: c.first, last: c.last };
-    // Where it is cut now, the words it had are the ones it was suggested with.
-    const { first, last } = where || c;
+    const where = on ? placedOn(c, on) : { start: c.start, end: c.end, seconds: c.seconds };
+    // Where it is cut now, or where only its time places it, the words it had are the ones it was suggested with.
+    const { first = spell(c.first), last = spell(c.last) } = where || {};
     const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why: ${c.reason}`];
     if (!where) return [`${c.n}. Cut now: its words were cut from ${on.on}. ${state}.`, ...about].filter(Boolean).join("\n");
     const seconds = Math.round(where.seconds);
@@ -356,12 +368,12 @@ function suggestionsText(reels, record, now) {
     (as `ask` would say), is said instead of the offer. After the candidates, the Reels of the record that are none of them,
     which are the clips the import cut of an episode imported before phase 3. `record` is the episode's record, for its kind
     and for what each Reel is now: one it does not know of is a candidate.
-    For a video of the switch (layout 3) it is the list of suggestions on the clock she is reading, `now` being clockFor's read
-    of the main video, or null (suggestionsText); `whyNot` is then not said, since asking Claude again is not offered. For any
-    other record it is this list, as it always was, whatever `now` is. A bare shape with no `kind` is no record a session reads
-    (episode.js refuses one), and is read as one from before the switch. */
+    For a video she has answered the card of (episode.js isAnswered) it is the list of suggestions on the clock she is reading,
+    `now` being clockFor's read of the main video, or null (suggestionsText); `whyNot` is then not said, since asking Claude again
+    is not offered. For any other record it is this list, as it always was, whatever `now` is: layoutOf is not asked, since it
+    turns 3 for an old video that only holds a version with a `how`. */
 export function reelsText(reels, record, whyNot = "", now = null) {
-  if (record.kind !== undefined && layoutOf(record) === 3) return suggestionsText(reels, record, now);
+  if (isAnswered(record)) return suggestionsText(reels, record, now);
   const name = reels.video;
   if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
   if (!reels.candidates.length) {

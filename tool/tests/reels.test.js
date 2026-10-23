@@ -428,9 +428,35 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
       assert.ok(!other.includes("IMG_4821") && !other.includes("No preview"), other);
     }
   });
-  it("names a video not yet answered by its label, as everything edit.js prints does", () => {
-    const waiting = { id: "e-20261022-4a7c10", kind: null, answer: { state: "needs your answer", guess: "raw", seen: "wide", came: "camera" }, label: "Video of 22 Oct, 09:00 (Mac Studio)", reels: [] };
-    assert.match(reelsText(reels, waiting, "", NOW), /^Reel suggestions of Video of 22 Oct, 09:00 \(Mac Studio\): 4, with times on main v1\.\n/);
+  it("names a session not yet cleared by its label, never by its file's name, as everything edit.js prints does", () => {
+    const session = { id: "e-20261022-4a7c10", kind: "session", answer: { ...ANSWERED, private: "yes" }, session: { marked: made, on: "Mac Studio", teachings: null, cleared: null }, label: "Video of 22 Oct, 09:00 (Mac Studio)", name: { text: "IMG_4821", placeholder: true }, reels: [] };
+    const text = reelsText(reels, session, "", NOW);
+    assert.match(text, /^Reel suggestions of Video of 22 Oct, 09:00 \(Mac Studio\): 4, with times on main v1\.\n/);
+    assert.ok(!text.includes("IMG_4821"), text);
+  });
+  it("counts the seconds of a suggestion's own stretches that the clock keeps, not the gap between them that it keeps too", () => {
+    const apart = suggestion(6, [{ start: 10, end: 15 }, { start: 20, end: 25 }]);
+    const list = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [apart] });
+    const whole = [{ at: 0, from: 0, to: 60 }];
+    for (const words of [WORDS, []]) {
+      const text = reelsText(list, RAW, "", { clock: whole, words, on: "the video" });
+      assert.match(text, /\n6\. 0:10 to 0:25, 10 seconds\. A candidate\.\n/, JSON.stringify(words.length));
+    }
+    // And of one the clock leaves a gap in: the seconds are those it keeps of the stretches.
+    const gap = [{ at: 0, from: 0, to: 12 }, { at: 12, from: 14, to: 60 }];
+    assert.match(reelsText(list, RAW, "", { clock: gap, words: WORDS, on: "main v2" }), /\n6\. 0:10 to 0:23, 8 seconds\. A candidate\.\n/);
+  });
+  it("spells the words a suggestion opens and closes with that the clock does not give, as the episode spells them", () => {
+    const said = suggestion(7, [{ start: 32, end: 38 }], { first: "so much, Sally", last: "thank you, Sally" });
+    const list = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [said] });
+    const spelt = { ...RAW, spellings: [["Sally", "Sallie"]] };
+    for (const now of [NOW, null]) {
+      const text = reelsText(list, spelt, "", now);
+      assert.ok(text.includes("   Opens with: so much, Sallie\n") && text.includes("   Closes with: thank you, Sallie\n"), text);
+    }
+    // By its time alone too, when there are no words.
+    const timed = reelsFile({ video: "IMG_4821.MOV", by: "read", made, candidates: [suggestion(8, [{ start: 10, end: 20 }], { first: "Sally says", last: "Sally ends" })] });
+    assert.match(reelsText(timed, spelt, "", { clock: CLOCK, words: [], on: "main v1" }), /Opens with: Sallie says\n   Closes with: Sallie ends\n/);
   });
   it("places each by the time of its stretches when there are no words, kept when 70 in 100 of their seconds are on the clock", () => {
     const both = suggestion(5, [{ start: 28, end: 31 }, { start: 50, end: 52 }]);
@@ -519,13 +545,17 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
     const old = reelsFile({ video: "talk.mov", by: "import", made, candidates: [{ ...one, preview: "previews/reel-1.mp4" }, { ...one, n: 3, preview: null, failed: "ffmpeg stopped (Cannot allocate memory)" }] });
     const none = reelsFile({ video: "talk.mov", by: "import", made, candidates: [], none: "Claude was not asked" });
     const clock = { clock: CLOCK, words: WORDS, on: "main v1" };
-    const records = [{ reels: [{ n: 1, status: "picked" }] }, { kind: "episode", reels: [] }, { id: "e-20261014-3fa9c1", kind: "episode", spellings: [["Sally", "Sallie"]], reels: [] }];
+    // layoutOf turns 3 for a record with a version that has a `how`; she has not answered the card of a video from before the switch.
+    const rendered = { v: 2, how: "render", at: made, on: "Mac Studio", file: "edit/main.v2.fcpxml", opened: made };
+    const main = { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [{ v: 1, at: made, on: "Mac Studio", file: "edit/main.v1.fcpxml", project: "p1" }, rendered] };
+    const records = [{ reels: [{ n: 1, status: "picked" }] }, { kind: "episode", reels: [] }, { id: "e-20261014-3fa9c1", kind: "episode", spellings: [["Sally", "Sallie"]], reels: [] }, { id: "e-20261014-3fa9c1", kind: "episode", main, reels: [] }, { id: "e-20261014-3fa9c1", kind: "episode", main: { ...main, pushed: [main.pushed[0], { ...rendered, how: "push" }] }, reels: [] }];
     for (const r of records) {
       for (const list of [old, none]) assert.equal(reelsText(list, r, "", clock), reelsText(list, r, ""), JSON.stringify(r));
       assert.match(reelsText(old, r, "", clock), /^Reel candidates of talk\.mov: 2\.\n\n1\. 0:13 to 0:21, 5 seconds\. /, JSON.stringify(r));
       assert.equal(reelsText(none, r, "", clock), 'There are no Reel candidates of talk.mov: Claude was not asked.\nSay "ask Claude again for Reels" to ask again.\n');
     }
-    assert.equal(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [] }), { id: "e-20261014-3fa9c1", kind: "short video", reels: [] }, "", clock), "talk.mov is a short video, and a short video gets no Reels.\n");
+    const none_ = reelsFile({ video: "talk.mov", by: "import", made, candidates: [] });
+    for (const clip of [{ id: "e-20261014-3fa9c1", kind: "short video", reels: [] }, { id: "e-20261014-3fa9c1", kind: "short video", main, reels: [] }]) assert.equal(reelsText(none_, clip, "", clock), "talk.mov is a short video, and a short video gets no Reels.\n");
   });
 });
 

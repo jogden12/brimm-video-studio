@@ -34,7 +34,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
@@ -2354,10 +2354,15 @@ async function reels(ctx, rest) {
   // While a file is still coming, ask can be asked: it brings it.
   const blocked = askRefusal(ctx, found, record);
   // A listing changes nothing, so a refusal's "Nothing was changed." is not said here.
-  // A video of the switch (layout 3) is listed with its times on the clock she is reading, or on the recording's own when that cannot
-  // be read now. Nothing is brought from here: a listing changes nothing.
-  const now = layoutOf(record) === 3 ? clockFor({ ...found, record }, "main", ctx) : null;
-  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, ""), now && now.clock ? now : null));
+  // A video she has answered the card of is listed with its times on the clock she is reading, or on the recording's own when that
+  // cannot be read now: a file is not whole yet, the read fails, or the version's file holds no clip. Nothing is brought from here.
+  let now = null;
+  try {
+    now = isAnswered(record) ? clockFor({ ...found, record }, "main", ctx) : null;
+  } catch (e) {
+    now = null;
+  }
+  ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, ""), now && now.clock && now.clock.length ? now : null));
   if (flags["no-play"]) return 0;
   const previews = read.reels.candidates.filter((c) => c.preview).map((c) => c.preview);
   const coming = previews.filter((rel) => !ctx.isWhole(join(found.folder, rel)));

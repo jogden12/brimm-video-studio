@@ -162,6 +162,11 @@ export function layoutOf(r) {
   return (r.spellings || []).length > 0 || layered(r.main) || (r.reels || []).some(layered) || Boolean(r.brand && r.brand.logo) ? 2 : 1;
 }
 
+/** Whether she has answered the card about a video (layout 3): its `answer` says "answered". A video from before the switch has no
+    answer. This is what the switch's reading of times and its list of Reel suggestions turn on, and not layoutOf, which turns
+    3 for an old video that only holds a version with a `how` (a render, or a push so marked). */
+export const isAnswered = (r) => isObject(r) && isObject(r.answer) && r.answer.state === "answered";
+
 /** A new episode's id, made once at the import and never changed: "e-", the day without its dashes, and six hex digits, as
     "e-20261014-3fa9c1". `rand` gives a number from 0 up to 1, as Math.random does: a test gives a stand-in. */
 export const newId = (day, rand = Math.random) => `e-${day.split("-").join("")}-${Math.floor(rand() * 0x1000000).toString(16).padStart(6, "0")}`;
