@@ -4999,6 +4999,14 @@ describe("the light import", () => {
     assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
     t.done();
   });
+  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer brimm-video wrote and one imported lightly", () => {
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const part = /\n\*\*`--from-plan` of an episode's video\*\*([^\n]*)\n/.exec(readme);
+    assert.ok(part, "the README's paragraph on --from-plan of an episode's video");
+    // One sentence says both refusals, and that --out changes neither.
+    const said = part[1].split(/(?<=\.) /).find((sentence) => sentence.includes("with or without `--out`")) || "";
+    assert.ok(said.includes("a newer brimm-video wrote") && said.includes("imported lightly"), part[1]);
+  });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });
     await uneditedFolder(t.drop, t.deps);
