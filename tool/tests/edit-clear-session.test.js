@@ -39,6 +39,9 @@ const SENTENCE = "This was marked a client or group session. Clearing it lets Cl
 const DIALOG = (label = SESSION_NAME) => `${label}\n\n${SENTENCE}`;
 const TOO_LONG = "Not cleared: the dialog was open too long for this to finish in time. Say it again, and click within a minute.";
 const LOG_FAILED = "The log on this Mac could not be written: the record holds the clearing.";
+const TIMED_OUT = "Not cleared: the dialog was not answered within a minute, so it was closed. The session mark stays.";
+/** What runProgram gives of a program it killed at its limit: no output, and it says it was out of time. */
+const OUT_OF_TIME = { code: 1, signal: "SIGKILL", outOfTime: true, stderr: "" };
 const UNREADABLE_MARK = (label) => `${label}'s session mark cannot be read: ask Jason.`;
 const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
 const RUNNING = /^Not cleared: read is running for .* already\. Say it again when it has finished\.$/;
@@ -67,7 +70,7 @@ function dialogs(t, found, answer, { during, ...deps } = {}) {
   const said = [];
   const run = async (cmd, args, opts) => {
     if (cmd !== OSASCRIPT) return t.ctx.deps.run(cmd, args, opts);
-    asked.push({ cmd, args, saidBefore: [...said], revBefore: reread(found).rev, waitsBefore: [...t.waits] });
+    asked.push({ cmd, args, opts, saidBefore: [...said], revBefore: reread(found).rev, waitsBefore: [...t.waits] });
     if (during) await during();
     return typeof answer === "function" ? answer() : answer;
   };
@@ -202,6 +205,102 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
     const r = await d.ask(...clearing("raw"));
     assert.deepEqual([r.code, r.said], [0, [CLICK(), CLEARED(SESSION_NAME, "raw with retakes"), `${SESSION_NAME}: answered. Readings are off on this Mac: ask Jason.`]]);
     assert.deepEqual([reread(found).kind, gated(reread(found)), t.started], ["raw", false, []]);
+    t.done();
+  });
+});
+
+describe("kind --clear-session: every way the dialog ends prints a line of its own, after the line that says it is open", () => {
+  /** What the dialog's run is given by edit.js: a limit of a minute, and the printing of the answer to read. */
+  const givenALimit = (d) => {
+    assert.equal(d.asked.length, 1);
+    assert.equal(d.asked[0].opts.limit, 60000);
+    assert.ok(d.asked[0].opts.out > 0, JSON.stringify(d.asked[0].opts));
+  };
+  /** The lines she is shown: the line that says the dialog is open, and then at once the ending's own line (not the reading's). */
+  const endsWith = (r, ending) => assert.deepEqual(r.said.slice(0, 2), [CLICK(), ending]);
+  it("ending: her click on Clear it, which is followed by the cleared line", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    const d = dialogs(t, found, CLEAR_IT);
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 0, r.text);
+    endsWith(r, CLEARED(SESSION_NAME, "raw with retakes"));
+    givenALimit(d);
+    t.done();
+  });
+  it("ending: her click on Clear it, when the clearing is then refused, which is followed by a line that says it was not cleared", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    const d = dialogs(t, found, CLEAR_IT, {
+      alive: (pid) => pid === 4242,
+      during: () => {
+        mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+        writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "read" }));
+      }
+    });
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 1);
+    assert.equal(r.said.length, 2);
+    assert.match(r.said[1], RUNNING);
+    assert.equal(r.said[0], CLICK());
+    givenALimit(d);
+    t.done();
+  });
+  it("ending: Cancel, which is followed by 'Not cleared: the session mark stays.'", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    const before = recordsOf(found);
+    const d = dialogs(t, found, CANCELED);
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.said, [CLICK(), NOT_CLEARED]);
+    givenALimit(d);
+    unchanged(t, found, before);
+    t.done();
+  });
+  it("ending: the dialog never opening, which is followed by 'Not cleared: <why> The session mark stays.'", async () => {
+    // osascript failing, osascript not found (runProgram's 127 for a program that cannot start), a run that throws, and an answer that is no button.
+    const endings = [
+      [{ code: 2, stdout: "", stderr: "not allowed to send keystrokes" }, "Not cleared: The dialog could not be shown (osascript ended with code 2). The session mark stays."],
+      [{ code: 127, stderr: "spawn /usr/bin/osascript ENOENT" }, "Not cleared: The dialog could not be shown (osascript ended with code 127). The session mark stays."],
+      [() => { throw new Error("spawn /usr/bin/osascript ENOENT"); }, "Not cleared: The dialog could not be shown. The session mark stays."],
+      [UNREADABLE, "Not cleared: The dialog's answer could not be read. The session mark stays."]
+    ];
+    for (const [answer, ending] of endings) {
+      const t = setup();
+      const found = sessionOf(t);
+      const before = recordsOf(found);
+      const d = dialogs(t, found, answer);
+      const r = await d.ask(...clearing("raw"));
+      assert.equal(r.code, 1, ending);
+      assert.deepEqual(r.said, [CLICK(), ending]);
+      givenALimit(d);
+      unchanged(t, found, before, ending);
+      t.done();
+    }
+  });
+  it("ending: a timeout, when the dialog was not answered within a minute, which is followed by a line that says it was closed", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    const before = recordsOf(found);
+    const d = dialogs(t, found, OUT_OF_TIME);
+    const r = await d.ask(...clearing("raw"));
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.said, [CLICK(), TIMED_OUT]);
+    givenALimit(d);
+    // Nothing is written: the record is byte-identical, there is no claim, no log line, no reading, and no lock is left.
+    unchanged(t, found, before);
+    assert.equal(gated(reread(found)), true);
+    t.done();
+  });
+  it("ending: a timeout, whatever the killed run printed before it was closed: a click it seems to hold clears nothing", async () => {
+    const t = setup();
+    const found = sessionOf(t);
+    const before = recordsOf(found);
+    const d = dialogs(t, found, { ...CLEAR_IT, outOfTime: true });
+    const r = await d.ask(...clearing("raw"));
+    assert.deepEqual([r.code, r.said], [1, [CLICK(), TIMED_OUT]]);
+    unchanged(t, found, before);
     t.done();
   });
 });

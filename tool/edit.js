@@ -3212,8 +3212,12 @@ const CLEAR_BY_KIND = "A session mark is cleared by answering what the video rea
 /** The sentence of the dialog that clears a session mark: its words are hers to read, and only her click on "Clear it" clears the
     mark. The dialog opens with the video's label on a line of its own and a blank line (clickedClear), so that she knows which. */
 const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+/** How long the dialog that clears a session mark stays open, in milliseconds: then it is closed and nothing is cleared. A person
+    who never answers must not hold the command until Claude Code ends it, with the video claimed. */
+export const DIALOG_MS = 60000;
 /** What is said first when a clearing is refused or does not happen: the mark was not cleared. */
 const NOT_CLEARED = "Not cleared:";
+const DIALOG_TIMED_OUT = `${NOT_CLEARED} the dialog was not answered within a minute, so it was closed. The session mark stays.`;
 const TOO_LATE = `${NOT_CLEARED} the dialog was open too long for this to finish in time. Say it again, and click within a minute.`;
 const LOG_NOT_WRITTEN = "The log on this Mac could not be written: the record holds the clearing.";
 /** Why `--clear-session` has nothing to clear on the video `name`: it is no session, or its mark was cleared already. */
@@ -3383,10 +3387,11 @@ function answerWhy(ctx, found, record, plan) {
       run at work;
     - with --clear-session, which clears a session mark by saying what the video really is (never "session"), a dialog on this
       Mac, which Claude cannot press, naming the video: the video is claimed and written only if she clicks "Clear it", and Cancel,
-      or any answer but that click, writes nothing (clickedClear). Her click may come long after the record was read, so the
-      record is read again and the checks of answerWhy are made again before anything is written, and a click so late that the
-      claim's wait would not finish within the command's time (COMMAND_BUDGET_MS) clears nothing (clearedAfterClick). Any
-      refusal after her click says first that it was not cleared, and lets this Mac's claim go again if it had written one;
+      or any answer but that click, or none within DIALOG_MS, writes nothing (clickedClear). Her click may come long after the
+      record was read, so the record is read again and the checks of answerWhy are made again before anything is written, and a
+      click so late that the claim's wait would not finish within the command's time (COMMAND_BUDGET_MS) clears nothing
+      (clearedAfterClick). Any refusal after her click says first that it was not cleared, and lets this Mac's claim go again if
+      it had written one;
     - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
       so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
       the checks are made again on it, right before the answer is written;
@@ -3435,12 +3440,25 @@ export async function kindCommand(ctx, rest) {
 /** Ask her, on a dialog Claude cannot press, to clear the session mark of the video called `label`, and say whether she did: true
     only for her click on "Clear it". The dialog and the line before it name the video by its label, so that two dialogs, or a
     label misread, cannot clear another. Cancel, Escape and a dialog that could not be shown or read are not a click (askDialog
-    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. She is
-    told first to click, since Return presses Cancel. The dialog is shown by this Mac's own `run`, as every program edit.js runs
-    is: no flag or setting stands in for it. */
+    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. So is a
+    dialog not answered within DIALOG_MS: it is run with that limit, which kills osascript and so closes the dialog, and when the
+    run says it was out of time nothing it printed counts, whatever askDialog made of it. Every ending says a line of its own,
+    after the first: the skill that tells her a dialog is about to open never passes that line on. She is told first to click,
+    since Return presses Cancel. The dialog is shown by this Mac's own `run`, as every program edit.js runs is: no flag or setting
+    stands in for it. */
 async function clickedClear(ctx, label) {
   ctx.say(`A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`);
-  const answer = await askDialog(`${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"], run: ctx.deps.run || runProgram });
+  let outOfTime = false;
+  const run = async (cmd, args, opts) => {
+    const done = await (ctx.deps.run || runProgram)(cmd, args, { ...opts, limit: DIALOG_MS });
+    if (done && done.outOfTime === true) outOfTime = true;
+    return done;
+  };
+  const answer = await askDialog(`${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"], run });
+  if (outOfTime) {
+    ctx.say(DIALOG_TIMED_OUT);
+    return false;
+  }
   if (answer && answer.button === "Clear it") return true;
   const why = answer && answer.button === null && typeof answer.why === "string" ? answer.why : "";
   ctx.say(why ? `${NOT_CLEARED} ${why} The session mark stays.` : `${NOT_CLEARED} the session mark stays.`);
