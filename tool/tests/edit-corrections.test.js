@@ -669,16 +669,18 @@ const COMING = `Dropbox is still bringing ${NAME}'s earlier files over to this M
 const SESSION_COMING = `Dropbox is still bringing ${SESSION_NAME}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
 
 describe("fix round 1: files the record lists that are not on this Mac yet", () => {
-  it("1. refuses, writing nothing, while a final/ file the record lists is not here; once Dropbox brings it, sets it aside and lists it no more", async () => {
+  it("1. marks it at once while a final/ file the record lists is not here, and owes it; once Dropbox brings it, the same answer sets it aside and lists it no more", async () => {
+    // Final fix 3: the mark is written at once, so that the gate holds the video; what is here is set aside, and what is not is owed.
     const t = setup();
     handoffVersion(t, 2);
     const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(ID, 1), "final/Pricing talk.transcript.txt": "THE SESSION'S WORDS" });
     rmSync(join(found.folder, "final", "Pricing talk.transcript.txt"));
-    const refused = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
-    assert.deepEqual([refused.code, refused.said], [1, [COMING]]);
-    assert.deepEqual([reread(found).rev, existsSync(join(found.folder, "history")), finalOf(found)], [1, false, ["Pricing talk.brimm-ops.json"]]);
+    const marked = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.equal(marked.code, 0, marked.text);
+    assert.ok(marked.said.includes(`Dropbox is still bringing some of ${SESSION_NAME}'s earlier files over to this Mac: say your answer again in a minute, and they are set aside too.`), marked.text);
+    assert.deepEqual([reread(found).kind, "final/Pricing talk.transcript.txt" in reread(found).files, finalOf(found)], ["session", true, [`${SESSION_NAME}.brimm-ops.json`]]);
     writeFileSync(join(found.folder, "final", "Pricing talk.transcript.txt"), "THE SESSION'S WORDS");
-    const r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(finalOf(found), [`${SESSION_NAME}.brimm-ops.json`]);
     assert.deepEqual(Object.keys(reread(found).files).filter((k) => k.startsWith("final/")), [`final/${SESSION_NAME}.brimm-ops.json`]);

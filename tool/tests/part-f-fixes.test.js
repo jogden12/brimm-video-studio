@@ -5,7 +5,7 @@
 // stand-in. Every name in it is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs, { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -594,6 +594,58 @@ describe("a waiting video whose import matched a video since marked a session, o
       t.done();
     });
   }
+});
+
+describe("\"it was a session after all\" with a listed file of final/ that is not on this Mac (item 3)", () => {
+  const COMING = "Dropbox is still bringing Session, 2026-10-14's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
+  const ASK = `${COMING} Ask Jason if it does not come.`;
+  /** The probe's video: finished and handed off, its final/ listing captions that were deleted by hand. */
+  function gone(t) {
+    const found = handedOff(t);
+    rmSync(join(found.folder, "final", "Pricing talk.srt"));
+    return found;
+  }
+  it("writes the mark at once, sets aside what is here, owes what is not, and sweeps it once it comes; after the first refusal it says to ask Jason", async () => {
+    const t = setup();
+    const found = gone(t);
+    const first = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(first.code, 0, first.text);
+    assert.deepEqual(first.said, [
+      `${SESSION_NAME}: marked a client or group session. Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.`,
+      `The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder: drop it on the BRIMM Ops page.`,
+      `Dropbox is still bringing some of ${SESSION_NAME}'s earlier files over to this Mac: say your answer again in a minute, and they are set aside too.`
+    ]);
+    let record = reread(found);
+    assert.deepEqual([record.kind, record.session.emptyRevision, "final/Pricing talk.srt" in record.files], ["session", 2, true]);
+    assert.deepEqual(finalOf(found), [`${SESSION_NAME}.brimm-ops.json`]);
+    // The gate holds it at once.
+    assert.deepEqual((await on(t.ctx.deps, "show", SESSION_NAME, "transcript")).said, [`${SESSION_NAME} has no transcript yet.`]);
+    // Said again while it is not here: refused, then pointed to Jason.
+    const second = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([second.code, second.said], [1, [COMING]]);
+    const third = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([third.code, third.said], [1, [ASK]]);
+    assert.equal(reread(found).rev, record.rev);
+    // It comes: the same answer sweeps it into history/, and no second empty revision is written.
+    writeFileSync(join(found.folder, "final", "Pricing talk.srt"), "1\n00:00:00,000 --> 00:00:02,000\nHello\n");
+    const fourth = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.equal(fourth.code, 0, fourth.text);
+    record = reread(found);
+    assert.deepEqual([finalOf(found), "final/Pricing talk.srt" in record.files, record.session.emptyRevision, record.finished.revision], [[`${SESSION_NAME}.brimm-ops.json`], false, 2, 2]);
+    assert.ok(listAll(join(found.folder, "history")).some((rel) => rel.endsWith(" Pricing talk.srt")));
+    // Nothing is owed now: the answer again is a session already.
+    const fifth = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([fifth.code, fifth.said], [1, [`${SESSION_NAME} is a client or group session already.`]]);
+    t.done();
+  });
+  it("says to ask Jason after the first refusal of a correction to another kind too, which waits for the file", async () => {
+    const t = setup();
+    gone(t);
+    const NOT = "Dropbox is still bringing Pricing talk's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
+    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [NOT]);
+    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} Ask Jason if it does not come.`]);
+    t.done();
+  });
 });
 
 describe("a command's name is one of edit.js's own (item 21)", () => {

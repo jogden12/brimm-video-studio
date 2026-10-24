@@ -3951,7 +3951,7 @@ function answerWhy(ctx, found, record, plan) {
     if (stored !== "session") return MARK_STAYS;
     // A video answered as a session after it was read as another kind owes the BRIMM Ops page its empty session revision until it
     // is written (a gap in its versions, or this Mac handing off version 1, held it back): the same answer again writes it.
-    if (!plan.again || !revisionOwed(record)) return `${name} is a client or group session already.`;
+    if (!plan.again || !(revisionOwed(record) || sweepOwed(found.folder, record))) return `${name} is a client or group session already.`;
     // The same answer alone writes it: another link now would not be the one it is owed under.
     if (plan.versionOf || plan.unlink) return owedLinked(name);
     plan.owed = true;
@@ -4218,7 +4218,8 @@ async function answerKind(ctx, found, plan, began) {
   if (correcting) {
     const earlier = earlierFiles(found.folder, record, { session: stored === "session" }).rels;
     await broughtOver(ctx, found, earlier.filter((rel) => existsSync(join(found.folder, rel))));
-    if (notReady(ctx, found, earlier).length) return refuse(ctx, asideComing(name));
+    // A correction to a session is written at once, so that the gate holds the video at once: what is not here yet is owed (below).
+    if (stored !== "session" && notReady(ctx, found, earlier).length) return refuse(ctx, comingWhy(ctx, found, name));
   }
   // A session mark is cleared only by her click: asked after the checks and before the claim, so that Cancel writes nothing at all.
   // Her click may come long after the record was read: it is read again and checked again before the claim, or, when this Mac has
@@ -4241,11 +4242,15 @@ async function answerKind(ctx, found, plan, began) {
       return refuse(ctx, stop(late));
     }
   }
-  // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still.
-  const aside = correcting ? earlierFiles(found.folder, base, { session: stored === "session" }) : null;
+  // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still. To a session,
+  // only what is here and whole: a file the record lists that is not stays listed, owed, and the same answer again sweeps it once
+  // Dropbox has brought it (sweepOwed, emptyRevisionAgain).
+  const listedAside = correcting ? earlierFiles(found.folder, base, { session: stored === "session" }) : null;
+  const owed = listedAside && stored === "session" ? notReady(ctx, found, listedAside.rels) : [];
+  const aside = listedAside ? { ...listedAside, rels: listedAside.rels.filter((rel) => !owed.includes(rel)) } : null;
   if (aside && notReady(ctx, found, aside.rels).length) {
     if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
-    return refuse(ctx, stop(asideComing(name)));
+    return refuse(ctx, stop(comingWhy(ctx, found, name)));
   }
   const at = localStamp(new Date(ctx.now()));
   const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
@@ -4286,6 +4291,7 @@ async function answerKind(ctx, found, plan, began) {
   // A session's words, and the words of a video becoming one, name no file and no folder even when its files cannot be set aside.
   const written = aside ? await setAsideWritten(ctx, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(ctx, { ...found, record: base }, next, ""), stayed: [] };
   if (written.code !== 0) return 1;
+  if (aside) forgetComing(ctx, found);
   if (stored === "session") {
     // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
     // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
@@ -4293,6 +4299,7 @@ async function answerKind(ctx, found, plan, began) {
     if (empty && empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
+    if (owed.length) say(owedWords(next.name.text));
     sayVersionsToMark(ctx, found, next);
     return 0;
   }
@@ -4343,6 +4350,34 @@ async function answerKind(ctx, found, plan, began) {
 
 /** What is said while a file a correction sets aside is not on this Mac, or not whole, once it was read through. */
 const asideComing = (name) => `Dropbox is still bringing ${name}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
+/** What a correction to a session says of the files it owes: they were not here to set aside, and the same answer again does. */
+const owedWords = (label) => `Dropbox is still bringing some of ${label}'s earlier files over to this Mac: say your answer again in a minute, and they are set aside too.`;
+/** The note on this Mac that a correction of the episode `found` was refused once for a file not here (comingWhy). */
+const comingNote = (ctx, found) => join(episodeWork(ctx.home, found.name), "aside-coming");
+
+/** Why a correction of the video `name` waits for a file Dropbox has not brought (asideComing): after the first such refusal on this
+    Mac, it says to ask Jason if it does not come, since a file gone for good never will. Which it is is noted on this Mac's own disk,
+    never in the episode, and the note goes once a correction or a sweep is written (forgetComing). */
+function comingWhy(ctx, found, name) {
+  const note = comingNote(ctx, found);
+  if (existsSync(note)) return `${asideComing(name)} Ask Jason if it does not come.`;
+  try {
+    mkdirSync(dirname(note), { recursive: true });
+    writeFileSync(note, "");
+  } catch (e) {
+    // Said the first time again, next time.
+  }
+  return asideComing(name);
+}
+
+/** Forget that a correction of the episode `found` waited for a file (comingWhy): it is written. */
+function forgetComing(ctx, found) {
+  try {
+    rmSync(comingNote(ctx, found), { force: true });
+  } catch (e) {
+    // It says to ask Jason a time early, next time.
+  }
+}
 /** What is said when a correction set a hand-off aside from final/ (spec 2: "the next one written is the next revision"). */
 const handoffAside = (name) => `${name}'s hand-off is set aside in history/: the next one written is its next revision.`;
 /** What is said, naming no file and no folder, when a session's files could not be set aside: `code`, the error's. */
@@ -4368,6 +4403,12 @@ const owedLinked = (label) => `The empty session revision of ${label} is still o
     when it could not write it, and no hand-off has been written for it since (record.finished: its own finish writes a session
     revision too). */
 const revisionOwed = (record) => record.session !== null && typeof record.session === "object" && record.session.emptyRevision === "owed" && !record.finished;
+
+/** Whether a session answered so after it was read as another kind (it has `session.emptyRevision`) still owes a sweep of final/: a
+    file its record lists there, or one there, that is no session's own hand-off (earlierFiles, finalOnly), as one that Dropbox had
+    not brought when it was answered, or brought since. The same answer again sweeps it (emptyRevisionAgain). */
+const sweepOwed = (folder, record) => record.session !== null && typeof record.session === "object" && !Array.isArray(record.session) && record.session.emptyRevision !== undefined
+  && earlierFiles(folder, record, { session: true, finalOnly: true }).rels.length > 0;
 
 /** Whether a file, by its name or its path, is one a reading of Claude's writes: Claude's notes, the Reel suggestions (reels.json and
     the copy she reads) or a session's teachings. A set-aside copy in history/ ("<stamp> <name>") is one too. */
@@ -4649,17 +4690,24 @@ async function emptyRevisionAgain(ctx, found, record) {
   const label = shownName(record);
   const at = localStamp(new Date(ctx.now()));
   const aside = earlierFiles(found.folder, record, { session: true, finalOnly: true });
-  const empty = emptyRevisionOf(ctx, found, record, at, { gone: readBefore(found.folder, record, { rels: aside.rels }) });
-  if (!empty.handoff && !aside.rels.length) return refuse(ctx, `${empty.words} ${OUT_OF_SHARED}`);
+  // An empty revision written already is not written again: only the sweep it still owes (sweepOwed) is made.
+  const empty = revisionOwed(record) ? emptyRevisionOf(ctx, found, record, at, { gone: readBefore(found.folder, record, { rels: aside.rels }) }) : null;
+  if (!(empty && empty.handoff) && !aside.rels.length) return refuse(ctx, empty ? `${empty.words} ${OUT_OF_SHARED}` : `${label} is a client or group session already.`);
   await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(join(found.folder, rel))));
-  if (notReady(ctx, found, aside.rels).length) return refuse(ctx, asideComing(label));
-  const next = empty.handoff ? { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished } : record;
-  const wrote = await setAsideWritten(ctx, found, record, next, aside, empty.handoff, { quiet: true, session: true });
+  if (notReady(ctx, found, aside.rels).length) return refuse(ctx, comingWhy(ctx, found, label));
+  const handoff = empty && empty.handoff;
+  const next = handoff ? { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished } : record;
+  const wrote = await setAsideWritten(ctx, found, record, next, aside, handoff, { quiet: true, session: true });
   if (wrote.code !== 0) return 1;
-  if (empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
-  sayEmpty(ctx, label, empty, wrote.stayed);
+  forgetComing(ctx, found);
+  if (handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
+  if (empty) sayEmpty(ctx, label, empty, wrote.stayed);
+  else {
+    ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
+    if (wrote.stayed.length) ctx.say(stayedWords(label, whatsInFinal(wrote.stayed)));
+  }
   sayVersionsToMark(ctx, found, next);
-  return empty.handoff ? 0 : 1;
+  return !empty || handoff ? 0 : 1;
 }
 
 /** Say which other versions of the video of `record` (a session now, in the episode `found`) she must answer as a session too, each
