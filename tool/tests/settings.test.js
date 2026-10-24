@@ -675,6 +675,20 @@ describe("node settings.js set and sessions", () => {
     assert.equal(t.said.at(-1), `  Teachings from sessions:  lapsed, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`);
     t.done();
   });
+  it("show says the teachings are off, not lapsed, when they were turned on later than now: the clock was set back, as the gate reads it", () => {
+    const t = mac();
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com", "--app-account", "sallie@example.com");
+    const at = readSettings(t.home).settings.sessionTeachings.at;
+    const states = [];
+    for (const days of [-1, 0, 89, 90, 91]) {
+      const said = [];
+      assert.equal(settingsMain(["show"], { home: t.home, say: (line) => said.push(line), now: new Date(Date.parse(at) + days * 86400000) }), 0);
+      states.push(said.at(-1));
+    }
+    const shown = (state) => `  Teachings from sessions:  ${state}, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`;
+    assert.deepEqual(states, [shown("off"), shown("on"), shown("on"), shown("lapsed"), shown("lapsed")]);
+    t.done();
+  });
   it("show says neither account the teachings were turned on for: what it prints may reach a chat", () => {
     const t = mac();
     t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com (Ogden Studio Org)", "--app-account", "sallie@example.com");
