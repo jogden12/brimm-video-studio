@@ -719,6 +719,31 @@ describe("a session mark on a new version whose import matched its earlier versi
   });
 });
 
+describe("the empty revision says its words went to Claude when a reading's files are listed but not here (item 23)", () => {
+  it("at the answer, and when an owed revision is written later", async () => {
+    const t = setup();
+    // Claude's notes from before the switch, which the record lists and Dropbox has not brought.
+    const found = handedOff(t, { files: { "Pricing talk.edit-notes.txt": "notes" } });
+    rmSync(join(found.folder, "Pricing talk.edit-notes.txt"));
+    const r = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. ${GONE}`), r.text);
+    t.done();
+    // Owed: its earlier version is not on this Mac yet, so the revision waits; once it comes, the same answer writes it, and says so.
+    const u = setup();
+    const MISSING = "e-20261001-aaaaaa";
+    const owed = handedOff(u, { over: { versionOf: MISSING }, files: { "Pricing talk.edit-notes.txt": "notes", "final/Pricing talk.brimm-ops.json": handoff2(MISSING, 1) } });
+    rmSync(join(owed.folder, "Pricing talk.edit-notes.txt"));
+    const first = await on(u.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(reread(owed).session.emptyRevision, "owed", first.text);
+    episodeAs(u, { id: MISSING, name: "2026-10-01 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const later = await on(u.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.equal(later.code, 0, later.text);
+    assert.ok(later.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. ${GONE}`), later.text);
+    u.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

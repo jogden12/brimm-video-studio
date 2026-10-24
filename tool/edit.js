@@ -4292,7 +4292,7 @@ async function answerKind(ctx, found, plan, began) {
     // an empty session revision, which redacts what it had (spec 2, "A session answered as something else"). It is judged with the
     // record as it is to be written, its last finish still on it for the version of the hand-off on file.
     if (aside) {
-      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(found.folder, base, { rels: aside.rels, restored: aside.restore.length > 0 }) });
+      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(found.folder, base, { rels: listedAside.rels, restored: aside.restore.length > 0 }) });
       next.session.emptyRevision = empty.handoff ? empty.revision : "owed";
       if (empty.handoff) next.finished = empty.finished;
     }
@@ -4425,11 +4425,12 @@ const sweepOwed = (folder, record) => record.session !== null && typeof record.s
 const readingFile = (rel) => /(?:^|[/ ])reels\.json$|\.(?:edit-notes|reel-suggestions)\.txt$|\.principles\.json$/.test(rel);
 
 /** Whether Claude has read the video of `record`, in the episode's `folder`: its record holds a reading, or held one that a
-    correction let go (null); or the files of one are among `rels` (those set aside now), or were set aside into its history/
-    before; or `restored` (the rules' plan put back, which a raw reading's plan had replaced). Only then do its words say they have
-    gone to Claude. */
+    correction let go (null); or the files of one are among `rels` (those set aside now, and those owed: listed, and not here yet),
+    or the record lists them, or they were set aside into its history/ before; or `restored` (the rules' plan put back, which a raw
+    reading's plan had replaced). Only then do its words say they have gone to Claude. */
 function readBefore(folder, record, { rels = [], restored = false } = {}) {
-  if (record.reading !== undefined || restored || rels.some(readingFile)) return true;
+  const listedFiles = record.files !== null && typeof record.files === "object" ? Object.keys(record.files) : [];
+  if (record.reading !== undefined || restored || [...rels, ...listedFiles].some(readingFile)) return true;
   try {
     return readdirSync(join(folder, "history"), { recursive: true }).some((rel) => readingFile(String(rel)));
   } catch (e) {
