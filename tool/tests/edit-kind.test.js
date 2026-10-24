@@ -276,7 +276,9 @@ describe("kind: a session whose mark she cleared", () => {
     const r = await on(t.ctx.deps, "kind", "Talk with a friend", "session", "--private", "yes", "--again");
     assert.equal(r.code, 0, r.text);
     const record = reread(found);
-    assert.deepEqual(record.session, { marked: AFTER_CLAIM, on: "Mac Studio", teachings: null, cleared: null });
+    // Its words may have gone to Claude while its mark was cleared: an empty session revision is owed the BRIMM Ops page, which this
+    // Mac, handing off version 1, does not write yet (F9b).
+    assert.deepEqual(record.session, { marked: AFTER_CLAIM, on: "Mac Studio", teachings: null, cleared: null, emptyRevision: "owed" });
     assert.equal(record.name.text, sessionLabel(record.video.recorded));
     t.done();
   });
@@ -769,11 +771,14 @@ describe("kind --version-of", () => {
     assert.equal(readEpisode(added.folder).record.versionOf, null);
     t.done();
   });
-  it("(b) gives a video never handed off the versionOf her answer names, null when none: --again without it clears an earlier one", async () => {
+  it("(b, as changed in F9b) gives a video never handed off the versionOf her answer names: --again without it keeps the one it has, --version-of none clears it", async () => {
     const t = setup();
     const { added } = pair(t);
     writeFileSync(recordFile(added.folder, 2), recordText({ ...readEpisode(added.folder).record, rev: 2, kind: "raw", answer: { ...ANSWERED, state: "answered" }, versionOf: ID }));
-    const cleared = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again");
+    const kept = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again");
+    assert.equal(kept.code, 0, kept.text);
+    assert.equal(readEpisode(added.folder).record.versionOf, ID);
+    const cleared = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again", "--version-of", "none");
     assert.equal(cleared.code, 0, cleared.text);
     assert.equal(readEpisode(added.folder).record.versionOf, null);
     const named = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--again", "--version-of", ID);
@@ -1005,8 +1010,9 @@ describe("a video left alone, in the gate's own words", () => {
     const found = waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
     const which = await on(t.ctx.deps, "which", LABEL);
     assert.deepEqual([which.code, which.said, t.opened.length], [0, [`Opened ${LABEL} in QuickTime Player on this Mac.`], 1]);
+    // show prints nothing of it: it opens a read-only copy on this Mac (F9b), here of none, since it has no cut log.
     const show = await on(t.ctx.deps, "show", LABEL, "plan");
-    assert.deepEqual([show.code, show.said], [1, ["Its words are not shown in the chat: you said to leave this video."]]);
+    assert.deepEqual([show.code, show.said], [1, [`${LABEL} has no cut plan yet.`]]);
     const leave = await on(t.ctx.deps, "leave", LABEL);
     assert.deepEqual([leave.code, leave.said], [0, [`${LABEL} is left already. It is not asked about again.`]]);
     assert.equal(reread(found).rev, 1);
@@ -1444,10 +1450,10 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       assert.equal(readEpisode(r.folder).record.versionOf, ID);
       t.done();
     });
-    it("refuses --again with no --version-of, which clears the version it is of", async () => {
+    it("refuses --version-of none, which clears the version it is of (--again alone keeps it, F9b)", async () => {
       const t = setup();
       const { r } = chain(t);
-      const refused = await again(t);
+      const refused = await again(t, "--version-of", "none");
       assert.deepEqual([refused.code, refused.said], [1, [GONE("Third cut", "Coaching call")]]);
       writesNothing(t, r);
       t.done();

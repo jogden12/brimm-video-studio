@@ -18,7 +18,7 @@
 // the video, so that no number is given twice under one id. The record keeps what the call did (`reading`). Before anything is
 // asked, and again just before the call, the record must still be the answer the run was started for. The log and the result
 // name the episode by its name and id, and never quote Claude's reply or the transcript.
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { requestFor, readReading } from "./readings.js";
 import { applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
@@ -203,6 +203,32 @@ function offersFor(spellings, record) {
   return spellings.filter((s) => !known.has(s.heard) && !seen.has(s.heard) && Boolean(seen.add(s.heard)));
 }
 
+
+/** The rules' plan of a raw video as its first reading set it aside in history/ (written(), below): `<moment> <stem>.cut-plan.json`,
+    with its cut log `<moment> <stem>.cut-plan.txt` beside it. { json, txt, text }: their paths from the episode's `folder` (`txt`
+    null when there is no cut log of that moment) and the plan's text, of the newest such plan that Claude has not read (it holds
+    no `claude` block); or null when there is none. A raw video read again starts from it (edit.js, `kind … --again`). */
+export function rulesPlanKept(folder, stem) {
+  let names = [];
+  try {
+    names = readdirSync(join(folder, "history"));
+  } catch (e) {
+    return null;
+  }
+  const ending = ` ${stem}.cut-plan.json`;
+  for (const name of names.filter((n) => n.endsWith(ending)).sort().reverse()) {
+    try {
+      const text = readFileSync(join(folder, "history", name), "utf8");
+      const plan = JSON.parse(text);
+      if (!isObject(plan) || plan.claude || !Array.isArray(plan.phrases)) continue;
+      const txt = `history/${name.slice(0, -ending.length)} ${stem}.cut-plan.txt`;
+      return { json: `history/${name}`, txt: existsSync(join(folder, txt)) ? txt : null, text };
+    } catch (e) {
+      // One that cannot be read is no plan to start from.
+    }
+  }
+  return null;
+}
 
 /** Claude's clips, as clipRanges names one it left out ("Clip 1 was left out: …", "… it overlaps clip 2."), named so that their
     numbers, which are Claude's own, are not taken for the numbers the reading gives the suggestions it keeps. */
@@ -402,7 +428,9 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   if (kind === "raw") {
     // The import's plan, the rules' alone, and its cut log are set aside in history/ by the rule, put in before the reading
     // replaces them, so that a raw reading made again can start from them.
-    if (!plan.claude) {
+    // A rules' plan that `kind … --again` put back from history/ is kept there already, whole: it is not set aside twice.
+    const rules = plan.claude ? null : rulesPlanKept(folder, stem);
+    if (!plan.claude && !(rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) {
       const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
       for (const ending of [".cut-plan.json", ".cut-plan.txt"]) {
         const at_ = join(folder, `${stem}${ending}`);

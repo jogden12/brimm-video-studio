@@ -2,11 +2,12 @@
 // edit.js, and asks whether this Mac has the newest brimm-video. git is a stand-in here: no test runs it.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { writeStudio } from "../studio.js";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
-import { setup, episodeFor, FOLDER } from "./episodes.js";
+import { episodeWork, workFolder } from "../settings.js";
+import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -62,7 +63,111 @@ describe("show", () => {
   });
 });
 
+describe("show, for a video not yet answered, left alone or a session: a read-only copy on this Mac, in TextEdit", () => {
+  const AT = "2026-10-20T15:00:00-05:00";
+  const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+  const SESSION_NAME = "Session, 2026-10-14";
+  const ASKED = { state: "needs your answer", guess: "raw", seen: "wide, 0:23", came: "camera", match: null };
+  const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Mac Studio", on: "Mac Studio", at: AT, private: "yes" };
+  /** Each record the gate holds, and how it is named. */
+  const HELD = [
+    ["a video not yet answered", { version: 3, kind: null, answer: ASKED, label: LABEL }, LABEL],
+    ["a video left alone", { version: 3, kind: null, answer: { ...ASKED, state: "not for brimm-video" }, label: LABEL }, LABEL],
+    ["a session", { version: 3, kind: "session", answer: ANSWERED, label: LABEL, name: { text: SESSION_NAME, placeholder: false }, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } }, SESSION_NAME]
+  ];
+  const WHAT = { transcript: "transcript", notes: "notes from Claude", plan: "cut plan" };
+  /** The episode's folder on this Mac, where the copies are made. */
+  const shownDir = (t) => join(episodeWork(t.home, FOLDER), "shown");
+  /** The made-up episode with `record` laid on it, and its three files, each with words of a client's. */
+  function held(record) {
+    const t = setup();
+    const found = episodeFor(t, { record });
+    for (const [file, text] of Object.values(TEXTS)) writeFileSync(join(found.folder, file), `Jane Doe of Acme. ${text}`);
+    return { t, found };
+  }
+  for (const [what, record, name] of HELD) {
+    it(`copies the file of ${what} into BRIMM Video Work, read-only, opens the copy in TextEdit and prints only that it did`, async () => {
+      const { t, found } = held(record);
+      for (const [kind, [file]] of Object.entries(TEXTS)) {
+        const r = await on(t.ctx.deps, "show", name, kind);
+        assert.deepEqual([r.code, r.text], [0, `Opened ${name}'s ${WHAT[kind]} in TextEdit on this Mac.`], kind);
+        // One copy, of this file alone: the earlier ones are taken away first.
+        const names = readdirSync(shownDir(t));
+        assert.equal(names.length, 1, names.join(", "));
+        const copy = join(shownDir(t), names[0]);
+        assert.equal(readFileSync(copy, "utf8"), readFileSync(join(found.folder, file), "utf8"), kind);
+        assert.equal(statSync(copy).mode & 0o777, 0o444, kind);
+        // Named by how the video is named, never by its file.
+        assert.equal(names[0], `${name.replace(/:/g, "-")} ${WHAT[kind]}.txt`);
+        assert.deepEqual(t.opened[t.opened.length - 1], ["TextEdit", copy]);
+      }
+      // Nothing was brought, started or written into the episode.
+      assert.deepEqual([t.started, reread(found).rev], [[], 1]);
+      t.done();
+    });
+  }
+  it("copies a file Dropbox has not brought whole yet all the same, since reading it brings it, and starts no bring", async () => {
+    const [, record, name] = HELD[0];
+    const { t } = held(record);
+    const r = await on({ ...t.ctx.deps, isWhole: () => false }, "show", name, "transcript");
+    assert.deepEqual([r.code, r.text, t.started], [0, `Opened ${name}'s transcript in TextEdit on this Mac.`, []]);
+    assert.equal(readdirSync(shownDir(t)).length, 1);
+    t.done();
+  });
+  it("says when there is no such file, by the video's name, and opens nothing", async () => {
+    for (const [, record, name] of HELD) {
+      const t = setup();
+      episodeFor(t, { record });
+      const r = await on(t.ctx.deps, "show", name, "notes");
+      assert.deepEqual([r.code, r.text, t.opened], [1, `${name} has no notes from Claude yet.`, []]);
+      t.done();
+    }
+  });
+  it("says so, naming no file, when TextEdit cannot be opened", async () => {
+    const [, record, name] = HELD[0];
+    const { t } = held(record);
+    const r = await on({ ...t.ctx.deps, openApp: () => { throw new Error("TextEdit could not be opened (no such app)"); } }, "show", name, "plan");
+    assert.deepEqual([r.code, r.text], [1, `${name}: TextEdit could not be opened (no such app).`]);
+    t.done();
+  });
+});
+
+describe("show, for a video she has answered", () => {
+  const AT = "2026-10-20T15:00:00-05:00";
+  const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Mac Studio", on: "Mac Studio", at: AT, private: "no" };
+  const ROUGH = "[00:00] Welcome to the show.\n";
+  it("prints a raw video's rough cut transcript as its transcript, and a finished video's or a clip's own, as before", async () => {
+    for (const [kind, expected] of [["raw", ROUGH], ["finished", TEXTS.transcript[1]], ["short video", TEXTS.transcript[1]], ["episode", TEXTS.transcript[1]]]) {
+      const t = setup();
+      const record = kind === "episode" ? {} : { version: 3, kind, answer: ANSWERED, name: { text: "Pricing talk", placeholder: false } };
+      const found = episodeFor(t, { record });
+      writeFileSync(join(found.folder, TEXTS.transcript[0]), TEXTS.transcript[1]);
+      writeFileSync(join(found.folder, "Pricing talk.rough-cut.transcript.txt"), ROUGH);
+      const r = await on(t.ctx.deps, "show", FOLDER, "transcript");
+      assert.deepEqual([r.code, r.text], [0, expected.replace(/\n$/, "")], kind);
+      t.done();
+    }
+  });
+});
+
 describe("behind", () => {
+  it("clears the copies show made of every episode, at the session's start", async () => {
+    const t = setup();
+    const made = [];
+    for (const folder of [FOLDER, "2026-10-15 Another (Mac Studio)"]) {
+      const dir = join(workFolder(t.home), folder, "shown");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "a copy.txt"), "words");
+      made.push(dir);
+    }
+    writeFileSync(join(workFolder(t.home), FOLDER, "kept.txt"), "stays");
+    const r = await on({ ...t.ctx.deps, run: async () => ({ code: 0, stderr: "", stdout: "0\n" }) }, "behind");
+    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+    for (const dir of made) assert.ok(!existsSync(dir), dir);
+    assert.ok(existsSync(join(workFolder(t.home), FOLDER, "kept.txt")));
+    t.done();
+  });
+
   /** A stand-in for git: each call's arguments and options, and the answers given in turn. */
   const git = (...answers) => {
     const calls = [];

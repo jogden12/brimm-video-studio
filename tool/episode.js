@@ -119,10 +119,13 @@ const isEdit = (e, list) => isObject(e) && Object.entries(e).every(([key, text])
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
     when it was cleared, if it was: confirmed by her click on a dialog. Once her teachings are asked for, when (`asked`); and
     what she decided of each item Claude read (`decided`, "kept" or "dropped", by list and number) and what she changed of one
-    (`edits`), which only her command writes (spec 2026-10-22, section 8). */
+    (`edits`), which only her command writes (spec 2026-10-22, section 8). A video read as another kind and answered again as a
+    session owes the BRIMM Ops page an empty session revision (`emptyRevision`): "owed" until it is written, then the revision it
+    was written as (edit.js, `kind … session --again`). */
 const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
   && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))
-  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit));
+  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit))
+  && (x.emptyRevision === undefined || x.emptyRevision === "owed" || (Number.isInteger(x.emptyRevision) && x.emptyRevision >= 1));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
     ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
     own folder. */

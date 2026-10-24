@@ -1,7 +1,7 @@
 // The timeline a push hands to Final Cut, built from the record once the session has given it anything (phase 4).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { REEL_FRAME } from "../reels.js";
@@ -15,7 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { FOLDER, reread } from "./episodes.js";
 import { GUESSED } from "../reels.js";
 import { clockOf, clockOfRanges } from "../clock.js";
-import { layoutOf } from "../episode.js";
+import { layoutOf, recordFile, recordText } from "../episode.js";
 
 const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}((?: [\\w-]+="[^"]*")*)/?>`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/ ([\w-]+)="([^"]*)"/g)].map((a) => [a[1], a[2]])));
 async function on(deps, ...argv) {
@@ -711,6 +711,143 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.match(r.text, /^Reel candidates of Pricing talk\.mp4: 2\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
     assert.match(r.text, /\n   Preview: previews\/reel-2\.mp4\n/);
+    t.done();
+  });
+});
+
+describe("edit.js on the one version model: a render is a version, and only a push was in Final Cut", () => {
+  const STUDIO = "Mac Studio";
+  const LAPTOP = "Sallie's laptop";
+  const V0 = EPISODE.files["edit/main.v0.fcpxml"];
+  /** A raw video she has answered, this Mac holding it, its main video's versions as listed, each one's stored file laid in edit/
+      as the rough cut's own timeline is. */
+  const answeredRaw = (pushed) => {
+    const made = episode({ ...LAYOUT_3.raw, editing: { by: STUDIO, since: AT }, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed, base: null } });
+    for (const p of pushed) if (!existsSync(join(made.found.folder, p.file))) writeFileSync(join(made.found.folder, p.file), V0);
+    return made;
+  };
+  const renderOn = (v, on = STUDIO) => ({ v, how: "render", at: AT, on, file: v ? `edit/main.v${v}.fcpxml` : "edit/main.v0.fcpxml", opened: AT });
+  const pushOn = (v, on = STUDIO) => ({ v, at: AT, on, file: `edit/main.v${v}.${on === STUDIO ? "mac-studio" : "sallie-s-laptop"}.fcpxml`, project: `p${v}` });
+  const ELSEWHERE = (v, on) => `The other Mac has a newer version (v${v}, on ${on}): say "render it here" to see it.`;
+
+  it("pushes without asking about Final Cut when the newest version was rendered", async () => {
+    const { t, found } = answeredRaw([pushOn(1), renderOn(2)]);
+    const r = await on(t.ctx.deps, "push", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Shown in Final Cut as "Pricing- what to charge- main v3 3fa9c1"/);
+    const entry = reread(found).main.pushed.find((p) => p.v === 3);
+    assert.ok(entry && !("how" in entry) && !("answer" in entry), JSON.stringify(entry));
+    t.done();
+  });
+  it("still asks when the newest version was pushed, or when this Mac handed Final Cut a newer one than the record lists", async () => {
+    const { t } = answeredRaw([renderOn(1), pushOn(2)]);
+    const r = await on(t.ctx.deps, "push", FOLDER);
+    assert.deepEqual([r.code, r.text], [1, 'Did you change v2 of Pricing: what to charge? in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.']);
+    t.done();
+    const other = answeredRaw([renderOn(2)]);
+    mkdirSync(pushedFolder(other.t.home, FOLDER), { recursive: true });
+    writeFileSync(join(pushedFolder(other.t.home, FOLDER), "main.v3.mac-studio.fcpxml"), V0);
+    const asked = await on(other.t.ctx.deps, "push", FOLDER);
+    assert.deepEqual([asked.code, asked.text], [1, 'Did you change v3 of Pricing: what to charge? in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.']);
+    other.t.done();
+  });
+  it("reads a time on a rendered newest version without asking about Final Cut", async () => {
+    const { t, found } = answeredRaw([pushOn(1), renderOn(2)]);
+    const r = await on(t.ctx.deps, "text", FOLDER, "add", "lower-third", "--at", "0:03", "--line", "Sallie Ogden");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /on main v2 at 0:03/);
+    assert.equal(reread(found).main.texts.length, 1);
+    t.done();
+  });
+  it("says when the other Mac has a newer version rendered there, and offers to render it here", async () => {
+    const { t } = answeredRaw([renderOn(0), renderOn(1, LAPTOP)]);
+    const r = await on(t.ctx.deps, "text", FOLDER, "add", "lower-third", "--at", "0:03", "--line", "Sallie Ogden");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text.split("\n")[0], ELSEWHERE(1, LAPTOP));
+    const reels = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
+    assert.ok(reels.text.split("\n").includes(ELSEWHERE(1, LAPTOP)), reels.text);
+    t.done();
+  });
+  it("hands Final Cut a version's own stored timeline with push v<n>, not the timeline as the record makes it now", async () => {
+    const { t, found } = answeredRaw([pushOn(1)]);
+    const stored = V0.replace("<spine>", "<spine><!-- as v1 was stored -->");
+    writeFileSync(join(found.folder, pushOn(1).file), stored);
+    // Since v1, a cut was asked for: a plain push would show it.
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, files: { ...reread(found).files, [pushOn(1).file]: Buffer.byteLength(stored) }, main: { ...reread(found).main, cuts: [{ id: "c1", keep: false, from: 13.38, to: 16.3 }] } }));
+    const r = await on(t.ctx.deps, "push", FOLDER, "v1", "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Shown in Final Cut as "Pricing- what to charge- main v2 3fa9c1"/);
+    assert.ok(r.text.includes("It is v1 as it was stored, shown again as a new version."), r.text);
+    const handed = readFileSync(join(pushedFolder(t.home, FOLDER), "main.v2.mac-studio.fcpxml"), "utf8");
+    assert.ok(handed.includes("<!-- as v1 was stored -->"), handed.slice(0, 400));
+    assert.equal(tags(handed, "project")[0].name, "Pricing- what to charge- main v2 3fa9c1");
+    const entry = reread(found).main.pushed.find((p) => p.v === 2);
+    assert.equal(readFileSync(join(found.folder, entry.file), "utf8").includes("<!-- as v1 was stored -->"), true);
+    t.done();
+  });
+  it("hands Final Cut a rendered version's timeline too, and refuses a version the part does not have", async () => {
+    const { t, found } = answeredRaw([renderOn(0)]);
+    const r = await on(t.ctx.deps, "push", FOLDER, "v0");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).main.pushed.map((p) => p.v).join(), "0,1");
+    const none = await on(t.ctx.deps, "push", FOLDER, "v7", "--no-hand-edits");
+    assert.deepEqual([none.code, none.text], [1, "There is no v7 of the main video."]);
+    t.done();
+  });
+  it("hands Final Cut a Reel's stored version too, with push … reel <n> v<k>", async () => {
+    const { t, found } = episode();
+    assert.equal((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).code, 0);
+    const first = reread(found).reels.find((r) => r.n === 2).pushed[0];
+    const marked = readFileSync(join(found.folder, first.file), "utf8").replace("<spine>", "<spine><!-- reel 2 as v1 was stored -->");
+    writeFileSync(join(found.folder, first.file), marked);
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, files: { ...now.files, [first.file]: Buffer.byteLength(marked) } }));
+    const r = await on(t.ctx.deps, "push", FOLDER, "reel", "2", "v1", "--no-hand-edits");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Shown in Final Cut as "Pricing- what to charge- reel 2 v2 3fa9c1"/);
+    const handed = readFileSync(join(pushedFolder(t.home, FOLDER), readdirSync(pushedFolder(t.home, FOLDER)).find((n) => n.startsWith("reel-2.v2"))), "utf8");
+    assert.ok(handed.includes("<!-- reel 2 as v1 was stored -->"));
+    assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2", "v9", "--no-hand-edits")).text, "There is no v9 of Reel 2.");
+    t.done();
+  });
+  it("writes no `how` on a push: a record from before the switch stays at its layout", async () => {
+    const { t, found } = episode();
+    const before = layoutOf(found.record);
+    assert.ok(before < 3);
+    const r = await on(t.ctx.deps, "push", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    const record = reread(found);
+    assert.deepEqual([record.version, record.main.pushed.some((p) => "how" in p)], [layoutOf(record), false]);
+    assert.ok(record.version < 3, String(record.version));
+    t.done();
+  });
+  it("hands an episode over asking nothing about Final Cut for a part whose newest version was rendered", async () => {
+    const { t } = answeredRaw([pushOn(1), renderOn(2)]);
+    const r = await on(t.ctx.deps, "release", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text, "Pricing: what to charge? is handed over. Copied for the other Mac: nothing. Keep this Mac open and online until Dropbox shows the folder is up to date.");
+    t.done();
+    const pushed = answeredRaw([renderOn(1), pushOn(2)]);
+    const asked = await on(pushed.t.ctx.deps, "release", FOLDER);
+    assert.deepEqual([asked.code, asked.text], [1, 'Did you change anything in Final Cut since it was last shown (main v2)? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.']);
+    pushed.t.done();
+  });
+  it("says in the episodes and open lines whether the newest version was rendered or shown in Final Cut", async () => {
+    for (const [pushed, line] of [[[renderOn(0)], "Shown: v0 (rendered), on Mac Studio"], [[renderOn(0), pushOn(1)], "Shown: v1 (in Final Cut), on Mac Studio"], [[pushOn(2), renderOn(1, LAPTOP)], "Shown: v2 (in Final Cut), on Mac Studio"]]) {
+      const { t } = answeredRaw(pushed);
+      const listed = await on(t.ctx.deps, "episodes");
+      assert.ok(listed.text.split("\n").includes(`    ${line}`), listed.text);
+      const opened = await on(t.ctx.deps, "open", FOLDER);
+      assert.ok(opened.text.split("\n").includes(`${line}.`), opened.text);
+      t.done();
+    }
+  });
+  it("opens no preview for a video she has answered, and says nothing of asking Claude again", async () => {
+    const { t } = episode({ ...LAYOUT_3.raw }, {}, EPISODE);
+    const r = await on(t.ctx.deps, "reels", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([t.opened, t.started], [[], []]);
+    assert.ok(!/ask Claude again/i.test(r.text), r.text);
     t.done();
   });
 });

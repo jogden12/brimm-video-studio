@@ -2049,7 +2049,8 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
     p.t.done();
   });
   // An answered video, and a session whose mark is cleared, are not refused for what they are: the checks after those come to
-  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse.
+  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse the detached part. `ask`
+  // itself reads such a video again as its kind (F9: `kind <its kind> --again`), and is not refused for what it is either.
   it("lets an answered video, and a session whose mark is cleared, on to the checks that come after", async () => {
     for (const [what, more] of [
       ["an answered video", { kind: "finished", answer: ANSWERED }],
@@ -2058,11 +2059,12 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
       const p = askable();
       relayout(p.found, more);
       rmSync(join(p.found.folder, "Pricing talk.cut-plan.json"));
-      const r = await askedBoth(p);
+      const now = await editMain(["ask", "--now", FOLDER], p.t.ctx.deps);
       const why = "Pricing talk.mp4 has no cut plan here, so Claude cannot be asked.";
-      assert.deepEqual([r.quick, r.started, r.now, r.claude, r.rev], [1, 0, 1, 0, 1], what);
-      assert.ok(p.t.said().includes(why), `${what}: ${p.t.said()}`);
-      assert.deepEqual(r.failed, [why], what);
+      assert.deepEqual([now, (readResult(p.t.home, FOLDER, "ask") || {}).failed, p.t.calls.filter((c) => c.cmd === "CLAUDE").length, reread(p.found).rev], [1, [why], 0, 1], what);
+      const quick = await editMain(["ask", "Pricing"], p.t.ctx.deps);
+      assert.equal(quick, 0, `${what}: ${p.t.said()}`);
+      assert.deepEqual(p.t.started.map(([, args]) => args.slice(1, 2).concat(args.slice(-4))), [["read", "--kind", "finished", "--rev", String(reread(p.found).rev)]], what);
       p.t.done();
     }
   });

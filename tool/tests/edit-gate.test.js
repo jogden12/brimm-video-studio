@@ -474,12 +474,14 @@ describe("show, which prints a file of an episode into the chat", () => {
       t.done();
     }
   });
+  /** What show says of a file it opened on this Mac instead of printing it (F9b): by the video's label, and what the file is. */
+  const OPENED = { transcript: "transcript", notes: "notes from Claude", plan: "cut plan" };
   it("prints nothing of a video waiting for its answer, or one left alone, and starts no bring, in words that name no episode", async () => {
-    for (const [record, why] of [[UNANSWERED_RECORD, NOT_SHOWN_WAITING], [LEFT_RECORD, NOT_SHOWN_LEFT]]) {
+    for (const record of [UNANSWERED_RECORD, LEFT_RECORD]) {
       const { t, found } = shown(record);
       for (const kind of Object.keys(WORDS)) {
         const r = await on(t.ctx.deps, "show", FOLDER, kind);
-        assert.deepEqual([r.code, r.said, t.started], [1, [why], []], kind);
+        assert.deepEqual([r.code, r.said, t.started], [0, [`Opened ${record.label}'s ${OPENED[kind]} in TextEdit on this Mac.`], []], kind);
         assert.ok(!r.text.includes("Jane") && !r.text.includes(FOLDER), r.text);
       }
       assert.equal(reread(found).rev, 1);
@@ -491,7 +493,7 @@ describe("show, which prints a file of an episode into the chat", () => {
       const { t } = shown(SESSION_RECORD);
       for (const kind of Object.keys(WORDS)) {
         const r = await on(deps(t), "show", FOLDER, kind);
-        assert.deepEqual([r.code, r.said, t.started], [1, [NOT_SHOWN_SESSION], []], kind);
+        assert.deepEqual([r.code, r.said, t.started], [0, [`Opened ${SESSION_RECORD.label}'s ${OPENED[kind]} in TextEdit on this Mac.`], []], kind);
         assert.ok(!r.text.includes("Jane") && !r.text.includes(FOLDER), r.text);
       }
       t.done();

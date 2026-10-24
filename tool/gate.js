@@ -109,9 +109,9 @@ export function gateFor(command, record, { teachingsOn = false, lapsed = false, 
 }
 
 /** Why `show` may not print a file of the episode with this `record` into the chat, in plain words, or "" when it may. The gate
-    lets `show` run for a video not answered and for a session (it names them, and opens nothing), but what it prints goes into
-    Sallie's chat, and a transcript, notes or cut plan hold words said in them. Until `show` opens a read-only copy on this Mac
-    instead, it prints no file of such a record, whether the training gate is on or off. */
+    lets `show` run for a video not answered and for a session, but what it prints goes into Sallie's chat, and a transcript, notes
+    or cut plan hold words said in them. For such a record `show` prints nothing, whether the training gate is on or off: it opens
+    a read-only copy of the file on this Mac instead (edit.js showCopy). */
 export function printWhy(record) {
   if (leftAlone(record)) return "Its words are not shown in the chat: you said to leave this video.";
   if (kindOf(record) === null) return "Its words are not shown in the chat while it waits for its answer.";

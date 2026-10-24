@@ -543,8 +543,8 @@ export function handoffTarget({ root, settings }, { folder, record }) {
   const own = ownFolder ? resolve(ownFolder) : null;
   // A version 2 hand-off in its own final/ or history/ under an id other than the one its versions lead to now: the video went
   // to the page under that id, which never changes (one set aside since, as by a corrected kind, is the page's still).
-  const went = ownFolder ? handoffsAt(ownFolder).find((h) => h.version === VERSION_2 && h.video && isId(h.video.id) && h.video.id !== walked.first) : undefined;
-  if (went) return refused(`${who} went to the BRIMM Ops page under ${went.video.id}, but its versions now lead to ${walked.first}: ask Jason. Nothing was written.`);
+  const went = ownFolder ? wentElsewhere(handoffsAt(ownFolder), walked.first) : undefined;
+  if (went) return refused(movedWords(record, went.video.id, walked.first));
   const taken = new Set();
   for (const at of set.folders) if (resolve(at) !== own) for (const h of handoffsAt(at)) if (handoffFor(h, walked.first)) [...numbersOf(h), ...sessionNumbersOf(h.session)].forEach((n) => taken.add(n));
   return { v2, refusal: "", id: walked.first, revision: revisionIn(set, walked.first, handoffsAt), taken: [...taken].sort((a, b) => a - b) };
@@ -552,6 +552,24 @@ export function handoffTarget({ root, settings }, { folder, record }) {
 
 /** Is this an id brimm-video gives an episode? Only such an id is ever said of a hand-off: it names no one. */
 const isId = (id) => typeof id === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(id);
+
+/** The version 2 hand-off among `handoffs` (a folder's own, in its final/ and history/) that went to the BRIMM Ops page under
+    another id than `first`, the id the video's versions lead to now; or undefined. */
+const wentElsewhere = (handoffs, first) => handoffs.find((h) => h.version === VERSION_2 && h.video && isId(h.video.id) && h.video.id !== first);
+/** Why a video that went to the BRIMM Ops page under the id `went` is refused while its versions lead to `first`: by its name. */
+const movedWords = (record, went, first) => `${shownName(record)} went to the BRIMM Ops page under ${went}, but its versions now lead to ${first}: ask Jason. Nothing was written.`;
+
+/** Why the record in the episode `folder` cannot keep the version it is of as it stands, in handoffTarget's words, or "": a version
+    2 hand-off in its own final/ or history/ went to the BRIMM Ops page under another id than the one its versions lead to now
+    (its earlier version was linked elsewhere since). `kind … --again`, which keeps the link it has, asks this of it again, as the
+    hand-off writers do (handoffTarget). A chain with a gap is not judged here: the writers refuse it in their own words. This
+    only reads. */
+export function movedIdWords(root, folder, record) {
+  const walked = walk(viewOf(root), record, folder);
+  if (walked.gap) return "";
+  const went = wentElsewhere(handoffsBeside(join(folder, "final")), walked.first);
+  return went ? movedWords(record, went.video.id, walked.first) : "";
+}
 
 /** Is there a record of the episode numbered above `n`? */
 function laterRecord(folder, n) {
