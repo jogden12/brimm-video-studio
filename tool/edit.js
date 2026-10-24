@@ -3845,12 +3845,14 @@ const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jas
 const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
 /** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
     session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
-    sessionsBeside), as Episodes holds it now. A match this Mac cannot read says nothing. */
+    sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
+    and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
+    cleared). A match this Mac cannot read says nothing. */
 function matchedSession(links, record) {
   const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
   if (typeof id !== "string" || id === record.id) return false;
   const match = links.find(id);
-  return Boolean(match) && (links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).length > 0);
+  return Boolean(match) && (links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id));
 }
 /** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
     video being answered. */

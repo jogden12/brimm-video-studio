@@ -693,6 +693,32 @@ describe("the README's rows for the commands of the fork (item 7)", () => {
   });
 });
 
+// --- The second wave ---
+
+describe("a session mark on a new version whose import matched its earlier version can be cleared (item 22)", () => {
+  const CLEAR_IT = { code: 0, stdout: "button returned:Clear it\n", stderr: "" };
+  it("answers it a new version of the video it matched, marks it a session, and clears the mark by her click", async () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 2 });
+    episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const found = episodeFor(t, { record: { version: 3, kind: null, label: LABEL, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera", match: OLD } }, files: LIGHT });
+    const dialogs = [];
+    const clicking = { ...t.ctx.deps, run: async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? (dialogs.push(args), CLEAR_IT) : t.ctx.deps.run(cmd, args, opts)) };
+    const answered = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--version-of", "a0a0a0");
+    assert.equal(answered.code, 0, answered.text);
+    assert.equal(reread(found).versionOf, OLD);
+    const marked = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--again");
+    assert.equal(marked.code, 0, marked.text);
+    const label = reread(found).name.text;
+    const cleared = await on(clicking, "kind", label, "finished", "--private", "no", "--again", "--clear-session");
+    assert.equal(cleared.code, 0, cleared.text);
+    assert.ok(cleared.said.includes(`${label}: the session mark is cleared, by your click. It is now finished by your editor.`), cleared.text);
+    assert.equal(dialogs.length, 1);
+    assert.deepEqual([reread(found).kind, reread(found).session.cleared.confirmed], ["finished", "dialog"]);
+    t.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();
