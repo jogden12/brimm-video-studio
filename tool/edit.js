@@ -4898,10 +4898,10 @@ export async function editMain(argv, deps = {}) {
   try {
     return await run(ctx, rest);
   } catch (e) {
-    // Something nobody foresaw stopped a command that found a video not yet answered, or a session: its error may name the
-    // video's file or folder, as a path does, so only its code is said, through the filter, and the command ends there. Any
-    // other is thrown as it always was.
-    if (!ctx.hidden.names.length) throw e;
+    // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or any command on a Mac that
+    // does the light import, where any video's file may be named for a client: its error may name the video's file or folder, as a
+    // path does, so only its code is said, through the filter, and the command ends there. Any other is thrown as it always was.
+    if (!ctx.hidden.names.length && !lightImport(ctx.settings)) throw e;
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
     return 1;
   }
