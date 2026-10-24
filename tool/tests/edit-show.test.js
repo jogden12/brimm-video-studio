@@ -3,9 +3,11 @@
 // loosened on this Mac (spec 2026-10-22, section 7). git is a stand-in here: no test runs it, and each test has a home of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { writeStudio } from "../studio.js";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { episodeWork, workFolder } from "../settings.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
@@ -231,9 +233,9 @@ describe("behind", () => {
       writeFileSync(join(t.home, ".claude", "settings.json"), typeof text === "string" ? text : JSON.stringify(text));
     }
     /** `behind` on that Mac with git finding it up to date, and the git stand-in, to see whether git was asked at all. */
-    async function behindOn(t) {
+    async function behindOn(t, more = {}) {
       const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" });
-      return { ...(await on({ ...t.ctx.deps, run: g.run }, "behind")), g };
+      return { ...(await on({ ...t.ctx.deps, run: g.run, ...more }, "behind")), g };
     }
     /** Every file under `dir` by its path, with what it holds ("<link to …>" for a link, "<folder>" for a folder). */
     function treeOf(dir, found = new Map(), at = dir) {
@@ -247,7 +249,6 @@ describe("behind", () => {
     }
     const LOCAL_WHY = "(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)";
     const HOOKS_WHY = "(Jason: this Mac's ~/.claude/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)";
-    const UNREAD_WHY = "(Jason: this Mac's ~/.claude/settings.json could not be read, so it is not known that hooks are on. Its contents are not shown here.)";
 
     it("goes on as it always did when her folder is as the installer writes it and this Mac's settings leave hooks on", async () => {
       for (const settings of [undefined, {}, { disableAllHooks: false }, { disableAllHooks: false, env: { A: "b" }, hooks: { Stop: [] }, permissions: { allow: ["Bash(ls)"] } }, { permissions: { disableBypassPermissionsMode: "disable" } }]) {
@@ -310,25 +311,25 @@ describe("behind", () => {
       assert.equal(folder, realpathSync(join(t.home, "elsewhere")));
       assert.equal((await behindOn(t)).code, 0);
       writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
-      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [1, `${LOCK}\n${LOCAL_WHY}`]);
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${LOCAL_WHY}`]);
       t.done();
     });
-    it("cannot tell, and so refuses, when this Mac's settings cannot be read as the JSON object they should be, or disableAllHooks is anything but false", async () => {
-      for (const text of ["{ not json", "", "[]", '"hooks"', "null", '{"disableAllHooks": "true"}', '{"disableAllHooks": 1}', '{"disableAllHooks": null}', '{"disableAllHooks": "false"}']) {
+    it("goes on when this Mac's settings are not a JSON object with disableAllHooks true: Claude Code ignores such a file, and only true turns hooks off", async () => {
+      const BOM = "\ufeff";
+      for (const text of ["{ not json", "", "[]", '"hooks"', "null", `${BOM}{"disableAllHooks": true}`, '{\n  // hooks off\n  "disableAllHooks": true\n}', '{"disableAllHooks": true,}',
+        '{"disableAllHooks": "true"}', '{"disableAllHooks": 1}', '{"disableAllHooks": null}', '{"disableAllHooks": "false"}', '{"disableAllHooks": []}']) {
         const { t } = mac();
         userSettings(t, text);
         const r = await behindOn(t);
-        assert.equal(r.code, 1, JSON.stringify(text));
-        assert.equal(r.text.split("\n")[0], LOCK, JSON.stringify(text));
-        assert.ok([HOOKS_WHY, UNREAD_WHY].includes(r.text.split("\n")[1]) && r.text.split("\n").length === 2, `${JSON.stringify(text)}: ${r.text}`);
-        assert.equal(r.g.calls.length, 0);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest brimm-video.", 2], JSON.stringify(text));
         t.done();
       }
-      // A settings file that is not a file cannot be read either.
+      // A settings file that is not a file is no file.
       const { t } = mac();
       mkdirSync(join(t.home, ".claude", "settings.json"), { recursive: true });
       const r = await behindOn(t);
-      assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${UNREAD_WHY}`]);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
       t.done();
     });
     it("cannot tell, and so refuses, when it is not allowed to look for a settings.local.json in her folder", async (c) => {
@@ -347,10 +348,253 @@ describe("behind", () => {
     it("looks at this Mac's settings when it has no folder for Claude, which hooks off would defeat the lock of too; and goes on when they are not", async () => {
       const t = setup();
       userSettings(t, { disableAllHooks: true });
-      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [1, `${LOCK}\n${HOOKS_WHY}`]);
+      const off = await behindOn(t);
+      assert.deepEqual([off.code, off.text], [1, `${LOCK}\n${HOOKS_WHY}`]);
       userSettings(t, { disableAllHooks: false });
-      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [0, "This Mac has the newest brimm-video."]);
+      const on_ = await behindOn(t);
+      assert.deepEqual([on_.code, on_.text], [0, "This Mac has the newest brimm-video."]);
       t.done();
+    });
+    // --- Her folder's own .claude/settings.json: the lock is what it says (fix round 1, item 1) ---
+    const FOLDER_UNREAD_WHY = "(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)";
+    const FOLDER_HOOKS_WHY = "(Jason: her folder's .claude/settings.json does not say disableAllHooks is false, so hooks may be off, and the lock rests on them. Its contents are not shown here.)";
+    const FOLDER_GUARD_WHY = "(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)";
+    const BYPASS = "does not disable Bypass mode (disableBypassPermissionsMode)";
+    const AUTO = "does not disable Auto mode (disableAutoMode)";
+    const modesWhy = (...parts) => `(Jason: her folder's .claude/settings.json ${parts.join(" and ")}. Its contents are not shown here.)`;
+    /** Her folder's settings, changed by `change` (which is given them, and may return nothing), and written back. */
+    function editSettings(folder, change) {
+      const file = join(folder, ".claude", "settings.json");
+      const settings = JSON.parse(readFileSync(file, "utf8"));
+      change(settings);
+      writeFileSync(file, JSON.stringify(settings, null, 2));
+    }
+    const guardOf = (settings) => settings.hooks.PreToolUse[0].hooks[0];
+    it("goes on, as before, when her folder's settings are as the installer writes them", async () => {
+      const { t, folder } = mac();
+      assert.equal(guardOf(JSON.parse(readFileSync(join(folder, ".claude", "settings.json"), "utf8"))).onFailure, "block");
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+      t.done();
+    });
+    it("refuses when her folder's own settings.json no longer holds the lock, saying which part and nothing of what it holds", async () => {
+      const OTHER = { hooks: [{ type: "command", command: "/bin/sh", args: ["/checkout/tool/studio/guard.sh", NODE, "/elsewhere"], onFailure: "block" }] };
+      const cases = [
+        ["hooks turned off", (s) => { s.disableAllHooks = true; }, [FOLDER_HOOKS_WHY]],
+        ["disableAllHooks taken out", (s) => { delete s.disableAllHooks; }, [FOLDER_HOOKS_WHY]],
+        ["disableAllHooks a word", (s) => { s.disableAllHooks = "false"; }, [FOLDER_HOOKS_WHY]],
+        ["disableAllHooks null", (s) => { s.disableAllHooks = null; }, [FOLDER_HOOKS_WHY]],
+        ["the hooks taken out and Bash(*) allowed", (s) => { delete s.hooks; s.permissions.allow = ["Bash(*)"]; }, [FOLDER_GUARD_WHY]],
+        ["no PreToolUse", (s) => { s.hooks = {}; }, [FOLDER_GUARD_WHY]],
+        ["PreToolUse empty", (s) => { s.hooks.PreToolUse = []; }, [FOLDER_GUARD_WHY]],
+        ["PreToolUse not a list", (s) => { s.hooks.PreToolUse = { matcher: "*" }; }, [FOLDER_GUARD_WHY]],
+        ["the guard's matcher narrowed", (s) => { s.hooks.PreToolUse[0].matcher = "Bash"; }, [FOLDER_GUARD_WHY]],
+        ["the guard's matcher empty", (s) => { delete s.hooks.PreToolUse[0].matcher; }, [FOLDER_GUARD_WHY]],
+        ["another command for the hook", (s) => { guardOf(s).command = "/bin/bash"; }, [FOLDER_GUARD_WHY]],
+        ["another type of hook", (s) => { guardOf(s).type = "prompt"; }, [FOLDER_GUARD_WHY]],
+        ["another script for the guard", (s) => { guardOf(s).args[0] = "/checkout/tool/studio/other.sh"; }, [FOLDER_GUARD_WHY]],
+        ["another checkout's guard", (s) => { guardOf(s).args[0] = "/elsewhere/tool/studio/guard.sh"; }, [FOLDER_GUARD_WHY]],
+        ["another folder given to the guard", (s) => { guardOf(s).args[2] = "/elsewhere"; }, [FOLDER_GUARD_WHY]],
+        ["the guard given no folder", (s) => { guardOf(s).args.length = 2; }, [FOLDER_GUARD_WHY]],
+        ["the guard with no args", (s) => { delete guardOf(s).args; }, [FOLDER_GUARD_WHY]],
+        ["a hook that lets a call through when it cannot run", (s) => { guardOf(s).onFailure = "allow"; }, [FOLDER_GUARD_WHY]],
+        ["a hook with no word on failure", (s) => { delete guardOf(s).onFailure; }, [FOLDER_GUARD_WHY]],
+        ["no hook in the entry", (s) => { s.hooks.PreToolUse[0].hooks = []; }, [FOLDER_GUARD_WHY]],
+        ["the guard for another folder only", (s) => { s.hooks.PreToolUse = [{ matcher: "*", ...OTHER }]; }, [FOLDER_GUARD_WHY]],
+        ["Bypass mode not disabled", (s) => { delete s.permissions.disableBypassPermissionsMode; }, [modesWhy(BYPASS)]],
+        ["Bypass mode enabled", (s) => { s.permissions.disableBypassPermissionsMode = "enable"; }, [modesWhy(BYPASS)]],
+        ["Auto mode not disabled", (s) => { delete s.permissions.disableAutoMode; }, [modesWhy(AUTO)]],
+        ["Auto mode enabled", (s) => { s.permissions.disableAutoMode = "enable"; }, [modesWhy(AUTO)]],
+        ["both modes not disabled", (s) => { s.permissions.disableAutoMode = false; s.permissions.disableBypassPermissionsMode = false; }, [modesWhy(BYPASS, AUTO)]],
+        ["no permissions", (s) => { delete s.permissions; }, [modesWhy(BYPASS, AUTO)]],
+        ["hooks off, no guard, modes enabled: each said, hooks first", (s) => { s.disableAllHooks = true; delete s.hooks; s.permissions = {}; }, [FOLDER_HOOKS_WHY, FOLDER_GUARD_WHY, modesWhy(BYPASS, AUTO)]]
+      ];
+      for (const [what, change, lines] of cases) {
+        const { t, folder } = mac();
+        editSettings(folder, (s) => { s.env = { TOKEN: SECRET }; change(s); });
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, [LOCK, ...lines].join("\n"), 0], what);
+        assert.ok(!r.text.includes(SECRET), what);
+        t.done();
+      }
+    });
+    it("refuses when her folder's settings.json is not there, is not JSON, or is not an object, or .claude is a file", async () => {
+      const cases = [
+        ["deleted", (folder) => rmSync(join(folder, ".claude", "settings.json"))],
+        ["not JSON", (folder) => writeFileSync(join(folder, ".claude", "settings.json"), `{ "env": "${SECRET}" `)],
+        ["empty", (folder) => writeFileSync(join(folder, ".claude", "settings.json"), "")],
+        ["a list", (folder) => writeFileSync(join(folder, ".claude", "settings.json"), "[]")],
+        ["null", (folder) => writeFileSync(join(folder, ".claude", "settings.json"), "null")],
+        ["a folder", (folder) => { rmSync(join(folder, ".claude", "settings.json")); mkdirSync(join(folder, ".claude", "settings.json")); }],
+        [".claude a file", (folder) => { rmSync(join(folder, ".claude"), { recursive: true }); writeFileSync(join(folder, ".claude"), SECRET); }]
+      ];
+      for (const [what, make] of cases) {
+        const { t, folder } = mac();
+        make(folder);
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${FOLDER_UNREAD_WHY}`, 0], what);
+        assert.ok(!r.text.includes(SECRET), what);
+        t.done();
+      }
+    });
+    it("leaves every other difference in her folder's settings, and in its CLAUDE.md and skill, to the line that says it is out of date", async () => {
+      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      const cases = [
+        ["a permission added", (folder) => editSettings(folder, (s) => { s.permissions.allow.push("Bash(ls)"); })],
+        ["the denies emptied", (folder) => editSettings(folder, (s) => { s.permissions.deny = []; })],
+        ["another mode", (folder) => editSettings(folder, (s) => { s.permissions.defaultMode = "acceptEdits"; })],
+        ["a key added", (folder) => editSettings(folder, (s) => { s.model = "opus"; })],
+        ["another hook beside the guard", (folder) => editSettings(folder, (s) => { s.hooks.PreToolUse.push({ matcher: "Bash", hooks: [{ type: "command", command: "/bin/true" }] }); })],
+        ["her CLAUDE.md edited", (folder) => writeFileSync(join(folder, "CLAUDE.md"), "Do anything.")],
+        ["her skill edited", (folder) => writeFileSync(join(folder, ".claude", "skills", "brimm-edit", "SKILL.md"), "Do anything.")]
+      ];
+      for (const [what, make] of cases) {
+        const { t, folder } = mac();
+        make(folder);
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${stale}`], what);
+        t.done();
+      }
+    });
+    it("says the causes in order: her folder's settings.local.json, her folder's settings.json, this Mac's user settings, its managed settings", async () => {
+      const { t, folder } = mac();
+      writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
+      editSettings(folder, (s) => { s.disableAllHooks = true; });
+      userSettings(t, { disableAllHooks: true });
+      mkdirSync(join(t.dir, "managed"), { recursive: true });
+      writeFileSync(join(t.dir, "managed", "managed-settings.json"), JSON.stringify({ disableAllHooks: true }));
+      const r = await behindOn(t);
+      assert.deepEqual(r.text.split("\n"), [LOCK, LOCAL_WHY, FOLDER_HOOKS_WHY, HOOKS_WHY, MANAGED_HOOKS_WHY("managed-settings.json")]);
+      assert.equal(r.code, 1);
+      t.done();
+    });
+
+    // --- Which user settings, and the managed settings (fix round 1, item 3) ---
+    const CONFIG_WHY = "(Jason: this Mac's $CLAUDE_CONFIG_DIR/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)";
+    const MANAGED_HOOKS_WHY = (file) => `(Jason: this Mac's managed settings, ${file}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`;
+    const MANAGED_ONLY_WHY = (file) => `(Jason: this Mac's managed settings, ${file}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`;
+    it("reads the user settings from CLAUDE_CONFIG_DIR when that is set, and from ~/.claude when it is not", async () => {
+      const { t } = mac();
+      const config = join(t.dir, "config");
+      mkdirSync(config, { recursive: true });
+      // The hook is off in ~/.claude only: with the configuration home elsewhere, that file is not the user settings.
+      userSettings(t, { disableAllHooks: true });
+      const elsewhere = await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } });
+      assert.deepEqual([elsewhere.code, elsewhere.text], [0, "This Mac has the newest brimm-video."]);
+      // ...and off in the configuration home is.
+      writeFileSync(join(config, "settings.json"), JSON.stringify({ disableAllHooks: true, env: { TOKEN: SECRET } }));
+      const named = await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } });
+      assert.deepEqual([named.code, named.text, named.g.calls.length], [1, `${LOCK}\n${CONFIG_WHY}`, 0]);
+      assert.ok(!named.text.includes(SECRET));
+      // Without the variable, or with it empty, it is ~/.claude's.
+      for (const env of [{}, { CLAUDE_CONFIG_DIR: "" }]) {
+        const home = await behindOn(t, { env });
+        assert.deepEqual([home.code, home.text], [1, `${LOCK}\n${HOOKS_WHY}`], JSON.stringify(env));
+      }
+      t.done();
+    });
+    it("refuses when this Mac's managed settings, or one of their drop-ins, turn hooks off or allow only managed hooks, and says which file", async () => {
+      const managed = (t) => join(t.dir, "managed");
+      const put = (t, name, text) => {
+        mkdirSync(dirname(join(managed(t), name)), { recursive: true });
+        writeFileSync(join(managed(t), name), typeof text === "string" ? text : JSON.stringify(text));
+      };
+      const cases = [
+        ["hooks off", [["managed-settings.json", { disableAllHooks: true, env: { TOKEN: SECRET } }]], [MANAGED_HOOKS_WHY("managed-settings.json")]],
+        ["only managed hooks", [["managed-settings.json", { allowManagedHooksOnly: true }]], [MANAGED_ONLY_WHY("managed-settings.json")]],
+        ["both in one file", [["managed-settings.json", { disableAllHooks: true, allowManagedHooksOnly: true }]], [MANAGED_HOOKS_WHY("managed-settings.json"), MANAGED_ONLY_WHY("managed-settings.json")]],
+        ["a drop-in", [["managed-settings.d/50-hooks.json", { disableAllHooks: true }]], [MANAGED_HOOKS_WHY("managed-settings.d/50-hooks.json")]],
+        ["two drop-ins, in the order Claude Code reads them", [["managed-settings.d/60-b.json", { allowManagedHooksOnly: true }], ["managed-settings.d/10-a.json", { disableAllHooks: true }]], [MANAGED_HOOKS_WHY("managed-settings.d/10-a.json"), MANAGED_ONLY_WHY("managed-settings.d/60-b.json")]],
+        ["the file and a drop-in", [["managed-settings.d/10-a.json", { disableAllHooks: true }], ["managed-settings.json", { disableAllHooks: true }]], [MANAGED_HOOKS_WHY("managed-settings.json"), MANAGED_HOOKS_WHY("managed-settings.d/10-a.json")]],
+        ["a drop-in that is a link", [["managed-settings.d/20-link.json", null]], [MANAGED_HOOKS_WHY("managed-settings.d/20-link.json")]]
+      ];
+      for (const [what, files, lines] of cases) {
+        const { t } = mac();
+        for (const [name, text] of files) {
+          if (text !== null) put(t, name, text);
+          else {
+            put(t, "other/target.json", { disableAllHooks: true });
+            mkdirSync(dirname(join(managed(t), name)), { recursive: true });
+            symlinkSync(join(managed(t), "other", "target.json"), join(managed(t), name));
+          }
+        }
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, [LOCK, ...lines].join("\n"), 0], what);
+        assert.ok(!r.text.includes(SECRET), what);
+        t.done();
+      }
+    });
+    it("goes on when the managed settings say neither, or are files Claude Code would not read", async () => {
+      const BOM = "\ufeff";
+      const cases = [
+        ["managed-settings.json", { disableAllHooks: false, allowManagedHooksOnly: false }],
+        ["managed-settings.json", { env: { A: "b" }, allowManagedPluginsOnly: true }],
+        ["managed-settings.json", { disableAllHooks: "true", allowManagedHooksOnly: 1 }],
+        ["managed-settings.json", "{ not json"],
+        ["managed-settings.json", ""],
+        ["managed-settings.json", "[]"],
+        ["managed-settings.json", `${BOM}{"disableAllHooks": true}`],
+        ["managed-settings.d/10-a.json", '{"disableAllHooks": true,}'],
+        ["managed-settings.d/.hidden.json", { disableAllHooks: true }],
+        ["managed-settings.d/notes.txt", { disableAllHooks: true }],
+        ["managed-settings.d/sub/20-b.json", { disableAllHooks: true }],
+        ["managed-settings.d/x.json/y.json", { disableAllHooks: true }],
+        ["managed-settings.json.bak", { disableAllHooks: true }],
+        ["other-settings.json", { disableAllHooks: true }]
+      ];
+      for (const [name, text] of cases) {
+        const { t } = mac();
+        mkdirSync(dirname(join(t.dir, "managed", name)), { recursive: true });
+        writeFileSync(join(t.dir, "managed", name), typeof text === "string" ? text : JSON.stringify(text));
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], `${name}: ${JSON.stringify(text)}`);
+        t.done();
+      }
+      // A managed settings folder that is not there is the usual case on a Mac nobody manages.
+      const { t } = mac();
+      assert.ok(!existsSync(join(t.dir, "managed")));
+      assert.equal((await behindOn(t)).code, 0);
+      t.done();
+    });
+    it("reads the managed settings from the folder Claude Code uses on a Mac unless it is told another", () => {
+      // The folder is injectable for the tests above; on a Mac it is this one (and Claude Code's drop-ins are in managed-settings.d).
+      assert.match(readFileSync(new URL("../edit.js", import.meta.url), "utf8"), /const MANAGED_DIR = "\/Library\/Application Support\/ClaudeCode";/);
+    });
+
+    // --- When brimm-video has no settings on this Mac (fix round 1, item 4) ---
+    describe("on a Mac with no settings for episodes", () => {
+      const THIS_CHECKOUT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+      /** A home with no settings for brimm-video, the managed folder and the environment of the test, and what `behind` says there. */
+      async function bare(prepare = () => {}) {
+        const dir = mkdtempSync(join(tmpdir(), "brimm-lock-"));
+        const home = join(dir, "home");
+        mkdirSync(home, { recursive: true });
+        prepare(home);
+        const said = [];
+        const code = await editMain(["behind"], { home, say: (line) => said.push(line), env: {}, managedDir: join(dir, "managed"), run: async () => assert.fail("git is not run") });
+        rmSync(dir, { recursive: true, force: true });
+        return { code, text: said.join("\n") };
+      }
+      const NOT_SET_UP = "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it.";
+      it("is as it was when the lock holds, or there is no folder", async () => {
+        assert.deepEqual(await bare(), { code: 2, text: NOT_SET_UP });
+        assert.deepEqual(await bare((home) => writeStudio(home, { checkout: THIS_CHECKOUT, node: NODE })), { code: 2, text: NOT_SET_UP });
+      });
+      it("still refuses when the lock is loosened: her folder's settings.local.json or settings, or the user settings", async () => {
+        const local = await bare((home) => writeFileSync(join(writeStudio(home, { checkout: THIS_CHECKOUT, node: NODE }), ".claude", "settings.local.json"), "{}"));
+        assert.deepEqual(local, { code: 1, text: `${LOCK}\n${LOCAL_WHY}` });
+        const hooks = await bare((home) => {
+          mkdirSync(join(home, ".claude"), { recursive: true });
+          writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ disableAllHooks: true }));
+        });
+        assert.deepEqual(hooks, { code: 1, text: `${LOCK}\n${HOOKS_WHY}` });
+        const folder = await bare((home) => editSettings(writeStudio(home, { checkout: THIS_CHECKOUT, node: NODE }), (s) => { s.disableAllHooks = true; }));
+        assert.deepEqual(folder, { code: 1, text: `${LOCK}\n${FOLDER_HOOKS_WHY}` });
+      });
+      it("takes the checkout this edit.js runs from for the guard her folder's settings should name", async () => {
+        const other = await bare((home) => writeStudio(home, { checkout: "/elsewhere", node: NODE }));
+        assert.deepEqual(other, { code: 1, text: `${LOCK}\n${FOLDER_GUARD_WHY}` });
+      });
     });
     it("writes nothing when it refuses, and still clears the copies show made", async () => {
       const { t, folder } = mac();
@@ -373,9 +617,43 @@ describe("behind", () => {
       assert.equal((await behindOn(t)).code, 1);
       assert.equal((await behindOn(t)).code, 1);
       rmSync(local);
-      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [0, "This Mac has the newest brimm-video."]);
+      const put = await behindOn(t);
+      assert.deepEqual([put.code, put.text], [0, "This Mac has the newest brimm-video."]);
       t.done();
     });
+  });
+  it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there; otherwise Homebrew's", async () => {
+    // The folder's settings are a file she can change, and Jason is told to run what this line prints.
+    const HOMEBREW = "/opt/homebrew/bin/node";
+    const said = (node) => `Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${node}, then start a new session in her Claude folder)`;
+    const t = setup();
+    const bin = join(t.home, "bin");
+    mkdirSync(join(bin, "newline\n--evil"), { recursive: true });
+    for (const file of [join(bin, "node"), join(bin, "sh"), join(bin, "newline\n--evil", "node")]) writeFileSync(file, "");
+    const cases = [
+      [join(bin, "node"), join(bin, "node")],
+      [join(t.home, "nowhere", "node"), HOMEBREW],
+      [join(bin, "sh"), HOMEBREW],
+      [join(bin, "newline\n--evil", "node"), HOMEBREW],
+      ["node", HOMEBREW],
+      ["../bin/node", HOMEBREW],
+      [`${join(bin, "node")}; echo hi`, HOMEBREW],
+      ["", HOMEBREW],
+      [42, HOMEBREW],
+      [["x"], HOMEBREW],
+      [{ a: 1 }, HOMEBREW]
+    ];
+    for (const [node, printed] of cases) {
+      const folder = writeStudio(t.home, { checkout: "/checkout", node: HOMEBREW });
+      const file = join(folder, ".claude", "settings.json");
+      const settings = JSON.parse(readFileSync(file, "utf8"));
+      settings.hooks.PreToolUse[0].hooks[0].args[1] = node;
+      writeFileSync(file, JSON.stringify(settings, null, 2));
+      const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" });
+      const r = await on({ ...t.ctx.deps, run: g.run }, "behind");
+      assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${said(printed)}`], JSON.stringify(node));
+    }
+    t.done();
   });
   it("says it could not check when git cannot fetch, runs out of time, or answers something else, and still ends with 0", async () => {
     const t = setup();

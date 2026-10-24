@@ -90,6 +90,9 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
+    // No test reads this computer's own Claude settings: `behind` looks at the environment and the managed settings folder
+    // (edit.js lockLoosened), and here they are empty and in the test's own folder.
+    env: {}, managedDir: join(dir, "managed"),
     wait: async (ms) => {
       waits.push(ms);
       clock += ms;

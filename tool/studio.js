@@ -6,9 +6,10 @@
 // folder's mode is "default", not dontAsk: dontAsk denies AskUserQuestion, the card she answers what a video is on (spec
 // 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
 // settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
-// off. A .claude/settings.local.json in her folder, or her user settings (~/.claude/settings.json) that turn hooks off, are
-// not for this file but for `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to
-// ask Jason, when either is so. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
+// off. What a settings file in her folder, or the user's or the managed settings, can change of that is not for this file but for
+// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when her folder has
+// a .claude/settings.local.json, when its own .claude/settings.json no longer holds the lock (lockBroken, here), or when the user
+// settings or the managed settings turn hooks off. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
 // edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
@@ -39,6 +40,28 @@ function settingsOf({ checkout, node, folder }) {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
     }
   };
+}
+
+/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on,
+    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is not false), "guard" (no entry with the guard
+    hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
+    node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
+    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date". */
+export function lockBroken(settings, { checkout, folder }) {
+  const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const want = settingsOf({ checkout, node: "", folder });
+  const entry = want.hooks.PreToolUse[0];
+  const hook = entry.hooks[0];
+  const broken = [];
+  if (settings.disableAllHooks !== want.disableAllHooks) broken.push("hooks");
+  const entries = object(settings.hooks) && Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : [];
+  const guarded = entries.some((e) => object(e) && e.matcher === entry.matcher && Array.isArray(e.hooks)
+    && e.hooks.some((h) => object(h) && h.type === hook.type && h.command === hook.command && h.onFailure === hook.onFailure && Array.isArray(h.args) && h.args[0] === hook.args[0] && h.args[2] === hook.args[2]));
+  if (!guarded) broken.push("guard");
+  const permissions = object(settings.permissions) ? settings.permissions : {};
+  if (permissions.disableBypassPermissionsMode !== want.permissions.disableBypassPermissionsMode) broken.push("bypass");
+  if (permissions.disableAutoMode !== want.permissions.disableAutoMode) broken.push("auto");
+  return broken;
 }
 
 /** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. */

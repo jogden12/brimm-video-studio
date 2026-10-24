@@ -9,8 +9,10 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio.js";
-import { COMMAND_NAMES, HELP, LOCK_CHANGED } from "../edit.js";
+import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain } from "../edit.js";
 import { EDITS } from "../sessions.js";
+import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
+import { episode } from "./phase4.js";
 
 const CHECKOUT = "/Users/sallie/Claude Code/BRIMM video";
 const FOLDER = "/Users/sallie/BRIMM Video Studio";
@@ -329,25 +331,42 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(start.indexOf(trigger[0]) < start.indexOf("Then run `episodes`"), start);
     assert.doesNotMatch(start, /settings\.local|disableAllHooks/);
   });
-  it("uses only the flags edit.js's help gives each command, so that a flag renamed there fails here", () => {
-    // HELP's entries by command: an entry starts at "  node edit.js <command>" and runs to the next such line. A command may have
-    // several (title, push, reel, cut, text), which are read as one. "--<what>" stands for the fields she may change (EDITS).
-    const entries = new Map();
-    let at = null;
+  /** HELP's usage lines, each as { command, keys, text }: a line starts at "  node edit.js <command>", its usage runs to the column where
+      the description starts (two spaces or more), and goes on in the lines indented 21 spaces ("                     [--again]").
+      The description lines (indented 40) are not usage. `keys` are the subcommands the usage is for: "pick" and "drop" for
+      "reel pick|drop …", and "" for a usage that goes on with a quoted word, a bracket or nothing ("reel "<label>" …"). */
+  const subcommandsOf = (words) => (/^[a-z]+(\|[a-z]+)*$/.test(words[0] || "") ? words[0].split("|") : [""]);
+  const usages = (() => {
+    const found = [];
     for (const line of HELP.split("\n")) {
-      const starts = /^  node edit\.js (\S+)/.exec(line);
-      if (starts) at = starts[1];
-      if (at) entries.set(at, `${entries.get(at) || ""}${line}\n`);
+      const head = /^  node edit\.js (\S+)\s?(.*)$/.exec(line);
+      if (head) {
+        const text = head[2].split(/\s{2,}/)[0];
+        found.push({ command: head[1], keys: subcommandsOf(text.split(" ")), text });
+      } else if (/^ {21}\S/.test(line) && found.length) found[found.length - 1].text += ` ${line.trim()}`;
     }
-    const flagsIn = (text) => [...text.matchAll(/(?<![\w-])--[a-z][a-z_-]*/g)].map((m) => m[0]);
-    const editable = Object.values(EDITS).flat().map((field) => `--${field}`);
+    return found;
+  })();
+  const flagsIn = (text) => [...text.matchAll(/(?<![\w-])--[a-z][a-z_-]*/g)].map((m) => m[0]);
+  /** Which list of items a command edits with "--<what>" (HELP's placeholder): principles and ideas have their own fields, and the recurring
+      principles theirs (sessions.js EDITS). */
+  const listOf = (command, words) => (command === "ideas" ? "reelIdeas" : command === "principles" ? (words.includes("recurring") ? "recurringPrinciples" : "principles") : null);
+  /** The flags HELP gives `command` run with `words` (the words after it): those of its usage lines for that subcommand, and for
+      "--<what>" the fields she may change in that list. */
+  const flagsHelpGives = (command, words) => {
+    const [key] = subcommandsOf(words);
+    const mine = usages.filter((u) => u.command === command && u.keys.includes(key));
+    const list = listOf(command, words);
+    return new Set(mine.flatMap((u) => [...flagsIn(u.text), ...(u.text.includes("--<what>") && list ? EDITS[list].map((field) => `--${field}`) : [])]));
+  };
+  it("uses only the flags edit.js's help gives each command's usage, by subcommand, so that a flag renamed there fails here", () => {
     const seen = new Set();
     for (const span of commands) {
-      const command = span.split(" ")[0];
-      assert.ok(entries.has(command), `edit.js's help has no entry for ${command}, which the skill runs`);
-      const given = new Set([...flagsIn(entries.get(command)), ...(entries.get(command).includes("--<what>") ? editable : [])]);
+      const [command, ...words] = span.split(" ");
+      assert.ok(usages.some((u) => u.command === command), `edit.js's help has no usage for ${command}, which the skill runs`);
+      const given = flagsHelpGives(command, words);
       for (const flag of flagsIn(span)) {
-        assert.ok(given.has(flag), `the skill runs ${command} with ${flag}, which edit.js's help does not give it: ${span}`);
+        assert.ok(given.has(flag), `the skill runs ${command} with ${flag}, which the usage of ${command}${subcommandsOf(words)[0] ? ` ${subcommandsOf(words)[0]}` : ""} in edit.js's help does not give it: ${span}`);
         seen.add(`${command} ${flag}`);
       }
     }
@@ -356,15 +375,88 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
     }
     // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).
-    const anywhere = new Set([...flagsIn(HELP), ...editable]);
+    const anywhere = new Set([...usages.flatMap((u) => flagsIn(u.text)), ...Object.values(EDITS).flat().map((field) => `--${field}`)]);
     const alone = [...new Set([...skill.matchAll(/`(--[a-z][a-z_-]*)[^`]*`/g)].map((m) => m[1]))];
     assert.ok(alone.length >= 15, alone.join(" "));
     for (const flag of alone) assert.ok(anywhere.has(flag), `the skill names ${flag}, which edit.js's help does not give`);
   });
+  it("gives a flag to the subcommand whose usage has it, and the editable fields to the list that has them", () => {
+    // reel pick|drop has no --client-agreed, though another usage of reel has; and --name is a principle's field, not a Reel idea's.
+    assert.ok(flagsHelpGives("reel", ['"<label>"', "2", "--client-agreed"]).has("--client-agreed"));
+    assert.ok(!flagsHelpGives("reel", ["pick", '"<episode>"', "1"]).has("--client-agreed"));
+    assert.ok(!flagsHelpGives("reel", ["drop", '"<episode>"', "1"]).has("--client-agreed"));
+    assert.ok(flagsHelpGives("principles", ['"<label>"', "edit", "3"]).has("--name"));
+    assert.ok(!flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--name"));
+    assert.ok(flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--text"));
+    assert.ok(!flagsHelpGives("ideas", ['"<label>"', "edit", "1"]).has("--text"));
+    assert.ok(flagsHelpGives("ideas", ['"<label>"', "edit", "1"]).has("--why"));
+    // The usage lines stop where the description starts: a flag that only the description names is not given.
+    assert.ok(!flagsHelpGives("kind", ['"<label>"']).has("--clear-sess"));
+    assert.ok(flagsHelpGives("kind", ['"<label>"']).has("--clear-session"));
+  });
+  it("runs every command of the skill in a world holding its video: none prints the help or ends with 2, and each flag changes what edit.js does, bar the known few", async () => {
+    // A flag renamed only in a parser, with HELP left as it was, is not seen by the help's usage lines above. So each command is run
+    // in a world of its own (phase4.js's made-up episode, with stand-ins for every program) holding the video it names: a video
+    // waiting for its answer for kind, leave and which; a session for what a session is asked (teachings, principles, ideas, finish,
+    // a client's agreement, and clearing a mark); and the made-up episode for the rest. It must be taken (no help, no exit 2), and
+    // run again with each of its flags put for a flag edit.js has not got (--zzz), it must do something else: a flag the parser no
+    // longer knows is the same as that one. Flags that change nothing in these worlds are the known exceptions, listed below: a
+    // flag that joins them, or leaves them, fails here.
+    const AT = "2026-10-20T15:00:00-05:00";
+    const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Mac Studio", on: "Mac Studio", at: AT, private: "yes" };
+    const UNANSWERED = { label: "Video of 14 Oct, 09:12 (Mac Studio)", record: { version: 3, kind: null, answer: { state: "needs your answer", guess: "raw", seen: "wide, 0:23", came: "camera", match: null }, label: "Video of 14 Oct, 09:12 (Mac Studio)" } };
+    const SESSION = { label: "Session, 2026-10-14", record: { version: 3, kind: "session", answer: ANSWERED, label: "Video of 14 Oct, 09:12 (Mac Studio)", name: { text: "Session, 2026-10-14", placeholder: false }, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } } };
+    const KNOWN_INERT = [
+      'kind "<label>" finished --private no --not-a-session [--not-a-session]', // a camera video is no Zoom download
+      'open "<episode>" --take-over [--take-over]', // no other Mac has the episode
+      'finish "<episode>" --yes [--yes]', // the main video was never shown in Final Cut, which it says first
+      'resolve "<episode>" --keep A [--keep]', // there is no conflict, whatever is kept
+      'principles "<label>" edit 3 --name "<words>" [--name]' // teachings are not turned on in this world
+    ];
+    const inWorld = (span) => {
+      const command = span.split(" ")[0];
+      if (!span.includes("<label>")) return { made: null, name: FOLDER_NAME };
+      return span.includes("--clear-session") || !["kind", "leave", "which"].includes(command) ? { made: SESSION, name: SESSION.label } : { made: UNANSWERED, name: UNANSWERED.label };
+    };
+    /** A command of the skill as the words Claude would pass: its placeholders filled with made-up ones, its quotes taken off. */
+    const argvOf = (span, name) => [...span.matchAll(/"[^"]*"|'[^']*'|\S+/g)].map((m) => m[0].replace(/^"(.*)"$|^'(.*)'$/s, "$1$2").replace(/<kind>/g, "finished").replace(/<id>/g, "0d0d0d").replace(/<(label|video|episode)>/g, name).replace(/<[^>]*>/g, "Pricing talk"));
+    /** What edit.js does with `span`, its words changed by `change`, in a world of its own: its exit code and what it says. */
+    async function run(span, change = (words) => words) {
+      const { t } = episode();
+      const { made, name } = inWorld(span);
+      if (made) episodeAs(t, { id: "e-20261014-5a5a5a", name: "2026-10-14 Talk (Mac Studio)", record: made.record });
+      const deps = {
+        ...t.ctx.deps, statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }), kickstart: () => {}, agentRunning: () => false, running: async () => false,
+        run: async (cmd, args, asked) => (cmd === "/usr/bin/git" ? { code: 0, stdout: "0\n", stderr: "" } : t.ctx.deps.run(cmd, args, asked))
+      };
+      const said = [];
+      const code = await editMain(change(argvOf(span, name)), { ...deps, say: (line) => said.push(line) });
+      const text = said.join("\n").split(t.dir).join("<dir>");
+      t.done();
+      return { code, text };
+    }
+    const inert = [];
+    const ran = [];
+    for (const span of [...new Set(commands.filter((c) => c.includes(" ") || ["episodes", "behind", "status"].includes(c)))]) {
+      const base = await run(span);
+      assert.ok(base.code !== 2 && !base.text.startsWith("The command line for episodes on this Mac"), `edit.js does not take what the skill runs: ${span}: ${base.code} ${base.text.split("\n")[0]}`);
+      assert.deepEqual(await run(span), base, `${span} does not do the same twice`);
+      ran.push(span);
+      const words = argvOf(span, "X");
+      for (const [at, word] of words.entries()) {
+        if (!/^--[a-z]/.test(word)) continue;
+        const other = await run(span, (given) => given.map((w, i) => (i === at ? "--zzz" : w)));
+        if (other.code === base.code && other.text === base.text) inert.push(`${span} [${word}]`);
+      }
+    }
+    assert.ok(ran.length >= 60, `${ran.length} commands run`);
+    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"']) assert.ok(ran.includes(span), span);
+    assert.deepEqual(inert, KNOWN_INERT, "the flags that change nothing in these worlds are not the known ones");
+  });
   it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
     const head = source("studio.js").split("\n").filter((line) => line.startsWith("//")).join("\n");
     for (const words of ["`behind`", "lockLoosened", ".claude/settings.local.json", "turn hooks off"]) assert.ok(head.includes(words), words);
-    assert.match(source("edit.js"), /\nfunction lockLoosened\(ctx\) \{/);
+    assert.match(source("edit.js"), /\nfunction lockLoosened\(/);
   });
   it("tells her never to rate, report or share a chat about a session, in the skill and in her CLAUDE.md", () => {
     for (const text of [skill, files["CLAUDE.md"]]) assert.match(text, /Never rate, report or share a chat about a session/);

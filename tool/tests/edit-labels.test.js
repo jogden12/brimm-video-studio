@@ -786,6 +786,59 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     rmSync(other.folder, { recursive: true, force: true });
     t.done();
   });
+  it("leaves out the Maybe line when the match's chain has a gap or a loop, or holds the waiting video itself, as `kind --version-of` refuses such a target", async () => {
+    // B waits, and its words matched A. `kind --version-of A` is refused when A's chain cannot be followed to its first (an episode not
+    // on this Mac, or a loop), and when A is already a version of B (answerWhy: links.gapOf, links.chainOf).
+    const A = { ...TARGET, over: { kind: "finished", answer: ANSWERED, name: NAMED } };
+    const C = { folder: "2026-10-17 Older talk (Mac Studio)", video: "Older talk.mov", id: "e-20261017-5c5c5c", label: "Video of 17 Oct, 09:00 (Mac Studio)" };
+    const OLDER = { kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } };
+    const WAITING_ID = "e-20261020-a1b2c3";
+    const lines = ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"];
+    const said = async (t) => (await cardOf(t)).lines;
+    const kindRefused = async (t) => (await on(depsOf(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d")).said.join("\n");
+    // The control: A a version of an episode that is here, and that of another, offers A.
+    {
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: C.id } }, { ...C, over: OLDER });
+      assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+      t.done();
+    }
+    // A gap: A is a version of an episode this Mac does not have.
+    {
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: "e-20261001-9f9f9f" } });
+      assert.deepEqual(await said(t), lines);
+      assert.match(await kindRefused(t), /is a new version of a video that is not on this Mac yet/);
+      t.done();
+    }
+    // A loop: A is a version of C, which is a version of A.
+    {
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: C.id } }, { ...C, over: { ...OLDER, versionOf: TARGET.id } });
+      assert.deepEqual(await said(t), lines);
+      assert.match(await kindRefused(t), /each say they are a version of the other/);
+      t.done();
+    }
+    // A longer loop, A to C to D to C: A's own chain ends in a circle it is not in.
+    {
+      const D = { folder: "2026-10-16 Oldest talk (Mac Studio)", video: "Oldest talk.mov", id: "e-20261016-6d6d6d", label: "Video of 16 Oct, 09:00 (Mac Studio)" };
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: C.id } }, { ...C, over: { ...OLDER, versionOf: D.id } }, { ...D, over: { ...OLDER, versionOf: C.id } });
+      assert.deepEqual(await said(t), lines);
+      assert.match(await kindRefused(t), /in a circle/);
+      t.done();
+    }
+    // The waiting video itself in A's chain: A is a version of B (a video that was matched to B's words, say, and answered since).
+    {
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: WAITING_ID } });
+      assert.deepEqual(await said(t), lines);
+      assert.match(await kindRefused(t), /is already a version of it/);
+      t.done();
+    }
+    // ...or further back in it: A is a version of C, which is a version of B.
+    {
+      const { t } = waiting({ match: TARGET.id }, { ...A, over: { ...A.over, versionOf: C.id } }, { ...C, over: { ...OLDER, versionOf: WAITING_ID } });
+      assert.deepEqual(await said(t), lines);
+      assert.match(await kindRefused(t), /is already a version of it/);
+      t.done();
+    }
+  });
   it("says nothing of the card under a video she answered, left alone, or a session, whatever its answer holds", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });

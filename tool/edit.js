@@ -31,7 +31,7 @@ import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
@@ -64,7 +64,7 @@ import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
-import { studioFiles, studioFolder } from "./studio.js";
+import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 
@@ -179,10 +179,13 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         take whole phrases out, at a pause, as read on the timeline; or keep what was
                                         cut, by its words or at the join nearest a time on the timeline`;
 
+/** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
+const homeOf = (deps) => deps.home || process.env.HOME || homedir();
+
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
 export function contextFor(deps = {}) {
-  const home = deps.home || process.env.HOME || homedir();
+  const home = homeOf(deps);
   const got = deps.settings ? { settings: deps.settings } : readSettings(home);
   if (!got.settings) return { why: "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
   const { settings } = got;
@@ -524,10 +527,11 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
     known by that record, is not the video itself, is not archived, was not written by a newer brimm-video, and has every record
     it is known by, the one in force and each conflicted copy, answered and neither gated nor a session (gate.js gated, which
     reads a video not answered or left alone, and a session not cleared). An episode with one record that is not is named by its
-    label in its own line, and would be given away by its name in this one. Nor is it offered when one of its versions is a
-    session not cleared: `links` (finish.js linksOf) gives the versions of the video it starts from, earlier, later and beside it,
-    each by its record and its conflicted copies, as answerWhy reads them for `kind --version-of`, which refuses such a target.
-    It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). */
+    label in its own line, and would be given away by its name in this one. Nor is it offered when `kind --version-of` would refuse
+    it for what links it: `links` (finish.js linksOf) is asked as answerWhy asks it, whether its chain of versions cannot be followed to
+    its first (a gap: an episode not on this Mac; or a loop), whether that chain holds the waiting video itself, and whether one of
+    the versions of the video it starts from, earlier, later and beside it, is a session not cleared (in the record or a conflicted
+    copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). */
 function cardLines(named, others, links) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
@@ -537,6 +541,7 @@ function cardLines(named, others, links) {
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
   if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
+    && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
     && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
     lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
   }
@@ -2094,20 +2099,42 @@ const BEHIND_MS = 20000;
     for these words (tests/studio.test.js). */
 export const LOCK_CHANGED = "This folder's lock is changed on this Mac: ask Jason before going on.";
 
+/** Where Claude Code reads this Mac's managed settings (a Mac's folder: managed-settings.json, and managed-settings.d/*.json beside it,
+    read in the order of their names). A test gives another, as `managedDir` in its deps. */
+const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
+
+/** A settings file as the object Claude Code reads from it, or null: it is not there, cannot be read, is not JSON (a byte-order mark,
+    a comment and a comma at the end are not JSON) or is not an object. Claude Code leaves such a file out. */
+function settingsObject(file) {
+  try {
+    const settings = JSON.parse(readFileSync(file, "utf8"));
+    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** `behind`: whether the lock on her folder for Claude has been loosened on this Mac (spec 2026-10-22, section 7), as the lines
-    `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The
-    lock rests on a guard hook (studio.js), which a settings file in her folder or her user settings can turn off, so two files
-    are looked at, and no other, and nothing is written:
+    `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The lock
+    rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and nothing is written.
+    `home` and `deps` are the command's (deps.env and deps.managedDir are a test's own), and `checkout` is the one the guard is run
+    from. In this order:
     - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
       anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
-    - this Mac's ~/.claude/settings.json, whether or not she has a folder: it turns hooks off when disableAllHooks is there and is
-      not false, and when it is there but cannot be read as a JSON object it is not known that it does not, so that is said too.
-    A file that is not there, or whose disableAllHooks is false or not there, loosens nothing. */
-function lockLoosened(ctx) {
+    - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it no
+      longer says disableAllHooks is false, no longer has the guard hook settingsOf writes, or no longer turns Bypass and Auto mode
+      off. Every other difference from what is written there is only "out of date" (studioStale);
+    - the user's settings, ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR/settings.json when that is set (Claude Code's own): when it
+      is a JSON object with disableAllHooks true, whether or not she has a folder, since hooks off would defeat the lock of one made
+      later. A file that is not that is left out by Claude Code, so it turns nothing off;
+    - this Mac's managed settings (MANAGED_DIR): managed-settings.json, then the files of managed-settings.d that end in .json and do
+      not begin with a dot (a file or a link), in the order of their names, each when it sets disableAllHooks true, or
+      allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. */
+function lockLoosened({ home, checkout, deps = {} }) {
   const why = [];
   let folder = null;
   try {
-    folder = realpathSync.native(studioFolder(ctx.home));
+    folder = realpathSync.native(studioFolder(home));
   } catch (e) {
     // She has no folder for Claude on this Mac, so nothing in it can be there.
   }
@@ -2117,39 +2144,55 @@ function lockLoosened(ctx) {
     } catch (e) {
       if (e.code !== "ENOTDIR") why.push("(Jason: her folder's .claude/settings.local.json could not be looked for, so it is not known that there is none.)");
     }
+    const own = settingsObject(join(folder, ".claude", "settings.json"));
+    if (own === null) why.push("(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)");
+    else {
+      const broken = lockBroken(own, { checkout, folder });
+      if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json does not say disableAllHooks is false, so hooks may be off, and the lock rests on them. Its contents are not shown here.)");
+      if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
+      const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
+      if (modes.length) why.push(`(Jason: her folder's .claude/settings.json ${modes.join(" and ")}. Its contents are not shown here.)`);
+    }
   }
-  // No settings file loosens nothing. One that is there and cannot be read as a JSON object leaves it unknown.
-  let text = null;
+  const config = (deps.env || process.env).CLAUDE_CONFIG_DIR;
+  const user = settingsObject(config ? join(config, "settings.json") : join(home, ".claude", "settings.json"));
+  if (user && user.disableAllHooks === true) why.push(`(Jason: this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
+  const managed = deps.managedDir || MANAGED_DIR;
+  let dropIns = [];
   try {
-    text = readFileSync(join(ctx.home, ".claude", "settings.json"), "utf8");
+    dropIns = readdirSync(join(managed, "managed-settings.d"), { withFileTypes: true })
+      .filter((e) => (e.isFile() || e.isSymbolicLink()) && e.name.endsWith(".json") && !e.name.startsWith(".")).map((e) => `managed-settings.d/${e.name}`).sort();
   } catch (e) {
-    if (e.code === "ENOENT" || e.code === "ENOTDIR") return why;
+    // No drop-ins.
   }
-  let settings = null;
-  try {
-    if (text !== null) settings = JSON.parse(text);
-  } catch (e) {
-    // It stays null, as for a file that could not be read.
+  for (const file of ["managed-settings.json", ...dropIns]) {
+    const set = settingsObject(join(managed, file));
+    if (!set) continue;
+    if (set.disableAllHooks === true) why.push(`(Jason: this Mac's managed settings, ${file}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
+    if (set.allowManagedHooksOnly === true) why.push(`(Jason: this Mac's managed settings, ${file}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`);
   }
-  if (settings === null || typeof settings !== "object" || Array.isArray(settings)) why.push("(Jason: this Mac's ~/.claude/settings.json could not be read, so it is not known that hooks are on. Its contents are not shown here.)");
-  else if (Object.hasOwn(settings, "disableAllHooks") && settings.disableAllHooks !== false) why.push("(Jason: this Mac's ~/.claude/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)");
   return why;
 }
 
+/** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. */
+function refuseIfLoosened(lock, say) {
+  const why = lockLoosened(lock);
+  if (!why.length) return null;
+  say(LOCK_CHANGED);
+  for (const line of why) say(line);
+  return 1;
+}
+
 /** `behind`: whether this Mac's checkout of brimm-video is behind main on GitHub, by git, in this Mac's checkout: it fetches
-    main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown). Then it
-    looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and ends with 1
-    without asking git, since she is not to go on. On her laptop git reaches GitHub with the deploy key. It changes nothing in the
+    main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
+    writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
+    ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
     checkout, and otherwise always ends with 0: a check that could not be made is said. */
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
-  const loosened = lockLoosened(ctx);
-  if (loosened.length) {
-    ctx.say(LOCK_CHANGED);
-    for (const line of loosened) ctx.say(line);
-    return 1;
-  }
+  const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
+  if (refused !== null) return refused;
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer brimm-video. Is this Mac offline?";
@@ -2189,15 +2232,23 @@ function studioStale(ctx) {
       return null;
     }
   };
-  let node = "/opt/homebrew/bin/node";
+  let node = HOMEBREW_NODE;
   try {
     node = JSON.parse(read(".claude/settings.json")).hooks.PreToolUse[0].hooks[0].args[1] || node;
   } catch (e) {
     // Settings that cannot be read are out of date too, and Homebrew's node is the one the installer finds.
   }
   const want = studioFiles({ checkout: ctx.settings.checkout, node, folder });
-  return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node };
+  return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node: nameableNode(node) };
 }
+
+/** Homebrew's node, which the installer finds, and which is named when her folder's settings name none that can be run. */
+const HOMEBREW_NODE = "/opt/homebrew/bin/node";
+
+/** The node `behind` tells Jason to rewrite her folder with, from what her folder's settings name (a file she may have changed, and
+    Jason is told to run what is printed): only an absolute path that ends in /node, holds no control character and is there;
+    otherwise Homebrew's. */
+const nameableNode = (node) => (typeof node === "string" && isAbsolute(node) && basename(node) === "node" && !/[\u0000-\u001f\u007f]/.test(node) && existsSync(node) ? node : HOMEBREW_NODE);
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the
@@ -4828,6 +4879,10 @@ export async function editMain(argv, deps = {}) {
   }
   const made = contextFor({ ...deps, say });
   if (made.why) {
+    // A Mac with no settings for episodes can still have her folder, and the lock on it is looked at all the same, for the checkout
+    // this edit.js runs from.
+    const refused = command === "behind" ? refuseIfLoosened({ home: homeOf(deps), checkout: dirname(dirname(fileURLToPath(import.meta.url))), deps }, say) : null;
+    if (refused !== null) return refused;
     say(made.why);
     return 2;
   }
