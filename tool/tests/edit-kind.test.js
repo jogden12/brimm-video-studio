@@ -7,7 +7,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
 import { askBlocked, clockAt } from "../unedited.js";
 import { claimed, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
@@ -938,7 +938,8 @@ describe("which", () => {
     const found = waiting(t);
     const r = await on(t.ctx.deps, "which", LABEL);
     assert.deepEqual([r.code, r.said], [0, [`Opened ${LABEL} in QuickTime Player on this Mac.`]]);
-    assert.deepEqual(t.opened, [["QuickTime Player", join(found.folder, "Pricing talk.mp4")]]);
+    // A clone, named by its label, in BRIMM Video Work: QuickTime Player's title bar shows the name of the file it opens (final fix 13).
+    assert.deepEqual(t.opened, [["QuickTime Player", join(episodeWork(t.home, FOLDER), "shown", `${LABEL.replace(/:/g, "-")}.mp4`)]]);
     untouched(t, found);
     t.done();
   });
@@ -946,7 +947,7 @@ describe("which", () => {
     const t = setup();
     const found = waiting(t);
     const r = await on({ ...t.ctx.deps, isWhole: () => false }, "which", LABEL);
-    assert.deepEqual([r.code, r.said], [0, [`Opened ${LABEL} in QuickTime Player on this Mac. It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`Opened ${LABEL} in QuickTime Player on this Mac. Its copy could not be made, so it opened under its file's name, which QuickTime Player's title bar shows: share no screen while it is open. It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.`]]);
     assert.deepEqual([t.opened, t.started], [[["QuickTime Player", join(found.folder, "Pricing talk.mp4")]], []]);
     untouched(t, found);
     t.done();
@@ -959,7 +960,7 @@ describe("which", () => {
     const t2 = setup();
     const answered = episodeFor(t2, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false } } });
     assert.deepEqual((await on(t2.ctx.deps, "which", NAME)).said, [`Opened ${NAME} in QuickTime Player on this Mac.`]);
-    assert.deepEqual(t2.opened, [["QuickTime Player", join(answered.folder, "Pricing talk.mp4")]]);
+    assert.deepEqual(t2.opened, [["QuickTime Player", join(episodeWork(t2.home, basename(answered.folder)), "shown", `${NAME.replace(/[:?]/g, "-")}.mp4`)]]);
     t.done();
     t2.done();
   });

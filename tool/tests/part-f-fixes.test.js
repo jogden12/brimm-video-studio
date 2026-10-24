@@ -248,6 +248,51 @@ describe("behind takes away only what show and which put in shown/, by their mar
   });
 });
 
+describe("which opens a clone named by the video's label, never its file (item 13)", () => {
+  /** A video waiting for its answer, as the light import files one. */
+  const waiting = (t) => episodeFor(t, { record: { version: 3, kind: null, label: LABEL, answer: { state: "needs your answer", guess: "raw", seen: "", came: "camera", match: null } }, files: LIGHT });
+  const CLONE = `${LABEL.replace(/:/g, "-")}.mp4`;
+  it("clones the video into BRIMM Video Work's shown/, named by its label, lists it by the marker, and opens the clone: behind takes it away", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const shown = join(episodeWork(t.home, FOLDER), "shown");
+    const cloned = [];
+    const deps = { ...t.ctx.deps, cloneFile: (from, to) => { cloned.push([from, to]); writeFileSync(to, readFileSync(from)); } };
+    const r = await on(deps, "which", LABEL);
+    assert.deepEqual([r.code, r.said], [0, [`Opened ${LABEL} in QuickTime Player on this Mac.`]]);
+    assert.deepEqual(cloned, [[join(found.folder, "Pricing talk.mp4"), join(shown, CLONE)]]);
+    assert.deepEqual(t.opened, [["QuickTime Player", join(shown, CLONE)]]);
+    assert.deepEqual(JSON.parse(readFileSync(join(shown, SHOWN_MARKER), "utf8")).files, [CLONE]);
+    // Said again, the clone is made again in its place; a copy show made beside it stays.
+    writeFileSync(join(shown, "kept transcript.txt"), "words");
+    writeFileSync(join(shown, SHOWN_MARKER), JSON.stringify({ files: [CLONE, "kept transcript.txt"] }));
+    assert.equal((await on(deps, "which", LABEL)).code, 0);
+    assert.deepEqual(t.opened[1], ["QuickTime Player", join(shown, CLONE)]);
+    assert.deepEqual(treeOf(shown).sort(), [SHOWN_MARKER, CLONE, "kept transcript.txt"].sort());
+    assert.equal((await behind(t)).code, 0);
+    assert.ok(!existsSync(shown));
+    assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+  it("opens the video itself when the clone cannot be made, or the video is not here to clone, and says its title bar shows its file's name", async () => {
+    const TITLE = "Its copy could not be made, so it opened under its file's name, which QuickTime Player's title bar shows: share no screen while it is open.";
+    const ONLINE = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
+    for (const [what, deps, said] of [
+      ["no clone on this disk", { cloneFile: () => { throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }); } }, `Opened ${LABEL} in QuickTime Player on this Mac. ${TITLE}`],
+      ["not whole here", { isWhole: () => false, cloneFile: () => assert.fail("a video not here is never cloned: that would bring it all over first") }, `Opened ${LABEL} in QuickTime Player on this Mac. ${TITLE} ${ONLINE}`]
+    ]) {
+      const t = setup();
+      const found = waiting(t);
+      const r = await on({ ...t.ctx.deps, ...deps }, "which", LABEL);
+      assert.deepEqual([r.code, r.said], [0, [said]], what);
+      assert.deepEqual(t.opened, [["QuickTime Player", join(found.folder, "Pricing talk.mp4")]], what);
+      const shown = join(episodeWork(t.home, FOLDER), "shown");
+      assert.ok(!existsSync(join(shown, CLONE)), what);
+      t.done();
+    }
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

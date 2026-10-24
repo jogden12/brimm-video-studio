@@ -29,7 +29,7 @@
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
-import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +40,7 @@ import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
-import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
+import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
@@ -4638,9 +4638,24 @@ export async function leaveCommand(ctx, rest) {
   }
 }
 
-/** `which "<video>"`: open the episode's video in QuickTime Player on this Mac, so that she can see which video it is. It says
-    nothing else of the video, and brings nothing over: on the Mac that did not import it the file is online-only, and QuickTime
-    Player has Dropbox bring it over first, which is said. */
+/** Clone the file at `from` to `to` (copyFileSync with COPYFILE_FICLONE, which calls clonefile(2)), and never by copying its bytes:
+    a clone is made only on one disk, so it throws when the two are on different disks, as onSameDisk tells (COPYFILE_FICLONE would
+    copy a video of gigabytes byte by byte there; COPYFILE_FICLONE_FORCE is not there on macOS). `ctx.deps` may give stand-ins. */
+function cloneWhole(ctx, from, to) {
+  if (!(ctx.deps.sameDisk || onSameDisk)(from, dirname(to))) throw new Error("it is on another disk, where no clone can be made");
+  (ctx.deps.cloneFile || ((a, b) => copyFileSync(a, b, fsConstants.COPYFILE_FICLONE)))(from, to);
+}
+/** What `which` says when it opened the video's own file, whose name QuickTime Player's title bar shows. */
+const OWN_FILE = "Its copy could not be made, so it opened under its file's name, which QuickTime Player's title bar shows: share no screen while it is open.";
+
+/** `which "<video>"`: open the episode's video in QuickTime Player on this Mac, so that she can see which video it is. QuickTime
+    Player shows the name of the file it opens in its title bar, on a screen she may share: so it opens a clone of the video, named
+    by how the video is named (its label, for a video not yet answered or a session), in ~/BRIMM Video Work/<folder>/shown/, listed
+    by that folder's marker before it is made, as show's copies are, and taken away with them by `behind`. A clone takes no room and
+    no time; it is made only of a video whole on this Mac, and only as a clone, on one disk (cloneWhole). When it
+    cannot be made, or the video is not whole here (on the Mac that did not import it the file is online-only, and a clone would
+    have Dropbox bring it all over first), the video's own file is opened, and she is told its name shows in the title bar; QuickTime
+    Player then has Dropbox bring it over, which is said. It says nothing else of the video. */
 export async function whichCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
   const got = episodeFor(ctx, words, { newerEnds: 1 });
@@ -4649,12 +4664,28 @@ export async function whichCommand(ctx, rest) {
   const name = shownName(record);
   const video = join(found.folder, record.video.file);
   const here = ctx.isWhole(video);
+  let opened = "";
+  if (here) {
+    const dir = shownFolder(ctx.home, found.name);
+    try {
+      mkdirSync(dir, { recursive: true });
+      // The clone `which` made before goes first; the copies `show` made stay.
+      clearShownIn(dir, (listed) => !listed.endsWith(".txt"));
+      mkdirSync(dir, { recursive: true });
+      const named = freeShownName(dir, fileSafe(name), extname(record.video.file));
+      addShown(dir, named);
+      cloneWhole(ctx, video, join(dir, named));
+      opened = join(dir, named);
+    } catch (e) {
+      // The video itself is opened instead, and she is told so.
+    }
+  }
   try {
-    ctx.openApp("QuickTime Player", video);
+    ctx.openApp("QuickTime Player", opened || video);
   } catch (e) {
     return refuse(ctx, `${name}: ${e.message}`);
   }
-  ctx.say(`Opened ${name} in QuickTime Player on this Mac.${here ? "" : ` ${ONLINE_ONLY}`}`);
+  ctx.say(`Opened ${name} in QuickTime Player on this Mac.${opened ? "" : ` ${OWN_FILE}`}${here ? "" : ` ${ONLINE_ONLY}`}`);
   return 0;
 }
 
