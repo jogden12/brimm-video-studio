@@ -170,6 +170,43 @@ describe("finish of a video that is not edited in Final Cut (item 5)", () => {
   }
 });
 
+/** The made-up video, finished and handed off as version 2 in final/ (revision 1), with `over` on its record: as a Final Cut
+    finish or a spellings card leaves one. Returns `found`. */
+function handedOff(t, { over = {}, files = {} } = {}) {
+  writeSettings(t.home, { handoffVersion: 2 });
+  const handoff = JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: ID, kind: "finished" } });
+  return episodeFor(t, {
+    record: { version: 3, kind: "finished", answer: ANSWERED, label: LABEL, editing: null, finished: { revision: 1, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} }, ...over },
+    files: { "Pricing talk.mp4": "v", "Pricing talk.cut-plan.json": "{}", "final/Pricing talk.brimm-ops.json": handoff, "final/Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n", ...files }
+  });
+}
+/** The session label `kind … session` gives the made-up video. */
+const SESSION_NAME = "Session, 2026-10-14";
+const GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+
+describe("the empty session revision says its words went to Claude only when a reading of it ran (item 12)", () => {
+  it("does not say so of a video no reading ran on", async () => {
+    const t = setup();
+    handedOff(t);
+    const r = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder: drop it on the BRIMM Ops page.`), r.text);
+    assert.doesNotMatch(r.text, /gone to Claude/);
+    t.done();
+  });
+  it("says so when the record holds a reading, or the files of one are set aside", async () => {
+    const READING = { kind: "finished", model: "claude-x", at: AT, on: "Mac Studio", account: "", outcome: "read" };
+    for (const [what, made] of [["a reading in the record", { over: { reading: READING } }], ["Claude's notes from before the switch", { files: { "Pricing talk.edit-notes.txt": "notes" } }], ["Reel suggestions", { files: { "reels.json": "{}" } }]]) {
+      const t = setup();
+      handedOff(t, made);
+      const r = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+      assert.equal(r.code, 0, `${what}: ${r.text}`);
+      assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. ${GONE}`), `${what}: ${r.text}`);
+      t.done();
+    }
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

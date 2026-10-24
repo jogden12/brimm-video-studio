@@ -4089,7 +4089,7 @@ async function answerKind(ctx, found, plan, began) {
     // an empty session revision, which redacts what it had (spec 2, "A session answered as something else"). It is judged with the
     // record as it is to be written, its last finish still on it for the version of the hand-off on file.
     if (aside) {
-      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at);
+      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(found.folder, base, { rels: aside.rels, restored: aside.restore.length > 0 }) });
       next.session.emptyRevision = empty.handoff ? empty.revision : "owed";
       if (empty.handoff) next.finished = empty.finished;
     }
@@ -4160,7 +4160,7 @@ const OUT_OF_SHARED = "Its files are out of the shared folder.";
 /** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
     for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
     held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
-const emptyWritten = (label, n) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder. ${WORDS_GONE}`;
+const emptyWritten = (label, n, gone = true) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`;
 const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
 const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
 const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
@@ -4172,6 +4172,23 @@ const owedLinked = (label) => `The empty session revision of ${label} is still o
     when it could not write it, and no hand-off has been written for it since (record.finished: its own finish writes a session
     revision too). */
 const revisionOwed = (record) => record.session !== null && typeof record.session === "object" && record.session.emptyRevision === "owed" && !record.finished;
+
+/** Whether a file, by its name or its path, is one a reading of Claude's writes: Claude's notes, the Reel suggestions (reels.json and
+    the copy she reads) or a session's teachings. A set-aside copy in history/ ("<stamp> <name>") is one too. */
+const readingFile = (rel) => /(?:^|[/ ])reels\.json$|\.(?:edit-notes|reel-suggestions)\.txt$|\.principles\.json$/.test(rel);
+
+/** Whether Claude has read the video of `record`, in the episode's `folder`: its record holds a reading, or held one that a
+    correction let go (null); or the files of one are among `rels` (those set aside now), or were set aside into its history/
+    before; or `restored` (the rules' plan put back, which a raw reading's plan had replaced). Only then do its words say they have
+    gone to Claude. */
+function readBefore(folder, record, { rels = [], restored = false } = {}) {
+  if (record.reading !== undefined || restored || rels.some(readingFile)) return true;
+  try {
+    return readdirSync(join(folder, "history"), { recursive: true }).some((rel) => readingFile(String(rel)));
+  } catch (e) {
+    return false;
+  }
+}
 
 /** The names of the files at the top of a folder, none when it cannot be read. */
 function topFiles(folder) {
@@ -4392,7 +4409,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     off version 1 otherwise; nor when handoffTarget refuses it (a gap in the video's versions, said in H4's words, or an id it went to
     the page under that its versions no longer lead to); nor when a hand-off of its own, of either version, went to the page under
     another id than the one it would go under, since the page would keep that id's words (said by the id alone). */
-function emptyRevisionOf(ctx, found, record, at) {
+function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
   const label = shownName(record);
   const own = ownHandoffs(found.folder);
   if (!writesV2For(ctx.settings, found.folder, record) && !own.some((h) => h.version === 2)) return { words: emptyV1(label) };
@@ -4407,7 +4424,7 @@ function emptyRevisionOf(ctx, found, record, at) {
   const fault = handoffFaultV2(made);
   if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
   const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
-  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision) };
+  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone) };
 }
 
 /** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
@@ -4436,7 +4453,7 @@ async function emptyRevisionAgain(ctx, found, record) {
   const label = shownName(record);
   const at = localStamp(new Date(ctx.now()));
   const aside = earlierFiles(found.folder, record, { session: true, finalOnly: true });
-  const empty = emptyRevisionOf(ctx, found, record, at);
+  const empty = emptyRevisionOf(ctx, found, record, at, { gone: readBefore(found.folder, record, { rels: aside.rels }) });
   if (!empty.handoff && !aside.rels.length) return refuse(ctx, `${empty.words} ${OUT_OF_SHARED}`);
   await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(join(found.folder, rel))));
   if (notReady(ctx, found, aside.rels).length) return refuse(ctx, asideComing(label));
