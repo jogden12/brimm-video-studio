@@ -214,7 +214,8 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
                                (by --drop, or by another --root or --machine), but not while the old drop folder holds a
                                video, or an import of this Mac failed or found a problem: it says which, and what to do
-                               first. A video held by an episode not yet answered, a session not cleared, or another
+                               first (a video this Mac still owes a late check is one to wait for, before a failed import
+                               of it). A video held by an episode not yet answered, a session not cleared, or another
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"

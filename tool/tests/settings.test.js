@@ -1873,7 +1873,8 @@ describe("what --help says of write, plan and set", () => {
     for (const said of [
       "a video an episode already holds, which this Mac still owes a late check, is said to be already imported, with when the check is due, and to run the installer again after it",
       "one it owes none (the check passed, or it is a copy of an imported video) is said to be one nothing of its import will take out, for a person to delete by hand before the installer is run again",
-      "an old folder or status files that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
+      "an old folder, status files or this Mac's late checks that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
+      "a late check this Mac owes comes first, whatever holds the video and before a failed import of it",
       "a node older than 22 counts as no node when the settings are to be checked",
       "try a late check that found a problem again with `retry` and leave its video in the old folder, since the check is made again from that video",
       "a video whose import is at work now is said to be being imported, to wait for it and run the installer again, and to leave its video in the old folder"
