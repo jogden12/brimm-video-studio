@@ -1005,7 +1005,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const d = box();
     refusedWith(ask("--print", "--machine", "Mac Studio", "--drop", "Elsewhere", d.root), ['Not written: --drop takes Drop or "Unedited Video".']);
     refusedWith(ask("--print", "--machine", "Mac Studio", d.root, "--handoff", "3"), ["Not written: --handoff takes 1 or 2."]);
-    refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light").'], true);
+    refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac\'s name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.'], true);
     // What it is told mends that one.
     const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "full", d.root);
     assert.equal(mended.status, 0, mended.out);

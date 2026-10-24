@@ -14,6 +14,8 @@ import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
+/** What Jason does about a setting in the file that will not do, as settings.js says it. */
+const MEND_SETTING = "Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.";
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const CHECKOUT = "/Users/sallie/brimm-video";
 
@@ -633,7 +635,7 @@ describe("node settings.js set and sessions", () => {
     writeFileSync(file, text);
     t.said.length = 0;
     assert.equal(t.run("write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT), 1);
-    assert.deepEqual(t.said, ['This Mac\'s settings could not be written (the import must be "full" or "light").']);
+    assert.deepEqual(t.said, [`This Mac's settings could not be written (the import must be "full" or "light"). ${MEND_SETTING}`]);
     assert.equal(readFileSync(file, "utf8"), text);
     t.done();
   });
@@ -1003,7 +1005,8 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     for (const command of ["plan", "write"]) {
       t.said.length = 0;
       assert.equal(await t.run(command, ...t.told, "--drop", "Drop"), 1, command);
-      assert.deepEqual(t.said, ['This Mac\'s settings could not be written (the import must be "full" or "light").']);
+      // And what to do about it, as `show` says it.
+      assert.deepEqual(t.said, [`This Mac's settings could not be written (the import must be "full" or "light"). ${MEND_SETTING}`]);
       assert.equal(t.held(), before);
     }
     // What is told mends it.
@@ -1786,7 +1789,7 @@ describe("what set, sessions, show and studio say when this Mac's settings canno
     writeFileSync(settingsFile(t.home), readFileSync(settingsFile(t.home), "utf8").replace('"version": 1', '"version": 1, "import": "ligth"'));
     for (const [code, text] of said(t)) {
       assert.equal(code, 2);
-      assert.equal(text, `This Mac's settings could not be read (${settingsFile(t.home)}: the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it with --import, --handoff or --drop when it is one of those.`);
+      assert.equal(text, `This Mac's settings could not be read (${settingsFile(t.home)}: the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.`);
     }
     t.done();
   });

@@ -128,10 +128,15 @@ export function teachingsLapsed(s, now = Date.now()) {
   return teachingsWhole(t) && Number(now) - Date.parse(t.at) >= TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
 }
 
+/** What Jason does about a setting in the settings file that will not do, as a sentence: install.sh --machine writes the Mac,
+    BRIMM Video and the checkout every time, and the settings of the switch only when it is told them. */
+const MEND_SETTING = "Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.";
+
 /** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words, and {mend}, what Jason does
     about it, as a sentence. Any field a later version of brimm-video adds is kept as it is. install.sh --machine makes
-    settings that are not there and mends a file that is not JSON; it mends a setting that is wrong only when it is told that
-    one, with --import, --handoff or --drop; and nothing else in the file. */
+    settings that are not there and mends a file that is not JSON; it writes the Mac, BRIMM Video and the checkout every time,
+    and mends another setting that is wrong only when it is told it (--import, --handoff, --drop, or --rules-only for readings
+    off); and nothing else in the file. */
 function usable(home) {
   const file = settingsFile(home);
   const installer = "Jason runs install.sh --machine on it.";
@@ -145,7 +150,7 @@ function usable(home) {
   }
   const fault = settingsFault(s);
   return fault
-    ? { why: `This Mac's settings could not be read (${file}: ${fault}).`, mend: "Jason puts that setting right by hand, or runs install.sh --machine on it with --import, --handoff or --drop when it is one of those." }
+    ? { why: `This Mac's settings could not be read (${file}: ${fault}).`, mend: MEND_SETTING }
     : { settings: s };
 }
 
@@ -302,7 +307,7 @@ function planned(home, rest, now) {
     return { code: 1, said: [`This Mac's settings could not be written (${e.code || e.message}).`] };
   }
   const { settings, fault } = afterWrite(held, told.fields);
-  if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}).`] };
+  if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
   // The drop folder is Unedited Video until the file says Drop.
   const from = held.drop === "Drop" ? "Drop" : "Unedited Video";
   const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
