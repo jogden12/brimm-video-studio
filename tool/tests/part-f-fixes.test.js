@@ -773,6 +773,27 @@ describe("a clearing whose set-aside fails after her click (item 24)", () => {
   });
 });
 
+describe("a video held as a session, with no label, is listed with its short id once (item 25)", () => {
+  it("in the lists of episodes a command gives, and in a drop folder's line", async () => {
+    const t = setup();
+    twoVersions(t, { bOver: { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: SESSION_NAME, placeholder: false } } });
+    const none = await on(t.ctx.deps, "show", "nothing fits this", "transcript");
+    assert.deepEqual(none.said, [`No episode fits "nothing fits this". The episodes are: ${SESSION_NAME} (3fa9c1) and a video (a0a0a0).`]);
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mp4"), "v");
+    const episodes = await on(t.ctx.deps, "episodes");
+    assert.ok(episodes.said.some((line) => line.endsWith(": already imported as a video (a0a0a0). It stays in the drop folder until its late check passes, or for a person to delete.")), episodes.text);
+    for (const r of [none, episodes]) assert.doesNotMatch(r.text, /\(a0a0a0\) \(a0a0a0\)/);
+    // A labelled one keeps its label and its short id, as a gated one is listed.
+    const u = setup();
+    twoVersions(u, { aOver: { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: "Session, 2026-10-10", placeholder: false } } });
+    assert.match((await on(u.ctx.deps, "show", "nothing fits this", "transcript")).said[0], new RegExp(`${LABEL.replace(/[()]/g, "\\$&")} \\(3fa9c1\\)`));
+    t.done();
+    u.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

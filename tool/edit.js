@@ -329,18 +329,21 @@ const isGated = (e) => e.records.filter(recordShaped).some(gated) || e.held;
     force. */
 const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held ? e.inForce : undefined);
 
+/** Whether a record has a label of the import's to be named by. */
+const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
+
 /** How a video held as a session is named, wherever a gated one is named by its label (shownName): by its label, or with none (a
     video from before the switch), as "a video (<short id>)", never by its name, which may be its file's. */
-const heldName = (r) => (typeof r.label === "string" && r.label.trim() ? r.label : `a video (${String(r.id).slice(-6)})`);
+const heldName = (r) => (isLabelled(r) ? r.label : `a video (${String(r.id).slice(-6)})`);
 
 /** How the record `r` of a gated episode is named: as shownName names a gated record, and by heldName when it is held as a session
     (`held`) and not gated itself. */
 const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
 
 /** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
-    episodeHolding's `gatedAs`), through `links` (finish.js linksOf): as gatedName names a gated record or one held as a session, and
-    "" for any other, which is named by its folder. */
-const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : recordKind(record) !== null && links.sessionsBeside(record).length > 0 ? heldName(record) : "");
+    episodeHolding's `gatedAs`, which says its short id after it), through `links` (finish.js linksOf): as shownName names a gated
+    record, one held as a session by its label or as "a video", and "" for any other, which is named by its folder. */
+const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : recordKind(record) !== null && links.sessionsBeside(record).length > 0 ? (isLabelled(record) ? record.label : "a video") : "");
 
 /** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
 const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
@@ -365,6 +368,8 @@ function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
     const r = gatedRecord(e);
+    // A video held as a session with no label is named by its short id already: it is said once.
+    if (e.held && !gated(r) && !isLabelled(r)) return heldName(r);
     return `${gatedName(r, e.held)} (${String(r.id).slice(-6)})`;
   }
   if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
