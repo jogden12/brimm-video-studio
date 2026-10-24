@@ -382,16 +382,19 @@ export function cannotFinish(record) {
 export const writesHandoffV2 = (settings) => Boolean(settings) && settings.handoffVersion === VERSION_2;
 
 /** Is the next hand-off of this video written as version 2? Yes when this Mac's settings say so, and also when the hand-off its
-    last finish wrote (`record.finished.handoff`, a path from the episode's `folder`) is on file and is version 2 already: a
-    version 1 hand-off is never written over a version 2 one, as with the setting back at 1 after a rollback, or the two Macs not
-    both switched yet, since a new version's version 1 hand-off would move the BRIMM Ops page's id for the video from its first
-    version's to its own. A hand-off that is not there, or cannot be read, is not looked at: the setting decides. This only reads. */
+    last finish wrote (`record.finished.handoff`, a path from the episode's `folder`) is on file and is version 2 already, or any
+    hand-off of the folder's own is (in its final/, or set aside in its history/: a correction clears record.finished and sets its
+    hand-off aside, and the page keeps it): a version 1 hand-off is never written over a version 2 one, as with the setting back at
+    1 after a rollback, or the two Macs not both switched yet, since a new version's version 1 hand-off would move the BRIMM Ops
+    page's id for the video from its first version's to its own. A hand-off that is not there, or cannot be read, is not looked
+    at: the setting decides. This only reads. */
 export function writesV2For(settings, folder, record) {
   if (writesHandoffV2(settings)) return true;
+  if (!folder) return false;
   const named = record && record.finished && record.finished.handoff;
-  if (!folder || typeof named !== "string" || named === "") return false;
-  const onFile = readJson(join(folder, named));
-  return Boolean(onFile) && onFile.version === VERSION_2;
+  const onFile = typeof named === "string" && named !== "" ? readJson(join(folder, named)) : null;
+  if (Boolean(onFile) && onFile.version === VERSION_2) return true;
+  return handoffsBeside(join(folder, "final")).some((h) => h.version === VERSION_2);
 }
 
 /** The id a video's hand-off carries: the first version's, which every new version keeps (`video.id`), so that the BRIMM Ops

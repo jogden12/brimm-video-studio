@@ -1645,11 +1645,22 @@ describe("the hand-off version a finish writes for a video", () => {
       for (const settings of [{ handoffVersion: 1 }, {}, undefined]) assert.equal(writesV2For(settings, folder, record), false, `${text} ${JSON.stringify(settings)}`);
       t.done();
     }
-    const { t, folder } = named(V2_FILE);
-    assert.equal(writesV2For({ handoffVersion: 1 }, folder, { finished: null }), false, "a hand-off in the folder that no finish of the record named is not looked at");
+    const { t, folder } = named(V1_FILE);
+    assert.equal(writesV2For({ handoffVersion: 1 }, folder, { finished: null }), false, "a version 1 hand-off of the folder's own keeps version 1");
     assert.equal(writesV2For({ handoffVersion: 1 }, folder, {}), false);
     assert.equal(writesV2For({ handoffVersion: 1 }, folder, { finished: { handoff: "" } }), false);
     t.done();
+  });
+  it("is 2 with the setting at 1 or none when a hand-off of the folder's own, in final/ or set aside in history/, is version 2, though no finish of the record names it (final fix 10)", () => {
+    // A correction (`kind … --again`) clears record.finished and sets the hand-off aside in history/: the BRIMM Ops page holds the
+    // video's version 2 hand-offs all the same, and a version 1 one would move its id.
+    for (const where of ["final/a.brimm-ops.json", "history/2026-10-20T15-30-00-05-00 a.brimm-ops.json", "history/older/a.brimm-ops.json"]) {
+      const { t, folder } = named(null);
+      mkdirSync(dirname(join(folder, where)), { recursive: true });
+      writeFileSync(join(folder, where), V2_FILE);
+      for (const record of [{ finished: null }, {}, { finished: { handoff: "" } }]) for (const settings of [{ handoffVersion: 1 }, {}, undefined]) assert.equal(writesV2For(settings, folder, record), true, `${where} ${JSON.stringify(record)} ${JSON.stringify(settings)}`);
+      t.done();
+    }
   });
 });
 
