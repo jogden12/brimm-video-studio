@@ -327,9 +327,12 @@ function planned(home, rest, now) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: oldRoot, machine: oldMachine, old: from, light, home, now: Number(now) });
-      if (![work, running, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to, old: oldFolder };
-      const head = unreadable.length && ![work, running, problem, imported, kept].some((lines) => lines.length) ? "and the old one could not be looked at:" : "and work is not finished in the old one:";
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, old: from, light, home, now: Number(now) });
+      if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields: told.fields, from, to, old: oldFolder };
+      // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
+      // Mac's own late checks could not be read, the old folder having been.
+      const working = [work, running, problem, imported, kept].some((lines) => lines.length);
+      const head = working ? "and work is not finished in the old one:" : unreadable.length ? "and the old one could not be looked at:" : "and the late checks this Mac still owes could not be read:";
       // Each kind of line is followed by the advice for it alone: what to do about a failed import is not what to do about a late
       // check that found a problem (leave its video where it is), nor about an import at work (wait for it), nor an imported video.
       const kinds = [
@@ -341,7 +344,8 @@ function planned(home, rest, now) {
         ]],
         [imported, ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."]],
         [kept, ["Delete each of these from the old folder by hand, then run this again."]],
-        [unreadable, ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]]
+        [unreadable, ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]],
+        [lateChecks, ["Make that folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."]]
       ];
       return {
         code: 1,

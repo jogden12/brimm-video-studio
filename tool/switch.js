@@ -47,7 +47,8 @@ function namesIn(folder) {
     out, and its line says when it is due. `kept` is a video an episode holds already, with no such
     check (its late check has passed, or it is a copy of an imported video), so nothing of this Mac's import will take it out,
     and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which
-    holds no video's name: the old folder, the status files, or this Mac's late checks (and then no video is said to be `kept`).
+    holds no video's name: the old folder, or the status files. `lateChecks` is this Mac's late checks, on its own disk, when
+    they could not be read (and then no video is said to be `kept`).
     `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
     episode that holds the video does too. A video an episode holds whose record edit.js names by a label and not by its file
@@ -96,7 +97,8 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   // A folder of late checks that cannot be read (anything but its not being there) is not known to hold none: it is said, and no
   // imported video is then said to be one to delete.
   const owing = home ? namesIn(pendingFolder(home)) : { names: [] };
-  if (owing.code) unreadable.push(`  The late checks this Mac still owes, in ${pendingFolder(home)}, could not be read (${owing.code}), so which videos still wait for one is not known.`);
+  // They are kept on this Mac's own disk, not in Dropbox, and the old folder itself was read: their line and advice are their own.
+  const lateChecks = owing.code ? [`  The late checks this Mac still owes, kept on this Mac in ${pendingFolder(home)}, could not be read (${owing.code}): the old folder was read, but which of its videos still wait for a late check is not known.`] : [];
   const pendings = home && !owing.code ? readPendings(home) : [];
   const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && sameFolder(String(p.root), root));
   const imported = new Set();
@@ -181,5 +183,5 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   }
   if (runningCounted) running.add(runningCounted === 1 ? "  1 video is being imported now." : `  ${runningCounted} videos are being imported now.`);
   if (importedCounted) imported.add(importedCounted === 1 ? "  1 video is already imported, and its late check is still to come." : `  ${importedCounted} videos are already imported, and their late checks are still to come.`);
-  return { work: lines, running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept, unreadable };
+  return { work: lines, running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept, unreadable, lateChecks };
 }

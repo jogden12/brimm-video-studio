@@ -437,7 +437,7 @@ if [[ -n "$machine" ]]; then
   say "  Its marker there, $marker, saying:  $machine"
   # When the folder watched changes, the one it was is no longer watched, and is left as it is: nothing in Dropbox is deleted.
   if [[ -n "$old_folder" && -d "$old_folder" ]]; then
-    say "  The old drop folder:  $old_folder, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported"
+    say "  The old drop folder:  $old_folder, no longer watched once this is done, and left as it is. The check found no video in it now. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported"
   fi
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"

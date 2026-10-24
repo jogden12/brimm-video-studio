@@ -864,7 +864,8 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     for (const line of [
       `  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio`,
       `  Its marker there, ${d.root}/Drop/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
-      `  The old drop folder:  ${old}, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported`,
+      // What the check found, and what Jason does: he checks it is still empty before he deletes it, as the closing line says.
+      `  The old drop folder:  ${old}, no longer watched once this is done, and left as it is. The check found no video in it now. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported`,
       `  Once, in Finder:  Control-click ${d.root}/Drop/Mac Studio and choose Make available offline, so that a video dropped there from another device is brought down at once`
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
     assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), handoffVersion: 2, drop: "Drop" });
@@ -920,7 +921,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     writeFileSync(join(mine, ".brimm-watched-by"), "Mac Studio\n");
     const theirs = d.folder("Unedited Video", "Sallie's laptop");
     writeFileSync(join(theirs, "Her talk.mov"), "video");
-    const OLD = (folder) => `  The old drop folder:  ${folder}, no longer watched once this is done, and left as it is.`;
+    const OLD = (folder) => `  The old drop folder:  ${folder}, no longer watched once this is done, and left as it is. The check found no video in it now. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported\n`;
     const other = askWith({ settings: d.mine() }, "--print", "--machine", "Sallie's laptop", "--drop", "Drop", d.root);
     assert.equal(other.status, 0, other.err + other.out);
     assert.ok(other.out.includes(`\n${OLD(mine)}`), other.out);

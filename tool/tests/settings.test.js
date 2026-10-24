@@ -1713,7 +1713,12 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       chmodSync(pendingFolder(t.home), 0o000);
       try {
         const said = await refused(t, "--drop", "Drop");
-        assert.deepEqual(said, [HEAD_UNREAD, `  The late checks this Mac still owes, in ${pendingFolder(t.home)}, could not be read (EACCES), so which videos still wait for one is not known.`, READABLE]);
+        // Its own words: the old folder was read, and the late checks are kept on this Mac's own disk, not in Dropbox.
+        assert.deepEqual(said, [
+          "Not written: the drop folder would change from Unedited Video to Drop, and the late checks this Mac still owes could not be read:",
+          `  The late checks this Mac still owes, kept on this Mac in ${pendingFolder(t.home)}, could not be read (EACCES): the old folder was read, but which of its videos still wait for a late check is not known.`,
+          "Make that folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."
+        ]);
         assert.ok(!said.some((line) => /Delete|take the video out/.test(line)), said.join("\n"));
       } finally {
         chmodSync(pendingFolder(t.home), 0o755);
@@ -1873,7 +1878,7 @@ describe("what --help says of write, plan and set", () => {
     for (const said of [
       "a video an episode already holds, which this Mac still owes a late check, is said to be already imported, with when the check is due, and to run the installer again after it",
       "one it owes none (the check passed, or it is a copy of an imported video) is said to be one nothing of its import will take out, for a person to delete by hand before the installer is run again",
-      "an old folder, status files or this Mac's late checks that cannot be read (macOS asks whether node may read Dropbox) refuse too, with the error's code",
+      "an old folder or status files that cannot be read (macOS asks whether node may read Dropbox), or this Mac's own late checks (on its own disk), refuse too, with the error's code",
       "a late check this Mac owes comes first, whatever holds the video and before a failed import of it",
       "a node older than 22 counts as no node when the settings are to be checked",
       "try a late check that found a problem again with `retry` and leave its video in the old folder, since the check is made again from that video",
