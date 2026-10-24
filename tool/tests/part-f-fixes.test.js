@@ -14,6 +14,7 @@ import { readEpisode, recordFile, recordText } from "../episode.js";
 import { handoffTarget } from "../finish.js";
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
 import { askBlocked } from "../unedited.js";
+import { HELD as HELD_WORDS, UNANSWERED, UNSCOPED, heldGateFor } from "../gate.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -449,6 +450,11 @@ const finalOf = (found) => listAll(join(found.folder, "final"));
 const A = "a video (a0a0a0)";
 
 describe("a session mark follows the video's other versions: each is held as a session until answered as one (items 1, 15)", () => {
+  it("lets run for a video held as a session only what runs for a video not yet answered, and the commands that name none", () => {
+    assert.equal(HELD_WORDS, HELD);
+    for (const name of COMMAND_NAMES) assert.equal(heldGateFor(name), [...UNSCOPED, ...UNANSWERED].includes(name) ? "" : HELD, name);
+    assert.deepEqual(COMMAND_NAMES.filter((name) => !heldGateFor(name)).sort(), ["behind", "episodes", "kind", "leave", "release", "resolve", "retry", "show", "status", "which"]);
+  });
   it("B marked while A is handed off: names A to answer too, writes nothing into A's folder, and holds A as a session", async () => {
     const t = setup();
     const { older, newer } = twoVersions(t);
