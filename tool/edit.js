@@ -29,7 +29,7 @@
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
-import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2054,21 +2054,96 @@ async function show(ctx, rest) {
 /** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
 const shownFolder = (home, folder) => join(episodeWork(home, folder), "shown");
 
+/** The file in a shown/ folder that lists what brimm-video put into it (showCopy, whichCommand): `behind` takes away those files alone,
+    and only from a folder that has it (clearShownIn). */
+export const SHOWN_MARKER = ".brimm-shown.json";
+
+/** The names the marker in the shown/ folder `dir` lists, or null when it has none that can be read. Only a plain name in the folder
+    counts: never a path, nor the marker itself. */
+function shownListed(dir) {
+  try {
+    const read = JSON.parse(readFileSync(join(dir, SHOWN_MARKER), "utf8"));
+    if (read === null || typeof read !== "object" || !Array.isArray(read.files)) return null;
+    return read.files.filter((name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && name !== SHOWN_MARKER && !/[/\\\u0000]/.test(name));
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Have the marker in `dir` list `names`, and take it away when there are none. */
+function listShown(dir, names) {
+  const file = join(dir, SHOWN_MARKER);
+  if (!names.length) rmSync(file, { force: true });
+  else writeFileSync(file, `${JSON.stringify({ files: [...new Set(names)] })}\n`);
+}
+
+/** Add `name` to what the marker in `dir` lists, before the file is put there: a file listed and not there is passed over. */
+const addShown = (dir, name) => listShown(dir, [...(shownListed(dir) || []), name]);
+
+/** Take away from the shown/ folder `dir` the files its marker lists that `only` takes, each on its own: a file or a link, never a
+    folder, and nothing inside one; then the marker, once it lists nothing that is left, and the folder, once nothing else is in it.
+    A folder that is not one (a link to one included), or has no marker, is left as it is. Gives back the names still listed, or
+    null for such a folder. */
+function clearShownIn(dir, only = () => true) {
+  const at = lstatSync(dir, { throwIfNoEntry: false });
+  if (!at || !at.isDirectory()) return null;
+  const listed = shownListed(dir);
+  if (listed === null) return null;
+  const left = [];
+  for (const name of listed) {
+    const file = join(dir, name);
+    const found = lstatSync(file, { throwIfNoEntry: false });
+    if (!found) continue;
+    if (found.isDirectory() || !only(name)) {
+      left.push(name);
+      continue;
+    }
+    try {
+      rmSync(file);
+    } catch (e) {
+      left.push(name);
+    }
+  }
+  listShown(dir, left);
+  if (!left.length) {
+    try {
+      rmdirSync(dir);
+    } catch (e) {
+      // Something brimm-video did not put there is in it, and stays.
+    }
+  }
+  return left;
+}
+
+/** A name in `dir` for a copy named `base` with its `ending` that nothing there has: "<base><ending>", then "<base> 2<ending>" and on.
+    Nothing in shown/ is ever written over, a file brimm-video did not list (an older brimm-video's copy) least of all. */
+function freeShownName(dir, base, ending) {
+  for (let n = 1; ; n++) {
+    const name = `${base}${n > 1 ? ` ${n}` : ""}${ending}`;
+    if (!lstatSync(join(dir, name), { throwIfNoEntry: false })) return name;
+  }
+}
+
 /** Open the file `rel` of the episode `found` (whose record is `record`, one the gate holds: a video not yet answered, left alone,
     or a session not cleared) on this Mac, and print nothing of it (spec 2, "What else the mark stops"): it is copied into
     ~/BRIMM Video Work/<folder>/shown/, made read-only (TextEdit saves in place, and the file in Dropbox is never written into),
-    and opened in TextEdit, and she is told only that it was, by the video's name. The copies made before in that folder go first;
-    `behind`, at the next session start, clears them all. The copy is named by the video's name, never its file's. A file Dropbox
-    has not brought whole yet is copied all the same: reading it is what brings it, and it is small. */
+    and opened in TextEdit, and she is told only that it was, by the video's name. The copies `show` made before in that folder go
+    first, and `behind`, at the next session start, clears them all: each is listed by the folder's marker (SHOWN_MARKER) before it
+    is made, and only what the marker lists is ever taken away. The copy is named by the video's name, never its file's. A file
+    Dropbox has not brought whole yet is copied all the same: reading it is what brings it, and it is small. */
 function showCopy(ctx, found, record, rel, what) {
   const name = shownName(record);
   const from = join(found.folder, rel);
   if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
   const dir = shownFolder(ctx.home, found.name);
-  const copy = join(dir, `${fileSafe(name)} ${what}.txt`);
+  let copy = "";
   try {
-    rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
+    clearShownIn(dir, (listed) => listed.endsWith(".txt"));
+    mkdirSync(dir, { recursive: true });
+    const named = freeShownName(dir, `${fileSafe(name)} ${what}`, ".txt");
+    copy = join(dir, named);
+    addShown(dir, named);
     copyFileSync(from, copy);
     chmodSync(copy, 0o444);
   } catch (e) {
@@ -2083,8 +2158,9 @@ function showCopy(ctx, found, record, rel, what) {
   return 0;
 }
 
-/** Clear the copies `show` made, of every episode (showCopy): `behind` does it at every session's start. One that cannot be taken
-    away stays until the next. */
+/** Clear the copies `show` and `which` made, of every episode (showCopy, whichCommand): `behind` does it at every session's start.
+    Only the files a shown/ folder's marker lists are taken away (clearShownIn): a shown/ with no marker, and anything else in BRIMM
+    Video Work, is left as it is, and nothing is gone into but shown/ itself. One that cannot be taken away stays until the next. */
 function clearShown(ctx) {
   let names = [];
   try {
@@ -2094,7 +2170,7 @@ function clearShown(ctx) {
   }
   for (const name of names) {
     try {
-      rmSync(shownFolder(ctx.home, name), { recursive: true, force: true });
+      clearShownIn(shownFolder(ctx.home, name));
     } catch (e) {
       // It is cleared at the next session start.
     }

@@ -5,13 +5,13 @@
 // stand-in. Every name in it is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs, { mkdirSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import { HELP, editMain } from "../edit.js";
+import { HELP, SHOWN_MARKER, editMain } from "../edit.js";
 import { recordText } from "../episode.js";
 import { handoffTarget } from "../finish.js";
-import { writeSettings } from "../settings.js";
+import { episodeWork, workFolder, writeSettings } from "../settings.js";
 import { askBlocked } from "../unedited.js";
 import { setup, episodeFor, episodeAs, reread, FOLDER, ID } from "./episodes.js";
 
@@ -204,6 +204,47 @@ describe("the empty session revision says its words went to Claude only when a r
       assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. ${GONE}`), `${what}: ${r.text}`);
       t.done();
     }
+  });
+});
+
+/** `behind` on the made-up Mac, with git finding it up to date. */
+const behind = (t) => on({ ...t.ctx.deps, run: async () => ({ code: 0, stderr: "", stdout: "0\n" }) }, "behind");
+/** Every file and folder under `dir`, by its path from it, sorted. */
+const treeOf = (dir) => readdirSync(dir, { recursive: true }).map(String).sort();
+
+describe("behind takes away only what show and which put in shown/, by their marker (item 16)", () => {
+  it("leaves a shown/ with no marker, every file the marker does not list, and every other folder and file, as they are", async () => {
+    const t = setup();
+    const work = workFolder(t.home);
+    const marked = join(work, FOLDER, "shown");
+    mkdirSync(join(marked, "sub"), { recursive: true });
+    for (const name of ["a copy.txt", "hers.txt", "sub/c.txt"]) writeFileSync(join(marked, name), "words");
+    writeFileSync(join(marked, SHOWN_MARKER), JSON.stringify({ files: ["a copy.txt", "sub", "../kept.txt", "sub/c.txt", SHOWN_MARKER] }));
+    const unmarked = join(work, "2026-10-15 Another (Mac Studio)", "shown");
+    mkdirSync(unmarked, { recursive: true });
+    writeFileSync(join(unmarked, "x.txt"), "words");
+    writeFileSync(join(work, FOLDER, "kept.txt"), "stays");
+    mkdirSync(join(work, "2026-10-16 Third (Mac Studio)", "renders"), { recursive: true });
+    writeFileSync(join(work, "2026-10-16 Third (Mac Studio)", "renders", "v0.mp4"), "a render");
+    const r = await behind(t);
+    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+    assert.ok(!existsSync(join(marked, "a copy.txt")));
+    assert.deepEqual(treeOf(marked).filter((n) => n !== SHOWN_MARKER), ["hers.txt", "sub", "sub/c.txt"]);
+    assert.deepEqual(treeOf(unmarked), ["x.txt"]);
+    assert.equal(readFileSync(join(work, FOLDER, "kept.txt"), "utf8"), "stays");
+    assert.ok(existsSync(join(work, "2026-10-16 Third (Mac Studio)", "renders", "v0.mp4")));
+    t.done();
+  });
+  it("takes away the copies show made, and their folder once it is empty", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { version: 3, kind: null, label: LABEL, answer: { state: "needs your answer", guess: "raw", seen: "", came: "camera", match: null } } });
+    writeFileSync(join(found.folder, "Pricing talk.transcript.txt"), "[0:00] Jane Doe's words");
+    const shown = join(episodeWork(t.home, FOLDER), "shown");
+    assert.equal((await on(t.ctx.deps, "show", LABEL, "transcript")).code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(shown, SHOWN_MARKER), "utf8")).files, [`${LABEL.replace(/:/g, "-")} transcript.txt`]);
+    assert.equal((await behind(t)).code, 0);
+    assert.ok(!existsSync(shown));
+    t.done();
   });
 });
 

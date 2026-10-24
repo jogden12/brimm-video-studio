@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { writeStudio } from "../studio.js";
 import { dirname, join } from "node:path";
-import { editMain } from "../edit.js";
+import { SHOWN_MARKER, editMain } from "../edit.js";
 import { episodeWork, workFolder } from "../settings.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
 
@@ -95,7 +95,7 @@ describe("show, for a video not yet answered, left alone or a session: a read-on
         const r = await on(t.ctx.deps, "show", name, kind);
         assert.deepEqual([r.code, r.text], [0, `Opened ${name}'s ${WHAT[kind]} in TextEdit on this Mac.`], kind);
         // One copy, of this file alone: the earlier ones are taken away first.
-        const names = readdirSync(shownDir(t));
+        const names = readdirSync(shownDir(t)).filter((n) => n !== SHOWN_MARKER);
         assert.equal(names.length, 1, names.join(", "));
         const copy = join(shownDir(t), names[0]);
         assert.equal(readFileSync(copy, "utf8"), readFileSync(join(found.folder, file), "utf8"), kind);
@@ -114,7 +114,7 @@ describe("show, for a video not yet answered, left alone or a session: a read-on
     const { t } = held(record);
     const r = await on({ ...t.ctx.deps, isWhole: () => false }, "show", name, "transcript");
     assert.deepEqual([r.code, r.text, t.started], [0, `Opened ${name}'s transcript in TextEdit on this Mac.`, []]);
-    assert.equal(readdirSync(shownDir(t)).length, 1);
+    assert.equal(readdirSync(shownDir(t)).filter((n) => n !== SHOWN_MARKER).length, 1);
     t.done();
   });
   it("says when there is no such file, by the video's name, and opens nothing", async () => {
@@ -161,6 +161,8 @@ describe("behind", () => {
       const dir = join(workFolder(t.home), folder, "shown");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "a copy.txt"), "words");
+      // Listed by the folder's marker, as show lists each copy it makes (final fix 16).
+      writeFileSync(join(dir, SHOWN_MARKER), JSON.stringify({ files: ["a copy.txt"] }));
       made.push(dir);
     }
     writeFileSync(join(workFolder(t.home), FOLDER, "kept.txt"), "stays");
@@ -611,6 +613,7 @@ describe("behind", () => {
       const shown = join(workFolder(t.home), FOLDER, "shown");
       mkdirSync(shown, { recursive: true });
       writeFileSync(join(shown, "a copy.txt"), "words");
+      writeFileSync(join(shown, SHOWN_MARKER), JSON.stringify({ files: ["a copy.txt"] }));
       const before = [treeOf(folder), treeOf(join(t.home, ".claude"))];
       const r = await behindOn(t);
       assert.equal(r.code, 1);
