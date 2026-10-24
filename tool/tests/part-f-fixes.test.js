@@ -421,6 +421,7 @@ describe("resolve never clears a session mark, nor takes back an answer, by keep
 const OLD = "e-20261010-a0a0a0";
 const OLD_FOLDER = "2026-10-10 Coaching Jane Doe (Mac Studio)";
 const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+const STILL_HELD = "Another version of it is still marked a client or group session, so it is held as one, and Claude reads nothing of it: once that mark is cleared too, say what it is again.";
 /** Put `text` at `rel` in `folder`. */
 const lay = (folder, rel, text) => {
   mkdirSync(dirname(join(folder, rel)), { recursive: true });
@@ -789,6 +790,91 @@ describe("a video held as a session, with no label, is listed with its short id 
     const u = setup();
     twoVersions(u, { aOver: { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: "Session, 2026-10-10", placeholder: false } } });
     assert.match((await on(u.ctx.deps, "show", "nothing fits this", "transcript")).said[0], new RegExp(`${LABEL.replace(/[()]/g, "\\$&")} \\(3fa9c1\\)`));
+    t.done();
+    u.done();
+  });
+});
+
+// --- The third wave ---
+
+describe("clearing a session mark among three versions that matched the same video (item 26)", () => {
+  const CLEAR_IT = { code: 0, stdout: "button returned:Clear it\n", stderr: "" };
+  const BID = "e-20261016-b0b0b0";
+  const BLABEL = "Video of 16 Oct, 09:12 (Mac Studio)";
+  const MATCHED = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
+  const WAITS = (match) => ({ version: 3, kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera", match } });
+  const clicking = (t, dialogs = []) => ({ ...t.ctx.deps, run: async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? (dialogs.push(args), CLEAR_IT) : t.ctx.deps.run(cmd, args, opts)) });
+  it("clears V by her click though B, another version, is marked: V is held while B's mark stands, and then B is cleared too", async () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 2 });
+    episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const b = episodeAs(t, { id: BID, name: "2026-10-16 B talk (Mac Studio)", record: { ...WAITS(OLD), label: BLABEL } });
+    const v = episodeFor(t, { record: { ...WAITS(OLD), label: LABEL }, files: LIGHT });
+    for (const label of [LABEL, BLABEL]) assert.equal((await on(t.ctx.deps, "kind", label, "finished", "--private", "no", "--version-of", "a0a0a0")).code, 0, label);
+    const marked = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--again");
+    // The mark tells her to answer A and B as sessions too: she answers B so.
+    assert.ok(marked.said.some((line) => line.includes(`${BLABEL} (b0b0b0)`)), marked.text);
+    assert.equal((await on(t.ctx.deps, "kind", BLABEL, "session", "--private", "yes", "--again")).code, 0);
+    const vName = reread(v).name.text;
+    const bName = reread(b).name.text;
+    const dialogs = [];
+    const before = t.started.length;
+    const first = await on(clicking(t, dialogs), "kind", vName, "finished", "--private", "no", "--again", "--clear-session");
+    assert.deepEqual([first.code, dialogs.length], [0, 1], first.text);
+    assert.ok(first.said.includes(STILL_HELD), first.text);
+    assert.deepEqual([reread(v).kind, reread(v).session.cleared.confirmed, t.started.slice(before)], ["finished", "dialog", []], "no reading of it is started");
+    // Held as a session while B's mark stands: nothing else runs for it, and no hand-off of it is written.
+    assert.deepEqual((await on(t.ctx.deps, "spell", LABEL, "add", "Jane", "Jayne")).said, [HELD]);
+    assert.match(handoffTarget({ root: t.root, settings: { handoffVersion: 2 } }, { folder: v.folder, record: reread(v) }).refusal, /is a version of a client or group session: ask Jason/);
+    const second = await on(clicking(t, dialogs), "kind", bName, "finished", "--private", "no", "--again", "--clear-session");
+    assert.deepEqual([second.code, dialogs.length], [0, 2], second.text);
+    assert.deepEqual([reread(b).kind, reread(b).session.cleared.confirmed], ["finished", "dialog"]);
+    assert.notDeepEqual((await on(t.ctx.deps, "spell", "Pricing talk", "add", "Jane", "Jayne")).said, [HELD]);
+    t.done();
+  });
+  it("refuses a clearing that moves the video out of its versions (--version-of none, or another video): no dialog, no reading, nothing written", async () => {
+    const ZID = "e-20261009-e9e9e9";
+    const cases = [
+      ["B marked, --version-of none", { withB: true }, ["--version-of", "none"]],
+      ["B marked, --version-of an unrelated video", { withB: true }, ["--version-of", "e9e9e9"]],
+      ["A itself marked, --version-of none", { aMarked: true }, ["--version-of", "none"]],
+      ["A itself marked, --version-of an unrelated video", { aMarked: true }, ["--version-of", "e9e9e9"]]
+    ];
+    for (const [what, { withB = false, aMarked = false }, how] of cases) {
+      const t = setup();
+      writeSettings(t.home, { handoffVersion: 2 });
+      episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+      episodeAs(t, { id: ZID, name: "2026-10-09 Z talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Z talk", placeholder: false } } });
+      if (withB) episodeAs(t, { id: BID, name: "2026-10-16 B talk (Mac Studio)", record: { ...WAITS(OLD), label: BLABEL } });
+      const v = episodeFor(t, { record: { ...WAITS(OLD), label: LABEL }, files: LIGHT });
+      if (aMarked) assert.equal((await on(t.ctx.deps, "kind", "Older talk", "session", "--private", "yes", "--again")).code, 0, what);
+      // Answered as sessions from the first: never read, never handed off.
+      assert.equal((await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--version-of", "a0a0a0")).code, 0, what);
+      if (withB) assert.equal((await on(t.ctx.deps, "kind", BLABEL, "session", "--private", "yes", "--version-of", "a0a0a0")).code, 0, what);
+      const record = reread(v);
+      const dialogs = [];
+      const before = t.started.length;
+      const r = await on(clicking(t, dialogs), "kind", record.name.text, "finished", "--private", "no", "--again", "--clear-session", ...how);
+      assert.deepEqual([r.code, r.said, dialogs.length, t.started.slice(before), reread(v).rev], [1, [MATCHED], 0, [], record.rev], what);
+      t.done();
+    }
+  });
+  it("still refuses an answer, a clearing among them, when the session is in the match's versions and not in the video's own", async () => {
+    const t = setup();
+    // X is finished; S, a session not cleared, is a version of X. V is a session of its own, whose import matched X.
+    const X = "e-20261011-c1c1c1";
+    episodeAs(t, { id: X, name: "2026-10-11 X talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "X talk", placeholder: false } } });
+    episodeAs(t, { id: "e-20261012-d2d2d2", name: "2026-10-12 S talk (Mac Studio)", record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Video of 12 Oct, 09:12 (Mac Studio)", name: { text: "Session, 2026-10-12", placeholder: false }, session: markOf(null), versionOf: X } });
+    const v = episodeFor(t, { record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes", match: X }, label: LABEL, name: { text: SESSION_NAME, placeholder: false }, session: markOf(null), editing: null }, files: LIGHT });
+    const dialogs = [];
+    const cleared = await on(clicking(t, dialogs), "kind", SESSION_NAME, "finished", "--private", "no", "--again", "--clear-session");
+    assert.deepEqual([cleared.code, cleared.said, dialogs.length, reread(v).rev], [1, [MATCHED], 0, 1]);
+    // And a first answer that is not a session, of a video waiting whose import matched X (item 2).
+    const u = setup();
+    episodeAs(u, { id: X, name: "2026-10-11 X talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "X talk", placeholder: false } } });
+    episodeAs(u, { id: "e-20261012-d2d2d2", name: "2026-10-12 S talk (Mac Studio)", record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Video of 12 Oct, 09:12 (Mac Studio)", name: { text: "Session, 2026-10-12", placeholder: false }, session: markOf(null), versionOf: X } });
+    episodeFor(u, { record: { ...WAITS(X), label: LABEL }, files: LIGHT });
+    assert.deepEqual((await on(u.ctx.deps, "kind", LABEL, "finished", "--private", "no")).said, [MATCHED]);
     t.done();
     u.done();
   });
