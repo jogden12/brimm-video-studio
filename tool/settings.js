@@ -208,7 +208,8 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                is told are written with them, as set reads them, and any setting it is not told is kept.
                                It refuses a value set would refuse, and a switch of the drop folder while the old drop
                                folder still holds a video, or an import of this Mac failed or found a problem: it says
-                               which (by label where there is one), and what to do first
+                               which (by label where there is one, and one held by a video not yet answered or a session
+                               by its short id when it has none), and what to do first
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the

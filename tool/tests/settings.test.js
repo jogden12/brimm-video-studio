@@ -830,7 +830,8 @@ describe("node settings.js write and plan, with the settings of the switch", () 
   /** A Mac with settings, `held` over them, whose BRIMM Video is a folder of its own in the test's home folder, with Episodes and
       its status files. `told` is what install.sh tells write and plan of this Mac. `drop(name)` is its drop folder in `name`'s
       parent, made; `video(folder, name)` puts a video there; `status(video, more, machine)` is a status file of an import, as one
-      writes it; `episode(folder, video, label)` is an episode that holds a video. */
+      writes it; `episode(folder, video, bytes, label, over)` is an episode that holds a video, its record's fields `over` put over
+      what the import writes. */
   function mac(held = {}) {
     const t = setup();
     const root = join(t.home, "BRIMM Video");
@@ -842,10 +843,10 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       return join(root, parent, machine);
     };
     const status = (video, more = {}, machine = "Mac Studio") => writeFileSync(join(root, "Episodes", ".importing", `${video} (${machine}) 1.json`), JSON.stringify({ version: 1, machine, pid: 4242, video, bytes: 5, seconds: 120, step: "Making the rough cut", at: AT.toISOString(), ...more }));
-    const episode = (name, video, bytes, label) => {
+    const episode = (name, video, bytes, label, over = {}) => {
       const path = join(root, "Episodes", name);
       mkdirSync(join(path, "record"), { recursive: true });
-      const record = { ...newEpisode({ id: "e-20261022-000001", machine: "Mac Studio", at: "2026-10-22T10:00:00-04:00", video: { file: video, bytes, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" }, label }), rev: 1 };
+      const record = { ...newEpisode({ id: "e-20261022-000001", machine: "Mac Studio", at: "2026-10-22T10:00:00-04:00", video: { file: video, bytes, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" }, label }), rev: 1, ...over };
       writeFileSync(recordFile(path, 1), recordText(record));
     };
     const told = ["--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT];
@@ -1289,6 +1290,66 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const two = await refused(t, "--drop", "Drop");
       assert.deepEqual(two, [HEAD, "  1 video is already imported, and its late check is still to come.", LATE, "  2 videos are already imported, and nothing of this Mac's import will take them out of the old folder.", KEPT]);
       assert.ok(!/Jane|Doe|Acme|Coaching|Sales|Pricing/.test([...said, ...two].join("\n")), [...said, ...two].join("\n"));
+      t.done();
+    });
+    // A video an episode holds whose record the gate holds (gate.js gated: a video not yet answered, or a session not cleared) is
+    // named as edit.js names such a record (episode.js shownName), by its label or else its short id, whatever this Mac's import:
+    // never by its file, nor by its episode's folder, and never counted. The folders here hold the client's name to show that.
+    const ANSWER = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-22T10:00:00-04:00", private: "yes" };
+    const SESSION_HELD = { version: 3, kind: "session", answer: ANSWER, session: { marked: "2026-10-22T10:00:00-04:00", on: "Mac Studio", teachings: null, cleared: null } };
+    const UNANSWERED = { version: 3, kind: null, answer: { state: "needs your answer", guess: null, seen: "", came: null } };
+    const CLIENT = /Jane|Doe|Coaching/;
+    it("names a video a session with no label holds by its short id under today's import, owed a late check or kept, and never by its file", async () => {
+      for (const owed of [true, false]) {
+        const t = mac();
+        const old = t.folder();
+        put(old, "Coaching call Jane Doe.mp4", "12345");
+        t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "", SESSION_HELD);
+        if (owed) owe(t, "2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, old);
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, owed
+          ? [HEAD, `  a client or group session (000001): already imported; its late check is still to come (due at ${due}).`, LATE]
+          : [HEAD, KEPT_LINE("a client or group session (000001)"), KEPT], owed ? "owed" : "kept");
+        assert.ok(!CLIENT.test(said.join("\n")), said.join("\n"));
+        t.done();
+      }
+    });
+    it("names a video a gated record holds by its label when it has one, and a video not yet answered with none by its short id, under either import, never counting it", async () => {
+      for (const held of [{}, { import: "full" }, { import: "light" }]) {
+        const t = mac(held);
+        const old = t.folder();
+        put(old, "Coaching call Jane Doe.mp4", "12345");
+        t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "", UNANSWERED);
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, [HEAD, KEPT_LINE("a video not yet answered (000001)"), KEPT], JSON.stringify(held));
+        t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "Video of 22 Oct, 10:00 (Mac Studio)", SESSION_HELD);
+        const labelled = await refused(t, "--drop", "Drop");
+        assert.deepEqual(labelled, [HEAD, KEPT_LINE("Video of 22 Oct, 10:00 (Mac Studio)"), KEPT], JSON.stringify(held));
+        assert.ok(!CLIENT.test([...said, ...labelled].join("\n")), [...said, ...labelled].join("\n"));
+        t.done();
+      }
+    });
+    it("names a late check's problem of a video a session with no label holds by its short id, under either import, and does not count it", async () => {
+      for (const held of [{}, { import: "light" }]) {
+        const t = mac(held);
+        const old = t.folder();
+        put(old, "Coaching call Jane Doe.mp4", "12345");
+        t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "", SESSION_HELD);
+        t.status("Coaching call Jane Doe.mp4", { problem: "Coaching call Jane Doe.rough-cut.mp4 is short" });
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, [HEAD, "  a client or group session (000001): it was copied in, but its late check found a problem.", PROBLEM_HERE], JSON.stringify(held));
+        assert.ok(!CLIENT.test(said.join("\n")), said.join("\n"));
+        t.done();
+      }
+    });
+    it("keeps the file name of a video an answered record that is not a session holds, under today's import, owed a late check or kept", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, "", { version: 3, kind: "finished", answer: { ...ANSWER, private: "no" } });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, KEPT_LINE("Budget.mov"), KEPT]);
+      owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE]);
       t.done();
     });
     it("follows each kind of line with the advice for it alone: work, an imported video to wait for, one to delete, and what could not be read", async () => {

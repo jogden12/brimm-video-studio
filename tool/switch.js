@@ -3,18 +3,25 @@
 // watches the new folder and no longer the old, which is left as it is. A video still in the old one would be left there, never
 // imported, and an import that failed, or whose late check found a problem, is for a person to see to (retry) from the
 // drop folder it is in. So the switch is refused until they are dealt with. Nothing here changes anything.
-// This file reads the status files (importing.js) and the episodes (filing.js), and both of them read settings.js, so
-// settings.js reaches this file by a dynamic import from the command that needs it, and not by a static one: a static import
-// would make the three a cycle.
+// This file reads the status files (importing.js) and the episodes (filing.js, episode.js and gate.js), and they read
+// settings.js, so settings.js reaches this file by a dynamic import from the command that needs it, and not by a static one: a
+// static import would make them a cycle.
 import { readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isMedia } from "./lib.js";
 import { clockTime, dueAt, holdingEpisode, readPendings } from "./filing.js";
+import { shownName } from "./episode.js";
+import { gated } from "./gate.js";
 import { importState, readStatuses } from "./importing.js";
 import { dropFolder, importingFolder } from "./settings.js";
 
 /** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
 const codeOf = (e) => (e && e.code) || "an error";
+
+/** How a video is named that the episode `holding` (holdingEpisode's) holds, when the gate holds its record (gate.js gated: a video
+    not yet answered, or a session not cleared): as edit.js names such a record (episode.js shownName), by its label or else its
+    short id, whatever this Mac's import. "" when no record holds it, or the gate does not hold the one that does. */
+const gatedName = (holding) => (holding && gated(holding.record) ? shownName(holding.record) : "");
 
 /** The names in `folder`: { names }, none when the folder is not there, or { code } when it cannot be read. Only a folder that
     is not there is empty: one that macOS has not let node read (it asks about Dropbox) is not known to be. */
@@ -41,10 +48,12 @@ function namesIn(folder) {
     imported video), so nothing of this Mac's import will take it out, and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which holds no video's
     name: the old folder, or the status files. `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
-    episode that holds the video does too. A video, or a status, that has none is counted and not named when `light` says the
-    import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to
-    reach a chat), and is named by its video's file name when the import is today's. A status is never named by its own file's
-    name; and what it says of why it failed is left out, as it may hold a file's name. */
+    episode that holds the video does too. A video an episode holds whose record the gate holds (a video not yet answered, or a
+    session not cleared) is named as edit.js names it (gatedName), by its label or else its short id, under either import, and
+    is never counted. Any other video, or status, that has no label is counted and not named when `light` says the import is the
+    light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to reach a chat),
+    and is named by its video's file name when the import is today's. A status is never named by its own file's name; and what
+    it says of why it failed is left out, as it may hold a file's name. */
 export function heldInOld({ root, machine, old, light, home, now = Date.now() }) {
   const folder = dropFolder(root, machine, old);
   const unreadable = [];
@@ -67,7 +76,8 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     named.add(status.video);
     const isFailed = importState(status, now) === "failed";
     const here = inFolder.code ? true : videos.includes(status.video);
-    if (light && !status.label) {
+    const name = gatedName(holdingEpisode({ root, video: status.video, bytes: status.bytes })) || status.label;
+    if (light && !name) {
       const count = counts[isFailed ? "failed" : "problem"];
       count[0] += 1;
       if (here) count[1] += 1;
@@ -76,11 +86,11 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     if (isFailed) {
       // A failed import whose video has since been taken out of the folder cannot be tried again: only its status file holds it.
       const gone = here ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
-      lines.add(`  ${status.label || status.video}: its import failed${gone}.`);
+      lines.add(`  ${name || status.video}: its import failed${gone}.`);
     } else {
       // A late check that found a problem makes itself again from the video in the old folder, which is why the video stays there.
       // With the video gone it cannot be made, and there is nothing for a person to take away: Jason looks at it.
-      problem.add(`  ${status.label || status.video}: it was copied in, but its late check found a problem${here ? "" : ", and its video is not in the old folder now"}.`);
+      problem.add(`  ${name || status.video}: it was copied in, but its late check found a problem${here ? "" : ", and its video is not in the old folder now"}.`);
       if (here) problemHere = true;
       else problemGone = true;
     }
@@ -111,7 +121,7 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
       bytes = undefined;
     }
     const holding = holdingEpisode({ root, video, bytes });
-    const label = mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || holding?.record.label;
+    const label = gatedName(holding) || mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || holding?.record.label;
     if (holding) {
       // Whether this Mac still owes the episode's late check for it: it is then to be waited for. If not, the late check has passed,
       // or it is a copy of an imported video, and filing.js leaves it in the drop folder for a person to delete.
