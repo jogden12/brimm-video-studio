@@ -1324,9 +1324,10 @@ describe("an error that leaves a command for a gated video (fix 2)", () => {
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
   });
-  it("leaves a command for an answered episode exactly as today: thrown", async () => {
+  it("leaves a command for an episode of today exactly as today: thrown", async () => {
+    // A record of the switch's layout says only the work stopped, as a gated one does (final fix 20).
     const t = setup();
-    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED } });
+    episodeFor(t);
     await refusing("mkdirSync", workFolder(t.home), () => assert.rejects(on(t.ctx.deps, "finish", FOLDER), (err) => err.code === "EACCES" && err.message.includes("From Final Cut")));
     t.done();
   });

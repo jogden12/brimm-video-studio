@@ -10,7 +10,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { HELP, editMain } from "../edit.js";
 import { writeSettings } from "../settings.js";
-import { setup } from "./episodes.js";
+import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -59,6 +59,39 @@ describe("an error nobody foresaw, on a Mac that does the light import (item 8)"
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, CLIENT_VIDEO), "video");
     await refusing("statSync", drop, () => assert.rejects(on(t.ctx.deps, "retry", CLIENT_VIDEO), (err) => err.code === "EACCES" && err.message.includes(CLIENT_VIDEO)));
+    t.done();
+  });
+});
+
+/** The clock of episodes.js's setup, as the record keeps a moment. */
+const AT = "2026-10-20T15:00:00-05:00";
+/** Her answer, as `kind` records it for a video that is not a session. */
+const ANSWERED = { state: "answered", guess: "raw", seen: "wide, 0:23, 1 retake", came: "camera", match: null, by: "Mac Studio", on: "Mac Studio", at: AT, private: "no" };
+/** The label a light import gives the made-up video. */
+const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
+/** A light import's files of the made-up video: the video and its plan, and no timeline of its own (edit/main.v0.fcpxml). */
+const LIGHT = { "Pricing talk.mp4": "the video", "Pricing talk.cut-plan.json": "{}", "Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n", "Pricing talk.transcript.txt": "[0:00] Hello" };
+
+describe("push of a video that has no timeline in Final Cut, and an error nobody foresaw for a record of the switch (item 20)", () => {
+  it("refuses a finished video, and an iPhone clip she answered, in plain words, before any timeline is read", async () => {
+    for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip"]]) {
+      const t = setup();
+      episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: LABEL }, files: LIGHT });
+      for (const argv of [["push", "Pricing talk"], ["push", "Pricing talk", "main", "--no-hand-edits"]]) {
+        const r = await on(t.ctx.deps, ...argv);
+        assert.deepEqual([r.code, r.said], [1, [`Pricing talk has no timeline to show in Final Cut: ${what} is not edited here.`]], `${kind}: ${argv.join(" ")}`);
+      }
+      assert.deepEqual(t.opened, []);
+      t.done();
+    }
+  });
+  it("says only that the work stopped for a record of the switch, on a Mac whose import is not the light one: no path, no stack", async () => {
+    // A raw video she answered, whose timeline Dropbox never brought: reading it fails in a way nobody foresaw.
+    const t = setup();
+    episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, label: LABEL }, files: LIGHT });
+    const r = await on(t.ctx.deps, "push", "Pricing talk");
+    assert.deepEqual([r.code, r.said], [1, ["The work stopped (ENOENT)."]]);
+    assert.equal(reread({ folder: join(t.root, "Episodes", FOLDER) }).rev, 1);
     t.done();
   });
 });

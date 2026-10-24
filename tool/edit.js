@@ -426,6 +426,9 @@ export function findEpisode(ctx, said) {
   if (fits.length === 1) {
     const e = fits[0];
     hideNames(ctx, e);
+    // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
+    // foresaw names none of it (editMain).
+    if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
     return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
@@ -1138,6 +1141,8 @@ export async function push(ctx, rest) {
   if (!got.found) return got.code;
   const { found, record } = got;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
+  // A finished video, and an iPhone clip she answered, have no timeline of their own: nothing of them is edited here.
+  if (!hasFinalCut(record)) return refuse(ctx, `${shownName(record)} has no timeline to show in Final Cut: ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"} is not edited here.`);
   if (version !== null) return pushVersion(ctx, { ...found, record }, "main", version, answers);
   // The timeline as the session leaves it: the import's own until something is laid over it (phase 4).
   const made = await timelineFor({ ...found, record }, "main", ctx);
@@ -4898,10 +4903,11 @@ export async function editMain(argv, deps = {}) {
   try {
     return await run(ctx, rest);
   } catch (e) {
-    // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or any command on a Mac that
-    // does the light import, where any video's file may be named for a client: its error may name the video's file or folder, as a
-    // path does, so only its code is said, through the filter, and the command ends there. Any other is thrown as it always was.
-    if (!ctx.hidden.names.length && !lightImport(ctx.settings)) throw e;
+    // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
+    // any command on a Mac that does the light import, where any video's file may be named for a client: its error may name the
+    // video's file or folder, as a path does, so only its code is said, through the filter, and the command ends there. Any other
+    // is thrown as it always was.
+    if (!ctx.hidden.names.length && !ctx.hidden.switched && !lightImport(ctx.settings)) throw e;
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
     return 1;
   }
