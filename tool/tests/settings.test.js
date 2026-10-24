@@ -1725,6 +1725,27 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       }
       t.done();
     });
+    it("says of late checks that cannot be read that the old folder was read only when it was", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+      chmodSync(old, 0o000);
+      chmodSync(pendingFolder(t.home), 0o000);
+      try {
+        assert.deepEqual(await refused(t, "--drop", "Drop"), [
+          HEAD_UNREAD,
+          `  The old folder, ${old}, could not be read (EACCES), so what it holds is not known.`,
+          READABLE,
+          `  The late checks this Mac still owes, kept on this Mac in ${pendingFolder(t.home)}, could not be read (EACCES), so which videos still wait for a late check is not known.`,
+          "Make that folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."
+        ]);
+      } finally {
+        chmodSync(old, 0o755);
+        chmodSync(pendingFolder(t.home), 0o755);
+      }
+      t.done();
+    });
     it("refuses when the old folder cannot be read, and says so with the code and the folder's own path: only a folder that is not there is empty", async () => {
       const t = mac({ import: "light" });
       const old = t.folder();

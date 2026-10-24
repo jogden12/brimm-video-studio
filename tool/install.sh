@@ -23,9 +23,9 @@
 #   ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
-#                                    left as it is: it holds no video, since the switch is refused while it does, and Jason
-#                                    deletes it by hand so that none is dropped there by habit. A run with no --drop keeps the
-#                                    folder the settings name. It is refused, before anything is changed, while the old folder
+#                                    left as it is. The switch is refused while it holds a video; Jason checks it is still
+#                                    empty, then deletes it by hand, so that none is dropped there by habit. A run with no
+#                                    --drop keeps the folder the settings name. It is refused, before anything is changed, while the old folder
 #                                    still holds a video, or an import of this Mac failed or found a problem: it says which,
 #                                    and to deal with each first. Run it with --print first
 #   ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"

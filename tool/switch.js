@@ -33,8 +33,8 @@ function namesIn(folder) {
 }
 
 /** What the old drop folder `old` ("Unedited Video" or "Drop") of the Mac `machine`, in BRIMM Video at `root`, still holds that
-    stops the switch, in plain words: { work, running, problem, imported, kept, unreadable }, each a list of lines, all [] when it
-    holds nothing of the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still
+    stops the switch, in plain words: { work, running, problem, imported, kept, unreadable, lateChecks }, each a list of lines,
+    all [] when it holds nothing of the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still
     arriving are none), and an import of this Mac, in Episodes/.importing, that failed. `running` is a video that no episode holds
     and whose import this Mac has at work now (its status says so, and was written in the last 10 minutes): the import makes its
     late check from this video, so it is to be waited for and left there, never taken out. An import that stopped (a crash left
@@ -97,8 +97,9 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   // A folder of late checks that cannot be read (anything but its not being there) is not known to hold none: it is said, and no
   // imported video is then said to be one to delete.
   const owing = home ? namesIn(pendingFolder(home)) : { names: [] };
-  // They are kept on this Mac's own disk, not in Dropbox, and the old folder itself was read: their line and advice are their own.
-  const lateChecks = owing.code ? [`  The late checks this Mac still owes, kept on this Mac in ${pendingFolder(home)}, could not be read (${owing.code}): the old folder was read, but which of its videos still wait for a late check is not known.`] : [];
+  // They are kept on this Mac's own disk, not in Dropbox: their line and advice are their own, and say that the old folder was read
+  // only when it was.
+  const lateChecks = owing.code ? [`  The late checks this Mac still owes, kept on this Mac in ${pendingFolder(home)}, could not be read (${owing.code})${inFolder.code ? ", so which videos still wait for a late check is not known" : ": the old folder was read, but which of its videos still wait for a late check is not known"}.`] : [];
   const pendings = home && !owing.code ? readPendings(home) : [];
   const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && sameFolder(String(p.root), root));
   const imported = new Set();

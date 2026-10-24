@@ -1334,5 +1334,6 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const r = ask("--print", "--help");
     const help = r.out.replace(/\s+/g, " ");
     for (const said of ["--drop Drop", '--drop "Unedited Video"', "--import light", "--handoff 2", "BRIMM Video/Drop/<this Mac>", "no longer watched", "left as it is", "refused", "--rules-only also writes readings off"]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
+    assert.ok(help.includes("The switch is refused while it holds a video; Jason checks it is still empty, then deletes it by hand, so that none is dropped there by habit."), r.out);
   });
 });
