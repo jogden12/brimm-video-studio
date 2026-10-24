@@ -75,6 +75,16 @@ describe("finish, the detached part", () => {
     for (const srt of [handoff.main.srt, ...handoff.reels.map((r) => r.srt)]) assert.match(tidyTranscript(srt), /^\[0:00\] /);
     t.done();
   });
+  it("finishes on a Mac that hands off version 1 an episode from before the switch answered again as raw, whose kind is \"raw\" now (final fix 4)", async () => {
+    const t = setup();
+    const answer = { state: "answered", guess: "raw", seen: "", came: "camera", match: null, by: "Mac Studio", on: "Mac Studio", at: "2026-10-20T14:00:00-05:00", private: "no" };
+    const found = await asked(t, { ...EDITED, version: 3, kind: "raw", answer });
+    const result = await finishNow(t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const handoff = JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8"));
+    assert.deepEqual([handoff.version, handoff.episode.kind, handoffFault(handoff)], [1, "episode", ""]);
+    t.done();
+  });
   it("finishes again over the final videos a corrected answer left in final/ (F9b): each is replaced by the rule, and nothing trips on it", async () => {
     const t = setup();
     const found = await asked(t);

@@ -1691,6 +1691,9 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // claim is written.
   const notYet = cannotFinish(record);
   if (notYet) return refuse(ctx, notYet);
+  // A version 1 hand-off holds an episode (a raw video) or a short video, and never a finished one: refused at once too, before any
+  // part is looked for or transcribed.
+  if (recordKind(record) === "finished" && !writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, handoffFromSpellingsWaits(shownName(record)));
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
   // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
   // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
@@ -3050,6 +3053,9 @@ function shownAfter(stamp, ms) {
 
 /** What is said when the hand-off waits for the switch, and when it is written. */
 const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What `finish` says of a video whose hand-off is written from its spellings (a finished video, an iPhone clip she answered) on a
+    Mac that hands off version 1. */
+const handoffFromSpellingsWaits = (name) => `${name}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`;
 const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
 /** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
     her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */

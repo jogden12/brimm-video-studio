@@ -16,7 +16,9 @@ const IN_MAIN_REACH = 1.5;
 
 /** The hand-off, in the spec's order. `record` is the episode's record; `main` and each of `reels` say what was finished:
     the file's name in final/, its length in seconds and its captions as the transcript tool writes them. `title` is the
-    approved title, and null when there is none. A Reel's `inMain` is left out when its words were not found in the main. */
+    approved title, and null when there is none. A Reel's `inMain` is left out when its words were not found in the main. A raw
+    video answered so since the switch (kind "raw", which an "episode" from before it is) is written as an episode, the kind
+    version 1 has for a raw recording. */
 export function buildHandoff({ record, revision, made, madeOn, commit, main, reels = [] }) {
   const title = record.title && record.title.approved ? record.title.text : null;
   return {
@@ -26,7 +28,7 @@ export function buildHandoff({ record, revision, made, madeOn, commit, main, ree
     made,
     madeOn,
     madeBy: `brimm-video ${commit}`,
-    episode: { id: record.id, kind: record.kind, name: record.name.text, recorded: record.video.recorded, recordedFrom: record.video.recordedFrom, title },
+    episode: { id: record.id, kind: record.kind === "raw" ? "episode" : record.kind, name: record.name.text, recorded: record.video.recorded, recordedFrom: record.video.recordedFrom, title },
     main: { file: main.file, seconds: main.seconds, srt: main.srt },
     reels: reels.map((r) => ({ n: r.n, title: r.title, file: r.file, seconds: r.seconds, ...(r.inMain ? { inMain: r.inMain } : {}), srt: r.srt }))
   };

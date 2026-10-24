@@ -128,6 +128,24 @@ describe("one rule for a session not cleared: the gate's (item 9)", () => {
   });
 });
 
+describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 4)", () => {
+  it("refuses a finished video at once on a Mac that hands off version 1, before any part is looked for or anything is run", async () => {
+    for (const settings of [{ handoffVersion: 1 }, {}]) {
+      const t = setup();
+      writeSettings(t.home, settings);
+      const found = episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, label: LABEL }, files: LIGHT });
+      // A Share of its main video waits in From Final Cut, which a finish would take.
+      t.shared("Pricing- what to charge- main v5 3fa9c1.mov");
+      for (const argv of [["finish", "Pricing talk"], ["finish", "Pricing talk", "--yes"]]) {
+        const r = await on(t.ctx.deps, ...argv);
+        assert.deepEqual([r.code, r.said], [1, ["Pricing talk's hand-off is written from its spellings once this Mac hands off version 2: ask Jason."]], `${JSON.stringify(settings)} ${argv.join(" ")}`);
+      }
+      assert.deepEqual([t.calls, t.started, reread(found).rev], [[], [], 1]);
+      t.done();
+    }
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();
