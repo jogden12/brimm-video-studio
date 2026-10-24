@@ -43,6 +43,8 @@
 # Nothing here needs a password or a key. No video and no sound ever leaves the Mac. Claude is asked to read each cut plan:
 # the words of the transcript with their times and the rules' plan are then sent to Claude through Claude Code, on the
 # Claude account signed in on this Mac, with the video's file name and its length. With --rules-only nothing leaves the Mac.
+# Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a
+# video only once its person has said what it is, and never a session's file name.
 set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
@@ -96,6 +98,8 @@ machine_option=""
 # said for settings.js to read and check. An option with no value after it is named in switch_missing, refused below.
 switch_options=()
 switch_missing=""
+# Set, with --machine, when the settings settings.js would write say the light import: what is sent to Claude is said for it.
+light_import=""
 while (( $# )); do
   arg="$1"
   shift
@@ -347,25 +351,29 @@ if [[ "$machined" == "yes" ]]; then
       exit 2
     fi
   fi
-  # The drop folder as it is now and as it will be are the last two lines of what it says, each as it says them, which are read as
-  # lines and never as JSON: what cannot be read refuses, and is never taken for Unedited Video. The settings are the lines above.
+  # The import it will be, and the drop folder as it is now and as it will be, are the last three lines of what it says, each as it
+  # says them, which are read as lines and never as JSON: what cannot be read refuses, and is never taken for today's import or
+  # Unedited Video. The settings are the lines above. With no node, the settings written are today's.
   old_drop_name="Unedited Video"
   drop_name="Unedited Video"
   if [[ -n "$settings_node" ]]; then
     plan_lines=("${(@f)planned}")
+    import_line="${plan_lines[-3]-}"
     now_line="${plan_lines[-2]-}"
     will_line="${plan_lines[-1]-}"
+    import_name="${import_line#The import will be: }"
     old_drop_name="${now_line#The drop folder is now: }"
     drop_name="${will_line#The drop folder will be: }"
-    if [[ "$now_line" != "The drop folder is now: "* || "$will_line" != "The drop folder will be: "* ]] ||
-       [[ "$old_drop_name" != ("Drop"|"Unedited Video") || "$drop_name" != ("Drop"|"Unedited Video") ]]; then
-      say "The installer could not read what settings.js said of the drop folder, so it changed nothing. It said:"
+    if [[ "$import_line" != "The import will be: "* || "$now_line" != "The drop folder is now: "* || "$will_line" != "The drop folder will be: "* ]] ||
+       [[ "$import_name" != ("light"|"full") || "$old_drop_name" != ("Drop"|"Unedited Video") || "$drop_name" != ("Drop"|"Unedited Video") ]]; then
+      say "The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:"
       say "$planned"
       say ""
       say "Nothing was changed."
       exit 2
     fi
-    planned="${(F)plan_lines[1,-3]}"
+    [[ "$import_name" != light ]] || light_import=1
+    planned="${(F)plan_lines[1,-4]}"
   fi
   drop="$root/$drop_name/$machine"
   marker="$drop/.brimm-watched-by"
@@ -510,7 +518,11 @@ if [[ -n "$rules_only" ]]; then
   say "  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac"
 elif claude="$(find_claude)"; then
   say "  Claude Code, to read each cut plan:  here already, at $claude"
-  say "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only"
+  if [[ -n "$light_import" ]]; then
+    say "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only"
+  else
+    say "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only"
+  fi
   say "  Claude model, named in unedited.js:  $(sed -n 's/^export const CLAUDE_MODEL = "\(.*\)";$/\1/p' "$HERE/unedited.js")"
 else
   say "  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
@@ -639,7 +651,11 @@ if [[ -n "$machine" ]]; then
   say "another device is brought down at once. Dropbox offers no command for it."
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
-  say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
+  if [[ -n "$light_import" ]]; then
+    say "in Claude, say \"what's waiting?\". What the tool did is in $LOG"
+  else
+    say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
+  fi
   if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
     say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. It holds no video. Jason deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
   fi

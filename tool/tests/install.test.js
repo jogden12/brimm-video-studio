@@ -873,6 +873,38 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.deepEqual(d.held(), before);
     d.done();
   });
+  // Under the light import nothing is sent to Claude when a video is dropped: the installer says what it sends then, and ends by
+  // saying to ask Claude what is waiting, not to open a video by its name. Today's import keeps today's lines.
+  const TODAY_SENT = "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only";
+  const LIGHT_SENT = "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only";
+  it("says under the light import, told or in the settings, that nothing is sent to Claude when a video is dropped, and today's line otherwise", () => {
+    const d = box();
+    for (const [settings, args] of [[undefined, ["--import", "light"]], [d.mine({ import: "light" }), []], [d.mine({ import: "full" }), ["--import", "light"]]]) {
+      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n${LIGHT_SENT}\n`), r.out);
+      assert.doesNotMatch(r.out, /file name and length/);
+    }
+    for (const [settings, args] of [[undefined, []], [d.mine({ import: "light" }), ["--import", "full"]], [d.mine(), []]]) {
+      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n${TODAY_SENT}\n`), r.out);
+      assert.ok(!r.out.includes(LIGHT_SENT), r.out);
+    }
+    d.done();
+  });
+  it("ends under the light import by saying to ask Claude what is waiting, and today's import by opening the video: its closing lines, read, not run", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    assert.ok(closing.includes(`  if [[ -n "$light_import" ]]; then
+    say "in Claude, say \\"what's waiting?\\". What the tool did is in $LOG"
+  else
+    say "in Claude, say \\"open\\" and the video's name. What the tool did is in $LOG"
+  fi`), closing);
+    // The help says so too.
+    const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
+    assert.ok(help.includes("Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a video only once its person has said what it is, and never a session's file name."), help);
+  });
   it("says at its end that the old folder holds no video and that Jason deletes it, so that none is dropped there by habit: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
     const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
@@ -1079,19 +1111,21 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const d = box();
     const said = (lines) => `printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}\n`;
     const answers = (lines) => `if [ "$2" = plan ]; then ${said(lines)}exit 0; fi\nexec "${process.execPath}" "$@"\n`;
-    const cannot = (lines) => ["The installer could not read what settings.js said of the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
+    const cannot = (lines) => ["The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
     for (const lines of [
       ["{", '  "version": 1', "}"],
-      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere"],
-      ["{", '  "version": 1', "}", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
+      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere"],
+      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
+      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
       ["nothing of the kind"]
     ]) {
       const r = askWith({ onPath: { node: answers(lines) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
       assert.deepEqual([r.status, r.out], [2, cannot(lines)], lines.join(" | "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
     }
-    // What it says whole is read: its own two lines, and the settings above them are what is shown.
-    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    // What it says whole is read: its own three lines, and the settings above them are what is shown.
+    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
     assert.equal(good.status, 0, good.out);
     assert.deepEqual(shown(good), { version: 1 });
     assert.ok(good.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), good.out);
