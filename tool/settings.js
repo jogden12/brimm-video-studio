@@ -205,11 +205,13 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
-                               is told are written with them, as set reads them, and any setting it is not told is kept.
-                               It refuses a value set would refuse, and a switch of the drop folder while the old drop
-                               folder still holds a video, or an import of this Mac failed or found a problem: it says
-                               which (by label where there is one, and one held by a video not yet answered, a session or
-                               a version of a session by its short id when it has none), and what to do first
+                               is told are written with them, read as set reads them, and any setting it is not told is
+                               kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
+                               (by --drop, or by another --root or --machine), but not while the old drop folder holds a
+                               video, or an import of this Mac failed or found a problem: it says which, and what to do
+                               first. A video held by an episode not yet answered, a session not cleared, or another
+                               version of such a session is named by the episode's label, or its short id, never by its
+                               own file
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
