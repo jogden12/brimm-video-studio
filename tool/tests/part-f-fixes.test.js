@@ -832,6 +832,33 @@ describe("clearing a session mark among three versions that matched the same vid
     assert.notDeepEqual((await on(t.ctx.deps, "spell", "Pricing talk", "add", "Jane", "Jayne")).said, [HELD]);
     t.done();
   });
+  it("refuses a clearing that moves the video out of its versions (--version-of none, or another video): no dialog, no reading, nothing written", async () => {
+    const ZID = "e-20261009-e9e9e9";
+    const cases = [
+      ["B marked, --version-of none", { withB: true }, ["--version-of", "none"]],
+      ["B marked, --version-of an unrelated video", { withB: true }, ["--version-of", "e9e9e9"]],
+      ["A itself marked, --version-of none", { aMarked: true }, ["--version-of", "none"]],
+      ["A itself marked, --version-of an unrelated video", { aMarked: true }, ["--version-of", "e9e9e9"]]
+    ];
+    for (const [what, { withB = false, aMarked = false }, how] of cases) {
+      const t = setup();
+      writeSettings(t.home, { handoffVersion: 2 });
+      episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+      episodeAs(t, { id: ZID, name: "2026-10-09 Z talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Z talk", placeholder: false } } });
+      if (withB) episodeAs(t, { id: BID, name: "2026-10-16 B talk (Mac Studio)", record: { ...WAITS(OLD), label: BLABEL } });
+      const v = episodeFor(t, { record: { ...WAITS(OLD), label: LABEL }, files: LIGHT });
+      if (aMarked) assert.equal((await on(t.ctx.deps, "kind", "Older talk", "session", "--private", "yes", "--again")).code, 0, what);
+      // Answered as sessions from the first: never read, never handed off.
+      assert.equal((await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--version-of", "a0a0a0")).code, 0, what);
+      if (withB) assert.equal((await on(t.ctx.deps, "kind", BLABEL, "session", "--private", "yes", "--version-of", "a0a0a0")).code, 0, what);
+      const record = reread(v);
+      const dialogs = [];
+      const before = t.started.length;
+      const r = await on(clicking(t, dialogs), "kind", record.name.text, "finished", "--private", "no", "--again", "--clear-session", ...how);
+      assert.deepEqual([r.code, r.said, dialogs.length, t.started.slice(before), reread(v).rev], [1, [MATCHED], 0, [], record.rev], what);
+      t.done();
+    }
+  });
   it("still refuses an answer, a clearing among them, when the session is in the match's versions and not in the video's own", async () => {
     const t = setup();
     // X is finished; S, a session not cleared, is a version of X. V is a session of its own, whose import matched X.

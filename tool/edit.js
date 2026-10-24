@@ -4000,7 +4000,9 @@ function answerWhy(ctx, found, record, plan) {
   if (stored !== "session" && !plan.clearSession && links.sessionsBeside(record, found.folder).length) return heldAnswer(name);
   // A video whose import found most of the words of a video since marked a session, or of a version of one, in it (answer.match)
   // holds that session's words: it is answered only as a session (her card says it may be one).
-  if (stored !== "session" && matchedSession(links, record, { clearing: plan.clearSession, folder: found.folder })) return MATCHED_SESSION;
+  // A clearing is let through for a match among the video's own versions only when it keeps the link it has: --version-of none, or
+  // another video, would take it out of them, and its match's session would then hold it no more.
+  if (stored !== "session" && matchedSession(links, record, { clearing: plan.clearSession && !plan.target && !plan.versionOf && !plan.unlink, folder: found.folder })) return MATCHED_SESSION;
   // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
   // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
   const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
