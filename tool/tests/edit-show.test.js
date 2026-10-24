@@ -357,7 +357,7 @@ describe("behind", () => {
     });
     // --- Her folder's own .claude/settings.json: the lock is what it says (fix round 1, item 1) ---
     const FOLDER_UNREAD_WHY = "(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)";
-    const FOLDER_HOOKS_WHY = "(Jason: her folder's .claude/settings.json does not say disableAllHooks is false, so hooks may be off, and the lock rests on them. Its contents are not shown here.)";
+    const FOLDER_HOOKS_WHY = "(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)";
     const FOLDER_GUARD_WHY = "(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)";
     const BYPASS = "does not disable Bypass mode (disableBypassPermissionsMode)";
     const AUTO = "does not disable Auto mode (disableAutoMode)";
@@ -381,9 +381,6 @@ describe("behind", () => {
       const OTHER = { hooks: [{ type: "command", command: "/bin/sh", args: ["/checkout/tool/studio/guard.sh", NODE, "/elsewhere"], onFailure: "block" }] };
       const cases = [
         ["hooks turned off", (s) => { s.disableAllHooks = true; }, [FOLDER_HOOKS_WHY]],
-        ["disableAllHooks taken out", (s) => { delete s.disableAllHooks; }, [FOLDER_HOOKS_WHY]],
-        ["disableAllHooks a word", (s) => { s.disableAllHooks = "false"; }, [FOLDER_HOOKS_WHY]],
-        ["disableAllHooks null", (s) => { s.disableAllHooks = null; }, [FOLDER_HOOKS_WHY]],
         ["the hooks taken out and Bash(*) allowed", (s) => { delete s.hooks; s.permissions.allow = ["Bash(*)"]; }, [FOLDER_GUARD_WHY]],
         ["no PreToolUse", (s) => { s.hooks = {}; }, [FOLDER_GUARD_WHY]],
         ["PreToolUse empty", (s) => { s.hooks.PreToolUse = []; }, [FOLDER_GUARD_WHY]],
@@ -434,6 +431,17 @@ describe("behind", () => {
         const r = await behindOn(t);
         assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${FOLDER_UNREAD_WHY}`, 0], what);
         assert.ok(!r.text.includes(SECRET), what);
+        t.done();
+      }
+    });
+    it("goes on for a folder as main's studio.js writes it, with no disableAllHooks: only disableAllHooks true turns hooks off (final fix 18)", async () => {
+      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      // main's settingsOf writes the permissions and the guard hook, and no disableAllHooks.
+      for (const [what, change] of [["as main writes it", (s) => { delete s.disableAllHooks; }], ["disableAllHooks a word", (s) => { s.disableAllHooks = "false"; }], ["disableAllHooks null", (s) => { s.disableAllHooks = null; }]]) {
+        const { t, folder } = mac();
+        editSettings(folder, change);
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${stale}`], what);
         t.done();
       }
     });

@@ -43,7 +43,8 @@ function settingsOf({ checkout, node, folder }) {
 }
 
 /** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on,
-    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is not false), "guard" (no entry with the guard
+    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is true: absent, as main's studio.js wrote
+    the folder, or false, it turns no hook off), "guard" (no entry with the guard
     hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
     node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
     hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date". */
@@ -53,7 +54,7 @@ export function lockBroken(settings, { checkout, folder }) {
   const entry = want.hooks.PreToolUse[0];
   const hook = entry.hooks[0];
   const broken = [];
-  if (settings.disableAllHooks !== want.disableAllHooks) broken.push("hooks");
+  if (settings.disableAllHooks === true) broken.push("hooks");
   const entries = object(settings.hooks) && Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : [];
   const guarded = entries.some((e) => object(e) && e.matcher === entry.matcher && Array.isArray(e.hooks)
     && e.hooks.some((h) => object(h) && h.type === hook.type && h.command === hook.command && h.onFailure === hook.onFailure && Array.isArray(h.args) && h.args[0] === hook.args[0] && h.args[2] === hook.args[2]));

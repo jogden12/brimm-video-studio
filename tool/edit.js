@@ -2126,9 +2126,9 @@ function settingsObject(file) {
     from. In this order:
     - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
       anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
-    - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it no
-      longer says disableAllHooks is false, no longer has the guard hook settingsOf writes, or no longer turns Bypass and Auto mode
-      off. Every other difference from what is written there is only "out of date" (studioStale);
+    - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it says
+      disableAllHooks is true (absent, as main wrote the folder, it turns no hook off), no longer has the guard hook settingsOf
+      writes, or no longer turns Bypass and Auto mode off. Every other difference from what is written there is only "out of date" (studioStale);
     - the user's settings, ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR/settings.json when that is set (Claude Code's own): when it
       is a JSON object with disableAllHooks true, whether or not she has a folder, since hooks off would defeat the lock of one made
       later. A file that is not that is left out by Claude Code, so it turns nothing off;
@@ -2153,7 +2153,7 @@ function lockLoosened({ home, checkout, deps = {} }) {
     if (own === null) why.push("(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)");
     else {
       const broken = lockBroken(own, { checkout, folder });
-      if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json does not say disableAllHooks is false, so hooks may be off, and the lock rests on them. Its contents are not shown here.)");
+      if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)");
       if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
       const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
       if (modes.length) why.push(`(Jason: her folder's .claude/settings.json ${modes.join(" and ")}. Its contents are not shown here.)`);
