@@ -275,7 +275,10 @@ function fieldsToldBy(rest) {
 /** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
     refuses by. It refuses a value that will not do, settings that would not do once written, and, when the drop folder
     changes, a drop folder that still holds work (switch.js), which it looks at by a dynamic import: so it gives back a promise
-    then, and the result itself when it needs no such look. `now` is a time, for the status files. */
+    then, and the result itself when it needs no such look. The drop folder changes when the folder the file names (its drop
+    folder, of its Mac, in its BRIMM Video) is not the one the settings would name: a new --drop, and a new --root or --machine
+    too; and the old folder looked at, with the statuses and late checks of its Mac in its BRIMM Video, is the file's. `now` is a
+    time, for the status files. */
 function planned(home, rest, now) {
   const told = fieldsToldBy(rest);
   if (!told.fields) return { code: told.code, said: [told.said] };
@@ -290,12 +293,20 @@ function planned(home, rest, now) {
   // The drop folder is Unedited Video until the file says Drop.
   const from = held.drop === "Drop" ? "Drop" : "Unedited Video";
   const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
-  if (from === to) return { settings, fields: told.fields, from, to };
+  // The old folder is the file's: of the Mac it names, in the BRIMM Video it names, when they will do; a Mac with no settings yet
+  // has the one it is told.
+  const oldRoot = typeof held.root === "string" && isAbsolute(held.root) ? held.root : settings.root;
+  const oldMachine = typeof held.machine === "string" && !machineFault(held.machine) ? held.machine : settings.machine;
+  const oldFolder = dropFolder(oldRoot, oldMachine, from);
+  const newFolder = dropFolder(settings.root, settings.machine, to);
+  if (resolve(oldFolder) === resolve(newFolder)) return { settings, fields: told.fields, from, to };
+  // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
+  const moved = resolve(oldRoot) !== resolve(settings.root) || oldMachine !== settings.machine;
   const light = lightImport(held) || lightImport(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: settings.root, machine: settings.machine, old: from, light, home, now: Number(now) });
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: oldRoot, machine: oldMachine, old: from, light, home, now: Number(now) });
       if (![work, running, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to };
       const head = unreadable.length && ![work, running, problem, imported, kept].some((lines) => lines.length) ? "and the old one could not be looked at:" : "and work is not finished in the old one:";
       // Each kind of line is followed by the advice for it alone: what to do about a failed import is not what to do about a late
@@ -313,7 +324,7 @@ function planned(home, rest, now) {
       ];
       return {
         code: 1,
-        said: [`Not written: the drop folder would change from ${from} to ${to}, ${head}`, ...kinds.flatMap(([lines, advice]) => (lines.length ? [...lines, ...advice] : []))]
+        said: [`Not written: the drop folder would change from ${moved ? oldFolder : from} to ${moved ? newFolder : to}, ${head}`, ...kinds.flatMap(([lines, advice]) => (lines.length ? [...lines, ...advice] : []))]
       };
     })
     .catch((e) => ({ code: 1, said: [`The old drop folder could not be looked at (${(e && e.code) || "an error"}), so nothing was written.`] }));

@@ -668,7 +668,7 @@ describe("node settings.js set and sessions", () => {
     t.done();
   });
 
-  it("write, as install.sh runs it, keeps the settings of the switch", () => {
+  it("write, as install.sh runs it, keeps the settings of the switch", async () => {
     const t = mac();
     writeSettings(t.home, { import: "light", handoffVersion: 2 });
     t.run("sessions", "--teachings", "on", "--cli-account", "a@b.c", "--app-account", "a@b.c");
@@ -679,7 +679,8 @@ describe("node settings.js set and sessions", () => {
     assert.deepEqual(t.said, [`Written: ${settingsFile(t.home)}`]);
     assert.deepEqual(readSettings(t.home).settings, before);
     t.said.length = 0;
-    assert.equal(t.run("write", "--machine", "Sallie's laptop", "--root", ROOT, "--checkout", CHECKOUT), 0);
+    // Another Mac's name moves the drop folder watched, so the old one is looked at first (here it is not there), and it ends later.
+    assert.equal(await t.run("write", "--machine", "Sallie's laptop", "--root", ROOT, "--checkout", CHECKOUT), 0);
     assert.deepEqual(readSettings(t.home).settings, { ...before, machine: "Sallie's laptop" });
     t.done();
   });
@@ -1383,6 +1384,40 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, KEPT_LINE("Talk.mov"), KEPT], beside ? "cleared" : "none");
         t.done();
       }
+    });
+    // The old drop folder is the one the file names, in its own BRIMM Video, of its own Mac, whatever this run is told: a switch
+    // told with a new --root or --machine would otherwise look at the wrong folder, and leave a video unwatched in the old one.
+    // And a new --root or --machine alone, the drop folder named the same, moves the folder watched as a switch does.
+    it("looks at the folder the file names, of its Mac in its BRIMM Video, when the run is told another BRIMM Video or another Mac", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      const elsewhere = join(t.home, "Elsewhere", "BRIMM Video");
+      mkdirSync(join(elsewhere, "Episodes", ".importing"), { recursive: true });
+      const moved = (root, machine) => `Not written: the drop folder would change from ${old} to ${dropFolder(root, machine, "Drop")}, and work is not finished in the old one:`;
+      const movedSame = (root, machine) => `Not written: the drop folder would change from ${old} to ${dropFolder(root, machine)}, and work is not finished in the old one:`;
+      assert.deepEqual(await refused(t, "--root", elsewhere, "--drop", "Drop"), [moved(elsewhere, "Mac Studio"), `  Talk.mov: waits in ${old}.`, ADVICE]);
+      assert.deepEqual(await refused(t, "--machine", "Mac Mini", "--drop", "Drop"), [moved(t.root, "Mac Mini"), `  Talk.mov: waits in ${old}.`, ADVICE]);
+      assert.deepEqual(await refused(t, "--root", elsewhere), [movedSame(elsewhere, "Mac Studio"), `  Talk.mov: waits in ${old}.`, ADVICE]);
+      assert.deepEqual(await refused(t, "--machine", "Mac Mini"), [movedSame(t.root, "Mac Mini"), `  Talk.mov: waits in ${old}.`, ADVICE]);
+      // The new folder holding a video does not stop it, and the old one empty lets it through.
+      mkdirSync(dropFolder(elsewhere, "Mac Studio", "Drop"), { recursive: true });
+      put(dropFolder(elsewhere, "Mac Studio", "Drop"), "New.mov");
+      rmSync(join(old, "Talk.mov"));
+      await allowed(t, "--root", elsewhere, "--drop", "Drop");
+      assert.equal(await t.run("plan", ...t.told, "--root", elsewhere), 0);
+      t.done();
+    });
+    it("matches the statuses and late checks of the file's Mac, in its BRIMM Video, when the run is told another Mac", async () => {
+      const t = mac();
+      const old = t.folder();
+      t.status("Budget.mov", { failed: "x" });
+      assert.deepEqual(await refused(t, "--machine", "Mac Mini", "--drop", "Drop"), [
+        `Not written: the drop folder would change from ${old} to ${dropFolder(t.root, "Mac Mini", "Drop")}, and work is not finished in the old one:`,
+        "  Budget.mov: its import failed, and its video is not in the old folder now: only its status file, in " + join(t.root, "Episodes", ".importing") + ", holds this, and a person takes it away by hand.",
+        ADVICE
+      ]);
+      t.done();
     });
     // What holds a video is found past a conflicted copy of its records, as edit.js finds the episode the gate holds by any of them
     // (G1a); a video whose holder cannot be told, since an episode's records cannot be read, is named by what it is and its size,
