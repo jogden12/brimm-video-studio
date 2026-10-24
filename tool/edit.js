@@ -3833,6 +3833,8 @@ const heldAnswer = (name) => `${name} is a version of a client or group session:
     the one named): `name` is the video being answered. */
 const sessionSet = (name) => `${name} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
 const ASK_FOR_TEACHINGS = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
+/** What a clearing says when another version of the video is still a session not cleared: it is held as one meanwhile. */
+const STILL_HELD = "Another version of it is still marked a client or group session, so it is held as one, and Claude reads nothing of it: once that mark is cleared too, say what it is again.";
 const ONLINE_ONLY = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
 const OFFLINE = "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.";
 
@@ -3906,7 +3908,10 @@ function lateCheckAt(ctx, record) {
       answer that is not a session, none of the versions of the video it starts from, earlier, later or beside it, and none of
       this video's own later versions, is a session not cleared (the gate's predicate, in the record or any conflicted copy of
       it); the version a handed-off video keeps is checked the same way. With --clear-session this video is left out of those
-      sets: it is the session being cleared, and any other session in them still refuses;
+      sets: it is the session being cleared, and any other session in them still refuses a new link (--version-of); but the set the
+      video is in already does not refuse a clearing, since each mark of it is cleared by a click of its own: the video cleared is
+      then held as a session while another is marked (no reading starts, and no hand-off of it is written), until that mark is
+      cleared too;
     - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
       since, which a new answer that is not one cannot be a version of;
     - and a video that is not itself handed off, but that the chain of one handed off passes through, is given no other version
@@ -3992,10 +3997,10 @@ function answerWhy(ctx, found, record, plan) {
   // out), and it did not go to the page under another id than its versions lead to now.
   if (keeps && linked && stored !== "session") {
     const kept = recordsHere(ctx).find((e) => e.record.id === linked);
-    if (kept && gated(kept.record)) return SESSION_TARGET;
+    if (kept && gated(kept.record) && !plan.clearSession) return SESSION_TARGET;
     const gap = links.gapOf(record, found.folder);
     if (gap && gap.reason === "loop") return chainGapWords(record, gap);
-    if (sessionAmong(links.setOf(links.firstOf(record, found.folder)).members)) return sessionSet(name);
+    if (!plan.clearSession && sessionAmong(links.setOf(links.firstOf(record, found.folder)).members)) return sessionSet(name);
     const moved = movedIdWords(ctx.root, found.folder, record);
     if (moved) return moved;
   }
@@ -4273,6 +4278,11 @@ async function answerKind(ctx, found, plan, began) {
     const becomes = KIND_SAID[stored];
     say(`${name}: the session mark is cleared, by your click. It is now ${becomes}.`);
     toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
+    // Another of its versions still marked holds it as a session: its names stay out of the chat, and Claude reads nothing of it.
+    if (linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
+      say(STILL_HELD);
+      return 0;
+    }
   }
   if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
   if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));

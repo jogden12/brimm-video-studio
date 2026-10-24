@@ -478,7 +478,7 @@ describe("kind --clear-session: the versions around the video", () => {
     await refuses(u, there, clearing("raw", "--version-of", ELSEWHERE), [SESSION_SET(SESSION_NAME)]);
     u.done();
   });
-  it("clears a session already handed off, which keeps the version it is of, unless another session is in that set", async () => {
+  it("clears a session already handed off, which keeps the version it is of, and while another session is in that set holds it as one", async () => {
     const t = setup();
     const found = sessionOf(t, { versionOf: ELSEWHERE, finished: FINISHED });
     video(t, ELSEWHERE, "2026-10-11 Elsewhere (Mac Studio)");
@@ -486,11 +486,15 @@ describe("kind --clear-session: the versions around the video", () => {
     assert.equal(r.code, 0, r.text);
     assert.deepEqual([reread(found).kind, reread(found).versionOf], ["raw", ELSEWHERE]);
     t.done();
+    // Each mark is cleared by a click of its own (final fix 17): the one cleared is held as a session while the other is marked,
+    // and Claude reads nothing of it.
     const u = setup();
     const there = sessionOf(u, { versionOf: ELSEWHERE, finished: FINISHED });
     video(u, ELSEWHERE, "2026-10-11 Elsewhere (Mac Studio)");
     otherSession(u, OTHER, "2026-10-12 Another (Mac Studio)", { versionOf: ELSEWHERE });
-    await refuses(u, there, clearing("raw"), [SESSION_SET(SESSION_NAME)]);
+    const held = await dialogs(u, there, CLEAR_IT).ask(...clearing("raw"));
+    assert.deepEqual([held.code, held.said.slice(1)], [0, [`${SESSION_NAME}: the session mark is cleared, by your click. It is now raw with retakes.`, "Another version of it is still marked a client or group session, so it is held as one, and Claude reads nothing of it: once that mark is cleared too, say what it is again."]]);
+    assert.deepEqual([reread(there).kind, reread(there).versionOf, reread(there).session.cleared.confirmed, u.started], ["raw", ELSEWHERE, "dialog", []]);
     u.done();
   });
 });

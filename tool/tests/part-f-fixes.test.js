@@ -536,6 +536,31 @@ describe("a session mark follows the video's other versions: each is held as a s
   });
 });
 
+describe("two sessions not cleared in one video's versions: each mark can be cleared (item 17)", () => {
+  const CLEAR_IT = { code: 0, stdout: "button returned:Clear it\n", stderr: "" };
+  /** edit.js with a stand-in osascript that clicks "Clear it". */
+  const clicking = (t) => ({ ...t.ctx.deps, run: async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? CLEAR_IT : t.ctx.deps.run(cmd, args, opts)) });
+  it("clears one by her click, holds it as a session while the other is marked, reads nothing of it, and lets the other be cleared", async () => {
+    const t = setup();
+    const MARKED = (name) => ({ kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: name, placeholder: false } });
+    const { older, newer } = twoVersions(t, { aOver: MARKED("Session, 2026-10-10"), bOver: MARKED(SESSION_NAME) });
+    const first = await on(clicking(t), "kind", SESSION_NAME, "finished", "--private", "no", "--again", "--clear-session");
+    assert.equal(first.code, 0, first.text);
+    assert.ok(first.said.includes(`${SESSION_NAME}: the session mark is cleared, by your click. It is now finished by your editor.`), first.text);
+    assert.ok(first.said.includes("Another version of it is still marked a client or group session, so it is held as one, and Claude reads nothing of it: once that mark is cleared too, say what it is again."), first.text);
+    assert.deepEqual([reread(newer).kind, reread(newer).session.cleared.confirmed, t.started], ["finished", "dialog", []]);
+    // Held as a session while the other is marked: nothing else runs for it, and no hand-off of it is written.
+    assert.deepEqual((await on(t.ctx.deps, "spell", LABEL, "add", "Jane", "Jayne")).said, [HELD]);
+    assert.match(handoffTarget({ root: t.root, settings: { handoffVersion: 2 } }, { folder: newer.folder, record: reread(newer) }).refusal, /is a version of a client or group session: ask Jason/);
+    // The other mark is cleared too: then neither is held.
+    const second = await on(clicking(t), "kind", "Session, 2026-10-10", "finished", "--private", "no", "--again", "--clear-session");
+    assert.equal(second.code, 0, second.text);
+    assert.equal(reread(older).session.cleared.confirmed, "dialog");
+    assert.notDeepEqual((await on(t.ctx.deps, "spell", "Pricing talk", "add", "Jane", "Jayne")).said, [HELD]);
+    t.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();
