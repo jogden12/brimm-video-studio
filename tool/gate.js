@@ -36,8 +36,9 @@ const isNumber = (word) => /^[1-9]\d*$/.test(word);
 /** Whether the record is of a client or group session whose mark is not cleared. A mark is cleared only when it holds what her
     click on the dialog leaves: `cleared` an object that says `confirmed: "dialog"`. Any other `cleared` (null, missing, "no",
     true, 1, an object without the confirmation) leaves it not cleared; so does a mark that cannot be read; and a record of kind
-    "session" with no mark at all is a session not cleared, since this is a gate and it errs toward refusing. */
-function sessionNotCleared(record) {
+    "session" with no mark at all is a session not cleared, since this is a gate and it errs toward refusing. It is the one rule
+    for a session not cleared: finish.js (handoffTarget) and unedited.js (askBlocked) read a mark by it too. */
+export function sessionNotCleared(record) {
   const mark = record.session;
   if (mark === undefined || mark === null) return record.kind === "session";
   if (!isObject(mark)) return true;

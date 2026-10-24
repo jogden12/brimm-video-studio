@@ -66,7 +66,7 @@ import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere,
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
-import { LEFT, leftAlone } from "./gate.js";
+import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { readStatuses, importState } from "./importing.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -1689,9 +1689,9 @@ export function listGone({ folder, record, home }) {
     - an import told to go by the rules alone, as the list says (`rulesOnly`). */
 export function askBlocked({ folder, record, root, home, machine, now = Date.now(), whole = isWhole }) {
   if (kindOf(record) === null) return { why: leftAlone(record) ? LEFT : "This video is waiting for its answer: say what it is first." };
-  // A session is known by its kind or by its mark, and only a mark that is cleared lets Claude read it: a record of kind
-  // "session" with no mark at all is refused too.
-  if ((kindOf(record) === "session" || record.session) && !(record.session && record.session.cleared)) return { why: "This is a client or group session: Claude reads it only for its teachings." };
+  // A session is known by its kind or by its mark, and only a mark cleared by her click lets Claude read it, by the gate's own rule
+  // (gate.js sessionNotCleared): a record of kind "session" with no mark at all is refused too.
+  if (sessionNotCleared(record)) return { why: "This is a client or group session: Claude reads it only for its teachings." };
   if (record.kind === "short video") return { why: "A short video gets no Reels." };
   // The other Mac has it open (phase 1b's claim): nothing is put into it from here meanwhile.
   const open = heldText(record, machine);

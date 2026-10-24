@@ -9,8 +9,11 @@ import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { HELP, editMain } from "../edit.js";
+import { recordText } from "../episode.js";
+import { handoffTarget } from "../finish.js";
 import { writeSettings } from "../settings.js";
-import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
+import { askBlocked } from "../unedited.js";
+import { setup, episodeFor, episodeAs, reread, FOLDER, ID } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -93,6 +96,35 @@ describe("push of a video that has no timeline in Final Cut, and an error nobody
     assert.deepEqual([r.code, r.said], [1, ["The work stopped (ENOENT)."]]);
     assert.equal(reread({ folder: join(t.root, "Episodes", FOLDER) }).rev, 1);
     t.done();
+  });
+});
+
+/** A session mark, as `kind … session` writes it, with `cleared` as given. */
+const markOf = (cleared) => ({ marked: AT, on: "Mac Studio", teachings: null, cleared });
+/** A mark cleared by her click on the dialog: the one clearing the gate takes. */
+const CLICKED = { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" };
+/** Marks that are not cleared by her click, though each says something under `cleared`. */
+const NOT_CLICKED = [true, "no", 1, {}, { at: AT, on: "Mac Studio", to: "finished" }, { ...CLICKED, confirmed: "typed" }];
+
+describe("one rule for a session not cleared: the gate's (item 9)", () => {
+  it("has askBlocked refuse a video whose mark says cleared in any way but her click", () => {
+    const record = { kind: "finished", answer: ANSWERED, label: LABEL, video: { file: "Pricing talk.mp4" } };
+    const asked = (session) => askBlocked({ folder: "/none", record: { ...record, session }, root: "/none", home: "/none", machine: "Mac Studio" });
+    for (const cleared of NOT_CLICKED) assert.deepEqual(asked(markOf(cleared)), { why: "This is a client or group session: Claude reads it only for its teachings." }, JSON.stringify(cleared));
+    assert.notDeepEqual(asked(markOf(CLICKED)), { why: "This is a client or group session: Claude reads it only for its teachings." });
+  });
+  it("has handoffTarget refuse a video one of whose versions has a conflicted copy marking it a session not cleared by her click", () => {
+    for (const cleared of [...NOT_CLICKED, CLICKED]) {
+      const t = setup();
+      const first = episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, label: LABEL } });
+      const later = episodeAs(t, { id: "e-20261022-b2b2b2", name: "2026-10-22 Talk (Mac Studio)", record: { kind: "finished", answer: ANSWERED, label: "Video of 22 Oct, 09:12 (Mac Studio)", versionOf: ID } });
+      // The copy is never checked as a record is: Dropbox wrote it.
+      writeFileSync(join(later.folder, "record/0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), recordText({ ...later.record, session: markOf(cleared) }));
+      const target = handoffTarget({ root: t.root, settings: { handoffVersion: 2 } }, { folder: first.folder, record: first.record });
+      if (cleared === CLICKED) assert.equal(target.refusal, "", "a mark cleared by her click");
+      else assert.equal(target.refusal, "Pricing talk is a version of a client or group session: ask Jason. Nothing was written.", JSON.stringify(cleared));
+      t.done();
+    }
   });
 });
 

@@ -17,7 +17,7 @@ import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, undone, acceptRev } from "./episode.js";
-import { gated } from "./gate.js";
+import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
 import { fileSafe } from "./names.js";
 import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
@@ -499,10 +499,11 @@ export function numbersTakenWords(record, handoff, taken) {
   return `${shownName(record)}'s hand-off would give ${list} again: another version of the video gave ${numbers} already, and a number is never given twice within a video. Ask Jason. Nothing was written.`;
 }
 
-/** Is a record a client or group session whose mark is not cleared? One is known by its kind or by its mark, as `ask` knows one
-    (unedited.js askBlocked), and a session with no mark at all is not cleared either. handoffTarget asks it of each version's
-    record and of each conflicted copy of its records (the view's copiesOf), as the gate holds a video by any of them. */
-const unclearedSession = (record) => Boolean(record) && (kindOf(record) === "session" || Boolean(record.session)) && !(record.session && record.session.cleared);
+/** Is a record a client or group session whose mark is not cleared? One is known by its kind or by its mark, by the gate's own
+    rule (gate.js sessionNotCleared: a mark is cleared only by her click on the dialog, and one that cannot be read is not), and a
+    session with no mark at all is not cleared either. handoffTarget asks it of each version's record and of each conflicted copy of
+    its records (the view's copiesOf), which nothing has checked as a record, as the gate holds a video by any of them. */
+const unclearedSession = (record) => record !== null && typeof record === "object" && !Array.isArray(record) && sessionNotCleared(record);
 
 /** Where the next hand-off of a video goes, as every hand-off writer asks it (finishEpisode, finishNow, saveSpellings, and
     Part F's writers), from one reading of Episodes: { v2, refusal, id, revision, taken }. `found` is { folder, record }, the
