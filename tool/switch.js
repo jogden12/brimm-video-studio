@@ -12,6 +12,7 @@ import { isMedia } from "./lib.js";
 import { clockTime, dueAt, holdingEpisode, readPendings } from "./filing.js";
 import { linksOf } from "./finish.js";
 import { gatedAsOf, gatedName } from "./gate.js";
+import { unlabelled } from "./kinds.js";
 import { importState, readStatuses } from "./importing.js";
 import { dropFolder, importingFolder } from "./settings.js";
 
@@ -36,19 +37,21 @@ function namesIn(folder) {
     late check from this video, so it is to be waited for and left there, never taken out. An import that stopped (a crash left
     it) is a video that waits, as one with no status is. `problem` is an import of this Mac whose
     late check found a problem: it is made again from the video in the old folder, so the video is to stay there, and
-    `problemHere` and `problemGone` say whether some have their video there and some have not. A video that an
-    episode holds already is imported, and is one of two kinds, by whether `home`, this Mac's own folder, holds the late check
-    this Mac still has to make for it: `imported` has one, so the video leaves the folder once it has passed, is to be waited
-    for and never taken out, and its line says when it is due; `kept` has none (its late check has passed, or it is a copy of an
-    imported video), so nothing of this Mac's import will take it out, and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which holds no video's
-    name: the old folder, or the status files. `now` is a time in milliseconds, for the status files.
+    `problemHere` and `problemGone` say whether some have their video there and some have not. `imported` is a video for which
+    `home`, this Mac's own folder, holds a late check this Mac still has to make, whatever holds it (an episode, none, or one
+    that cannot be read) and whatever else is said of it: the video leaves the folder once the check has passed, is to be
+    waited for and never taken out, and its line says when it is due. `kept` is a video an episode holds already, with no such
+    check (its late check has passed, or it is a copy of an imported video), so nothing of this Mac's import will take it out,
+    and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which
+    holds no video's name: the old folder, or the status files. `now` is a time in milliseconds, for the status files.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
     episode that holds the video does too. A video an episode holds whose record edit.js names by a label and not by its file
     (gate.js gatedAsOf, over the versions of the video, finish.js linksOf: a video not yet answered, a session not cleared, and an
     answered video one of whose other versions is such a session) is named as edit.js names that record (gatedName): a gated one
     by its label or else its short id, one held as a session by its label or else as "a video" with its short id; under either
-    import, and never counted. Any other video, or status, that has no label is counted and not named when `light` says the
-    import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to reach a chat),
+    import, and never counted. A video whose holder cannot be told (Episodes, or an episode's records, cannot be read) is named
+    by what it is and its size, under either import (kinds.js unlabelled). Any other video, or status, that has no label is
+    counted and not named when `light` says the import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to reach a chat),
     and is named by its video's file name when the import is today's. A status is never named by its own file's name; and what
     it says of why it failed is left out, as it may hold a file's name. */
 export function heldInOld({ root, machine, old, light, home, now = Date.now() }) {
@@ -56,7 +59,10 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));
-  const heldAs = (holding) => (holding && namedAs(holding.record) ? gatedName(holding.record, true) : "");
+  const heldAs = (holding) => (holding && holding.record && namedAs(holding.record) ? gatedName(holding.record, true) : "");
+  // A video whose holder cannot be told (holdingEpisode's `unknown`: Episodes, or an episode's records, cannot be read) may be a
+  // session's: it is named by what it is and its size, as edit.js names a video with no label, under either import.
+  const unknownAs = (holding, video, bytes) => (holding && holding.unknown ? unlabelled(video, bytes) : "");
   const unreadable = [];
   const inFolder = namesIn(folder);
   if (inFolder.code) unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
@@ -77,7 +83,8 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     named.add(status.video);
     const isFailed = importState(status, now) === "failed";
     const here = inFolder.code ? true : videos.includes(status.video);
-    const name = heldAs(holdingEpisode({ root, video: status.video, bytes: status.bytes })) || status.label;
+    const holder = holdingEpisode({ root, video: status.video, bytes: status.bytes });
+    const name = heldAs(holder) || status.label || unknownAs(holder, status.video, status.bytes);
     if (light && !name) {
       const count = counts[isFailed ? "failed" : "problem"];
       count[0] += 1;
@@ -122,15 +129,17 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
       bytes = undefined;
     }
     const holding = holdingEpisode({ root, video, bytes });
-    const label = heldAs(holding) || mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || holding?.record.label;
-    if (holding) {
-      // Whether this Mac still owes the episode's late check for it: it is then to be waited for. If not, the late check has passed,
-      // or it is a copy of an imported video, and filing.js leaves it in the drop folder for a person to delete.
-      const pending = pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && resolve(String(p.root)) === resolve(root));
-      if (pending) {
-        if (!label && light) importedCounted += 1;
-        else imported.add(`  ${label || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
-      } else if (!label && light) keptCounted += 1;
+    const held = holding && !holding.unknown ? holding : null;
+    const label = heldAs(held) || mine.find((s) => s.video === video && s.bytes === bytes && s.label)?.label || held?.record.label || unknownAs(holding, video, bytes);
+    // A late check this Mac still owes for it comes first, whatever holds it: the video is then to be waited for, and never taken
+    // out, since the check is made from it. Else an episode that holds it holds it for good: its late check has passed, or it is a
+    // copy of an imported video, and filing.js leaves it in the drop folder for a person to delete.
+    const pending = pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && resolve(String(p.root)) === resolve(root));
+    if (pending) {
+      if (!label && light) importedCounted += 1;
+      else imported.add(`  ${label || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
+    } else if (held) {
+      if (!label && light) keptCounted += 1;
       else kept.add(`  ${label || video}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
     } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
       // This Mac's import is at work on it now, and will make its late check from this video: it is to be waited for and left there.

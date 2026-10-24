@@ -12,7 +12,7 @@ import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
-import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode, shownName } from "./episode.js";
+import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
 import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
@@ -228,21 +228,51 @@ export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
   return "";
 }
 
-/** The episode that holds the video `video`, of `bytes` bytes, as { name, record }: the first, by its folder's name, whose whole
-    record names the video at that size. null when none does. */
+/** The episode that holds the video `video`, of `bytes` bytes, as { name, record }: the first, by its folder's name, one of whose
+    records names the video at that size, its record in force or a conflicted copy Dropbox keeps of one, read past the copies as
+    edit.js reads an episode the gate holds by any of its records. `record` is the one to name it by: the first of them that the
+    gate holds (gate.js gated), else the record in force. null when none does; { unknown: true } when none does, but Episodes, or
+    an episode's folder or its records, could not be read, or a record there is not whole yet: what holds the video cannot then
+    be told, and it is not to be named by its file, since it may be a session's. */
 export function holdingEpisode({ root, video, bytes }) {
   const episodes = episodesFolder(root);
   let names = [];
   try {
     names = readdirSync(episodes).filter((n) => !n.startsWith("."));
   } catch (e) {
-    return null;
+    return e.code === "ENOENT" ? null : { unknown: true };
   }
+  const holds = (r) => r && typeof r === "object" && r.video && r.video.file === video && r.video.bytes === bytes;
+  const shaped = (r) => r !== null && typeof r === "object" && typeof r.id === "string" && Number.isInteger(r.version);
+  let unknown = false;
   for (const name of names.sort()) {
-    const { record } = readEpisode(join(episodes, name));
-    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return { name, record };
+    const folder = join(episodes, name);
+    const read = readEpisode(folder);
+    const past = read.code === "CONFLICTED" ? readEpisode(folder, { pastCopies: true }) : null;
+    const inForce = read.record || (past && past.record) || null;
+    const records = [inForce, ...(past ? recordCopies(folder) : [])].filter(shaped);
+    if (records.some(holds)) return { name, record: records.find(gated) || inForce || records.find(holds) };
+    if (!inForce && cannotTell(folder, past || read)) unknown = true;
   }
-  return null;
+  return unknown ? { unknown: true } : null;
+}
+
+/** Whether the episode folder `folder`, of which `read` (readEpisode's) gave no whole record, may hold a record this Mac cannot
+    read yet: the folder, or its record folder, cannot be read, or a record file is there that is not whole. A name in Episodes
+    that is not a folder, and a folder with no record folder or no record in it, holds none. */
+function cannotTell(folder, read) {
+  if (read.code === "UNREADABLE") {
+    try {
+      return statSync(folder).isDirectory();
+    } catch (e) {
+      return e.code !== "ENOENT";
+    }
+  }
+  try {
+    return readdirSync(join(folder, RECORD_DIR)).some((n) => /^\d{4}\.json$/.test(n));
+  } catch (e) {
+    return !["ENOENT", "ENOTDIR"].includes(e.code);
+  }
 }
 
 /** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size
@@ -251,7 +281,7 @@ export function holdingEpisode({ root, video, bytes }) {
     record named so ("" for one named by its folder): edit.js gives one that names a video held as a session so too. */
 export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : "") }) {
   const held = holdingEpisode({ root, video, bytes });
-  if (!held) return "";
+  if (!held || held.unknown) return "";
   const as = gatedAs(held.record);
   return `already imported as ${as ? withShortId(as, held.record) : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }

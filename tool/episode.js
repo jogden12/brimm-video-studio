@@ -348,6 +348,21 @@ export function conflictedCopies(folder) {
   }
 }
 
+/** The conflicted copies Dropbox has kept of an episode's records, as they are read: each a record's object, past any that cannot
+    be read. [] when there are none. A copy is only read, as edit.js's findEpisode reads them for the gate. */
+export function recordCopies(folder) {
+  return conflictedCopies(folder)
+    .filter((path) => /^record\/\d{4}\.json$/.test(conflictedOf(path)))
+    .map((path) => {
+      try {
+        return JSON.parse(readFileSync(join(folder, path), "utf8"));
+      } catch (e) {
+        return null;
+      }
+    })
+    .filter((copy) => copy !== null && typeof copy === "object" && !Array.isArray(copy));
+}
+
 /** The numbers of the record files in an episode's folder, highest first: [] when there are none, or no folder record/. */
 export function recordNumbers(folder) {
   let names;

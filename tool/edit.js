@@ -37,7 +37,7 @@ import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
-import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
+import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -471,17 +471,8 @@ export function findEpisode(ctx, said) {
   return { why: all.length ? `No episode fits ${asked}. The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
-/** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
-export function sizeText(bytes) {
-  const units = ["bytes", "KB", "MB", "GB", "TB"];
-  let n = bytes;
-  let u = 0;
-  while (n >= 1024 && u < units.length - 1) {
-    n /= 1024;
-    u += 1;
-  }
-  return u === 0 ? `${n} bytes` : `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[u]}`;
-}
+/** A size in bytes as a person reads it (kinds.js sizeText). */
+export { sizeText };
 
 /** A stretch of time as a person reads it: "25 minutes", "2 hours", "3 days". */
 export function ageText(ms) {
@@ -559,10 +550,6 @@ function labelIn(statuses, video, machine) {
   const labelled = statuses.find(({ status }) => status && status.video === video && status.machine === machine && status.label);
   return labelled ? labelled.status.label : "";
 }
-
-/** A video in a drop folder that has no label, as it is named on a Mac that does the light import: by what it is and its size,
-    as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. */
-const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"} of ${sizeText(bytes)}`;
 
 /** How a video came, in the words of her card (answer.came, as episode.js CAMES has them). */
 const CAME_WORDS = { camera: "from a camera", phone: "from an iPhone", zoom: "as a Zoom download", sound: "as sound alone" };
@@ -708,7 +695,7 @@ export async function episodes(ctx) {
       // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
       const label = labelIn(statuses, video, mac);
       const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
-      if (!light && !label && !(holding && gatedAsOf(links)(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      if (!light && !label && !(holding && (holding.unknown || gatedAsOf(links)(holding.record)))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
       else {
         const who = label || capital(unlabelled(video, found.size));
         waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
@@ -1457,7 +1444,7 @@ export async function retry(ctx, rest) {
   const gatedAs = gatedAsOf(linksOf(ctx.root));
   const quiet = (v) => {
     const holding = holdingEpisode({ root: ctx.root, video: v, bytes: sizeOf(v) });
-    return light || Boolean(labelOf(v)) || Boolean(holding && gatedAs(holding.record));
+    return light || Boolean(labelOf(v)) || Boolean(holding && (holding.unknown || gatedAs(holding.record)));
   };
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {

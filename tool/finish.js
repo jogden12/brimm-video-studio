@@ -16,7 +16,7 @@ import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
-import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, undone, acceptRev } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
 import { fileSafe } from "./names.js";
@@ -236,12 +236,8 @@ function episodesIn(root) {
   });
 }
 
-/** The conflicted copies Dropbox has kept of an episode's records, as they are read: each a record's object, past any that cannot
-    be read. [] when there are none. A copy is only read, as edit.js's findEpisode reads them for the gate. */
-const recordCopiesIn = (folder) => conflictedCopies(folder)
-  .filter((path) => /^record\/\d{4}\.json$/.test(conflictedOf(path)))
-  .map((path) => readJson(join(folder, path)))
-  .filter((copy) => copy !== null && typeof copy === "object" && !Array.isArray(copy));
+/** The conflicted copies Dropbox has kept of an episode's records, as they are read (episode.js recordCopies). */
+const recordCopiesIn = recordCopies;
 
 /** What is in Episodes for the length of one call: read once, the first time it is asked for, and not again, so that a call
     which follows no link reads none. `all()` is every folder as episodesIn gives them; `find(id)` is the first one whose

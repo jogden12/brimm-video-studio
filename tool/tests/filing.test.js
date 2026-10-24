@@ -295,3 +295,23 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     t.done();
   });
 });
+
+describe("heldBy, for a video whose episode has a conflicted copy of its record", () => {
+  it("finds the episode past the copy, so the import holds the video, and names a session with no label by its short id once", () => {
+    // Before, readEpisode stopped at the copy, nothing held the video, and the import would have imported it again.
+    const root = join(mkdtempSync(join(tmpdir(), "brimm-held-")), "BRIMM Video");
+    const folder = join(root, "Episodes", "2026-10-22 Coaching call Jane Doe (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const at = "2026-10-22T10:00:00-04:00";
+    const record = {
+      ...newEpisode({ id: "e-20261022-3fa9c1", machine: "Mac Studio", at, video: { file: "Coaching call Jane Doe.mp4", bytes: 5, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" } }),
+      rev: 1, version: 3, kind: "session",
+      answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at, private: "yes" },
+      session: { marked: at, on: "Mac Studio", teachings: null, cleared: null }
+    };
+    writeFileSync(recordFile(folder, 1), recordText(record));
+    writeFileSync(join(folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), recordText(record));
+    assert.equal(heldBy({ root, video: "Coaching call Jane Doe.mp4", bytes: 5 }), "already imported as a client or group session (3fa9c1). It stays in the drop folder until its late check passes, or for a person to delete.");
+    rmSync(dirname(root), { recursive: true, force: true });
+  });
+});

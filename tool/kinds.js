@@ -70,6 +70,23 @@ function whenIn(at) {
 }
 
 /** A Mac as a sentence says it, from its name in the settings: "the Mac Studio", but "Sallie's laptop". */
+/** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
+export function sizeText(bytes) {
+  const units = ["bytes", "KB", "MB", "GB", "TB"];
+  let n = bytes;
+  let u = 0;
+  while (n >= 1024 && u < units.length - 1) {
+    n /= 1024;
+    u += 1;
+  }
+  return u === 0 ? `${n} bytes` : `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[u]}`;
+}
+
+/** A video in a drop folder that has no label, as it is named where its file's name is not to be said: by what it is and its size,
+    as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. With no size
+    (its file could not be looked at), by what it is alone. */
+export const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"}${Number.isFinite(bytes) ? ` of ${sizeText(bytes)}` : ""}`;
+
 export const spokenMac = (machine) => (/['’]s\b/.test(machine) ? machine : `the ${machine}`);
 
 /** The two ways to name a video that has been dropped and not answered, from its length in `seconds`, the Mac it was dropped

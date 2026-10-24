@@ -1384,6 +1384,66 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    // What holds a video is found past a conflicted copy of its records, as edit.js finds the episode the gate holds by any of them
+    // (G1a); a video whose holder cannot be told, since an episode's records cannot be read, is named by what it is and its size,
+    // under either import (G1b); and a late check this Mac owes for a video makes it one to wait for, whatever holds it (G1c).
+    const JD_FOLDER = "2026-10-22 Coaching call Jane Doe (Mac Studio)";
+    const JD = "Coaching call Jane Doe.mp4";
+    /** A conflicted copy of the first record of the episode `folder`, as Dropbox keeps one beside it. */
+    const copyOf = (t, folder) => {
+      const record = join(t.root, "Episodes", folder, "record");
+      writeFileSync(join(record, "0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), readFileSync(join(record, "0001.json"), "utf8"));
+    };
+    it("names a video a session with no label holds, read past a conflicted copy of its record, by its short id, owed or kept", async () => {
+      for (const owed of [true, false]) {
+        const t = mac();
+        const old = t.folder();
+        put(old, JD, "12345");
+        t.episode(JD_FOLDER, JD, 5, "", SESSION_HELD);
+        copyOf(t, JD_FOLDER);
+        if (owed) owe(t, JD_FOLDER, JD, 5, old);
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, owed
+          ? [HEAD, `  a client or group session (000001): already imported; its late check is still to come (due at ${due}).`, LATE]
+          : [HEAD, KEPT_LINE("a client or group session (000001)"), KEPT], owed ? "owed" : "kept");
+        assert.ok(!CLIENT.test(said.join("\n")), said.join("\n"));
+        t.done();
+      }
+    });
+    it("names a video whose holder cannot be told by what it is and its size, under either import, and one owed a late check is one to wait for", async () => {
+      for (const held of [{}, { import: "light" }]) {
+        const t = mac(held);
+        const old = t.folder();
+        put(old, JD, "12345");
+        t.episode(JD_FOLDER, JD, 5, "", SESSION_HELD);
+        const shut = join(t.root, "Episodes", JD_FOLDER, "record");
+        chmodSync(shut, 0o000);
+        const said = [];
+        try {
+          said.push(...(await refused(t, "--drop", "Drop")));
+          assert.deepEqual(said, [HEAD, `  a video of 5 bytes: waits in ${old}.`, ADVICE], JSON.stringify(held));
+          owe(t, JD_FOLDER, JD, 5, old);
+          const owed = await refused(t, "--drop", "Drop");
+          assert.deepEqual(owed, [HEAD, `  a video of 5 bytes: already imported; its late check is still to come (due at ${due}).`, LATE], JSON.stringify(held));
+          said.push(...owed);
+        } finally {
+          chmodSync(shut, 0o755);
+        }
+        assert.ok(!CLIENT.test(said.join("\n")), said.join("\n"));
+        t.done();
+      }
+    });
+    it("says a video this Mac owes a late check is one to wait for whatever holds it: no episode, or an import at work on it too", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+      const OWED = [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE];
+      assert.deepEqual(await refused(t, "--drop", "Drop"), OWED);
+      t.status("Budget.mov", { bytes: 6 });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), OWED);
+      t.done();
+    });
     it("keeps the file name of a video an answered record that is not a session holds, under today's import, owed a late check or kept", async () => {
       const t = mac();
       const old = t.folder();
