@@ -952,6 +952,22 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
       t.done();
     }
   });
+  it("names it by its file as today when an episode that cannot be read is not named for it: only one that could be its makes it untold", async () => {
+    const t = setup();
+    const e = clientEpisode(t, { folder: "2026-10-19 Budget (Mac Studio)", video: "Budget.mov", id: "e-20261019-0c0c0c", over: { kind: "finished", answer: ANSWERED } });
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    const shut = join(e.folder, "record");
+    chmodSync(shut, 0o000);
+    try {
+      assert.deepEqual(waitingIn((await on(depsOf(t), "episodes")).said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
+      assert.deepEqual((await on(depsOf(t), "retry", "nothing fits this")).said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: Talk.mov.']);
+    } finally {
+      chmodSync(shut, 0o755);
+    }
+    t.done();
+  });
   it("names it by its file as today when an episode that can be read holds it and is answered, or nothing holds it", async () => {
     const t = setup();
     const drop = join(t.root, "Unedited Video", "Mac Studio");

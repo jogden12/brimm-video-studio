@@ -1468,6 +1468,24 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    it("tells a video's holder unknown only when an episode that cannot be read is named for that video, by this Mac or another", async () => {
+      // An episode that cannot be read, named for another video, does not stop this one being named as today; one named for it,
+      // by either Mac, could be a session's, and it is named by what it is and its size.
+      for (const [folder, said] of [["2026-10-19 Budget (Mac Studio)", "Talk.mov"], ["2026-10-22 Talk (Sallie's laptop)", "a video of 5 bytes"], ["2026-10-22 Talk (Mac Studio)-2", "a video of 5 bytes"]]) {
+        const t = mac();
+        const old = t.folder();
+        put(old, "Talk.mov", "12345");
+        t.episode(folder, folder.includes("Budget") ? "Budget.mov" : "Talk.mov", 5, "", FINISHED);
+        const shut = join(t.root, "Episodes", folder, "record");
+        chmodSync(shut, 0o000);
+        try {
+          assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  ${said}: waits in ${old}.`, ADVICE], folder);
+        } finally {
+          chmodSync(shut, 0o755);
+        }
+        t.done();
+      }
+    });
     it("says a video this Mac owes a late check is one to wait for before any other kind, a failed import or a late check's problem included, and never to take it out", async () => {
       // An owed late check is made from the video in the old folder: whatever else a status says of it, it is waited for.
       for (const status of [{ failed: "the sound could not be read" }, { problem: "Budget.rough-cut.mp4 is short" }]) {

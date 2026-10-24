@@ -37,12 +37,15 @@ export function episodeKind(facts) {
   return facts.width <= facts.height || facts.duration < SHORT_UNDER ? "short video" : "episode";
 }
 
-/** The folders in Episodes that this Mac would have named for a video: any day, the video's name, this Mac's, and a number
-    or none. */
+/** The folders in Episodes that the Mac `machine` would have named for a video: any day, the video's name, that Mac's, and a
+    number or none. With no `machine`, the folders either Mac would have named for it, any Mac's name in its brackets. */
 function namedFor(name, stem, machine) {
-  const tail = ` ${fileSafe(stem)} (${machine})`;
+  const tail = ` ${fileSafe(stem)} (`;
   const i = name.indexOf(tail);
-  return /^\d{4}-\d{2}-\d{2}$/.test(name.slice(0, i)) && /^(-\d+)?$/.test(name.slice(i + tail.length));
+  if (i < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(name.slice(0, i))) return false;
+  const rest = name.slice(i + tail.length);
+  if (machine === undefined) return /^.+\)(-\d+)?$/.test(rest);
+  return rest.startsWith(`${machine})`) && /^(-\d+)?$/.test(rest.slice(machine.length + 1));
 }
 
 /** The size of a file, or -1 when it is not there. */
@@ -231,9 +234,11 @@ export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
 /** The episode that holds the video `video`, of `bytes` bytes, as { name, record }: the first, by its folder's name, one of whose
     records names the video at that size, its record in force or a conflicted copy Dropbox keeps of one, read past the copies as
     edit.js reads an episode the gate holds by any of its records. `record` is the one to name it by: the first of them that the
-    gate holds (gate.js gated), else the record in force. null when none does; { unknown: true } when none does, but Episodes, or
-    an episode's folder or its records, could not be read, or a record there is not whole yet: what holds the video cannot then
-    be told, and it is not to be named by its file, since it may be a session's. */
+    gate holds (gate.js gated), else the record in force. null when none does; { unknown: true } when none does, but Episodes
+    could not be read, or an episode that could be its, one in a folder either Mac would have named for this video (namedFor),
+    could not be read (its folder or its records), or has a record that is not whole yet: what holds the video cannot then be
+    told, and it is not to be named by its file, since it may be a session's. An episode named for another video that cannot be
+    read changes nothing for this one. */
 export function holdingEpisode({ root, video, bytes }) {
   const episodes = episodesFolder(root);
   let names = [];
@@ -244,6 +249,7 @@ export function holdingEpisode({ root, video, bytes }) {
   }
   const holds = (r) => r && typeof r === "object" && r.video && r.video.file === video && r.video.bytes === bytes;
   const shaped = (r) => r !== null && typeof r === "object" && typeof r.id === "string" && Number.isInteger(r.version);
+  const stem = basename(video, extname(video));
   let unknown = false;
   for (const name of names.sort()) {
     const folder = join(episodes, name);
@@ -252,7 +258,7 @@ export function holdingEpisode({ root, video, bytes }) {
     const inForce = read.record || (past && past.record) || null;
     const records = [inForce, ...(past ? recordCopies(folder) : [])].filter(shaped);
     if (records.some(holds)) return { name, record: records.find(gated) || inForce || records.find(holds) };
-    if (!inForce && cannotTell(folder, past || read)) unknown = true;
+    if (!inForce && namedFor(name, stem) && cannotTell(folder, past || read)) unknown = true;
   }
   return unknown ? { unknown: true } : null;
 }
