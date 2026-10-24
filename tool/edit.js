@@ -4298,8 +4298,17 @@ async function answerKind(ctx, found, plan, began) {
     }
   }
   // A session's words, and the words of a video becoming one, name no file and no folder even when its files cannot be set aside.
-  const written = aside ? await setAsideWritten(ctx, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(ctx, { ...found, record: base }, next, ""), stayed: [] };
-  if (written.code !== 0) return 1;
+  // A clearing that cannot be written, after her click, says first that it was not cleared, and lets go the claim it holds, so that
+  // the session stays as it was, held by nobody.
+  const said = plan.clearSession ? { ...ctx, say: (line) => ctx.say(`${NOT_CLEARED} ${line.replace(/^Nothing was changed: /, "")}`) } : ctx;
+  const written = aside ? await setAsideWritten(said, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(said, { ...found, record: base }, next, ""), stayed: [] };
+  if (written.code !== 0) {
+    if (plan.clearSession) {
+      const now = readEpisode(found.folder);
+      if (now.record && now.record.rev === base.rev) await letGoClaimWritten(ctx, found, now.record);
+    }
+    return 1;
+  }
   if (aside) forgetComing(ctx, found);
   if (stored === "session") {
     // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as

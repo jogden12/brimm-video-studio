@@ -744,6 +744,35 @@ describe("the empty revision says its words went to Claude when a reading's file
   });
 });
 
+describe("a clearing whose set-aside fails after her click (item 24)", () => {
+  const CLEAR_IT = { code: 0, stdout: "button returned:Clear it\n", stderr: "" };
+  it("says it was not cleared, and lets go the claim it wrote: the session stays as it was, held by nobody", async () => {
+    const t = setup();
+    writeSettings(t.home, { handoffVersion: 2 });
+    const sessionHandoff = JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: ID, kind: "session" } });
+    const found = episodeFor(t, {
+      record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: LABEL, editing: null, name: { text: SESSION_NAME, placeholder: false }, session: markOf(null), finished: { revision: 1, at: AT, on: "Mac Studio", handoff: `final/${SESSION_NAME}.brimm-ops.json`, parts: {} } },
+      files: { ...LIGHT, [`final/${SESSION_NAME}.brimm-ops.json`]: sessionHandoff }
+    });
+    // After her click, history/ cannot be written into.
+    const deps = {
+      ...t.ctx.deps,
+      run: async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? CLEAR_IT : t.ctx.deps.run(cmd, args, opts)),
+      clone: (from, to) => {
+        if (to.includes("/history/")) throw new Error("the disk refused it");
+        return t.ctx.deps.clone(from, to);
+      }
+    };
+    const r = await on(deps, "kind", SESSION_NAME, "finished", "--private", "no", "--again", "--clear-session");
+    assert.deepEqual([r.code, r.said.slice(1)], [1, ["Not cleared: its earlier files could not be set aside in history/ (an error)."]]);
+    const record = reread(found);
+    assert.deepEqual([record.kind, record.session.cleared, record.editing, finalOf(found)], ["session", null, null, [`${SESSION_NAME}.brimm-ops.json`]]);
+    assert.ok(!existsSync(join(found.folder, "history")) || listAll(join(found.folder, "history")).length === 0);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();
