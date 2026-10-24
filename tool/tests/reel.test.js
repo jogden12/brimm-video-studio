@@ -289,7 +289,7 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
   });
   it("says why, in one sentence, when the list cannot be read, as one a newer brimm-video wrote", async () => {
     const { t, found } = phase3();
-    writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 2 }));
+    writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
     assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
     assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.");
     assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac." });
@@ -476,7 +476,7 @@ describe("a Reel's timeline, decided for each Reel (from the review)", () => {
     await pickReels(t.ctx, found, [1]);
     const v0 = readFileSync(join(found.folder, "edit", "reel-1.v0.fcpxml"), "utf8");
     // The other Mac's newer brimm-video writes a reels.json this one cannot read, and the record with its size.
-    const unreadable = JSON.stringify({ format: "brimm-video reels", version: 2, video: "Pricing talk.mp4", candidates: [] });
+    const unreadable = JSON.stringify({ format: "brimm-video reels", version: 3, video: "Pricing talk.mp4", candidates: [] });
     writeFile(join(found.folder, "reels.json"), unreadable);
     const now = reread(found);
     writeFile(join(found.folder, "record", "0003.json"), JSON.stringify({ ...now, rev: 3, files: { ...now.files, "reels.json": unreadable.length } }, null, 2) + "\n");
@@ -580,15 +580,18 @@ describe("ask, when something fails half-way (from the review)", () => {
 import { writeStatus } from "../importing.js";
 import { writePending } from "../filing.js";
 import { RECORD_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
+import { askBlocked } from "../unedited.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
-const askedBoth = async (p) => {
-  const quick = await editMain(["ask", "Pricing"], p.t.ctx.deps);
+/** Ask, both parts, of the episode `p`: the quick part as Claude names it, by `said` (a gated video by its label, since words
+    of its folder never find it), and the detached part by its folder, as edit.js starts it. */
+const askedBoth = async (p, said = "Pricing") => {
+  const quick = await editMain(["ask", said], p.t.ctx.deps);
   const started = p.t.started.length;
   const before = existsSync(join(p.found.folder, "reels.json")) ? readFileSync(join(p.found.folder, "reels.json"), "utf8") : null;
   const now = await editMain(["ask", "--now", FOLDER], p.t.ctx.deps);
   const after = existsSync(join(p.found.folder, "reels.json")) ? readFileSync(join(p.found.folder, "reels.json"), "utf8") : null;
-  return { quick, started, now, failed: readResult(p.t.home, FOLDER, "ask").failed, claude: p.t.calls.filter((c) => c.cmd === "CLAUDE").length, kept: before === after, rev: reread(p.found).rev };
+  return { quick, started, now, failed: (readResult(p.t.home, FOLDER, "ask") || {}).failed, claude: p.t.calls.filter((c) => c.cmd === "CLAUDE").length, kept: before === after, rev: reread(p.found).rev };
 };
 
 describe("ask, and a video with a sound ffmpeg cannot read beside one it can, as an iPhone's (main #17)", () => {
@@ -621,7 +624,7 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
   it("writes nothing over a list that a newer brimm-video wrote while Claude was asked, and says why", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
-    const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 2 });
+    const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 3 });
     const asked = claudeSays([{ from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]);
     p.t.ctx.deps.run = ((run) => async (cmd, args, more) => {
       if (cmd === "CLAUDE") {
@@ -1807,7 +1810,7 @@ describe("ask, what it refuses (from the review)", () => {
     const p = askable();
     const reels = JSON.parse(readFileSync(join(p.found.folder, "reels.json"), "utf8"));
     rmSync(join(p.found.folder, "reels.json"));
-    writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 2 }));
+    writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 3 }));
     const r = await askedBoth(p);
     const why = "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
@@ -1980,34 +1983,50 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
   const SESSION = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
   // Nothing of an unanswered video goes to Claude until she says what it is, and a session's words go only to its own reading.
+  // edit.js's gate (gate.js) refuses first, in findEpisode, in both parts, in its own words: the detached part is refused before
+  // it asks anything, and leaves a result that says so. askBlocked's own refusals stand behind it, for askAgain's other callers.
+  const UNANSWERED = { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" };
+  const MARKED = { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION };
   it("refuses a video waiting for its answer, both parts, and asks nothing", async () => {
     const p = askable();
-    relayout(p.found, { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" });
-    const r = await askedBoth(p);
+    relayout(p.found, UNANSWERED);
+    const r = await askedBoth(p, UNANSWERED.label);
     const why = "This video is waiting for its answer: say what it is first.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
-    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.equal(p.t.said(), `${why}\n${why}`);
     assert.deepEqual(r.failed, [why]);
     p.t.done();
   });
   it("refuses a client or group session whose mark is not cleared, both parts, and asks nothing", async () => {
     const p = askable();
-    relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION });
-    const r = await askedBoth(p);
-    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    relayout(p.found, MARKED);
+    const r = await askedBoth(p, MARKED.label);
+    const why = "This is a client or group session: that is not done for one.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
-    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.equal(p.t.said(), `${why}\n${why}`);
     assert.deepEqual(r.failed, [why]);
     p.t.done();
+  });
+  it("has askBlocked, which askAgain goes by, refuse both on its own as well", () => {
+    for (const [more, why] of [[UNANSWERED, "This video is waiting for its answer: say what it is first."], [MARKED, "This is a client or group session: Claude reads it only for its teachings."]]) {
+      const p = askable();
+      relayout(p.found, more);
+      assert.deepEqual(askBlocked({ folder: p.found.folder, record: reread(p.found), root: p.t.root, home: p.t.home, machine: "Mac Studio", now: p.t.now() }), { why });
+      p.t.done();
+    }
   });
   it("refuses a session that has no mark at all, as one whose mark is not cleared, both parts, and asks nothing", async () => {
     const p = askable();
     relayout(p.found, { kind: "session", answer: ANSWERED, label: "Session, 2026-10-20" });
-    const r = await askedBoth(p);
-    const why = "This is a client or group session: Claude reads it only for its teachings.";
+    const r = await askedBoth(p, "Session, 2026-10-20");
+    // Through editMain the gate (gate.js) refuses first, a record of kind "session" with no mark being a session not cleared,
+    // and a --now it refuses leaves a result in its words.
+    const why = "This is a client or group session: that is not done for one.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.ok(p.t.said().includes(why), p.t.said());
     assert.deepEqual(r.failed, [why]);
+    // askBlocked on its own, which askAgain goes by, still refuses it, in its own words.
+    assert.deepEqual(askBlocked({ folder: p.found.folder, record: reread(p.found), root: p.t.root, home: p.t.home, machine: "Mac Studio", now: p.t.now() }), { why: "This is a client or group session: Claude reads it only for its teachings." });
     p.t.done();
   });
   // A newer brimm-video may have written a session or a video not yet answered: its detached part, which a stopped run or a
@@ -2020,12 +2039,18 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
     const listing = () => readdirSync(p.found.folder, { recursive: true }).sort().map((n) => [n, statSync(join(p.found.folder, n)).size]);
     const before = listing();
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    assert.equal(p.t.said(), `That is an episode a newer brimm-video wrote (${id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`);
-    assert.deepEqual([p.t.calls.filter((c) => c.cmd === "CLAUDE").length, readResult(p.t.home, FOLDER, "ask"), listing()], [0, null, before]);
+    const why = `That is an episode a newer brimm-video wrote (${id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`;
+    assert.equal(p.t.said(), why);
+    // The gate refuses it first, in the same sentence, and a --now it refuses leaves a result in its words: nothing asked of
+    // Claude, nothing written into the episode.
+    const result = readResult(p.t.home, FOLDER, "ask");
+    assert.deepEqual(result && result.failed, [why]);
+    assert.deepEqual([p.t.calls.filter((c) => c.cmd === "CLAUDE").length, listing()], [0, before]);
     p.t.done();
   });
   // An answered video, and a session whose mark is cleared, are not refused for what they are: the checks after those come to
-  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse.
+  // them as to any episode. Here the cut plan is gone, which is the first of those checks to refuse the detached part. `ask`
+  // itself reads such a video again as its kind (F9: `kind <its kind> --again`), and is not refused for what it is either.
   it("lets an answered video, and a session whose mark is cleared, on to the checks that come after", async () => {
     for (const [what, more] of [
       ["an answered video", { kind: "finished", answer: ANSWERED }],
@@ -2034,11 +2059,12 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
       const p = askable();
       relayout(p.found, more);
       rmSync(join(p.found.folder, "Pricing talk.cut-plan.json"));
-      const r = await askedBoth(p);
+      const now = await editMain(["ask", "--now", FOLDER], p.t.ctx.deps);
       const why = "Pricing talk.mp4 has no cut plan here, so Claude cannot be asked.";
-      assert.deepEqual([r.quick, r.started, r.now, r.claude, r.rev], [1, 0, 1, 0, 1], what);
-      assert.ok(p.t.said().includes(why), `${what}: ${p.t.said()}`);
-      assert.deepEqual(r.failed, [why], what);
+      assert.deepEqual([now, (readResult(p.t.home, FOLDER, "ask") || {}).failed, p.t.calls.filter((c) => c.cmd === "CLAUDE").length, reread(p.found).rev], [1, [why], 0, 1], what);
+      const quick = await editMain(["ask", "Pricing"], p.t.ctx.deps);
+      assert.equal(quick, 0, `${what}: ${p.t.said()}`);
+      assert.deepEqual(p.t.started.map(([, args]) => args.slice(1, 2).concat(args.slice(-4))), [["read", "--kind", "finished", "--rev", String(reread(p.found).rev)]], what);
       p.t.done();
     }
   });

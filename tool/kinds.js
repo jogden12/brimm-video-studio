@@ -2,9 +2,10 @@
 // (spec 2026-10-22, section 1). Her chat is Claude, and a file's name is often a client's or a meeting's, so a label is made
 // of the length, the Mac and the moment the video was dropped, and never of the name.
 // Nothing here touches a disk or runs a program.
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import { stamp } from "./shared/text.js";
 import { episodeKind } from "./filing.js";
+import { fileSafe } from "./names.js";
 
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -12,8 +13,18 @@ const list = (v) => (Array.isArray(v) ? v : []);
     sound and picture files of a meeting ("audio1449382767.m4a", "video1449382767.mp4"). */
 const ZOOM_NAMES = [/^GMT\d{8}-\d{6}_Recording/, /^(audio|video)\d{8,}\.(m4a|mp4)$/];
 
-/** Whether a file's name is one of Zoom's. */
+/** Whether a file's name is one of Zoom's. Zoom's own names are matched by how they start, so a download renamed with words after
+    them is one too ("GMT20261013-142933_Recording_Jane Doe.mp4"). */
 export const isZoomName = (name) => typeof name === "string" && ZOOM_NAMES.some((re) => re.test(basename(name)));
+
+/** How a Zoom download is named in every line, status and log: by the part of its name that Zoom's own names match, its Zoom time
+    alone ("GMT20261013-142933_Recording", "audio1449382767.m4a"), never by words a person put after it, which may be a client's. ""
+    for a name that is not Zoom's. */
+export function zoomTimeOf(name) {
+  if (typeof name !== "string") return "";
+  const matched = ZOOM_NAMES.map((re) => re.exec(basename(name))).find(Boolean);
+  return matched ? matched[0] : "";
+}
 
 /** Whether the picture is upright or square, as episodeKind takes it. A file with no picture is not. */
 const upright = (facts) => facts.height > 0 && facts.width <= facts.height;
@@ -100,4 +111,64 @@ export function seenLine({ facts, plan }) {
   if (plan == null) return seen;
   const n = retakesIn(plan);
   return `${seen}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
+}
+
+/** Whether a text is a line of what was seen, as seenLine makes it, on one line: "wide", "upright" or "sound only", the length, and
+    when there is a plan the retakes, "no retakes", "1 retake" or "<n> retakes". A record may hold any text as what was seen, as a
+    conflicted copy that was never checked does, so that a line printed from it into the chat is printed only in this shape: it
+    holds no line break, and no name of a file. Anything that is not text is not one. */
+export const isSeenLine = (text) => typeof text === "string" && /^(?:wide|upright|sound only), \d+(?::\d{2}){1,2}(?:, (?:no retakes|1 retake|\d+ retakes))?$/.test(text);
+
+/** The names a video's file goes by, which a line about it must not hold while it is named by its label: the file's own name,
+    that name without its ending, and that in the file-safe form its episode's folder and projects are named with. Each of
+    `files` is a file's name, or a path to it. */
+export function namesOf(...files) {
+  const names = [];
+  for (const file of files.filter((f) => typeof f === "string" && f !== "")) {
+    const name = basename(file);
+    const stem = basename(name, extname(name));
+    names.push(file, name, stem, fileSafe(stem));
+  }
+  return [...new Set(names.filter((n) => n !== "" && n !== "video"))];
+}
+
+/** Text as a regular expression takes it, letter for letter. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A path in a line: from a "/" or "~/" that starts a word, or one just inside a quote or a bracket, up to a quote, a bracket, a
+    colon or a comma with a space after it, a space and an opening bracket, a full stop at the end of a sentence, or the end of
+    the line or of the text between two kept ones. A path may hold spaces, as Dropbox's do, and a folder's name in it may end in
+    a bracketed part, as an episode's "(Mac Studio)" does: so it is taken to its end, and never word by word. It never ends in a
+    space, so that one before a kept text stays. */
+const PATH = /(^|[\s'"(\[=])~?\/(?:[^\n'"()[\]]|\([^\n'"()/]*\)(?=\/))*?(?<!\s)(?=['")\]\n]| \((?![^\n'"()/]*\)\/)|: |, |\.?\s*$|\.\s)/gm;
+
+/** How a name is found in a line (withoutNames). A name of more than one word, a file's name with its ending, or a path, as a
+    whole word wherever it stands, in any case. A name of one bare word, as the file "1.mov" or "Main.mov" has, could be a word
+    of the tool's own ("reel 1", "the main video", "a client or group session"): so it is found in its own case alone, and only
+    as the start of a file's name ("1.transcript.txt", "1 (Sallie's laptop's conflicted copy 2026-10-20).srt"), in an episode
+    folder's name ("2026-10-20 1 (Mac Studio)"), and on its own when it is three characters or more and holds a letter. */
+function finderOf(name) {
+  const word = (re) => String.raw`(?<![\p{L}\p{N}])${re}(?![\p{L}\p{N}])`;
+  if (/\s|\//u.test(name) || /\.\p{L}[\p{L}\p{N}]*$/u.test(name)) return new RegExp(word(literally(name)), "giu");
+  const forms = [String.raw`(?<![\p{L}\p{N}])${literally(name)}(?=(?: \([^()\n]*\))?\.\p{L})`, String.raw`(?<=\d{4}-\d{2}-\d{2} )${literally(name)}(?= \()`];
+  if ([...name].length >= 3 && /\p{L}/u.test(name)) forms.push(word(literally(name)));
+  return new RegExp(forms.join("|"), "gu");
+}
+
+/** `text` with nothing in it of the names in `names` (namesOf: a video's file and what is named from it), each put as "the
+    video" wherever it is found (finderOf), and, unless `paths` is false, with each path in it put as "a file": a line about a
+    video named by its label (spec 2026-10-22, section 1). What is in `keep` stays as it is, as the label itself does when the
+    file's name is a word of it ("Video.mov"): the text is taken apart at each of them, and only the parts between are looked
+    at. */
+export function withoutNames(text, names = [], keep = [], { paths = true } = {}) {
+  const texts = (given) => [...new Set(given.filter((x) => typeof x === "string" && x !== "").map((x) => x.normalize("NFC")))].sort((a, b) => b.length - a.length);
+  let parts = [{ text: String(text ?? "").normalize("NFC"), kept: false }];
+  for (const k of texts(keep)) parts = parts.flatMap((p) => (p.kept ? [p] : p.text.split(k).flatMap((piece, i) => [...(i ? [{ text: k, kept: true }] : []), { text: piece, kept: false }])));
+  const found = texts(names).map(finderOf);
+  // A name is put as a mark of its own until the paths are taken out, so that no shorter name is found in what it is put as.
+  const plain = (piece) => {
+    const named = found.reduce((out, re) => out.replace(re, "\u0001"), piece);
+    return (paths ? named.replace(PATH, "$1a file") : named).replace(/\u0001/g, "the video");
+  };
+  return parts.map((p) => (p.kept ? p.text : plain(p.text))).join("");
 }

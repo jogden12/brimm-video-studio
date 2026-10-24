@@ -7,6 +7,9 @@
 //
 //   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
 //                                         Mac's libraries
+//   node edit.js kind "<video>" finished|raw|clip|session --private yes|no
+//                                         her answer to "what is this video?": claim it, record it, and start Claude's
+//                                         reading (leave "<video>" and which "<video>" are its other two answers)
 //   node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
 //                                         decided for it
 //   node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
@@ -19,56 +22,93 @@
 //   node edit.js finish "<episode>"       gather what Final Cut Shared and exported, ask what it must, and then, detached,
 //                                         transcribe again, copy into final/ and write the hand-off for BRIMM Ops
 //
+// Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
+// episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
+// commands run, and every other is refused before it reads a word.
+//
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stamp } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, kindOf as kindOfRecord } from "./episode.js";
-import { readSettings, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { stamp, localDay } from "./shared/text.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
+import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
+import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared } from "./gate.js";
+import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
-import { startDetached, runDetached, runningCommand, readResult } from "./detached.js";
-import { cloneIn, isWhole, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
+import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
+import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
-import { eventName, projectName, timelineFile } from "./names.js";
-import { REELS_FILE, readReels, reelsText } from "./reels.js";
+import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
+import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, expectedWords, letGoClaim, cannotFinish, handoffTarget, numbersTakenWords } from "./finish.js";
-import { timelineFor, clockFor, piecesOf, askedOf } from "./timeline.js";
+import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
+import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
-import { handoffFaultV2 } from "./handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
-import { findPrograms, askAgain, askBlocked, clockAt, keptList } from "./unedited.js";
+import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
+import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.js";
+import { approve, EDITS } from "./sessions.js";
+import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
-import { studioFiles, studioFolder } from "./studio.js";
+import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
+import { askDialog } from "./dialog.js";
 
-const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
+export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
+  node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
+                     [--again] [--clear-session] [--here]
+                                        her answer to what a video is: both answers are needed, and they must agree (a
+                                        session with yes, anything else with no). The video is claimed for this Mac, the
+                                        answer is recorded, and Claude reads it, detached, unless it is a session: that is
+                                        marked, named by its label, and read only when its teachings are asked for. An
+                                        answered video is answered again only with --again, which sets its earlier
+                                        reading's files and its hand-off aside in history/, and keeps the video it is a
+                                        version of; answered again as a session, every file of final/ goes, and it is given
+                                        at once an empty session revision of its hand-off. --version-of names the video this
+                                        is a new version of, or none; --not-a-session says a Zoom download or sound alone is
+                                        none; --clear-session, with --again and what the video really is, clears a session
+                                        mark: it asks on a dialog on this Mac, and only her click clears it. A raw video not
+                                        on this Mac yet is read here only with --here, which brings it all over first
+  node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
+  node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
+  node edit.js teachings "<session>" [--transcript-only]
+                                        her answer for a client or group session: its teachings, which Claude reads once,
+                                        detached, only once Jason has turned teachings on for this Mac; or with
+                                        --transcript-only, its transcript alone, and nothing goes to Claude
+  node edit.js principles "<session>" [recurring] [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]
+                                        the principles Claude read in a session, and what is decided of each: keep, drop or
+                                        change them; with recurring, the principles said more than once
+  node edit.js ideas "<session>" [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]
+                                        the Reel ideas Claude read in a session: keep, drop or change them
   node edit.js open "<episode>" [--take-over]
                                         check its files are here, bring over those that are not, claim it for this
                                         Mac, and show what is decided for it. Another Mac's claim refuses it, unless
                                         it is taken over
-  node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits] [--without-other-macs-changes]
+  node edit.js push "<episode>" [main] [v<n>] [--no-hand-edits | --hand-edits] [--without-other-macs-changes]
                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
-                                        library for the episode. Shown before, it asks first whether it was changed in
-                                        Final Cut: --no-hand-edits says it was not, --hand-edits that it was. Shown last
-                                        on the other Mac, it goes by what that Mac said when it handed the episode over;
-                                        --without-other-macs-changes goes ahead from that version as brimm-video made it
+                                        library for the episode; with v<n>, version n as it was stored. Shown last in
+                                        Final Cut, it asks first whether it was changed there: --no-hand-edits says it
+                                        was not, --hand-edits that it was (a version rendered last asks nothing). Shown
+                                        last on the other Mac, it goes by what that Mac said when it handed the episode
+                                        over; --without-other-macs-changes goes ahead from that version as brimm-video
+                                        made it
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
   node edit.js name "<episode>" "<name>"
@@ -80,19 +120,31 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         show or set the title on screen of a Reel: the words in its picture
   node edit.js reel pick|drop "<episode>" <n>…
                                         pick Reels to finish, or drop them
+  node edit.js reel "<label>" <n> --client-agreed
+                                        for a client or group session: notes, on a dialog on this Mac that only her click
+                                        answers, that the client agreed to a kept Reel idea being cut from it. Who agreed
+                                        stays on this Mac
   node edit.js reels "<episode>" [--no-play]
-                                        list the Reel candidates, and play their previews in QuickTime Player
-  node edit.js ask "<episode>"          ask Claude again for Reel candidates, detached. Picked Reels stay as they are
-  node edit.js push "<episode>" reel <n> [--no-hand-edits | --hand-edits]
-                                        show a picked Reel in Final Cut Pro, upright
+                                        list the Reel candidates, and play their previews in QuickTime Player; for a
+                                        video she has answered, its Reel suggestions with times on the clock she is
+                                        reading, and nothing opens
+  node edit.js ask "<episode>"          ask Claude again for Reel candidates, detached. Picked Reels stay as they are.
+                                        A video she has answered is read again as its kind, as kind … --again does
+  node edit.js push "<episode>" reel <n> [v<k>] [--no-hand-edits | --hand-edits]
+                                        show a picked Reel in Final Cut Pro, upright; with v<k>, its version k as it was
+                                        stored
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--no-hand-edits "<part>"]
                      [--without "reel <n>"]
                                         find what Final Cut Shared and exported of each part, and ask what it must. With
                                         --yes and nothing left to ask, it transcribes the finished videos again, copies them
                                         into final/ and writes the hand-off for BRIMM Ops, detached
   node edit.js show "<episode>" transcript|notes|plan
-                                        print its transcript, Claude's notes or its cut plan, whole
-  node edit.js behind                   whether Jason has a newer brimm-video than this Mac's
+                                        print its transcript (a raw video's she has answered: its rough cut's), Claude's
+                                        notes or its cut plan, whole. Of a video not yet answered, or a session, nothing
+                                        is printed: a read-only copy of it opens in TextEdit on this Mac
+  node edit.js behind                   whether Jason has a newer brimm-video than this Mac's; and the copies show
+                                        opened are cleared. It refuses, and says to ask Jason, when her folder's lock is
+                                        changed on this Mac: a settings.local.json in it, or hooks turned off
   node edit.js resolve "<episode>" [--keep A|B]
                                         show the two sides of a conflicted copy Dropbox kept, and keep the one picked:
                                         the other is set aside in the episode's history/
@@ -103,9 +155,12 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         --hand-edits-stay that the changes stay in this Mac's library
   node edit.js captions "<episode>" reel <n> on|off
                                         a Reel's running captions, in its caption style; its title on screen stays
-  node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]
-                                        the episode's spellings, which every timeline's captions take; after a finish,
-                                        the final transcripts too, and the hand-off is made again
+  node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
+                                        the episode's spellings, which every timeline's captions take; several pairs of
+                                        add are one change; after a finish, the final transcripts too, and the hand-off is
+                                        made again. offers shows the spellings Claude offered as one numbered card, or
+                                        answers them (all, some or none), and a finished video's or an iPhone clip's
+                                        hand-off is then written
   node edit.js logo "<episode>" on|off [--picture "<name>"]
                                         the logo on the main video, top right; its picture is named once, from the
                                         Pictures folder
@@ -125,20 +180,28 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         take whole phrases out, at a pause, as read on the timeline; or keep what was
                                         cut, by its words or at the join nearest a time on the timeline`;
 
+/** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
+const homeOf = (deps) => deps.home || process.env.HOME || homedir();
+
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
 export function contextFor(deps = {}) {
-  const home = deps.home || process.env.HOME || homedir();
+  const home = homeOf(deps);
   const got = deps.settings ? { settings: deps.settings } : readSettings(home);
   if (!got.settings) return { why: "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
   const { settings } = got;
+  // The names of a gated video that a command has found (findEpisode, hideNames), which no line it says after may hold.
+  const hidden = { names: [], keep: [] };
+  const say = deps.say || ((line) => process.stdout.write(`${line}\n`));
   return {
     settings,
     machine: settings.machine,
     root: settings.root,
     episodes: episodesFolder(settings.root),
     home,
-    say: deps.say || ((line) => process.stdout.write(`${line}\n`)),
+    // Only the names are taken out: any other path in a line stays readable.
+    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line),
+    hidden,
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
     stat: deps.stat || ((path) => statSync(path, { throwIfNoEntry: false })),
@@ -164,6 +227,8 @@ function folders(ctx) {
 
 /** A name as it is compared with what a person said: whatever its case, and however its accents are written. */
 const plainly = (text) => String(text || "").normalize("NFC").toLowerCase();
+/** A label as it is compared with what a person said: as plainly does, and whatever its spacing. */
+const spaced = (text) => plainly(text).replace(/\s+/g, " ").trim();
 
 /** Some things as they are said in a row: "a", "a and b", "a, b and c". */
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
@@ -173,37 +238,251 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     answered, and this brimm-video cannot read the label a newer one names it by. */
 const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
 
-/** What a command says of an episode a newer brimm-video wrote, and does nothing more with it. */
-const newerWords = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+/** Why a command ends at an episode written by a newer brimm-video, in the words it has always used: by its short id alone. */
+const newerWhy = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+
+/** What the gate says when the record in force is not the newest file in the episode's record folder, for a record that may be a
+    session: Dropbox is still bringing the newer one, or it is one this code rejects. */
+const PENDING_WHY = "Dropbox is still bringing this episode's record over: say it again in a moment.";
+
+/** Whether a conflicted copy is shaped as a record: an object with an id and a version. What is not (`{}`, a file by the name of
+    a record) says nothing of the video and is not asked; what is, and says no kind, is asked, and is a video not answered. */
+const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.version);
+
+/** Whether the gate (gate.js) refuses the command editMain is running (`ctx.asked`, with its words) for the episode `e`, whose
+    records are `records` and whose record in force is `inForce`: { why, name, folder, gate: true }, in the gate's words (the
+    name and folder are for the detached runs that leave a result, and are never said), or null when it may run. `said` is
+    what the episode was asked for by. The records are all that findEpisode knows of an episode, and all that is read here
+    (and the numbers of the files in its record folder). In this order:
+    - A command that names no episode (UNSCOPED), and a call with no command on ctx, are not gated.
+    - A record of a layout newer than this code is refused for every command that names an episode, in the words episodeFor has
+      always used for it, with `newer: true`, so that episodeFor ends the command with the code that command gives such a record.
+    - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
+      to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
+      refuses every command. With today's settings and records it is passed over, as it always was.
+    - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
+      by the record in force. A copy that is not shaped as a record (recordShaped) is not asked.
+    - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
+      lets run, the commands of a video not yet answered. */
+function gateOf(ctx, e, records, said, inForce) {
+  if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
+  const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
+  if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
+  if (inForce && (lightImport(ctx.settings) || layoutOf(inForce) === 3) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
+  const on = teachingsOn(ctx.settings, ctx.now());
+  const lapsed = teachingsLapsed(ctx.settings, ctx.now());
+  for (const record of records.filter(recordShaped)) {
+    const why = gateFor(ctx.asked.command, record, { teachingsOn: on, lapsed, said }, ctx.asked.words);
+    if (why) return refused(why);
+  }
+  // A video one of whose other versions is a session not cleared is held as a session (episodeAt's `held`): fail closed.
+  if (e.held) {
+    const why = heldGateFor(ctx.asked.command);
+    if (why) return refused(why);
+  }
+  return null;
+}
+
+/** A detached run (`bring`, `finish` or `ask` with --now) that the gate ended before it began leaves a result in the gate's words,
+    as a run that failed does, so that "how far is it?" says why and not that nothing is running. The words name no folder or
+    file. A run already at work on the episode is left to leave its own. */
+async function leaveGateResult(ctx, found, command) {
+  await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
+}
+
+/** An episode in Episodes by its folder's `name`, as findEpisode and the lists know it: { name, folder, read, inForce, records,
+    newer }. `read` is what readEpisode gave; `inForce` is the record in force: the whole one, or for a conflicted episode the
+    newest whole record past its copies; `records` are the records it is known by, and all that is read of it: that one, and for
+    a conflicted episode each conflicted copy of a record, as it is, which may not be whole. `newer` is the record a newer
+    brimm-video wrote, when one did, the one past the copies included; null otherwise. `held` is whether the episode is held as
+    a session though none of its records is gated: one of them is answered, and one of its other versions (finish.js linksOf,
+    sessionsBeside), in its record or a conflicted copy of it, is a session not cleared. It is read only when it is asked, through
+    `links` when it is given (one reading of Episodes for every episode a command looks at), and is false for one a newer
+    brimm-video wrote. */
+function episodeAt(ctx, name, links = null) {
+  const folder = join(ctx.episodes, name);
+  const read = readEpisode(folder);
+  const past = read.code === "CONFLICTED" ? readEpisode(folder, { pastCopies: true }) : null;
+  const inForce = read.record || (past ? past.record : undefined);
+  const copies = past ? conflictedCopies(folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(folder, c))) : [];
+  const records = (read.record ? [read.record] : past ? [inForce, ...copies] : []).filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
+  const newer = read.newer ? read.record : past && past.newer ? past.record : null;
+  let held;
+  return {
+    name, folder, read, inForce, records, newer,
+    get held() {
+      if (held === undefined) {
+        const shaped = records.filter(recordShaped);
+        held = !newer && !shaped.some(gated) && shaped.some((r) => recordKind(r) !== null && (links || (links = linksOf(ctx.root))).sessionsBeside(r, folder).length > 0);
+      }
+      return held;
+    }
+  };
+}
+
+/** Whether an episode is gated (gate.js): any record it is known by is a video not yet answered or a session not cleared, so
+    that a conflicted copy of one names it so, as the gate asks it; or it is held as a session (episodeAt's `held`). A copy not
+    shaped as a record is not asked. */
+const isGated = (e) => e.records.filter(recordShaped).some(gated) || e.held;
+
+/** The record a gated episode is named by: the first of its records that is gated, or for one held as a session, its record in
+    force. */
+const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held ? e.inForce : undefined);
+
+/** Whether a record has a label of the import's to be named by. */
+const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
+
+/** How a video held as a session is named, wherever a gated one is named by its label (shownName): by its label, or with none (a
+    video from before the switch), as "a video (<short id>)", never by its name, which may be its file's. */
+const heldName = (r) => (isLabelled(r) ? r.label : `a video (${String(r.id).slice(-6)})`);
+
+/** How the record `r` of a gated episode is named: as shownName names a gated record, and by heldName when it is held as a session
+    (`held`) and not gated itself. */
+const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
+
+/** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
+    episodeHolding's `gatedAs`, which says its short id after it), through `links` (finish.js linksOf): as shownName names a gated
+    record, one held as a session by its label or as "a video", and "" for any other, which is named by its folder. */
+const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : recordKind(record) !== null && links.sessionsBeside(record).length > 0 ? (isLabelled(record) ? record.label : "a video") : "");
+
+/** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
+const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
+
+/** An episode whose record cannot be read at all, as it is named on a Mac that does the light import: by the day and the Mac its
+    folder's name begins and ends with (names.js episodeFolderName), as "an episode of 2026-10-22 from the Mac Studio whose
+    record cannot be read", and never by the rest, which is the video's file's name. */
+function unreadName(name) {
+  const m = FOLDER_NAME.exec(name);
+  return `an episode${m ? ` of ${m[1]} from ${spokenMac(m[2])}` : ""} whose record cannot be read`;
+}
+
+/** An episode folder's name, as names.js episodeFolderName makes it: the day, the video's name and, in brackets, the Mac, with a
+    number after it when the name was taken. */
+const FOLDER_NAME = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/;
+
+/** How an episode is named in a list of several, and wherever edit.js would name it by its folder: a gated one by its label and
+    its short id, since two labels may be the same (shownName); one a newer brimm-video wrote by its short id alone
+    (newerName); on a Mac that does the light import, one with no record that can be read by its day and Mac alone
+    (unreadName); and any other by its folder's name, as always. */
+function listedAs(ctx, e) {
+  if (e.newer) return newerName(e.newer);
+  if (isGated(e)) {
+    const r = gatedRecord(e);
+    // A video held as a session with no label is named by its short id already: it is said once.
+    if (e.held && !gated(r) && !isLabelled(r)) return heldName(r);
+    return `${gatedName(r, e.held)} (${String(r.id).slice(-6)})`;
+  }
+  if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
+  return e.name;
+}
+
+/** The episode `found` (findEpisode's), as a line names it where it would name its folder: as listedAs names it. */
+const calledAs = (ctx, found) => listedAs(ctx, episodeAt(ctx, found.name));
+
+/** What a line about the gated episode `e` must not hold, and what it keeps: { names, keep }. The names are its folder's, its
+    video's file and what is named from it (namesOf), every name its records have given it and that in its file-safe form, and
+    the name of every project it was pushed to Final Cut by, from the records in its record folder and its conflicted copies
+    alike; a record there that is not whole on this Mac (`ctx.isWhole`) is not read, since Dropbox would have to bring it. What
+    it keeps is how it is named now (shownName) and each label its records hold, but for a kept text that holds a name, or
+    that a name holds: so that a session whose name is still its file's does not take the name out of what is hidden. */
+function secretsOf(ctx, e) {
+  const isRecord = (r) => r !== null && typeof r === "object" && !Array.isArray(r);
+  const history = recordNumbers(e.folder).map((n) => recordFile(e.folder, n)).filter((file) => ctx.isWhole(file)).map(recordAt);
+  const all = [...e.records, ...history].filter(isRecord);
+  const labels = all.flatMap((r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""]).filter(Boolean);
+  const given = all.map((r) => (isRecord(r.name) && typeof r.name.text === "string" ? r.name.text : "")).filter((n) => n && !labels.includes(n));
+  const parts = all.flatMap((r) => [r.main, ...(Array.isArray(r.reels) ? r.reels : [])]).filter(isRecord);
+  const projects = parts.flatMap((part) => (Array.isArray(part.pushed) ? part.pushed : [])).map((p) => (isRecord(p) ? p.project : ""));
+  const names = [...new Set([e.name, ...all.flatMap((r) => namesOf(r.video && r.video.file)), ...given, ...given.map(fileSafe), ...projects])].filter((n) => typeof n === "string" && n !== "");
+  const lower = (text) => text.normalize("NFC").toLowerCase();
+  const keep = [...new Set(labels)].filter((k) => !names.some((n) => lower(k).includes(lower(n)) || lower(n).includes(lower(k))));
+  return { names, keep };
+}
+
+/** Text about the episode `e` with nothing in it of its video's names when it is gated (secretsOf), and as it is otherwise. Only
+    the names are taken out: any other path in it stays readable. */
+const cleanFor = (ctx, e) => {
+  if (!isGated(e)) return (text) => text;
+  const { names, keep } = secretsOf(ctx, e);
+  return (text) => withoutNames(text, names, keep, { paths: false });
+};
+
+/** Have every line the command editMain is running says from here on hold nothing of the names of `e`, the gated episode it
+    found (ctx.hidden, which contextFor's `say` reads): for a command that names an episode, since its own lines may name a file
+    or a folder of it on the way, as an error does. A command of UNSCOPED names each episode as it is to be named, and is left
+    alone. */
+function hideNames(ctx, e) {
+  if (!ctx.hidden || !ctx.asked || UNSCOPED.includes(ctx.asked.command) || !isGated(e)) return;
+  const { names, keep } = secretsOf(ctx, e);
+  ctx.hidden.names.push(...names);
+  ctx.hidden.keep.push(...keep);
+}
+
+/** What a detached run writes into its result for an episode, by what the command found (ctx.hidden): nothing of a gated
+    video's names. Undefined, so that runDetached writes it as it is, for any other. */
+const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : undefined);
+
+/** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
+    folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
+    gated episode is named by its label and short id, and its why names no file of its video; one a newer brimm-video wrote is
+    named by its short id; and on a Mac that does the light import, one with no record that can be read at all is named by its
+    day and Mac alone, and Jason is asked. */
+function notRead(ctx, found, said = found.name) {
+  const e = episodeAt(ctx, found.name);
+  const shown = listedAs(ctx, e);
+  if (shown === e.name) return `${said}: ${found.read.why}.`;
+  if (!e.inForce) return `${capital(shown)}: ask Jason.`;
+  const clean = e.newer ? (text) => withoutNames(text, [e.name, ...namesOf(e.newer.video && e.newer.video.file)], [], { paths: false }) : cleanFor(ctx, e);
+  return `${capital(shown)}: ${clean(found.read.why)}.`;
+}
 
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
-    name or its own name. Gives back { folder, name, read }, where `read` is what readEpisode gave, or { why } when no episode
-    fits or more than one does. An episode with a conflicted copy is found by its own name and id as well, since `name` never
-    renames its folder: by the newest whole record past the copies, and by each conflicted copy of a record, since the Mac
-    whose change became the copy knows the episode by the name it gave there. Its `read` still says it is conflicted, so
-    every command but `resolve` refuses it. In the lists of episodes it says, one a newer brimm-video wrote is named by its
-    short id alone (newerName). */
+    name or its own name; and a gated one by its label (shownName), the whole of it, whatever its case and spacing, so that a
+    label numbered " (2)" fits that video alone and the bare label the first, or by the label and short id its lists give it,
+    "<label> (3fa9c1)", and never by words, which would tell its file's name. Gives back { folder, name, read }, where `read` is
+    what readEpisode gave, or { why } when no episode fits or more than one does. An episode with a conflicted copy is found
+    by its own name, label and id as well, since `name` never renames its folder: by the newest whole record past the copies,
+    and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
+    there. Its `read` still says it is conflicted, so every command but `resolve` refuses it. In the lists of episodes it says,
+    each is named as listedAs names it: never a gated one by its folder. A video held as a session (episodeAt's `held`) is gated
+    so too, found by its label and short id, and `held` is true in what is given back.
+    When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
+    gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
+    read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
+    line the command says after hold nothing of its names (hideNames). */
 export function findEpisode(ctx, said) {
-  // An import that has not finished has no whole record, and is not an episode yet.
-  const all = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) })).filter((e) => e.read.code !== "NONE");
-  // The records a name or an id is matched against, and only that: for a conflicted episode, the one resolve would read and
-  // the records' conflicted copies, as they are, which may not be whole.
-  const copiesOf = (e) => conflictedCopies(e.folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(e.folder, c)));
-  const records = new Map(all.map((e) => {
-    const read = e.read.record ? [e.read.record] : e.read.code === "CONFLICTED" ? [readEpisode(e.folder, { pastCopies: true }).record, ...copiesOf(e)] : [];
-    return [e, read.filter((r) => r !== null && typeof r === "object" && !Array.isArray(r))];
-  }));
-  const known = (e) => records.get(e);
+  // An import that has not finished has no whole record, and is not an episode yet. The versions of each are read once.
+  const links = linksOf(ctx.root);
+  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE");
+  const known = (e) => e.records;
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
+  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)").
+  const labelled = (e, r) => {
+    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""].filter(Boolean);
+    return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
+  };
+  const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(said))));
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
-  const byWords = all.filter((e) => words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
-  const fits = exact.length ? exact : byId.length ? byId : byWords;
-  const shownAs = (e) => (e.read.newer ? newerName(e.read.record) : e.name);
-  if (fits.length === 1) return fits[0];
-  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map(shownAs))}. Say which.` };
-  return { why: all.length ? `No episode fits "${said}". The episodes are: ${listed(all.map(shownAs))}.` : "There are no episodes yet." };
+  // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
+  // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
+  // read here.
+  const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
+  const fits = exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  if (fits.length === 1) {
+    const e = fits[0];
+    hideNames(ctx, e);
+    // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
+    // foresaw names none of it (editMain).
+    if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
+    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
+  }
+  if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
+  // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
+  // it is named by its day and Mac alone, as that run's log says it.
+  const asked = ctx.asked && ctx.asked.words[0] === "--now" && FOLDER_NAME.test(said) ? unreadName(said) : `"${said}"`;
+  return { why: all.length ? `No episode fits ${asked}. The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
 /** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
@@ -254,51 +533,156 @@ function folderSize(folder) {
 }
 
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
-    late check. Only those whose video `fits`, when it is given. A video that is held in the drop folder, not imported, is no
-    import: the list of the videos waiting says why it waits. */
+    late check. Only those whose video `fits`, when it is given: by its label when it has one, and otherwise by its file's
+    name, so that words of a file's name never tell which label is its. A video that is held in
+    the drop folder, not imported, is no import: the list of the videos waiting says why it waits. A light import's status,
+    which carries its video's label (Part L), is named by its label, and why it failed or what its late check found is said
+    with no path or name of its file in it (withoutNames). */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
+  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.label || s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
-    if (state === "failed") return `  ${status.video}: its import failed on ${status.machine}: ${status.failed}`;
-    if (state === "problem") return `  ${status.video}: copied in on ${status.machine}, but the late check found a problem: ${status.problem}`;
-    if (state === "stopped") return `  ${status.video}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
-    return `  ${status.video}: being imported on ${status.machine}, at ${status.step}`;
+    const who = status.label || status.video;
+    const plain = (text) => (status.label ? withoutNames(text, namesOf(status.video), [status.label]) : text);
+    if (state === "failed") return `  ${who}: its import failed on ${status.machine}: ${plain(status.failed)}`;
+    if (state === "problem") return `  ${who}: copied in on ${status.machine}, but the late check found a problem: ${plain(status.problem)}`;
+    if (state === "stopped") return `  ${who}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
+    return `  ${who}: being imported on ${status.machine}, at ${status.step}`;
   });
 }
 
+/** The label a status of the Mac `machine` gives the video `video` in its drop folder, of a light import (Part L), or "". */
+function labelIn(statuses, video, machine) {
+  const labelled = statuses.find(({ status }) => status && status.video === video && status.machine === machine && status.label);
+  return labelled ? labelled.status.label : "";
+}
+
+/** A video in a drop folder that has no label, as it is named on a Mac that does the light import: by what it is and its size,
+    as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. */
+const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"} of ${sizeText(bytes)}`;
+
+/** How a video came, in the words of her card (answer.came, as episode.js CAMES has them). */
+const CAME_WORDS = { camera: "from a camera", phone: "from an iPhone", zoom: "as a Zoom download", sound: "as sound alone" };
+/** The tool's guess at what a video is, in the words of her card: the values kinds.js guessKind stores, which are "finished", "raw"
+    and "clip" (never "short video"). */
+const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retakes", clip: "an iPhone clip" };
+
+/** The lines of her card for the video not yet answered whose record is `named` (spec 2026-10-22, section 2, "The card"), below
+    its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen),
+    how it came, the tool's guess, and the episode whose words it found in the video, as "Maybe a new version of: <its name> (id
+    <short id>), <its kind>". Each line is left out when its fact is not given: no sight of it, or one not in the shape seenLine
+    makes on one line (isSeenLine: a record may hold any text there, and a line break would forge the card's lines), no way it
+    came, no guess, or a match that is none.
+    The match (answer.match, an id) is looked for among `others`, the episodes `episodes` lists, by their records alone (episodeAt's
+    inForce), and is offered only when `kind --version-of` would take it, so the whole line is left out unless the episode is
+    known by that record, is not the video itself, is not archived, was not written by a newer brimm-video, and has every record
+    it is known by, the one in force and each conflicted copy, answered and neither gated nor a session (gate.js gated, which
+    reads a video not answered or left alone, and a session not cleared). An episode with one record that is not is named by its
+    label in its own line, and would be given away by its name in this one. Nor is it offered when `kind --version-of` would refuse
+    it for what links it: `links` (finish.js linksOf) is asked as answerWhy asks it, whether its chain of versions cannot be followed to
+    its first (a gap: an episode not on this Mac; or a loop), whether that chain holds the waiting video itself, and whether one of
+    the versions of the video it starts from, earlier, later and beside it, is a session not cleared (in the record or a conflicted
+    copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). A match that is itself a session not
+    cleared, or one of whose versions is (matchedSession), gives the line "Maybe a new version of a client or group session." in its
+    place, naming none: her skill then offers "Client or group session" first, and `kind` takes no other answer for it. */
+function cardLines(named, others, links) {
+  const answer = named.answer;
+  if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
+  const lines = [];
+  if (isSeenLine(answer.seen)) lines.push(`    Seen: ${answer.seen}`);
+  if (Object.hasOwn(CAME_WORDS, answer.came)) lines.push(`    Came: ${CAME_WORDS[answer.came]}`);
+  if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
+  // A match that is a session not cleared, or a version of one, is offered as such, naming none (edit.js answerWhy then takes only
+  // a session for it).
+  if (matchedSession(links, named)) {
+    lines.push("    Maybe a new version of a client or group session.");
+    return lines;
+  }
+  const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
+  if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
+    && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
+    && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
+    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
+  }
+  return lines;
+}
+
+/** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
+    them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
+    files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
+    answer, a client or group session, or a video left alone (`left`), with no folder; its title, which Claude may have made of
+    its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
+    answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
+    the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
+    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. */
+function episodeLines(ctx, e, left, all, links) {
+  const r = e.read.record;
+  if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
+  if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    Not right: ${e.read.why}.`];
+  if (!e.inForce) return [`  ${capital(listedAs(ctx, e))}: ask Jason.`];
+  const record = e.inForce;
+  const lines = [];
+  const clean = cleanFor(ctx, e);
+  if (isGated(e)) {
+    const named = gatedRecord(e);
+    const held = e.held && !gated(named);
+    const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
+    lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all, links));
+    if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
+  } else {
+    const kind = record.kind === "short video" ? "a short video" : "an episode";
+    lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
+  }
+  if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
+  if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
+  const pushed = record.main && Array.isArray(record.main.pushed) ? record.main.pushed : [];
+  if (pushed.length) lines.push(`    ${shownLine(pushed)}`);
+  if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
+  for (const problem of filesProblems(e.folder, record)) lines.push(`    Not right: ${clean(problem)}`);
+  return lines;
+}
+
+/** How far a main video was shown, as `episodes` and `open` say it, of its list of versions `pushed` (not empty): the newest, and
+    whether it was rendered or shown in Final Cut, "Shown: v3 (rendered), on Mac Studio" (spec 3, "One version model"). A list
+    with no render in it, as every one before the switch, is said as it always was: its last version, "Shown in Final Cut: v3, on
+    Mac Studio". */
+function shownLine(pushed) {
+  if (!pushed.some((p) => p && p.how === "render")) return `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}`;
+  const top = newestOf(pushed);
+  return `Shown: v${top.v} (${top.how === "render" ? "rendered" : "in Final Cut"}), on ${top.on}`;
+}
+
+/** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
+const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
+
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
     and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
-    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). */
+    archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). A video not
+    yet answered, or a session, is named by its label (episodeLines), with the lines of her card under one not yet answered
+    (cardLines), and one she has left alone is listed apart, under a heading of its own. A video waiting in a drop folder that
+    a light import's status gives a label, or that a gated episode holds, is named by its label, or by what it is and its size,
+    and why it waits holds no name of its file, on either Mac; on a Mac that does the light import, every video waiting is; any
+    other, on a Mac that does not, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
-  const shown = folders(ctx).map((name) => ({ name, folder: join(ctx.episodes, name), read: readEpisode(join(ctx.episodes, name)) }))
-    .filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
-  if (!shown.length) say("No episodes yet.");
-  else {
+  // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
+  const links = linksOf(ctx.root);
+  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  const shown = all.filter((e) => !isLeft(e));
+  const left = all.filter(isLeft);
+  if (!shown.length && !left.length) say("No episodes yet.");
+  else if (shown.length) {
     say("Episodes, newest first:");
-    for (const { name, folder, read } of shown) {
-      const r = read.record;
-      if (!r) {
-        say(`  ${name}`);
-        say(`    Not right: ${read.why}.`);
-        continue;
-      }
-      if (read.newer) {
-        say(`  ${capital(newerName(r))}: Jason updates this Mac before it is changed here.`);
-        continue;
-      }
-      const kind = r.kind === "short video" ? "a short video" : "an episode";
-      say(`  ${r.name.text}${r.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(r.video.seconds)}, in ${name}, id ${r.id.slice(-6)}`);
-      if (r.editing) say(`    Editing: ${r.editing.by}, since ${shownAt(r.editing.since)}`);
-      if (r.title) say(`    Title: ${r.title.text}${r.title.approved ? "" : " (recommended)"}`);
-      const pushed = r.main && Array.isArray(r.main.pushed) ? r.main.pushed : [];
-      if (pushed.length) say(`    Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}`);
-      if (r.finished) say(`    Finished: revision ${r.finished.revision}, on ${r.finished.on}`);
-      for (const problem of filesProblems(folder, r)) say(`    Not right: ${problem}`);
-    }
+    for (const e of shown) for (const line of episodeLines(ctx, e, false, all, links)) say(line);
+  }
+  if (left.length) {
+    say("Left alone, not for brimm-video:");
+    for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
   // The videos in each Mac's drop folder.
   const drops = join(ctx.root, "Unedited Video");
+  const light = lightImport(ctx.settings);
+  const statuses = readStatuses(ctx.root, ctx.now());
   const waiting = [];
   let macs = [];
   try {
@@ -316,13 +700,22 @@ export async function episodes(ctx) {
     for (const video of names) {
       const found = ctx.stat(join(drops, mac, video));
       if (!found) continue;
-      const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
+      const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
       // and macOS moves its birth time back with them. When this Mac has not seen it, as in the other Mac's drop folder, from
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
       const noted = readSeen(ctx.home)[seenKey(video, found)];
       const came = noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs;
-      waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      // A video waiting here has not been answered. One a light import has a status of, with its label, or that a gated episode
+      // holds, is named by its label, which retry takes, or by what it is and its size, whichever Mac this is; and so is every
+      // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
+      const label = labelIn(statuses, video, mac);
+      const holding = holdingOf({ root: ctx.root, video, bytes: found.size });
+      if (!light && !label && !(holding && gatedAsOf(links)(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      else {
+        const who = label || capital(unlabelled(video, found.size));
+        waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
+      }
     }
   }
   if (waiting.length) {
@@ -335,7 +728,7 @@ export async function episodes(ctx) {
     say("Imports:");
     for (const line of imports) say(line);
   }
-  // This Mac's libraries, and the space left for them.
+  // This Mac's libraries, and the space left for them. A library of a gated episode is named as its episode is.
   say("On this Mac:");
   let work = [];
   try {
@@ -345,7 +738,9 @@ export async function episodes(ctx) {
   }
   for (const name of work) {
     const library = join(workFolder(ctx.home), name, `${name}.fcpbundle`);
-    if (statSync(library, { throwIfNoEntry: false })) say(`  ${name}.fcpbundle: ${sizeText(folderSize(library))}`);
+    if (!statSync(library, { throwIfNoEntry: false })) continue;
+    const named = listedAs(ctx, episodeAt(ctx, name, links));
+    say(`  ${named === name ? `${name}.fcpbundle` : `The library of ${named}`}: ${sizeText(folderSize(library))}`);
   }
   try {
     const disk = ctx.statfs(ctx.home);
@@ -372,15 +767,15 @@ function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
   const found = findEpisode(ctx, said);
   if (found.why) {
     ctx.say(found.why);
-    return { code: 1 };
+    return { code: found.newer ? newerEnds : 1 };
   }
   const { read } = found;
   if (!read.record) {
-    ctx.say(`${found.name}: ${read.why}.`);
+    ctx.say(notRead(ctx, found));
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(newerWords(read.record));
+    ctx.say(newerWhy(read.record));
     return { code: newerEnds };
   }
   return { found, record: read.record };
@@ -555,7 +950,7 @@ export async function open(ctx, rest) {
     await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
     const again = readEpisode(found.folder);
     if (!again.record) {
-      say(`${found.name}: ${again.why}.`);
+      say(notRead(ctx, { ...found, read: again }));
       return 1;
     }
     // The record read again is older than the claim this Mac wrote, or has nobody editing it: Dropbox took the claim away.
@@ -594,7 +989,7 @@ export async function open(ctx, rest) {
     for (const reel of candidates) say(`  ${reel.n}. "${reel.title}", ${stamp(reel.to - reel.from)}.${reel.why ? ` ${reel.why}` : ""}`);
   }
   const pushed = record.main.pushed;
-  say(pushed.length ? `Shown in Final Cut: v${pushed[pushed.length - 1].v}, on ${pushed[pushed.length - 1].on}.` : "Not shown in Final Cut yet.");
+  say(pushed.length ? `${shownLine(pushed)}.` : "Not shown in Final Cut yet.");
   offlineStep(ctx, found);
   say('Say "show it in Final Cut" to see the main video there.');
   return 0;
@@ -736,7 +1131,8 @@ export async function pushPart(ctx, found, { part, xml, told = [], noHandEdits =
 }
 
 /** The guard, for a part shown in Final Cut before (spec section 4, "the guard"): asked before it is shown again, and before
-    a command reads a time or quoted words on it (phase 4). { last, answer }: the version it was last shown as on either
+    a command reads a time or quoted words on it (phase 4), only when its newest version was pushed: one rendered (newestIsRender)
+    was never in Final Cut, and asks nothing. { last, answer }: the version it was last shown as on either
     Mac (0 when never), and what goes in the record of a push; or { why } it cannot go on. A yes to the guard (`handEdits`)
     always stops it. When the other Mac showed it last, only that Mac's answer, carried in the record when it handed the
     episode over, says whether it was changed there; `withoutOther` goes on from that version as brimm-video made it.
@@ -755,6 +1151,9 @@ function guardOf(ctx, found, part, { noHandEdits = false, handEdits = false, wit
     // Nothing has been handed to Final Cut on this Mac yet.
   }
   const last = Math.max(0, ...pushed.map((p) => p.v), ...handed);
+  // The newest version was rendered, not pushed (spec 3, "One version model"): nothing of it was in Final Cut to be changed, so
+  // nothing is asked. Unless this Mac handed Final Cut a newer one than the record lists (its copy is in pushed/): that one asks.
+  if (newestIsRender(record, part) && newestOf(pushed).v === last) return { last, answer: null };
   // The newest push, when another Mac made it: what was done to it there is in that Mac's library, and only that Mac's answer,
   // carried in the record when it handed the episode over, says whether it was changed (spec section 4).
   const top = pushed.reduce((best, p) => (!best || p.v > best.v ? p : best), null);
@@ -781,19 +1180,26 @@ function guardOf(ctx, found, part, { noHandEdits = false, handEdits = false, wit
 export async function push(ctx, rest) {
   const flags = new Set(rest.filter((word) => word.startsWith("--")));
   const words = rest.filter((word) => !word.startsWith("--"));
+  const answers = { noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") };
+  // `v<n>` last: that version as it was stored, shown again (pushVersion).
+  const version = words.length >= 2 && /^v\d+$/i.test(words[words.length - 1]) ? Number(words.pop().slice(1)) : null;
   if (words.length >= 2 && words[words.length - 2] === "reel" && /^\d+$/.test(words[words.length - 1])) {
     const n = Number(words.pop());
     words.pop();
     const got = episodeFor(ctx, words, { newerEnds: 1 });
     if (!got.found) return got.code;
     if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
-    return pushReel(ctx, { ...got.found, record: got.record }, n, { noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") });
+    if (version !== null) return pushVersion(ctx, { ...got.found, record: got.record }, { reel: n }, version, answers);
+    return pushReel(ctx, { ...got.found, record: got.record }, n, answers);
   }
   if (words[words.length - 1] === "main") words.pop();
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = got;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
+  // A finished video, and an iPhone clip she answered, have no timeline of their own: nothing of them is edited here.
+  if (!hasFinalCut(record)) return refuse(ctx, `${shownName(record)} has no timeline to show in Final Cut: ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"} is not edited here.`);
+  if (version !== null) return pushVersion(ctx, { ...found, record }, "main", version, answers);
   // The timeline as the session leaves it: the import's own until something is laid over it (phase 4).
   const made = await timelineFor({ ...found, record }, "main", ctx);
   if (made.coming) {
@@ -802,6 +1208,27 @@ export async function push(ctx, rest) {
   }
   if (made.why) return refuse(ctx, made.why);
   return pushPart(ctx, { ...found, record }, { part: "main", xml: made.xml, told: made.told, noHandEdits: flags.has("--no-hand-edits"), handEdits: flags.has("--hand-edits"), withoutOther: flags.has("--without-other-macs-changes") });
+}
+
+/** `push "<episode>" [main | reel <n>] v<k>`: show version k of a part in Final Cut again, as a new version, from the timeline that
+    version stored (its entry's file in edit/), not the record as it is now (spec 3, "One version model": "push <version> hands
+    Final Cut that version's stored FCPXML"). A rendered version's timeline is shown so too. It goes through the push every part
+    shares (pushPart), with its guard. A version the part does not list is refused, and a stored file Dropbox has not brought over
+    yet is brought, as push brings what it needs. */
+async function pushVersion(ctx, found, part, v, answers) {
+  const { record } = found;
+  const target = part === "main" ? record.main : (record.reels || []).find((reel) => reel.n === part.reel);
+  const named = part === "main" ? "the main video" : `Reel ${part.reel}`;
+  if (!target) return refuse(ctx, `There is no Reel ${part.reel}.`);
+  const entry = (Array.isArray(target.pushed) ? target.pushed : []).find((p) => p.v === v);
+  if (!entry || typeof entry.file !== "string") return refuse(ctx, `There is no v${v} of ${named}.`);
+  const at = join(found.folder, entry.file);
+  if (!existsSync(at)) return refuse(ctx, `${entry.file} is not in the episode's folder.`);
+  if (!ctx.isWhole(at)) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [entry.file] });
+    return refuse(ctx, `Dropbox is still bringing ${entry.file} over to this Mac. Say "open ${record.name.text}" first.`);
+  }
+  return pushPart(ctx, found, { part, xml: readFileSync(at, "utf8"), told: [`It is v${v} as it was stored, shown again as a new version.`], ...answers });
 }
 
 /** `bring --now "<episode folder>" [--take-over]`, the detached run `open` starts: each file of the episode that is not whole
@@ -820,14 +1247,15 @@ export async function bring(ctx, rest) {
   }
   const found = findEpisode(ctx, folder);
   if (!found.read || !found.read.record) {
-    ctx.say(found.why || `${folder}: ${found.read.why}.`);
+    ctx.say(found.why || notRead(ctx, found, folder));
+    if (found.gate) await leaveGateResult(ctx, found, "bring");
     return 1;
   }
   const { record } = found.read;
   const name = record.name.text;
   // The claim she said to take over, as the record has it when the bring starts: none when nobody else has it by then.
   const taking = takeOver ? heldElsewhere(record, ctx.machine) : null;
-  const result = await runDetached({ home: ctx.home, folder: found.name, command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
     const coming = wanted();
     const read = ctx.deps.readAll || readThrough;
@@ -850,11 +1278,11 @@ export async function bring(ctx, rest) {
     return { ok: true, made, failed, next, takeOver: { by: taking.by, since: taking.since, next: `Every file of ${name} is here. Say "take it over" again.` } };
   });
   if (result.taking) {
-    ctx.say(`Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+    ctx.say(`Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
     return 1;
   }
   if (result.running) {
-    ctx.say(`${result.running} is running for ${found.name} already.`);
+    ctx.say(`${result.running} is running for ${calledAs(ctx, found)} already.`);
     return 1;
   }
   return result.ok ? 0 : 1;
@@ -874,9 +1302,25 @@ function nextOf(ctx, folder, r) {
   return same(held) && same(yes) ? r.takeOver.next : r.next;
 }
 
+/** What a detached run's result `r` says of the episode `shown`, in one line: when it ended, what it made, what it could not do,
+    and `next`, what to say next. Each of them as `clean` says it. `status` says it for every result, and `kind` for the reading
+    it waited for. An early result (detached.js runDetached), which a reading writes once what it read is in the episode, says
+    when it put that in, and that the late check of its copies is still to come while its run is at work (`live`), or that the
+    run stopped before it was made. */
+function ranLine(ctx, shown, r, clean, next, live = false) {
+  const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
+  const when = r.early
+    ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "the late check of its copies is still to come" : "it stopped before the late check of its copies was made"}`
+    : `ended ${ageText(ctx.now() - r.ended)} ago`;
+  return `${shown}: ${r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
+}
+
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
-    say next (nextOf). With words, only what they fit. */
+    say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
+    session, by its label and short id, and what its runs left with nothing of its video's names in it (cleanFor), a result
+    left before it became one included, and with nothing said of what to say next. Words fit such an episode only when they
+    are its label or its id, and a light import's status only by its label. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -901,16 +1345,27 @@ export async function status(ctx, rest) {
   const imports = importLines(ctx, fits);
   if (imports.length) lines.push("Imports:", ...imports);
   let local = [];
+  // The versions of the episodes are read from Episodes once, for those held as sessions.
+  const links = linksOf(ctx.root);
   try {
     // An episode is found by its folder's name, or by its own name as findEpisode finds it.
     const named = words.length ? findEpisode(ctx, rest.join(" ")) : {};
-    local = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".") && (fits(n) || n === named.name)).sort();
+    // A gated episode is found by its label or its ids alone (findEpisode), never by words of its folder's name.
+    local = readdirSync(workFolder(ctx.home)).filter((n) => {
+      if (n.startsWith(".") || !(n === named.name || fits(n))) return false;
+      const e = n === named.name || !words.length ? null : episodeAt(ctx, n, links);
+      return !e || e.newer || !isGated(e);
+    }).sort();
   } catch (e) {
     // There is no BRIMM Video Work yet.
   }
   for (const folder of local) {
-    const command = runningCommand(ctx.home, folder, ctx.alive);
-    if (command) lines.push(`${folder}: ${command} is running.`);
+    const e = episodeAt(ctx, folder, links);
+    const shown = listedAs(ctx, e);
+    const clean = cleanFor(ctx, e);
+    const run = runningRun(ctx.home, folder, ctx.alive);
+    const command = run ? run.command : "";
+    if (command) lines.push(`${shown}: ${command} is running.`);
     let results = [];
     try {
       results = readdirSync(episodeWork(ctx.home, folder)).filter((n) => n.endsWith(".result.json")).sort();
@@ -919,10 +1374,12 @@ export async function status(ctx, rest) {
     }
     for (const file of results) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
-      if (!r || r.command === command) continue;
-      const done = r.failed.length ? ` Not done: ${r.failed.join(" ").replace(/([^.])$/, "$1.")}` : "";
-      const next = nextOf(ctx, folder, r);
-      lines.push(`${folder}: ${r.command} ended ${ageText(ctx.now() - r.ended)} ago.${r.made.length ? ` Made: ${r.made.join(", ")}.` : ""}${done}${next ? ` ${next}` : ""}`);
+      // The result of a command at work now is an older run's, and is not said; but the early result its own run wrote is.
+      const own = Boolean(r) && r.early === true && Boolean(run) && r.command === command && r.pid === run.pid;
+      if (!r || (r.command === command && !own)) continue;
+      // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
+      // left out.
+      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own));
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -933,31 +1390,33 @@ export async function status(ctx, rest) {
     when its import stopped on this Mac before its late check, that check holds the episode for ask and --from-plan on both
     Macs (unedited.js importHolds), and is made only at the import's next run: so the launch agent is asked to look, which
     makes it. When this Mac owes no late check of it, a stopped status of this Mac's own for it can never be cleared by a late
-    check, and is taken away. Otherwise it is refused, as before. */
-function lateCheckOwed(ctx, video, held) {
+    check, and is taken away. Otherwise it is refused, as before. `who` is the video as retry names it (retry), and `plain`
+    what a line about it is said as: for a light import's video, with no path or name of its file in it. */
+function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   const { say } = ctx;
   const owed = readPendings(ctx.home).find((p) => p.video === video && p.machine === ctx.machine && resolve(p.root) === resolve(ctx.root));
   const stopped = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine && importState(s.status, ctx.now()) === "stopped");
-  const name = owed ? owed.name : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
+  // The episode is named as listedAs names it: a gated one by its label and short id, and never by its folder.
+  const name = owed ? listedAs(ctx, episodeAt(ctx, owed.name)) : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
   if (!owed && !stopped.length) {
-    say(`${video} is ${held}`);
+    say(`${who} is ${plain(held)}`);
     return 1;
   }
   if (!owed) {
     for (const { status } of stopped) removeStatus(ctx.root, video, ctx.machine, status.import || "");
-    say(`${video} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
+    say(`${who} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
     return 0;
   }
-  const problem = owed.problem ? String(owed.problem).replace(/\.$/, "") : "";
+  const problem = owed.problem ? plain(String(owed.problem).replace(/\.$/, "")) : "";
   const due = dueAt(owed);
   const later = due > ctx.now() ? `when it is due, at ${clockAt(due)}` : "";
   // A run at work makes a due check within a minute, but makes a check that found a problem only once, at its start.
   if (ctx.agentRunning()) {
     if (problem) {
-      say(`${video} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
+      say(`${who} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
       return 1;
     }
-    say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
+    say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
     return 0;
   }
   try {
@@ -966,14 +1425,17 @@ function lateCheckOwed(ctx, video, held) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  if (problem) say(`${video} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
-  else say(`${video} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
+  if (problem) say(`${who} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
+  else say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
   return 0;
 }
 
 /** `retry "<video>"`: import again a video in this Mac's drop folder whose import failed or stopped. It is found by its
-    file's name or its name without the ending, whatever their case. Refused when an episode holds it already (but see
-    lateCheckOwed), and while its import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart). */
+    file's name or its name without the ending, whatever their case, or by the label a light import's status of this Mac gives
+    it (Part L), whatever its case and spacing. Refused when an episode holds it already (but see lateCheckOwed), and while its
+    import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart).
+    A video with a label is named by it in every line, and why its import failed is said with no path or name of its file in
+    it; on a Mac that does the light import, a video with none is named by what it is and its size, and never by its file. */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();
@@ -988,34 +1450,51 @@ export async function retry(ctx, rest) {
   } catch (e) {
     // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
   }
-  const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said));
+  const light = lightImport(ctx.settings);
+  const statuses = readStatuses(ctx.root, ctx.now());
+  const labelOf = (v) => labelIn(statuses, v, ctx.machine);
+  const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
+  // A video a light import has a status of, or that a gated episode holds, is never named by its file, whichever Mac this is;
+  // and on a Mac that does the light import, none is.
+  // An episode a version of a session holds is held as a session too (episodeAt's `held`), and named so.
+  const gatedAs = gatedAsOf(linksOf(ctx.root));
+  const quiet = (v) => {
+    const holding = holdingOf({ root: ctx.root, video: v, bytes: sizeOf(v) });
+    return light || Boolean(labelOf(v)) || Boolean(holding && gatedAs(holding.record));
+  };
+  const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {
-    say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(videos)}.` : "It is empty."}`);
+    const held = videos.map((v) => labelOf(v) || (quiet(v) ? unlabelled(v, sizeOf(v)) : v));
+    say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(held)}.` : "It is empty."}`);
     return 1;
   }
   const bytes = statSync(join(drop, video)).size;
-  const held = episodeHolding({ root: ctx.root, video, bytes });
-  if (held) return lateCheckOwed(ctx, video, held);
+  const label = labelOf(video);
+  const hush = quiet(video);
+  const who = label || (hush ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
+  const plain = (text) => (hush ? withoutNames(text, namesOf(video), [label]) : text);
+  const held = episodeHolding({ root: ctx.root, video, bytes, gatedAs });
+  if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
-  const mine = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
+  const mine = statuses.filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine);
   // A video the import holds in the folder on purpose, a Zoom download, is held again however often it is tried: its status
   // says why, and what to do. The status of a held video that is another file now is of no use, and is taken away below.
   const left = mine.find((s) => importState(s.status, ctx.now()) === "held" && s.status.bytes === bytes);
   if (left) {
-    say(`${video} is held: ${left.status.held}`);
+    say(`${who} is held: ${plain(left.status.held)}`);
     return 1;
   }
   const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
   const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
   if (!again.length && running) {
-    say(`${video} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
+    say(`${who} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
     return 1;
   }
   for (const { status } of again) removeStatus(ctx.root, video, ctx.machine, status.import || "");
   const how = (status) => {
     const state = importState(status, ctx.now());
-    if (state === "failed") return `which failed: ${String(status.failed).replace(/\.$/, "")}`;
+    if (state === "failed") return `which failed: ${plain(String(status.failed).replace(/\.$/, ""))}`;
     if (state === "problem") return "whose late check found a problem";
     if (state === "held") return "which was held, as another file";
     return `which stopped at ${status.step}`;
@@ -1025,7 +1504,7 @@ export async function retry(ctx, rest) {
   // A run of the launch agent at work now takes the video when it next looks: it looks again each minute while it waits for
   // a late check, and once more before it ends. Asking the agent to start would do nothing while it runs.
   if (ctx.agentRunning()) {
-    say(`${video} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
+    say(`${who} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
     return 0;
   }
   // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
@@ -1036,7 +1515,7 @@ export async function retry(ctx, rest) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  say(`${video} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
+  say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
   return 0;
 }
 
@@ -1176,6 +1655,8 @@ async function markReels(ctx, found, ns, status) {
     for (const n of ns) {
       const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
       if (candidate && !candidate.ranges.length) return refuse(ctx, `Reel ${n} has nothing to show: ${String(candidate.failed || "it has no stretch").replace(/\.$/, "")}.`);
+      // A candidate a reading suggested has no crops until it is made (reels.json version 2): its project cannot be written yet.
+      if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
     }
     // A change Dropbox took away is said before anything is written, as save says it.
     const gone = undone(found.record, ctx.home);
@@ -1217,12 +1698,20 @@ export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked")
 export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
 
 /** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
-    episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. */
+    episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. A Reel a
+    reading suggested and nobody has made yet (its candidate has no crops) is refused first: "make" it first. */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  // A Reel whose candidate has no crops yet, as a reading suggests it (reels.json version 2), is not made: there is nothing
+  // upright to show, whatever the record says of it.
+  if (!(record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) && existsSync(join(found.folder, REELS_FILE))) {
+    const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
+    const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
+    if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
+  }
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
   const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
@@ -1262,6 +1751,10 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // claim is written.
   const notYet = cannotFinish(record);
   if (notYet) return refuse(ctx, notYet);
+  // A finished video, and an iPhone clip she answered, are not edited in Final Cut: their hand-off is written from their spellings
+  // (saveSpellings), as version 2, which a version 1 hand-off could not hold. Said at once too, before any part is looked for or
+  // transcribed, and with no folder named.
+  if (!hasFinalCut(record)) return refuse(ctx, notInFinalCut(ctx, found, record));
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
   // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
   // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
@@ -1277,10 +1770,10 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // or version 2 when the hand-off on file is version 2 already (writesV2For). Version 1 needs a name, and an approved title for
   // all but a short video. Version 2 has no title, and needs a name only for a raw video (a finished video's name is its file's).
   const { v2 } = target;
-  if (record.name && record.name.placeholder && (!v2 || kindOfRecord(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
+  if (record.name && record.name.placeholder && (!v2 || recordKind(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
   const problems = filesProblems(found.folder, record);
-  if (problems.length) stops.push(`${found.name} is not whole in Dropbox: ${problems.join(" ")}`);
+  if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running) stops.push(`${running} is running for this episode. Say "how far is it?"`);
   const here = fromFinalCutFolder(ctx.home);
@@ -1329,7 +1822,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   if (!record.editing) {
     if ((await save(ctx, found, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return 1;
     const again = readEpisode(found.folder);
-    if (!again.record) return refuse(ctx, `${found.name}: ${again.why}.`);
+    if (!again.record) return refuse(ctx, notRead(ctx, { ...found, read: again }));
     rev = again.record.rev;
   }
   const asked = { version: 1, at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map((p) => ({ key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects, video: p.video, export: p.export, kept: p.kept, noHandEdits: noHandEdits.includes(p.key) })) };
@@ -1349,18 +1842,24 @@ async function finish(ctx, rest) {
   if (flags.now) {
     const found = findEpisode(ctx, words.join(" "));
     if (!found.read || !found.read.record) {
-      const why = found.why || `${words.join(" ")}: ${found.read.why}.`;
+      const why = found.why || notRead(ctx, found, words.join(" "));
       ctx.say(why);
       // The episode is there but its record cannot be read (a conflicted copy, say): the finish leaves a result that says
       // why, so that status shows it and not "nothing is running" (the P1 check, T6).
-      if (found.read) await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [why] }));
+      if (found.read) await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [why] }));
+      // The gate ended it: the same, in the gate's words, and the claim its quick part took for it is let go, as below.
+      if (found.gate) {
+        await leaveGateResult(ctx, found, "finish");
+        const gone = letGoClaim(ctx, { folder: found.folder, name: found.name });
+        if (gone) ctx.say(gone);
+      }
       return 1;
     }
     // The progress panel shows the finish as it shows an import (phase P).
     const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
-    const result = await runDetached({ home: ctx.home, folder: found.name, command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
     if (result.taking || result.running) {
-      ctx.say(result.taking ? `Another run is taking over ${found.name}'s lock. Say finish again in a moment.` : `${result.running} is running for ${found.name} already.`);
+      ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
       // The finish never ran: a claim its quick part took for it is let go (the P1 check, T17).
       const gone = letGoClaim(ctx, { folder: found.folder, name: found.name });
       if (gone) ctx.say(gone);
@@ -1370,6 +1869,8 @@ async function finish(ctx, rest) {
   }
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
+  // A session's finish is its own: the hand-off of what she approved of its teachings.
+  if (taughtSession(got.record)) return finishSessionCommand(ctx, { ...got.found, record: got.record });
   const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
   return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [] });
 }
@@ -1449,9 +1950,11 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
-  const name = record.name.text;
+  const name = shownName(record);
   const newest = newestPushes(record);
-  const mine = newest.filter((p) => p.last && p.last.on === ctx.machine);
+  // The parts this Mac pushed last: a part whose newest version was rendered was never in Final Cut, and is neither asked about
+  // nor copied (spec 3, "One version model").
+  const mine = newest.filter((p) => p.last && p.last.on === ctx.machine && p.last.how !== "render");
   // An episode nobody has open may be changed without opening it, so one this Mac pushed last is handed over as well.
   if (record.editing ? record.editing.by !== ctx.machine : !mine.length) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
@@ -1494,7 +1997,7 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
   const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
   const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
-  if (broken.length) return refuse(ctx, `${found.name} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
+  if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
   if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
   let notYet = [];
@@ -1579,7 +2082,10 @@ const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-no
 
 /** `show "<episode>" transcript|notes|plan`: print the episode's transcript, Claude's notes or the cut plan, whole. Her session
     reads an episode's files only through this (spec section 4), and it takes no path. A file not whole on this Mac yet is
-    brought over by a detached run, as open does. */
+    brought over by a detached run, as open does. The transcript of a raw video she has answered is its rough cut's, with its
+    times (spec 3, "Show me the transcript"); a finished video's, a clip's and one from before the switch is the video's own. Of a
+    video not yet answered, or a session whose mark is not cleared, it prints nothing into her chat (printWhy): it opens a read-only
+    copy of the file on this Mac, in TextEdit (showCopy). */
 async function show(ctx, rest) {
   const words = rest.slice();
   const kind = words.pop();
@@ -1590,10 +2096,14 @@ async function show(ctx, rest) {
   const got = episodeFor(ctx, words);
   if (!got.found) return got.code;
   const { found, record } = got;
+  const stem = basename(record.video.file, extname(record.video.file));
   const [ending, what] = SHOWN[kind];
-  const file = `${basename(record.video.file, extname(record.video.file))}${ending}`;
+  // What it prints goes into her chat: of a video not answered or a session, or one held as a session, nothing; a copy opens on this
+  // Mac instead.
+  if (printWhy(record) || found.held) return showCopy(ctx, found, record, `${stem}${ending}`, what);
+  const file = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
   const path = join(found.folder, file);
-  if (!existsSync(path)) return refuse(ctx, `${record.name.text} has no ${what} yet.`);
+  if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
   if (!ctx.isWhole(path)) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [file] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
@@ -1602,13 +2112,233 @@ async function show(ctx, rest) {
   return 0;
 }
 
+/** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
+const shownFolder = (home, folder) => join(episodeWork(home, folder), "shown");
+
+/** The file in a shown/ folder that lists what brimm-video put into it (showCopy, whichCommand): `behind` takes away those files alone,
+    and only from a folder that has it (clearShownIn). */
+export const SHOWN_MARKER = ".brimm-shown.json";
+
+/** The names the marker in the shown/ folder `dir` lists, or null when it has none that can be read. Only a plain name in the folder
+    counts: never a path, nor the marker itself. */
+function shownListed(dir) {
+  try {
+    const read = JSON.parse(readFileSync(join(dir, SHOWN_MARKER), "utf8"));
+    if (read === null || typeof read !== "object" || !Array.isArray(read.files)) return null;
+    return read.files.filter((name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && name !== SHOWN_MARKER && !/[/\\\u0000]/.test(name));
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Have the marker in `dir` list `names`, and take it away when there are none. */
+function listShown(dir, names) {
+  const file = join(dir, SHOWN_MARKER);
+  if (!names.length) rmSync(file, { force: true });
+  else writeFileSync(file, `${JSON.stringify({ files: [...new Set(names)] })}\n`);
+}
+
+/** Add `name` to what the marker in `dir` lists, before the file is put there: a file listed and not there is passed over. */
+const addShown = (dir, name) => listShown(dir, [...(shownListed(dir) || []), name]);
+
+/** Take away from the shown/ folder `dir` the files its marker lists that `only` takes, each on its own: a file or a link, never a
+    folder, and nothing inside one; then the marker, once it lists nothing that is left, and the folder, once nothing else is in it.
+    A folder that is not one (a link to one included), or has no marker, is left as it is. Gives back the names still listed, or
+    null for such a folder. */
+function clearShownIn(dir, only = () => true) {
+  const at = lstatSync(dir, { throwIfNoEntry: false });
+  if (!at || !at.isDirectory()) return null;
+  const listed = shownListed(dir);
+  if (listed === null) return null;
+  const left = [];
+  for (const name of listed) {
+    const file = join(dir, name);
+    const found = lstatSync(file, { throwIfNoEntry: false });
+    if (!found) continue;
+    if (found.isDirectory() || !only(name)) {
+      left.push(name);
+      continue;
+    }
+    try {
+      rmSync(file);
+    } catch (e) {
+      left.push(name);
+    }
+  }
+  listShown(dir, left);
+  if (!left.length) {
+    try {
+      rmdirSync(dir);
+    } catch (e) {
+      // Something brimm-video did not put there is in it, and stays.
+    }
+  }
+  return left;
+}
+
+/** A name in `dir` for a copy named `base` with its `ending` that nothing there has: "<base><ending>", then "<base> 2<ending>" and on.
+    Nothing in shown/ is ever written over, a file brimm-video did not list (an older brimm-video's copy) least of all. */
+function freeShownName(dir, base, ending) {
+  for (let n = 1; ; n++) {
+    const name = `${base}${n > 1 ? ` ${n}` : ""}${ending}`;
+    if (!lstatSync(join(dir, name), { throwIfNoEntry: false })) return name;
+  }
+}
+
+/** Open the file `rel` of the episode `found` (whose record is `record`, one the gate holds: a video not yet answered, left alone,
+    or a session not cleared) on this Mac, and print nothing of it (spec 2, "What else the mark stops"): it is copied into
+    ~/BRIMM Video Work/<folder>/shown/, made read-only (TextEdit saves in place, and the file in Dropbox is never written into),
+    and opened in TextEdit, and she is told only that it was, by the video's name. The copies `show` made before in that folder go
+    first, and `behind`, at the next session start, clears them all: each is listed by the folder's marker (SHOWN_MARKER) before it
+    is made, and only what the marker lists is ever taken away. The copy is named by the video's name, never its file's. A file
+    Dropbox has not brought whole yet is copied all the same: reading it is what brings it, and it is small. */
+function showCopy(ctx, found, record, rel, what) {
+  const name = namedAs(found, record);
+  const from = join(found.folder, rel);
+  if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
+  const dir = shownFolder(ctx.home, found.name);
+  let copy = "";
+  try {
+    mkdirSync(dir, { recursive: true });
+    clearShownIn(dir, (listed) => listed.endsWith(".txt"));
+    mkdirSync(dir, { recursive: true });
+    const named = freeShownName(dir, `${fileSafe(name)} ${what}`, ".txt");
+    copy = join(dir, named);
+    addShown(dir, named);
+    copyFileSync(from, copy);
+    chmodSync(copy, 0o444);
+  } catch (e) {
+    return refuse(ctx, `${name}'s ${what} could not be copied on this Mac (${e.code || "an error"}).`);
+  }
+  try {
+    ctx.openApp("TextEdit", copy);
+  } catch (e) {
+    return refuse(ctx, `${name}: ${String(e.message).replace(/\.$/, "")}.`);
+  }
+  ctx.say(`Opened ${name}'s ${what} in TextEdit on this Mac.`);
+  return 0;
+}
+
+/** Clear the copies `show` and `which` made, of every episode (showCopy, whichCommand): `behind` does it at every session's start.
+    Only the files a shown/ folder's marker lists are taken away (clearShownIn): a shown/ with no marker, and anything else in BRIMM
+    Video Work, is left as it is, and nothing is gone into but shown/ itself. One that cannot be taken away stays until the next. */
+function clearShown(ctx) {
+  let names = [];
+  try {
+    names = readdirSync(workFolder(ctx.home));
+  } catch (e) {
+    return;
+  }
+  for (const name of names) {
+    try {
+      clearShownIn(shownFolder(ctx.home, name));
+    } catch (e) {
+      // It is cleared at the next session start.
+    }
+  }
+}
+
 /** How long `behind` gives git, each time: well inside the two minutes the Code tab gives a command. */
 const BEHIND_MS = 20000;
 
+/** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
+    for these words (tests/studio.test.js). */
+export const LOCK_CHANGED = "This folder's lock is changed on this Mac: ask Jason before going on.";
+
+/** Where Claude Code reads this Mac's managed settings (a Mac's folder: managed-settings.json, and managed-settings.d/*.json beside it,
+    read in the order of their names). A test gives another, as `managedDir` in its deps. */
+const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
+
+/** A settings file as the object Claude Code reads from it, or null: it is not there, cannot be read, is not JSON (a byte-order mark,
+    a comment and a comma at the end are not JSON) or is not an object. Claude Code leaves such a file out. */
+function settingsObject(file) {
+  try {
+    const settings = JSON.parse(readFileSync(file, "utf8"));
+    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** `behind`: whether the lock on her folder for Claude has been loosened on this Mac (spec 2026-10-22, section 7), as the lines
+    `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The lock
+    rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and nothing is written.
+    `home` and `deps` are the command's (deps.env and deps.managedDir are a test's own), and `checkout` is the one the guard is run
+    from. In this order:
+    - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
+      anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
+    - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it says
+      disableAllHooks is true (absent, as main wrote the folder, it turns no hook off), no longer has the guard hook settingsOf
+      writes, or no longer turns Bypass and Auto mode off. Every other difference from what is written there is only "out of date" (studioStale);
+    - the user's settings, ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR/settings.json when that is set (Claude Code's own): when it
+      is a JSON object with disableAllHooks true, whether or not she has a folder, since hooks off would defeat the lock of one made
+      later. A file that is not that is left out by Claude Code, so it turns nothing off;
+    - this Mac's managed settings (MANAGED_DIR): managed-settings.json, then the files of managed-settings.d that end in .json and do
+      not begin with a dot (a file or a link), in the order of their names, each when it sets disableAllHooks true, or
+      allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. */
+function lockLoosened({ home, checkout, deps = {} }) {
+  const why = [];
+  let folder = null;
+  try {
+    folder = realpathSync.native(studioFolder(home));
+  } catch (e) {
+    // She has no folder for Claude on this Mac, so nothing in it can be there.
+  }
+  if (folder) {
+    try {
+      if (lstatSync(join(folder, ".claude", "settings.local.json"), { throwIfNoEntry: false })) why.push("(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)");
+    } catch (e) {
+      if (e.code !== "ENOTDIR") why.push("(Jason: her folder's .claude/settings.local.json could not be looked for, so it is not known that there is none.)");
+    }
+    const own = settingsObject(join(folder, ".claude", "settings.json"));
+    if (own === null) why.push("(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)");
+    else {
+      const broken = lockBroken(own, { checkout, folder });
+      if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)");
+      if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
+      const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
+      if (modes.length) why.push(`(Jason: her folder's .claude/settings.json ${modes.join(" and ")}. Its contents are not shown here.)`);
+    }
+  }
+  const config = (deps.env || process.env).CLAUDE_CONFIG_DIR;
+  const user = settingsObject(config ? join(config, "settings.json") : join(home, ".claude", "settings.json"));
+  if (user && user.disableAllHooks === true) why.push(`(Jason: this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
+  const managed = deps.managedDir || MANAGED_DIR;
+  let dropIns = [];
+  try {
+    dropIns = readdirSync(join(managed, "managed-settings.d"), { withFileTypes: true })
+      .filter((e) => (e.isFile() || e.isSymbolicLink()) && e.name.endsWith(".json") && !e.name.startsWith(".")).map((e) => `managed-settings.d/${e.name}`).sort();
+  } catch (e) {
+    // No drop-ins.
+  }
+  for (const file of ["managed-settings.json", ...dropIns]) {
+    const set = settingsObject(join(managed, file));
+    if (!set) continue;
+    if (set.disableAllHooks === true) why.push(`(Jason: this Mac's managed settings, ${file}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
+    if (set.allowManagedHooksOnly === true) why.push(`(Jason: this Mac's managed settings, ${file}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`);
+  }
+  return why;
+}
+
+/** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. */
+function refuseIfLoosened(lock, say) {
+  const why = lockLoosened(lock);
+  if (!why.length) return null;
+  say(LOCK_CHANGED);
+  for (const line of why) say(line);
+  return 1;
+}
+
 /** `behind`: whether this Mac's checkout of brimm-video is behind main on GitHub, by git, in this Mac's checkout: it fetches
-    main, and counts the changes there that this checkout has not. On her laptop git reaches GitHub with the deploy key. It
-    changes nothing in the checkout, and always ends with 0: a check that could not be made is said. */
+    main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
+    writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
+    ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
+    checkout, and otherwise always ends with 0: a check that could not be made is said. */
 async function behind(ctx) {
+  // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
+  clearShown(ctx);
+  const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
+  if (refused !== null) return refused;
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer brimm-video. Is this Mac offline?";
@@ -1648,19 +2378,30 @@ function studioStale(ctx) {
       return null;
     }
   };
-  let node = "/opt/homebrew/bin/node";
+  let node = HOMEBREW_NODE;
   try {
     node = JSON.parse(read(".claude/settings.json")).hooks.PreToolUse[0].hooks[0].args[1] || node;
   } catch (e) {
     // Settings that cannot be read are out of date too, and Homebrew's node is the one the installer finds.
   }
   const want = studioFiles({ checkout: ctx.settings.checkout, node, folder });
-  return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node };
+  return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node: nameableNode(node) };
 }
+
+/** Homebrew's node, which the installer finds, and which is named when her folder's settings name none that can be run. */
+const HOMEBREW_NODE = "/opt/homebrew/bin/node";
+
+/** The node `behind` tells Jason to rewrite her folder with, from what her folder's settings name (a file she may have changed, and
+    Jason is told to run what is printed): only an absolute path that ends in /node, holds no control character and is there;
+    otherwise Homebrew's. */
+const nameableNode = (node) => (typeof node === "string" && isAbsolute(node) && basename(node) === "node" && !/[\u0000-\u001f\u007f]/.test(node) && existsSync(node) ? node : HOMEBREW_NODE);
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the
-    same. */
+    same. When either side is a video not yet answered, or a session (gate.js gated), only who has it open, its finish, its
+    hand-over, how far its main video was shown and the sizes of its files are said, a file named without the video's name;
+    every other field that differs is named alone, as [what, null, null], and what it holds is never said into the chat. The
+    account a reading was made on (`reading.account`) is never said, whatever the record. */
 function recordDifferences(a, b) {
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
@@ -1679,8 +2420,10 @@ function recordDifferences(a, b) {
   const as = (v) => (v === undefined || v === null || (Array.isArray(v) && !v.length) ? "none" : JSON.stringify(v));
   const fields = (x, y, skip) => [...new Set([...Object.keys(x || {}), ...Object.keys(y || {})])].filter((k) => !skip.includes(k)).sort();
   const reelOf = (r, n) => (r.reels || []).find((x) => x.n === n);
+  // Claude's reading, but for the account it was read on, which is never said into the chat.
+  const reading = (r) => (r.reading !== null && typeof r.reading === "object" && !Array.isArray(r.reading) ? Object.fromEntries(Object.entries(r.reading).filter(([k]) => k !== "account")) : r.reading);
   const others = [
-    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(a[k]), as(b[k])]),
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
     ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
     ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
   ];
@@ -1696,8 +2439,21 @@ function recordDifferences(a, b) {
     ...sizes("File", a.files, b.files),
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
+  const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
+  const shown = (what) => ["Who has it open", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
+  // What each side is, and its session mark, in words of brimm-video's own that name nothing, so that she sees which side holds the
+  // answer or the mark that keeping the other would drop (resolveIn refuses that).
+  const kindWords = (r) => (recordKind(r) === null ? (leftAlone(r) ? "left alone" : "not answered yet") : KIND_SAID[recordKind(r)]);
+  const markWords = (r) => (r.session === undefined || r.session === null ? "none" : sessionNotCleared(r) ? "marked, not cleared" : "cleared by her click");
+  const gatedRow = ([what, x, y]) => {
+    if (shown(what)) return [withoutNames(what, names, [], { paths: false }), x, y];
+    if (what === "Kind") return ["What it is", kindWords(a), kindWords(b)];
+    if (what === "Session") return ["Its session mark", markWords(a), markWords(b)];
+    return [what, null, null];
+  };
+  const said = names ? rows.map(gatedRow).filter(([, x, y]) => x === null || x !== y) : rows;
   // Two sides are never said to hold the same unless they do, but for their rev and who wrote them.
-  return rows.length || sameRecord(a, b) ? rows : [["The rest of the record", "as A holds it", "as B holds it"]];
+  return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
 /** A record file read as it is, or null when it is not there or cannot be read. */
@@ -1748,14 +2504,24 @@ async function resolveConflict(ctx, rest) {
 /** What resolve says when keeping either side here could lose a change. */
 const NEEDS_JASON = "A conflict needs Jason: tell him the episode's name.";
 
+/** Why the side `kept` of a record's conflict may not be kept over the side `other`, in plain words, or "": `other` marks the video a
+    client or group session not cleared (gate.js sessionNotCleared: kind session, or a mark not cleared by her click) and `kept` is
+    not one, which would clear the mark with no dialog; or `other` holds her answer and `kept` is a video waiting for its answer,
+    which would take the answer back. Each names the video as edit.js names it (shownName). */
+function keptOverWhy(kept, other) {
+  if (sessionNotCleared(other) && !sessionNotCleared(kept)) return `One side marks ${shownName(other)} a client or group session: keep that side; the mark is cleared only by her click (say "clear the session mark").`;
+  if (recordKind(other) !== null && recordKind(kept) === null) return `One side has ${shownName(kept)} answered: keep that side; an answer is changed only by saying what it is again.`;
+  return "";
+}
+
 /** An error's words for a person: the copy rule's own "Nothing was copied." and the closing full stop taken off. */
 const plainWhy = (e) => String(e && e.message ? e.message : e).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
 
 async function resolveIn(ctx, found, keep) {
   const read = readEpisode(found.folder, { pastCopies: true });
-  if (!read.record) return refuse(ctx, `${found.name}: ${read.why}.`);
+  if (!read.record) return refuse(ctx, notRead(ctx, { ...found, read }));
   const { record } = read;
-  const name = record.name.text;
+  const name = shownName(record);
   const shownFile = join(episodeWork(ctx.home, found.name), "resolve.shown.json");
   const pin = (() => {
     try {
@@ -1811,7 +2577,7 @@ async function resolveIn(ctx, found, keep) {
       else if (copyRecord) {
         const differ = recordDifferences(record, copyRecord);
         ctx.say(differ.length ? "They differ in:" : "They hold the same.");
-        for (const [what, x, y] of differ) ctx.say(`  ${what}: A: ${x}; B: ${y}`);
+        for (const [what, x, y] of differ) ctx.say(x === null ? `  ${what}: they differ.` : `  ${what}: A: ${x}; B: ${y}`);
       }
     } else {
       const side = (s) => (s ? `${sizeText(s.size)}${s.size >= 1024 ? ` (${s.size} bytes)` : ""}, written ${shownAt(localStamp(new Date(s.mtimeMs)))}` : "not there");
@@ -1846,6 +2612,12 @@ async function resolveIn(ctx, found, keep) {
   }
   if (blocked) return refuse(ctx, blocked);
   if (isRecord && keep === "B" && !copyRecord) return refuse(ctx, "The copy cannot be read, so it cannot be kept. Keep A.");
+  // A side is never kept over one that marks the video a session not cleared (only her click on the dialog clears a mark), nor
+  // over one that holds her answer, which keeping the other would take back.
+  if (isRecord && copyRecord && !sameRecord(record, copyRecord)) {
+    const why = keptOverWhy(keep === "B" ? copyRecord : record, keep === "B" ? record : copyRecord);
+    if (why) return refuse(ctx, why);
+  }
   const aHere = existsSync(at(of));
   if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B, or ask Jason.`);
   // 1. Set aside, by the rule, every file this step replaces or deletes, and see each is whole there. A record copy kept as B,
@@ -1973,12 +2745,18 @@ async function free(ctx) {
   return 1;
 }
 
-/** `name "<episode>" "<name>"`. */
+/** `name "<episode>" "<name>"`. For a client or group session, a name that holds a name brimm-video can see in it is refused
+    (sessionNameWhy). */
 async function name(ctx, rest) {
   const [said, ...words] = rest;
   const got = episodeFor(ctx, said ? [said] : [], { newerEnds: 1 });
   if (!got.found) return got.code;
-  return nameEpisode(ctx, { ...got.found, record: got.record }, words.join(" "));
+  const found = { ...got.found, record: got.record };
+  if (asSession(got.record)) {
+    const why = await sessionNameWhy(ctx, found, words.join(" "));
+    if (why) return refuse(ctx, why);
+  }
+  return nameEpisode(ctx, found, words.join(" "));
 }
 
 /** `title "<episode>" [reel <n>] [--words "<words>"] [--approve] [--change]`: the episode's title, or a Reel's. */
@@ -1994,8 +2772,11 @@ async function title(ctx, rest) {
   return titleEpisode(ctx, { ...got.found, record: got.record }, { words: flags.words ? flags.words.join(" ") : undefined, approve: Boolean(flags.approve), change: Boolean(flags.change), ...(reel ? { reel } : {}) });
 }
 
-/** `reel pick|drop "<episode>" <n>…`. */
+/** `reel pick|drop "<episode>" <n>…`, and `reel "<label>" <n> --client-agreed`, a client's agreement to a Reel cut from a session
+    (clientAgreed), which is those three words and no other: `<n>` is digits, and `reel pick 14 --client-agreed` is still a pick of
+    the episode "14". */
 async function reel(ctx, rest) {
+  if (rest.length === 3 && rest[0] !== "pick" && rest[0] !== "drop" && /^\d+$/.test(rest[1]) && rest[2] === "--client-agreed") return clientAgreed(ctx, rest[0], Number(rest[1]));
   const [what, said, ...numbers] = rest;
   if ((what !== "pick" && what !== "drop") || !said) {
     ctx.say(HELP);
@@ -2007,9 +2788,130 @@ async function reel(ctx, rest) {
   return (what === "pick" ? pickReels : dropReels)(ctx, { ...got.found, record: got.record }, ns);
 }
 
+/** What is said when a client's agreement is refused or does not happen: it was not noted. */
+const NOT_NOTED = "Not noted:";
+const NOT_AGREED = "The Reel is not agreed.";
+const AGREEMENT_TIMED_OUT = `${NOT_NOTED} the dialog was not answered within a minute, so it was closed. ${NOT_AGREED}`;
+const NOTE_NOT_WRITTEN = `${NOT_NOTED} the note could not be written on this Mac. ${NOT_AGREED}`;
+const AGREEMENT_NOT_RECORDED = "The Reel is not agreed: the note of who agreed is on this Mac only. Say it again.";
+/** What a person types in the agreement dialog, made one line: each line break and tab one space. */
+const LINE_BREAKS = /[\r\n\t\v\f\u0085\u2028\u2029]/g;
+
+/** `reel "<label>" <n> --client-agreed`: she notes, on a dialog Claude cannot press, that the client agreed to Reel idea `n` of the
+    client or group session called `label` being cut from it (spec 2026-10-22, section 2). Before any dialog it refuses, writing
+    nothing, in this order: a video that is no session, or whose mark is cleared; then (`checks`) this Mac's training gate off or
+    lapsed; teachings Claude has not read, that Dropbox is still bringing, or that cannot be read; no such Reel idea; one to be
+    filmed again, which needs no agreement; one she has not kept; one agreed already, which it says and ends well; and the other
+    Mac's claim, or a run at work. Then it tells her to click, since Return presses Cancel, and shows the dialog (askHere, for
+    DIALOG_MS at most), which names the video by its label and asks who agreed and when. Only her click on "They agreed", with
+    something typed (a letter or a digit, not only spaces or invisible characters), goes on. Cancel, a dialog that gave no click, nothing typed and a dialog not answered in time each say so, in
+    a line of their own, and write nothing. Her click may come long after the record was read, so it is read again, and must be
+    the record she was asked about, and `checks` are made again (on this Mac's settings read again, for the gate), and so are the
+    two refusals save would make after the note (a newer record file still coming over; a change Dropbox undid). All of it is under
+    the answer lock of the episode, so that a second run is refused at once with `kind`'s words, before any dialog of its own. Then,
+    in this order: one line, with the time and the Reel, in agreements.txt in this Mac's work folder for the episode, a file only she can
+    read; and one write of the record, by the rule, holding that the agreement was noted and on which day. What she typed is in that
+    note and nowhere else: not in a line said, the tool log, the record, a result, a file of the episode or the hand-off. The log
+    says only that it was noted, by id and label. A note that cannot be written writes no record; a record that cannot be written
+    leaves the note, and says the Reel is not agreed. */
+async function clientAgreed(ctx, label, n) {
+  const got = episodeFor(ctx, [label], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  // One dialog at a time for an episode: the answer lock `kind` holds is held from before the dialog to after the write, so that
+  // two runs cannot both be open, note twice, and tell her that Dropbox undid a change it did not.
+  const lock = takeAnswerLock(ctx, got.found.name, "reel");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await noteAgreement(ctx, got.found, got.record, n);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** What `reel … --client-agreed` does once it holds the answer lock of the episode `found`, whose record is `record`: see
+    clientAgreed. */
+async function noteAgreement(ctx, found, record, n) {
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: a client's agreement is noted only for a Reel cut from one.`);
+  // Why the agreement may not be noted on the record `rec` with `settings`: { why }, with `already` when it was agreed already.
+  const checks = async (rec, settings) => {
+    const gate = teachingsWhy(settings, ctx.now());
+    if (gate) return { why: gate };
+    let read = readTeachings(found.folder, rec, ctx.isWhole);
+    if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, rec, ctx.isWhole);
+    if (read.none) return { why: `${name} has no teachings yet: Claude has not read it.` };
+    if (read.coming) return { why: TEACHINGS_COMING };
+    if (read.why) return { why: `${name}'s teachings cannot be read (${read.why}).` };
+    const reelIdea = itemsOf(read.teachings, rec.session).reelIdeas.find((item) => item.n === n);
+    if (!reelIdea) return { why: `${name} has no Reel idea ${n}.` };
+    if (reelIdea.refilm === true) return { why: `Reel idea ${n} of ${name} is to be filmed again, not cut from the session: no client's agreement is needed.` };
+    if (reelIdea.approved !== true) return { why: `Reel idea ${n} of ${name} is not kept: keep it first.` };
+    const before = ((rec.session || {}).agreed || []).find((a) => a.n === n);
+    if (before) return { why: `Reel idea ${n} of ${name} was agreed already, on ${before.at}.`, already: true };
+    return { why: sessionBusy(ctx, found, rec, "nothing was noted") };
+  };
+  const first = await checks(record, ctx.settings);
+  if (first.already) {
+    ctx.say(first.why);
+    return 0;
+  }
+  if (first.why) return refuse(ctx, first.why);
+  ctx.say(`A dialog is open on this Mac for ${name}: type who agreed to Reel ${n} and when, then click "They agreed". Return presses Cancel.`);
+  const { answer, outOfTime } = await askHere(ctx, `${name}\n\nWho agreed to Reel ${n} being cut from this session, and when?`, { buttons: ["Cancel", "They agreed"], answer: true });
+  if (outOfTime) return refuse(ctx, AGREEMENT_TIMED_OUT);
+  if (!answer || answer.button !== "They agreed") {
+    const why = answer && answer.button === null && typeof answer.why === "string" ? answer.why : "";
+    return refuse(ctx, why ? `${NOT_NOTED} ${why} ${NOT_AGREED}` : `${NOT_NOTED} the Reel is not agreed.`);
+  }
+  const typed = (typeof answer.text === "string" ? answer.text : "").replace(LINE_BREAKS, " ").trim();
+  // Invisible characters, as a zero-width space, are not something typed: it holds a letter or a digit.
+  if (!/[\p{L}\p{N}]/u.test(typed)) return refuse(ctx, `${NOT_NOTED} nothing was typed. ${NOT_AGREED}`);
+  const stop = (why) => refuse(ctx, `${NOT_NOTED} ${why}`);
+  // The record is read again, and must be the one she was asked about. This Mac's settings are read again too, unless a test
+  // gave them: Jason may have turned the training gate off meanwhile.
+  const now = readEpisode(found.folder);
+  if (!now.record) return stop(notRead(ctx, { ...found, read: now }));
+  if (now.newer) return stop(newerWhy(now.record));
+  if (now.record.rev !== record.rev) return stop(`${name} changed on the other Mac meanwhile. Say it again.`);
+  const again = await checks(now.record, ctx.deps.settings ? ctx.settings : readSettings(ctx.home).settings || {});
+  if (again.why) return stop(again.why);
+  // save refuses a newer record file that is still coming over, and a change Dropbox undid: no note is made before such a refusal.
+  // As save does, it accepts the rev read when it refuses for the second, so that saying it again is not refused for ever.
+  if (recordNumbers(found.folder)[0] > now.record.rev) return stop(PENDING_WHY);
+  const gone = undone(now.record, ctx.home);
+  if (gone) {
+    acceptRev(ctx.home, now.record.id, now.record.rev);
+    return stop(gone);
+  }
+  // The note first, on this Mac's own disk and never in Dropbox, then the record.
+  const moment = new Date(ctx.now());
+  const when = localStamp(moment);
+  const day = localDay(moment);
+  try {
+    const folder = episodeWork(ctx.home, found.name);
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, "agreements.txt");
+    appendFileSync(file, "", { mode: 0o600 });
+    chmodSync(file, 0o600);
+    appendFileSync(file, `${when} Reel ${n}: ${typed}\n`);
+  } catch (e) {
+    // Bare on purpose: nothing of the error is said, so that no message quotes the file's path or what she typed.
+    return refuse(ctx, NOTE_NOT_WRITTEN);
+  }
+  const session = { ...now.record.session, agreed: [...((now.record.session || {}).agreed || []), { n, at: day }] };
+  if ((await save(ctx, { ...found, record: now.record }, { ...now.record, session }, "")) !== 0) {
+    ctx.say(AGREEMENT_NOT_RECORDED);
+    return 1;
+  }
+  ctx.say(`${name}: Reel ${n}'s agreement is noted, on ${day}. Who agreed is kept on this Mac only.`);
+  toolLog(ctx, `${when} ${now.record.id} (${name}): a client's agreement to Reel ${n} was noted by a click on this Mac's dialog.`, "the agreement");
+  return 0;
+}
+
 /** `reels "<episode>" [--no-play]`: the list of the episode's Reel candidates (reels.json, phase 3), and each preview that is
     whole on this Mac opened in QuickTime Player, for the person to watch. A preview Dropbox is still bringing over is named
-    and brought, as open brings files. With --no-play the list alone. */
+    and brought, as open brings files. With --no-play the list alone. For a video she has answered the card of, the list of its
+    suggestions on the clock she is reading, and nothing opens. */
 async function reels(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);
   const got = episodeFor(ctx, words, { newerEnds: 1 });
@@ -2027,6 +2929,22 @@ async function reels(ctx, rest) {
   const listedSize = record.files ? record.files[REELS_FILE] : undefined;
   const thereSize = statSync(at).size;
   if (Number.isInteger(listedSize) && thereSize !== listedSize) return refuse(ctx, `${REELS_FILE} in this episode is not the one its record lists (it is ${thereSize} bytes, and the record lists ${listedSize}), so its candidates are not shown. ${keptOrWait(ctx, found, record)}`);
+  // A video she has answered the card of is listed with its times on the clock she is reading, or on the recording's own when that
+  // cannot be read now: a file is not whole yet, the read fails, or the version's file holds no clip. Nothing is brought from here,
+  // no preview is made or opened, and asking Claude again is not offered (spec 3, "The Reel suggestions"); when the other Mac has a
+  // newer version rendered there, that is said, as every command that reads a time says it.
+  if (isAnswered(record)) {
+    let now = null;
+    try {
+      now = clockFor({ ...found, record }, "main", ctx);
+    } catch (e) {
+      now = null;
+    }
+    const clock = now && now.clock && now.clock.length ? now : null;
+    ctx.say(reelsText(read.reels, record, "", clock));
+    if (clock) sayElsewhere(ctx, clock);
+    return 0;
+  }
   // Whether Claude can be asked again is said as this Mac finds it now, in the words ask would refuse with (PR 19's review).
   // While a file is still coming, ask can be asked: it brings it.
   const blocked = askRefusal(ctx, found, record);
@@ -2051,8 +2969,8 @@ function askRefusal(ctx, found, record) {
   if (claimHeld(ctx, record)) return { why: claimHeld(ctx, record) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
-  if (running) return { why: `${running} is running for ${found.name} already. Say it again when it has finished.` };
-  if (!(ctx.deps.tools || findPrograms()).claude) return { why: "Claude Code is not installed on this Mac, so Claude cannot be asked." };
+  if (running) return { why: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.` };
+  if (!(ctx.deps.tools || findPrograms()).claude) return { why: NO_CLAUDE_CODE };
   return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
 }
 
@@ -2063,21 +2981,29 @@ const keptOrWait = (ctx, found, record) => {
   return kept ? `The one its record lists is kept at ${kept}: ask Jason to put it back.` : "Say this again once Dropbox has it back.";
 };
 
+/** Why Claude cannot be asked on a Mac without Claude Code, as `ask` says it. */
+const NO_CLAUDE_CODE = "Claude Code is not installed on this Mac, so Claude cannot be asked.";
+/** The word `kind` takes for each kind a record keeps, as `ask` answers a video again with it. */
+const ASKED_AS = { finished: "finished", raw: "raw", "short video": "clip" };
+
 /** `ask "<episode>"`: Claude asked again for the episode's Reel candidates, detached (`ask --now "<episode folder>"`, which
     askAgain does, in unedited.js), since it can take minutes. It refuses a short video, a Mac without Claude Code, an
     episode whose import went by the rules alone, and an episode another command is at work on; and what askBlocked says.
-    Both parts refuse an episode a newer brimm-video wrote, by its short id alone. */
+    Both parts refuse an episode a newer brimm-video wrote, by its short id alone. A video she has answered the card of (not a
+    session) is read again as its kind instead: `kind <its kind> --again`, with its claim, what it sets aside and its reading
+    (spec 2026-10-22, section 2, "ask changes too"); the gate refuses a video not yet answered and a session first. */
 async function ask(ctx, rest) {
   if (rest[0] === "--now") {
     const found = findEpisode(ctx, rest[1] || "");
     if (!found.read || !found.read.record) {
-      ctx.say(found.why || `${rest[1]}: ${found.read.why}.`);
+      ctx.say(found.why || notRead(ctx, found, rest[1]));
+      if (found.gate) await leaveGateResult(ctx, found, "ask");
       return 1;
     }
     // A record a newer brimm-video wrote may be a session or a video not yet answered, whose fields this one cannot read: it is
     // named by its short id alone, nothing is asked of Claude, and nothing is written, not even the result of a run.
     if (found.read.newer) {
-      ctx.say(newerWords(found.read.record));
+      ctx.say(newerWhy(found.read.record));
       return 1;
     }
     const deps = {
@@ -2085,9 +3011,9 @@ async function ask(ctx, rest) {
       log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
       ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
     };
-    const result = await runDetached({ home: ctx.home, folder: found.name, command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
     if (result.taking || result.running) {
-      ctx.say(result.running ? `${result.running} is running for ${found.name} already.` : `Another run is taking over the lock of ${found.name}; try again in a few seconds.`);
+      ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
       return 1;
     }
     return result.ok ? 0 : 1;
@@ -2095,12 +3021,61 @@ async function ask(ctx, rest) {
   const got = episodeFor(ctx, rest, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = { found: got.found, record: got.record };
+  // A video she has answered the card of is read again as its kind: `kind <its kind> --again`, with its claim, what it sets aside
+  // and its reading (spec 2, "ask changes too"). A video not yet answered, and a session, the gate refuses before this (and
+  // askBlocked would too); a video from before the switch is asked for Reels as it always was.
+  // What would stop the reading is said first, as ask always said it, so that nothing of the earlier reading is set aside for a
+  // reading that cannot run.
+  if (isAnswered(record) && recordKind(record) !== "session") {
+    if (ctx.settings.readings === false) return refuse(ctx, READINGS_OFF);
+    if (!(ctx.deps.tools || findPrograms()).claude) return refuse(ctx, NO_CLAUDE_CODE);
+    return kindCommand(ctx, [...rest, ASKED_AS[recordKind(record)], "--private", "no", "--again", "--not-a-session"]);
+  }
   const blocked = askRefusal(ctx, found, record);
   if (blocked.bring) startDetached(ctx, { command: "bring", folder: found.name, args: blocked.bring });
   if (blocked.why) return refuse(ctx, blocked.why);
   startDetached(ctx, { command: "ask", folder: found.name });
   ctx.say(`Started: Claude is asked for Reel candidates again. Say "how far is it?" to see how far it has got.`);
   return 0;
+}
+
+/** `read --now "<episode folder>" --kind <kind> --rev <rev>`: Claude's reading of the episode, the detached run `kind` starts once
+    she has said what it is (spec 2026-10-22, section 2), with the kind the answer stored ("short video" is one word here, with
+    its space) and the rev of the record that holds the answer. It is detached alone: it is in no help, and without --now, or
+    without a kind it reads or a rev, it prints the help and ends 2, as a command it does not know. The episode is found and
+    gated as every command's is (`read` runs for a session only once the training gate is on, and its run refuses it there);
+    one a newer brimm-video wrote is named by its short id, and nothing is asked or written. The work is reading.js
+    readEpisodeNow's, held under the episode's lock (runDetached), whose result names a gated video by its label alone. */
+async function read(ctx, rest) {
+  const { flags } = flagsOf(rest.slice(2), ["kind", "rev"]);
+  const kind = Array.isArray(flags.kind) && flags.kind.length === 1 ? flags.kind[0] : "";
+  const rev = Array.isArray(flags.rev) && flags.rev.length === 1 && /^\d+$/.test(flags.rev[0]) ? Number(flags.rev[0]) : NaN;
+  if (rest[0] !== "--now" || !rest[1] || !READ_KINDS.includes(kind) || !Number.isInteger(rev)) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const found = findEpisode(ctx, rest[1]);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || notRead(ctx, found, rest[1]));
+    if (found.gate) await leaveGateResult(ctx, found, "read");
+    return 1;
+  }
+  if (found.read.newer) {
+    ctx.say(newerWhy(found.read.record));
+    return 1;
+  }
+  const deps = {
+    run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, now: ctx.now,
+    log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
+    notify: ctx.deps.notify || banner, ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.progress ? { progress: ctx.deps.progress } : {}),
+    ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), kind, rev
+  };
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "read", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ early }) => readEpisodeNow(ctx, { name: found.name, folder: found.folder, record: found.read.record }, { ...deps, early }));
+  if (result.taking || result.running) {
+    ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
+    return 1;
+  }
+  return result.ok ? 0 : 1;
 }
 
 /** The timeline a command names after the episode: "main", the default, or "reel <n>", in any case; and the words left. */
@@ -2169,7 +3144,14 @@ function timelineRead(ctx, found, part, flags) {
     return { code: refuse(ctx, `Dropbox is still bringing ${read.coming} over to this Mac. Say it again when it is done.`) };
   }
   if (read.why) return { code: refuse(ctx, read.why) };
+  sayElsewhere(ctx, read);
   return { read };
+}
+
+/** Say, when the other Mac has rendered a newer version than the one a time was read on here (clockFor's `elsewhere`), that it is
+    there and how to see it here: renders stay on the Mac that made them (spec 3, "Times"). */
+function sayElsewhere(ctx, read) {
+  if (read && read.elsewhere) ctx.say(`The other Mac has a newer version (v${read.elsewhere.v}, on ${read.elsewhere.on}): say "render it here" to see it.`);
 }
 
 /** How long a layer shows: `--for` seconds, else the quoted words' length, else `fallback`. { seconds } or { code }. */
@@ -2233,6 +3215,86 @@ function shownAfter(stamp, ms) {
   return new Date(Date.parse(stamp) + ms + offset).toISOString().slice(0, 16).replace("T", " ");
 }
 
+/** What is said when the hand-off waits for the switch, and when it is written. */
+const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What `finish` says of a video whose hand-off is written from its spellings (a finished video, an iPhone clip she answered) on a
+    Mac that hands off version 1. */
+const handoffFromSpellingsWaits = (name) => `${name}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`;
+/** What `finish` says of a video that has no Final Cut (hasFinalCut), `found` with its `record`: on a Mac that hands off version 1,
+    that its hand-off waits for version 2; once it is written, its revision; otherwise that it comes from the spellings card. */
+function notInFinalCut(ctx, found, record) {
+  const name = shownName(record);
+  if (!writesV2For(ctx.settings, found.folder, record)) return handoffFromSpellingsWaits(name);
+  if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.`;
+  return `${name} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
+}
+const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
+/** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
+    her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
+const hasFinalCut = (record) => {
+  const kind = recordKind(record);
+  if (kind === "short video") return !(record.answer !== null && typeof record.answer === "object");
+  return kind !== "finished";
+};
+/** Spellings as they are said in a row: "a" as "b", "c" as "d" and "e" as "f". */
+const pairsSaid = (pairs) => listed(pairs.map(([heard, meant]) => `"${heard}" as "${meant}"`));
+
+/** The reading the record holds when it is the current one, or null: one made after her answer (not before it), as the kind the
+    video is now. `kind … --again` keeps the reading and its offers in the record while the new one is made, and a video answered
+    again as another kind holds the old kind's: neither is a reading of this answer (the inverse of reading.js notAsAnswered). A
+    time that cannot be read is not after. */
+function currentReading(record) {
+  const reading = record.reading;
+  if (reading === null || typeof reading !== "object" || record.answer === null || typeof record.answer !== "object") return null;
+  return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === recordKind(record) ? reading : null;
+}
+
+/** The spellings Claude's reading offered, each { heard, spelled, why }, as the card numbers them (by their place in the record,
+    so that a spelling added meanwhile changes no number); null when the video has not been read, by a reading that counts
+    (currentReading). */
+function offersOf(record) {
+  if (!currentReading(record)) return null;
+  const offered = record.offers && Array.isArray(record.offers.spellings) ? record.offers.spellings : [];
+  return offered.map((o) => ({ heard: String((o && o.heard) ?? ""), spelled: String((o && o.spelled) ?? ""), why: typeof (o && o.why) === "string" ? o.why : "" }));
+}
+
+/** Her answer to the offers of the reading the record holds, { reading, at, on, applied, left }, or null while they are not
+    answered. An answer is of one reading, the current one (currentReading): a reading made again (its `at` is another) has offers
+    of its own. */
+function answerOf(record) {
+  const answer = record.offers && record.offers.answered;
+  const reading = currentReading(record);
+  return answer && reading && answer.reading === reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
+}
+
+/** Is the hand-off of a finished video or an iPhone clip owed: its offers are answered, and it is not written yet? */
+const handoffOwed = (record) => !record.finished && !hasFinalCut(record) && answerOf(record) !== null;
+
+/** Why an offer cannot be kept, in plain words, or "": the episode has a spelling of that word already, or it is not a spelling
+    (spellingFault). */
+function offerFault(record, offer) {
+  const mine = (record.spellings || []).find(([heard]) => heard === offer.heard);
+  if (mine && mine[1] !== offer.spelled) return `You have "${offer.heard}" spelled "${mine[1]}" already.`;
+  return spellingFault(offer.heard, offer.spelled);
+}
+
+/** Write the hand-off of a finished video or an iPhone clip from the import's captions (finish.js finishFinished), the first
+    one or the next revision of it, with the record `record` (its spellings and the answer to the offers in it), and say `done`
+    and what came of it. Version 1 of the hand-off waits for the switch: the record is kept, and nothing is put in final/. */
+async function importHandoff(ctx, found, record, done) {
+  const wrote = await finishFinished(ctx, found, { record });
+  if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}`);
+  if (wrote.coming) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: wrote.coming });
+    return refuse(ctx, `Dropbox is still bringing ${listed([...new Set(wrote.coming.map(whatIs))])} over: say it again in a minute.`);
+  }
+  if (wrote.why) return refuse(ctx, wrote.why);
+  if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
+  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.`);
+  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision)}`);
+  return 0;
+}
+
 /** The record with its spellings, `spellings`; and after a finish (spec section 4, "spell applies to every timeline and to
     the final transcripts") the final transcripts with each spelling they do not hold yet, and the hand-off made again as its
     next revision, each file put in by the rule, and only when its words change. Each finished part's transcripts hold the
@@ -2242,11 +3304,27 @@ function shownAfter(stamp, ms) {
     it checks they are here, whole (her folder may be online-only after a hand-off): if not, it starts bringing them over and
     stops. (`spell` has refused already while a finish runs, whose late check would put its own copies back.) When the record
     cannot be written, each final file is put back as it was, each on its own; one that cannot be is named, and she is told
-    the episode needs Jason. Resolves the save's code. */
-async function saveSpellings(ctx, found, spellings, done) {
-  const record = { ...found.record, spellings };
+    the episode needs Jason. `set` is what else the command changes in the record (the answer to Claude's offers), written in the
+    same record, and `later` what is said at the end when no hand-off is written yet and none is due (a raw video's). Resolves the
+    save's code. */
+async function saveSpellings(ctx, found, spellings, done, { set = {}, later = "" } = {}) {
+  const record = { ...found.record, ...set, spellings };
   const finished = record.finished;
-  if (!finished) return save(ctx, found, record, done);
+  // The hand-off of a finished video or an iPhone clip is made from the import's own captions (finish.js finishFinished): it is
+  // written at the first spell once its offers are answered, and made again from the captions at every one after, so that a
+  // spelling dropped or changed is dropped or changed in it too. Which refusals apply is that function's.
+  if (madeFromImport(record)) {
+    // A client or group session, and a video not yet answered, are refused as finish refuses them, whatever the hand-off on file
+    // was made as, before the spelling is kept (finish.js cannotFinish).
+    const notYet = cannotFinish(record);
+    if (notYet) return refuse(ctx, notYet);
+    // Only while the video is the kind its hand-off was made as: answered again as another kind, the spelling is kept and the
+    // hand-off waits for the new reading (`kind … --again` sets this one aside).
+    if (importKind(record) === recordKind(record)) return importHandoff(ctx, found, record, done);
+    return save(ctx, found, record, `${shownName(record)}: spelled. Its hand-off waits for its new reading.`);
+  }
+  if (!finished && handoffOwed(record)) return importHandoff(ctx, found, record, done);
+  if (!finished) return save(ctx, found, record, [done, later].filter(Boolean).join(" "));
   // A client or group session, and a video not yet answered, are refused at once, as finish refuses them (finish.js
   // cannotFinish), before any file in final/ is named or read, and nothing is written, the spelling included: none of a
   // session's transcripts may be in the shared folder, and an unanswered video has no kind to hand off as.
@@ -2359,10 +3437,97 @@ async function saveSpellings(ctx, found, spellings, done) {
   }
 }
 
-/** `spell "<episode>" [add "<as heard>" "<as spelled>" | drop "<as heard>"]`: the episode's own spellings, which every
-    timeline's captions and the final transcripts take. */
+/** The pairs of `spell … add` after its first "add": "<as heard>" "<as spelled>", and more pairs after them, each of which may be
+    started with "add" again, as the command line is written. { pairs }, or { odd } with the word that has no spelling after it.
+    An "add" is passed over where a pair would start only when at least a pair follows it, so a word heard as "add" is still one
+    when it is the last pair. */
+function spellPairs(words) {
+  const pairs = [];
+  for (let i = 0; i < words.length; ) {
+    if (words[i] === "add" && words.length - i >= 3) i += 1;
+    if (i + 1 >= words.length) return { odd: words[i] };
+    pairs.push([words[i].trim(), words[i + 1].trim()]);
+    i += 2;
+  }
+  return { pairs };
+}
+
+/** What she is to say to answer Claude's offers. */
+const ANSWER_WITH = 'Say which to apply: "all", "none", or their numbers, as in 1 3.';
+
+/** `spell "<episode>" offers`: the spellings Claude's reading offered, as one numbered card, or, once she has answered them, what
+    she answered. It reads only. */
+function spellCard(ctx, found) {
+  const { record } = found;
+  const name = shownName(record);
+  const offers = offersOf(record);
+  if (!offers) return refuse(ctx, `Claude has not read ${name} yet, so it has offered no spellings.`);
+  const answer = answerOf(record);
+  if (answer) {
+    ctx.say(`Claude's spellings for ${name} were answered on ${shownAt(answer.at)}:`);
+    offers.forEach((o, i) => ctx.say(`${i + 1}. "${o.heard}" as "${o.spelled}": ${answer.applied.includes(o.heard) ? "applied" : "left"}.`));
+    if (handoffOwed(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(HANDOFF_WAITS);
+    return 0;
+  }
+  if (!offers.length) {
+    ctx.say(`Claude offered no spellings for ${name}.`);
+    ctx.say("Answer none to go on.");
+    return 0;
+  }
+  ctx.say(`Claude offers these spellings for ${name}:`);
+  offers.forEach((o, i) => {
+    const fault = offerFault(record, o);
+    ctx.say(fault ? `${i + 1}. "${o.heard}" as "${o.spelled}" cannot be kept. ${fault}` : `${i + 1}. "${o.heard}" as "${o.spelled}"${o.why ? `: ${o.why}` : ""}`);
+  });
+  ctx.say(ANSWER_WITH);
+  return 0;
+}
+
+/** `spell "<episode>" offers all|none|<n> <n>…`: her answer to Claude's offers. The ones named are applied as the episode's
+    spellings, in the card's order, together with the answer, in one record; and, for a finished video or an iPhone clip, the
+    hand-off is then written (saveSpellings). "all" applies every offer that can be kept; a number whose offer cannot is refused.
+    An offer for a word the episode spells already is not used: her own spelling stays. Nothing is written when it is refused. */
+async function answerOffers(ctx, found, words) {
+  const { record } = found;
+  const name = shownName(record);
+  const offers = offersOf(record);
+  if (!offers) return refuse(ctx, `Claude has not read ${name} yet, so it has offered no spellings.`);
+  if (answerOf(record)) {
+    // Her answer stands. A hand-off still owed, because this Mac handed off version 1 when she gave it, is written now.
+    if (handoffOwed(record) && writesV2For(ctx.settings, found.folder, record)) return saveSpellings(ctx, found, record.spellings || [], `The spellings Claude offered for ${name} were answered already.`);
+    return refuse(ctx, `The spellings Claude offered for ${name} were answered already. To spell a word another way, say it with spell add; to take one back, spell drop.`);
+  }
+  const said = words.join(" ").split(/[\s,]+/).filter(Boolean);
+  const numbers = said.length > 0 && said.every((w) => /^[1-9]\d*$/.test(w));
+  if (said.length !== 1 && !numbers) return refuse(ctx, ANSWER_WITH);
+  if (said.length === 1 && !numbers && !["all", "none"].includes(said[0])) return refuse(ctx, ANSWER_WITH);
+  const faults = offers.map((o) => offerFault(record, o));
+  let chosen = [];
+  const notKept = [];
+  if (said[0] === "all") {
+    chosen = offers.map((_, i) => i).filter((i) => !faults[i]);
+    notKept.push(...faults.filter(Boolean));
+  } else if (numbers) {
+    const asked = [...new Set(said.map(Number))].sort((a, b) => a - b);
+    if (!offers.length) return refuse(ctx, `Claude offered no spellings for ${name}. Answer none to go on.`);
+    const beyond = said.map(Number).find((n) => n > offers.length);
+    if (beyond !== undefined) return refuse(ctx, `There is no offer ${beyond}: the offers are 1 to ${offers.length}.`);
+    const bad = asked.find((n) => faults[n - 1]);
+    if (bad !== undefined) return refuse(ctx, `Offer ${bad} cannot be kept. ${faults[bad - 1]} Nothing was written.`);
+    chosen = asked.map((n) => n - 1);
+  }
+  const applied = chosen.map((i) => offers[i]);
+  let next = record.spellings || [];
+  for (const o of applied) next = withSpelling(next, o.heard, o.spelled);
+  const answer = { reading: currentReading(record).at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
+  const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
+  return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later: recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : "" });
+}
+
+/** `spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all|none|<n> <n>…]]`: the
+    episode's own spellings, which every timeline's captions and the final transcripts take. Several pairs are one change. */
 async function spell(ctx, rest) {
-  const [said, verb, heard, meant] = rest;
+  const [said, verb, ...more] = rest;
   const got = episodeFor(ctx, said === undefined ? [] : [said], { newerEnds: 1 });
   if (!got.found) return got.code;
   const found = { ...got.found, record: got.record };
@@ -2371,21 +3536,44 @@ async function spell(ctx, rest) {
     ctx.say(spellings.length ? `The spellings: ${spellings.map(([h, m]) => `"${h}" as "${m}"`).join(", ")}.` : "There are no spellings for this episode yet.");
     return 0;
   }
-  if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
-  // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here.
-  const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
-  if (verb === "drop") {
-    if (!spellings.some(([h]) => h === heard)) return refuse(ctx, `There is no spelling of "${heard}".`);
-    return saveSpellings(ctx, found, spellings.filter(([h]) => h !== heard), `"${heard}" is as the transcriber writes it again. ${SHOW_IT}`);
+  if (verb === "offers") {
+    // A session, and a video not yet answered, are refused as finish refuses them, before any file is looked at.
+    const notYet = cannotFinish(got.record);
+    if (notYet) return refuse(ctx, notYet);
+    if (more.length === 0) return spellCard(ctx, found);
   }
+  if (claimHeld(ctx, got.record)) return refuse(ctx, claimHeld(ctx, got.record));
+  // A finish's late check would put its own copies of final/ back, and its record would be refused after a change here. A
+  // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes; but only
+  // once the record holds the current reading: one from before her answer is one a new reading is still to replace.
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  const fc = hasFinalCut(got.record);
+  if (verb === "drop") {
+    const heard = more[0];
+    if (!spellings.some(([h]) => h === heard)) return refuse(ctx, `There is no spelling of "${heard}".`);
+    return saveSpellings(ctx, found, spellings.filter(([h]) => h !== heard), `"${heard}" is as the transcriber writes it again.${fc ? ` ${SHOW_IT}` : ""}`);
+  }
+  if (verb === "offers") return answerOffers(ctx, found, more);
   if (verb !== "add") {
     ctx.say(HELP);
     return 2;
   }
-  const fault = spellingFault(heard, meant);
-  if (fault) return refuse(ctx, fault);
-  return saveSpellings(ctx, found, withSpelling(spellings, heard.trim(), meant.trim()), `"${heard.trim()}" is spelled "${meant.trim()}" now, in every timeline's captions. ${SHOW_IT}`);
+  let pairs = [[more[0], more[1]]];
+  if (more.length > 2) {
+    const read = spellPairs(more);
+    if (read.odd !== undefined) return refuse(ctx, spellingFault(read.odd, ""));
+    pairs = read.pairs;
+  }
+  for (const [heard, meant] of pairs) {
+    const fault = spellingFault(heard, meant);
+    if (fault) return refuse(ctx, fault);
+  }
+  const written = [...new Map(pairs.map(([h, m]) => [h.trim(), [h.trim(), m.trim()]])).values()];
+  const next = written.reduce((all, [h, m]) => withSpelling(all, h, m), spellings);
+  const where = fc ? "in every timeline's captions" : "in every caption";
+  const done = written.length === 1 ? `"${written[0][0]}" is spelled "${written[0][1]}" now, ${where}.` : `Spelled now, ${where}: ${pairsSaid(written)}.`;
+  return saveSpellings(ctx, found, next, fc ? `${done} ${SHOW_IT}` : done);
 }
 
 /** `logo "<episode>" on|off [--picture "<name>"]`: the logo on the main video, top right (spec section 4). Its picture is
@@ -2476,6 +3664,7 @@ async function graphic(ctx, rest) {
   if (verb === "ideas") {
     const read = clockFor(found, part, ctx);
     if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    sayElsewhere(ctx, read);
     const ideas = ((read.plan.claude && read.plan.claude.graphics) || []).map((idea) => ({ idea: idea.idea, phrase: read.plan.phrases.find((p) => p.id === idea.id) }))
       .filter(({ phrase }) => phrase && read.pieces.some((r) => phrase.end > r.start && phrase.start < r.end));
     ctx.say(ideas.length ? ideas.map(({ idea, phrase }) => `${idea}: at ${clockText(timelineAt(read.clock, Math.max(phrase.start, read.pieces.find((r) => phrase.end > r.start && phrase.start < r.end).start)) ?? 0)} on ${read.on}, "${phrase.text}"`).join("\n") : `Claude gave no ideas for graphics on what ${partLabel(part)} keeps.`);
@@ -2568,6 +3757,7 @@ async function cut(ctx, rest) {
   } else if (flags.words) {
     read = clockFor(found, part, ctx);
     if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    sayElsewhere(ctx, read);
     let places = wordsAt(read.words, [{ start: 0, end: read.plan.facts.duration }], last("words")).filter((p) => !read.pieces.some((r) => p.start < r.end && p.end > r.start));
     // On a Reel, only what is cut within its stretch counts: the same words said elsewhere in the recording are not meant.
     if (read.span) {
@@ -2616,8 +3806,1430 @@ async function cut(ctx, rest) {
   return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, cuts: next })), `${verb === "keep" ? "Kept in" : "Taken out of"} ${partLabel(part)}: "${what}" (${clockText(whole.from)} to ${clockText(whole.to)} of the recording, whole phrases, at a pause).${reach} ${SHOW_IT}`);
 }
 
-/** The commands, by the word a person's request is run with. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut };
+// --- Her answer to "what is this video?": kind, leave and which ---
+
+/** How long `kind` waits in the foreground for the reading it started: Claude Code gives a command about two minutes, so a
+    reading of under about 90 seconds is waited for, and a longer one posts a notice (spec 2026-10-22, section 2). */
+export const READ_WAIT_MS = 90000;
+/** How often `kind` looks for the reading's result while it waits. */
+export const READ_POLL_MS = 1000;
+/** The most a `kind` takes in the foreground, from the moment it starts: the wait for the claim and the wait for the reading
+    together, so that a command that waited the claim's 20 seconds does not run into the two minutes Claude Code gives it. */
+export const COMMAND_BUDGET_MS = 100000;
+
+/** What she says a video is, and how the record keeps it: an iPhone clip is a "short video", as it always was, so that the
+    places that test for one keep working. */
+const ANSWER_KEPT = { finished: "finished", raw: "raw", clip: "short video", session: "session" };
+/** What each kind is called to her, when she is told how a video is answered. */
+const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
+
+const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
+const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
+const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
+const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
+const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
+/** What `--clear-session` is refused in when the answer given is a session: a mark is cleared by saying what the video really is. */
+const CLEAR_BY_KIND = "A session mark is cleared by answering what the video really is: finished, raw or clip.";
+/** The sentence of the dialog that clears a session mark: its words are hers to read, and only her click on "Clear it" clears the
+    mark. The dialog opens with the video's label on a line of its own and a blank line (clickedClear), so that she knows which. */
+const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+/** How long the dialog that clears a session mark stays open, in milliseconds: then it is closed and nothing is cleared. A person
+    who never answers must not hold the command until Claude Code ends it, with the video claimed. */
+export const DIALOG_MS = 60000;
+/** What is said first when a clearing is refused or does not happen: the mark was not cleared. */
+const NOT_CLEARED = "Not cleared:";
+const DIALOG_TIMED_OUT = `${NOT_CLEARED} the dialog was not answered within a minute, so it was closed. The session mark stays.`;
+const TOO_LATE = `${NOT_CLEARED} the dialog was open too long for this to finish in time. Say it again, and click within a minute.`;
+/** What is said when this Mac's tool log cannot be written: the record holds what the line would have said (`holds`). */
+const logNotWritten = (holds) => `The log on this Mac could not be written: the record holds ${holds}.`;
+/** Why `--clear-session` has nothing to clear on the video `name`: it is no session, or its mark was cleared already. */
+const noMarkToClear = (name) => `${name} has no session mark to clear.`;
+/** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
+const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
+/** Why a video whose import matched a session's words (matchedSession) is answered only as one. */
+const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
+/** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
+    session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
+    sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
+    and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
+    cleared). And for a clearing of its mark (`clearing`, with the video's own `folder`), a match among the video's own versions (the
+    same first id) says nothing: each mark of a set is cleared by a click of its own, and the video cleared is then held as a session
+    while another of them is marked (STILL_HELD). A match outside its own versions still counts. A match this Mac cannot read says
+    nothing. */
+function matchedSession(links, record, { clearing = false, folder = null } = {}) {
+  const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
+  if (typeof id !== "string" || id === record.id) return false;
+  const match = links.find(id);
+  if (!match) return false;
+  if (clearing && links.firstOf(match.record, match.folder) === links.firstOf(record, folder)) return false;
+  return links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id);
+}
+/** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
+    video being answered. */
+const heldAnswer = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
+/** Why a video that is not a session cannot be a version of a video one of whose versions is (the whole set of versions, not only
+    the one named): `name` is the video being answered. */
+const sessionSet = (name) => `${name} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
+const ASK_FOR_TEACHINGS = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
+/** What a clearing says when another version of the video is still a session not cleared: it is held as one meanwhile. */
+const STILL_HELD = "Another version of it is still marked a client or group session, so it is held as one, and Claude reads nothing of it: once that mark is cleared too, say what it is again.";
+const ONLINE_ONLY = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
+const OFFLINE = "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.";
+
+/** Why a raw video, `record`, is not read on this Mac without --here: its video is not here yet, and how large it is. The Mac to
+    leave it for is the one that imported it, unless that is this one. */
+function notHereYet(ctx, record) {
+  const by = record.imported && typeof record.imported.on === "string" && record.imported.on && record.imported.on !== ctx.machine ? spokenMac(record.imported.on) : "the other Mac";
+  return `${shownName(record)} is a raw video of ${sizeText(record.video.bytes)} that is not on this Mac yet: reading it here brings it all over first, which may take a while. Say "read it here" to go on, or leave it for ${by}.`;
+}
+
+/** Why the other Mac, `by`, stops `name` from being answered or left now. */
+const beingAnswered = (name, by) => `${name} is being answered on ${by}. Nothing was changed.`;
+/** What is said when the record changed under an answer that was being written: nothing more is done. */
+const changedMeanwhile = (name) => `${name} changed meanwhile: say your answer again.`;
+
+/** The lock `kind` and `leave` hold for an episode on this Mac, for the whole of their run: two answers for one video started
+    on one Mac, the second inside the first's wait for Dropbox, would each find the claim this Mac wrote and go on. It is not
+    the lock of a detached run (detached.js), which the reading it starts holds. */
+const answerLockOf = (home, folder) => join(episodeWork(home, folder), "answer.lock");
+
+/** Take the answer lock of the episode in `folder` for `command`: { file, text } to give back to releaseEpisodeLock, or null when
+    another answer holds it. A lock whose run is gone (`ctx.alive`) is taken over; the lock of this very process is never gone. */
+function takeAnswerLock(ctx, folder, command) {
+  mkdirSync(episodeWork(ctx.home, folder), { recursive: true });
+  const file = answerLockOf(ctx.home, folder);
+  const took = takeEpisodeLock(file, command, (pid) => pid === process.pid || ctx.alive(pid));
+  return took.taken ? { file, text: took.text } : null;
+}
+
+/** Why an answer cannot be written for the episode `name` now, as every command says it. */
+const busyWhy = (name) => `Another answer for ${name} is being written on this Mac: say it again in a moment.`;
+
+/** The episodes on this Mac, each { name, record }, by their records alone, as findEpisode knows them: the record in force, and
+    none for an episode that has no whole record. */
+function recordsHere(ctx) {
+  return folders(ctx).map((name) => ({ name, record: episodeAt(ctx, name).inForce })).filter((e) => e.record && recordShaped(e.record));
+}
+
+/** When the import's late check will have been made of the episode with this `record`, in milliseconds, or null when nothing is
+    holding it. This Mac owes the check (a pending one in its own folder, which has not found a problem): it is due at its time,
+    or now when that has passed, since the import makes a check that is due within a minute. Or an import of the video is at
+    work on either Mac, by its status: then the check is made at the latest LATE_CHECK_MS from now, since the video has been
+    copied into its episode already. A check that found a problem, or an import that failed or stopped, does not clear by
+    itself, and holds nothing here: the reading says why when it meets it. */
+function lateCheckAt(ctx, record) {
+  const now = ctx.now();
+  const owed = readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && !p.problem);
+  if (owed) return Math.max(dueAt(owed), now);
+  const working = readStatuses(ctx.root, now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
+  return working ? now + LATE_CHECK_MS : null;
+}
+
+/** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, clearSession, versionOf, target })
+    when its record is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and
+    `plan.target`, the video this is a new version of, is looked for the first time it is asked. In this order:
+    - an answered video, without --again; a session not cleared, answered as anything but a session (which only --clear-session
+      does, by her click on a dialog), or as one; and, with --clear-session, a video that has no session mark to clear (no session,
+      or one whose mark is cleared already) or whose mark cannot be read. What the other Mac cleared after the record was read is
+      met by the checks made again once she has clicked and once the claim has waited: a record written meanwhile is not the one she
+      was asked about, and a clearing that reached the slot of this Mac's claim is met here, by "no session mark to clear";
+    - a video that may be a session, answered as anything else without --not-a-session: one the import saw came from Zoom or is
+      sound alone, a Zoom download by its file's name (a record from before the switch has no answer to say so), and one whose
+      facts the import could not read, until she has answered it (her click on the dialog says it is not one);
+    - a video held as a session (one of its other versions, as finish.js linksOf sessionsBeside reads them, is a session not
+      cleared), answered as anything but a session, but by --clear-session of its own mark: it is answered only as a session;
+    - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
+      videos have is not taken for either); a session not cleared is a version of only by a session;
+    - and, read from Episodes each time it is asked (finish.js linksOf), for that target, which is looked up again and checked as
+      at first on a later call (it may be archived, unanswered or a session by then): it is not already a version of this video,
+      directly or through others ("cannot be a version of"); its chain can be followed to its first (chainGapWords); and for an
+      answer that is not a session, none of the versions of the video it starts from, earlier, later or beside it, and none of
+      this video's own later versions, is a session not cleared (the gate's predicate, in the record or any conflicted copy of
+      it); the version a handed-off video keeps is checked the same way. With --clear-session this video is left out of those
+      sets: it is the session being cleared, and any other session in them still refuses a new link (--version-of); but the set the
+      video is in already does not refuse a clearing, since each mark of it is cleared by a click of its own: the video cleared is
+      then held as a session while another is marked (no reading starts, and no hand-off of it is written), until that mark is
+      cleared too;
+    - a video already handed off keeps the version it is of, and is given no other: the one it keeps may have been marked a session
+      since, which a new answer that is not one cannot be a version of;
+    - and a video that is not itself handed off, but that the chain of one handed off passes through, is given no other version
+      (--version-of naming another video, or --again with none, which clears the one it has, as the walk follows it): that would
+      move the id the handed-off video went to the page under, and is said of that video, the later one;
+    - the other Mac's claim, and a detached run at work on the episode. */
+function answerWhy(ctx, found, record, plan) {
+  const name = namedAs(found, record);
+  const { stored } = plan;
+  const was = recordKind(record);
+  if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
+  // A video that has a kind and is gated is a session whose mark is not cleared. With --clear-session it has to be one, with a mark to
+  // clear; without it, such a video can be answered only as a session (which it is) and never as another kind.
+  if (plan.clearSession) {
+    if (was === null || !gated(record)) return noMarkToClear(name);
+    if (!record.session || typeof record.session !== "object" || Array.isArray(record.session)) return markUnreadable(name);
+  } else if (was !== null && gated(record)) {
+    if (stored !== "session") return MARK_STAYS;
+    // A video answered as a session after it was read as another kind owes the BRIMM Ops page its empty session revision until it
+    // is written (a gap in its versions, or this Mac handing off version 1, held it back): the same answer again writes it.
+    if (!plan.again || !(revisionOwed(record) || sweepOwed(found.folder, record))) return `${name} is a client or group session already.`;
+    // The same answer alone writes it: another link now would not be the one it is owed under.
+    if (plan.versionOf || plan.unlink) return owedLinked(name);
+    plan.owed = true;
+  }
+  const answer = record.answer;
+  const came = answer ? answer.came : undefined;
+  const maybe = came === "zoom" || came === "sound" || isZoomName(record.video.file) || (Boolean(answer) && came === null && answer.state !== "answered");
+  if (maybe && stored !== "session" && !plan.notASession && !plan.clearSession) return ASK_IF_SESSION;
+  // A target looked up by an earlier call is looked up again, and the same checks are made of it as Episodes holds it now: it may
+  // have been archived, answered no more, or marked a session while the claim waited. Its spellings are then the ones it holds now.
+  const earlier = Boolean(plan.target);
+  if (plan.versionOf && !plan.target) {
+    const id = plan.versionOf;
+    const named = recordsHere(ctx).filter((e) => e.record.id === id || String(e.record.id).slice(-6) === id).filter((e) => recordKind(e.record) !== null && !e.record.archived);
+    const exact = named.filter((e) => e.record.id === id);
+    if (!exact.length && new Set(named.map((e) => e.record.id)).size > 1) return `More than one video on this Mac has the short id ${id}: say its whole id.`;
+    const picked = exact[0] || named[0];
+    if (picked && picked.record.id === record.id) return `${name} cannot be a version of itself.`;
+    if (!picked) return `No answered video on this Mac has the id ${id}.`;
+    if (stored !== "session" && gated(picked.record)) return SESSION_TARGET;
+    plan.target = picked;
+  }
+  // What links the target to this video, and to a session, as Episodes holds it now: one reading, each time this is asked.
+  const links = linksOf(ctx.root);
+  // A video one of whose other versions is a session not cleared is held as one (spec 1 forbids writing into another version's
+  // folder, so the mark cannot follow it there): it is answered only as a session itself, until that mark is cleared.
+  if (stored !== "session" && !plan.clearSession && links.sessionsBeside(record, found.folder).length) return heldAnswer(name);
+  // A video whose import found most of the words of a video since marked a session, or of a version of one, in it (answer.match)
+  // holds that session's words: it is answered only as a session (her card says it may be one).
+  // A clearing is let through for a match among the video's own versions only when it keeps the link it has: --version-of none, or
+  // another video, would take it out of them, and its match's session would then hold it no more.
+  if (stored !== "session" && matchedSession(links, record, { clearing: plan.clearSession && !plan.target && !plan.versionOf && !plan.unlink, folder: found.folder })) return MATCHED_SESSION;
+  // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
+  // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
+  const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
+  if (plan.target && earlier) {
+    const now = links.find(plan.target.record.id);
+    if (!now || recordKind(now.record) === null || now.record.archived) return `No answered video on this Mac has the id ${plan.versionOf}.`;
+    if (stored !== "session" && gated(now.record)) return SESSION_TARGET;
+    plan.target = { ...plan.target, record: now.record };
+  }
+  if (plan.target) {
+    const target = (links.find(plan.target.record.id) || plan.target).record;
+    const targetName = shownName(target);
+    if (links.chainOf(target).some((link) => link.record.id === record.id)) return `${name} cannot be a version of ${targetName}: ${targetName} is already a version of it.`;
+    // A chain that loops or runs to an episode not on this Mac cannot be read to its first, and what it holds is not known.
+    const gap = links.gapOf(target);
+    if (gap) return chainGapWords(target, gap);
+    // The video joins the versions of the target's first, and so do its own later versions, if it has any.
+    if (stored !== "session" && (sessionAmong(links.setOf(links.firstOf(target)).members) || sessionAmong(links.throughOf(record.id).filter((one) => one.record.id !== record.id)))) return sessionSet(name);
+  }
+  // The video it is a version of once this answer is written: the one --version-of names; none with --version-of none; and with
+  // neither, the one an answered video has (it keeps it, and its set is checked again below), or none for a first answer.
+  const linked = was !== null ? record.versionOf || null : null;
+  const keeps = was !== null && !plan.target && !plan.unlink;
+  const after = plan.target ? plan.target.record.id : keeps ? linked : null;
+  // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8), so it
+  // is given no other version, and none (--version-of none) is refused it too, unless it is a version of none already.
+  const handed = handedOff(found.folder, record);
+  if (handed && ((plan.unlink && record.versionOf) || (plan.target && plan.target.record.id !== (record.versionOf || null)))) {
+    const older = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
+    const place = record.versionOf ? `a version of ${older ? shownName(older.record) : `an episode (${String(record.versionOf).slice(-6)})`}` : "a video of its own";
+    return `${name} has already gone to the BRIMM Ops page as ${place}: ask Jason.`;
+  }
+  // The version it keeps is checked as a target is, for an answer that is not a session: the video it names is no session, its
+  // versions do not name each other, none of the versions of the video it starts from is a session (the one being cleared left
+  // out), and it did not go to the page under another id than its versions lead to now.
+  if (keeps && linked && stored !== "session") {
+    const kept = recordsHere(ctx).find((e) => e.record.id === linked);
+    if (kept && gated(kept.record) && !plan.clearSession) return SESSION_TARGET;
+    const gap = links.gapOf(record, found.folder);
+    if (gap && gap.reason === "loop") return chainGapWords(record, gap);
+    if (!plan.clearSession && sessionAmong(links.setOf(links.firstOf(record, found.folder)).members)) return sessionSet(name);
+    const moved = movedIdWords(ctx.root, found.folder, record);
+    if (moved) return moved;
+  }
+  if (!handed && after !== linked) {
+    // So does every video that the chain of a handed-off video passes through, though it is not handed off itself: another version
+    // for it, or none, moves the id that later video went to the page under. Only a link that changes is refused, the link the
+    // walk follows (the link of an unanswered video is not followed).
+    const through = links.handedOffThrough(record.id).find((one) => one.record.id !== record.id);
+    if (through) return `${shownName(through.record)} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
+  }
+  const held = heldElsewhere(record, ctx.machine);
+  if (held) return beingAnswered(name, held.by);
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+  return "";
+}
+
+/** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session] [--again] [--clear-session]`:
+    her answer to "what is this video?" (spec 2026-10-22, section 2). Both answers are needed, and they agree: a session with yes,
+    anything else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it,
+    and in order (answerWhy says why not):
+    - the checks of answerWhy, which read the record and the Macs, and refuse an answered video, a session not cleared, a video
+      that may be a session, a --version-of that names no video it can or a video that is already a version of this one, or
+      one whose versions hold a session not cleared (unless this is one), a video already handed off that would be given
+      another version, and one that the chain of a handed-off video passes through (the same), the other Mac's claim, and a
+      run at work;
+    - with --clear-session, which clears a session mark by saying what the video really is (never "session"), a dialog on this
+      Mac, which Claude cannot press, naming the video: the video is claimed and written only if she clicks "Clear it", and Cancel,
+      or any answer but that click, or none within DIALOG_MS, writes nothing (clickedClear). Her click may come long after the
+      record was read, so the record is read again and the checks of answerWhy are made again before anything is written, and a
+      click so late that the claim's wait would not finish within the command's time (COMMAND_BUDGET_MS) clears nothing
+      (clearedAfterClick). Any refusal after her click says first that it was not cleared, and lets this Mac's claim go again if
+      it had written one;
+    - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
+      so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
+      the checks are made again on it, right before the answer is written;
+    - a video answered before is being corrected (spec 2, "Correcting a wrong answer"): what its earlier reading and its hand-off left
+      in the shared folder (earlierFiles) must be on this Mac and whole first, read through when it is not, before she is asked
+      anything or it is claimed, and again once the claim has waited; a file the record lists that Dropbox has not brought over yet
+      holds it back until it has;
+    - the answer is one write: its kind, who answered, where and when, whether it is private, the video it is a version of (and
+      that video's spellings, which she confirmed there), and for a session its mark and its name, which is its label, so that
+      nothing made from the name holds a client's. An answered video keeps the video it is a version of unless --version-of names
+      another, or none (`--version-of none`, which a video handed off is refused unless it is a version of none already); a first
+      answer with no --version-of is a version of none. A correction is the same write (setAsideWritten): the earlier reading's files,
+      a session's teachings files and the hand-off with final/'s text files (every file of final/ for a session, but a session's own
+      hand-off) are set aside into history/ by the rule, the rules' plan of a raw video put back, the reading and the finish let go;
+      answered again as a session, the video is given at once its empty session revision (emptyRevisionOf), or it is owed, and the
+      same answer again writes it (emptyRevisionAgain). The claim stays on the record, so that the reading runs under it, except a
+      session's, which is let go in the same write: no reading runs under it, and the other Mac must not be kept from it. A
+      mark cleared is the same write: the session mark as it was with `cleared` on it ({ at, on, to, confirmed: "dialog" }),
+      and then one line in this Mac's tool log (toolLog);
+    - the reading is started detached (`read`, given the kind and the rev the answer's record holds, so that its run can refuse
+      a record that no longer says them), for every kind but a session, whose reading starts with its teachings, unless this
+      Mac's settings say readings are off: the answer is kept, since the gate runs on it. The record is read once more first, and
+      must still be the answer. A raw video's reading waits for the import's late check, so it is not waited for here; any other is
+      waited for, up to READ_WAIT_MS and COMMAND_BUDGET_MS from when this began, and what it found is said as `status` says a
+      result, or else a notice will come.
+    A video answered as anything but a session is no longer one whose names are kept from the chat. */
+export async function kindCommand(ctx, rest) {
+  const began = ctx.now();
+  const { say } = ctx;
+  const { words, flags } = flagsOf(rest, ["private", "version-of"]);
+  const asked = String(words[words.length - 1] || "").toLowerCase();
+  const given = Array.isArray(flags.private) && flags.private.length === 1 ? String(flags.private[0]).toLowerCase() : "";
+  if (!Object.hasOwn(ANSWER_KEPT, asked) || !["yes", "no"].includes(given)) {
+    say(BOTH_ANSWERS);
+    return 2;
+  }
+  const clearSession = Boolean(flags["clear-session"]);
+  if (clearSession && asked === "session") return refuse(ctx, CLEAR_BY_KIND);
+  if ((asked === "session") !== (given === "yes")) return refuse(ctx, ANSWERS_DISAGREE);
+  const versionOf = flags["version-of"];
+  if (versionOf && (versionOf.length !== 1 || !versionOf[0].trim())) {
+    say("Say the id of the video this is a new version of.");
+    return 2;
+  }
+  // `--version-of none` says it is a version of no video: an answered video keeps the one it has otherwise.
+  const unlink = Boolean(versionOf) && versionOf[0].trim().toLowerCase() === "none";
+  const got = episodeFor(ctx, words.slice(0, -1), { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const lock = takeAnswerLock(ctx, got.found.name, "kind");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), clearSession, versionOf: versionOf && !unlink ? versionOf[0].trim() : "", unlink, here: Boolean(flags.here), target: null }, began);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** Show the dialog `text` with `options` (dialog.js askDialog's) and wait for her, for DIALOG_MS at most: { answer, outOfTime }. The
+    dialog is shown by this Mac's own `run`, as every program edit.js runs is: no flag or setting stands in for it. It is run
+    with that limit, which kills osascript and so closes the dialog, and when the run says it was out of time `outOfTime` is true
+    and nothing it printed counts, whatever `answer` makes of it. A person who never answers must not hold the command until
+    Claude Code ends it. */
+async function askHere(ctx, text, options) {
+  let outOfTime = false;
+  const run = async (cmd, args, opts) => {
+    const done = await (ctx.deps.run || runProgram)(cmd, args, { ...opts, limit: DIALOG_MS });
+    if (done && done.outOfTime === true) outOfTime = true;
+    return done;
+  };
+  const answer = await askDialog(text, { ...options, run });
+  return { answer, outOfTime };
+}
+
+/** Ask her, on a dialog Claude cannot press, to clear the session mark of the video called `label`, and say whether she did: true
+    only for her click on "Clear it". The dialog and the line before it name the video by its label, so that two dialogs, or a
+    label misread, cannot clear another. Cancel, Escape and a dialog that could not be shown or read are not a click (askDialog
+    never says a button that was not clicked), and each is said as "Not cleared", with why when the dialog gave a reason. So is a
+    dialog not answered within DIALOG_MS, which askHere closes. Every ending says a line of its own, after the first: the skill
+    that tells her a dialog is about to open never passes that line on. She is told first to click, since Return presses Cancel. */
+async function clickedClear(ctx, label) {
+  ctx.say(`A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`);
+  const { answer, outOfTime } = await askHere(ctx, `${label}\n\n${CLEAR_DIALOG}`, { buttons: ["Cancel", "Clear it"] });
+  if (outOfTime) {
+    ctx.say(DIALOG_TIMED_OUT);
+    return false;
+  }
+  if (answer && answer.button === "Clear it") return true;
+  const why = answer && answer.button === null && typeof answer.why === "string" ? answer.why : "";
+  ctx.say(why ? `${NOT_CLEARED} ${why} The session mark stays.` : `${NOT_CLEARED} the session mark stays.`);
+  return false;
+}
+
+/** Why a clearing may not go on once she has clicked "Clear it" on the record `record` that she was asked about, in plain words,
+    or "": the record is read again, and must still be that one (a record written meanwhile, by the other Mac or by this one, is
+    not the one she was asked about), and the checks of answerWhy are made again on it, since a run may have started, or a video
+    this one is to be a version of may have been marked a session, while the dialog was open. A click so late that the claim's wait
+    could not finish within the command's time (`began` is when it began) clears nothing, when this Mac must still claim. */
+function clearedAfterClick(ctx, found, record, plan, began) {
+  const now = readEpisode(found.folder);
+  if (!now.record) return notRead(ctx, { ...found, read: now });
+  if (now.newer) return newerWhy(now.record);
+  if (now.record.rev !== record.rev) return changedMeanwhile(shownName(record));
+  const why = answerWhy(ctx, found, now.record, plan);
+  if (why) return why;
+  const holds = record.editing && record.editing.by === ctx.machine;
+  return !holds && ctx.now() - began + CLAIM_WAIT_MS > COMMAND_BUDGET_MS ? TOO_LATE : "";
+}
+
+/** Add `line` to this Mac's tool log, ~/Library/Logs/brimm-video.log, the file detached runs write to (spawnDetached); its folder
+    is made when it is missing. A line names an episode by its id and its label, never by its file, and quotes no word of it. A log
+    that cannot be written does not fail the command (the record holds what the line says as well, `holds` says what): she is
+    told so, once. */
+function toolLog(ctx, line, holds = "the clearing") {
+  const file = join(ctx.home, "Library", "Logs", "brimm-video.log");
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${line}\n`, { flag: "a" });
+  } catch (e) {
+    ctx.say(logNotWritten(holds));
+  }
+}
+
+/** Let go the claim this command wrote, when it must stop after her click: `claim` is the record as it stands, and the claim is let
+    go only while it is this Mac's, in one write by the rule (as `kind` lets go a session's, `editing: null`), so that a clearing
+    that did not happen leaves the session as it was, and nobody holding it. A write that fails says why, as every write does. */
+async function letGoClaimWritten(ctx, found, claim) {
+  if (!claim.editing || claim.editing.by !== ctx.machine) return;
+  await save(ctx, { ...found, record: claim }, { ...claim, editing: null }, "");
+}
+
+/** What `kind` does once it holds the answer lock of the episode `found`: see kindCommand. */
+async function answerKind(ctx, found, plan, began) {
+  const { say } = ctx;
+  const { stored, given } = plan;
+  // Once she has clicked "Clear it", whatever stops the clearing says first that nothing was cleared.
+  const stop = (why) => (plan.clearSession ? `${NOT_CLEARED} ${why}` : why);
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    say(notRead(ctx, { ...found, read }));
+    return 1;
+  }
+  if (read.newer) {
+    say(newerWhy(read.record));
+    return 1;
+  }
+  const { record } = read;
+  const name = namedAs(found, record);
+  const why = answerWhy(ctx, found, record, plan);
+  if (why) return refuse(ctx, why);
+  // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
+  if (plan.owed) return emptyRevisionAgain(ctx, found, record);
+  // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
+  // brings it all over first: only with --here, her "read it here". Otherwise nothing is written or claimed, so that the other Mac
+  // may answer it (spec 2, "Which Mac reads it").
+  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(join(found.folder, record.video.file))) return refuse(ctx, notHereYet(ctx, record));
+  // A video answered before is being corrected: what its earlier reading and its hand-off left in the shared folder is set aside
+  // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
+  // claimed.
+  const correcting = recordKind(record) !== null;
+  if (correcting) {
+    const earlier = earlierFiles(found.folder, record, { session: stored === "session" }).rels;
+    await broughtOver(ctx, found, earlier.filter((rel) => existsSync(join(found.folder, rel))));
+    // A correction to a session is written at once, so that the gate holds the video at once: what is not here yet is owed (below).
+    if (stored !== "session" && notReady(ctx, found, earlier).length) return refuse(ctx, comingWhy(ctx, found, name));
+  }
+  // A session mark is cleared only by her click: asked after the checks and before the claim, so that Cancel writes nothing at all.
+  // Her click may come long after the record was read: it is read again and checked again before the claim, or, when this Mac has
+  // the claim already, before the write.
+  if (plan.clearSession) {
+    if (!(await clickedClear(ctx, name))) return 1;
+    const late = clearedAfterClick(ctx, found, record, plan, began);
+    if (late) return refuse(ctx, late === TOO_LATE ? late : stop(late));
+  }
+  // The claim, as open makes it. The record read again is the one the answer is written on. A clearing that stops here says first
+  // that nothing was cleared, and lets go of the claim it wrote when a record was written on top of it.
+  let base = record;
+  if (!record.editing || record.editing.by !== ctx.machine) {
+    const claim = await claimAndWait(ctx, found, record, { again: "Say your answer again.", held: (by) => beingAnswered(name, by), changed: changedMeanwhile(name), said: stop, ...(plan.clearSession ? { onChanged: (on) => letGoClaimWritten(ctx, found, on) } : {}) });
+    if (!claim.record) return claim.code;
+    base = claim.record;
+    const late = answerWhy(ctx, found, base, plan);
+    if (late) {
+      if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
+      return refuse(ctx, stop(late));
+    }
+  }
+  // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still. To a session,
+  // only what is here and whole: a file the record lists that is not stays listed, owed, and the same answer again sweeps it once
+  // Dropbox has brought it (sweepOwed, emptyRevisionAgain).
+  const listedAside = correcting ? earlierFiles(found.folder, base, { session: stored === "session" }) : null;
+  const owed = listedAside && stored === "session" ? notReady(ctx, found, listedAside.rels) : [];
+  const aside = listedAside ? { ...listedAside, rels: listedAside.rels.filter((rel) => !owed.includes(rel)) } : null;
+  if (aside && notReady(ctx, found, aside.rels).length) {
+    if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
+    return refuse(ctx, stop(comingWhy(ctx, found, name)));
+  }
+  const at = localStamp(new Date(ctx.now()));
+  const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
+  const next = { ...base, kind: stored, answer };
+  if (plan.clearSession) next.session = { ...base.session, cleared: { at, on: ctx.machine, to: stored, confirmed: "dialog" } };
+  if (!handedOff(found.folder, base)) {
+    // An answered video keeps the video it is a version of unless her answer names another, or none (--version-of none).
+    next.versionOf = plan.target ? plan.target.record.id : correcting && !plan.unlink ? base.versionOf || null : null;
+    if (plan.target) {
+      const own = base.spellings || [];
+      next.spellings = [...(plan.target.record.spellings || []).filter(([heard]) => !own.some(([h]) => h === heard)), ...own];
+    }
+  }
+  // Corrected, the earlier reading and its hand-off are let go with their files: the reading, so that the new one may run (one
+  // reading for each answer); the finish, whose hand-off is in history/ now, so that `spell` and `finish` do not act on it; the
+  // Reel suggestions of the list set aside; and version 0, whose timeline is set aside (its render stays on this Mac).
+  if (aside) {
+    if (base.reading !== undefined) next.reading = null;
+    next.finished = null;
+    next.reels = (base.reels || []).filter((reel) => !(reel.status === "candidate" && aside.reels.has(reel.n)));
+    next.main = { ...base.main, pushed: (Array.isArray(base.main.pushed) ? base.main.pushed : []).filter((p) => !(p.how === "render" && aside.rels.includes(p.file))) };
+  }
+  let empty = null;
+  if (stored === "session") {
+    const taken = recordsHere(ctx).filter((e) => e.record.id !== record.id && (e.record.kind === "session" || e.record.session)).map((e) => (e.record.name && e.record.name.text) || "");
+    next.session = { marked: at, on: ctx.machine, teachings: null, cleared: null };
+    next.name = { text: sessionLabel(record.video.recorded, taken), placeholder: false };
+    next.editing = null;
+    // A video read as another kind, answered now as a session: its words have gone to Claude, and the BRIMM Ops page is given at once
+    // an empty session revision, which redacts what it had (spec 2, "A session answered as something else"). It is judged with the
+    // record as it is to be written, its last finish still on it for the version of the hand-off on file.
+    if (aside) {
+      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(found.folder, base, { rels: listedAside.rels, restored: aside.restore.length > 0 }) });
+      next.session.emptyRevision = empty.handoff ? empty.revision : "owed";
+      if (empty.handoff) next.finished = empty.finished;
+    }
+  }
+  // A session's words, and the words of a video becoming one, name no file and no folder even when its files cannot be set aside.
+  // A clearing that cannot be written, after her click, says first that it was not cleared, and lets go the claim it holds, so that
+  // the session stays as it was, held by nobody.
+  const said = plan.clearSession ? { ...ctx, say: (line) => ctx.say(`${NOT_CLEARED} ${line.replace(/^Nothing was changed: /, "")}`) } : ctx;
+  const written = aside ? await setAsideWritten(said, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(said, { ...found, record: base }, next, ""), stayed: [] };
+  if (written.code !== 0) {
+    if (plan.clearSession) {
+      const now = readEpisode(found.folder);
+      if (now.record && now.record.rev === base.rev) await letGoClaimWritten(ctx, found, now.record);
+    }
+    return 1;
+  }
+  if (aside) forgetComing(ctx, found);
+  if (stored === "session") {
+    // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
+    // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
+    hideNames(ctx, episodeAt(ctx, found.name));
+    if (empty && empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
+    say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
+    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
+    if (owed.length) say(owedWords(next.name.text));
+    sayVersionsToMark(ctx, found, next);
+    return 0;
+  }
+  if (plan.clearSession) {
+    const becomes = KIND_SAID[stored];
+    say(`${name}: the session mark is cleared, by your click. It is now ${becomes}.`);
+    toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
+  }
+  if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
+  if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
+  // A mark cleared while another of its versions is still marked: it is held as a session, its names stay out of the chat, and
+  // Claude reads nothing of it.
+  if (plan.clearSession && linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
+    say(STILL_HELD);
+    return 0;
+  }
+  // Answered as anything else, its names are no longer kept from the chat: it is named by its folder and its files as any episode is.
+  if (ctx.hidden) {
+    ctx.hidden.names.length = 0;
+    ctx.hidden.keep.length = 0;
+  }
+  if (ctx.settings.readings === false) {
+    say(`${name}: answered. Readings are off on this Mac: ask Jason.`);
+    return 0;
+  }
+  // Right before the reading is started the record is the answer written, and nothing is at work on the episode.
+  const wrote = readEpisode(found.folder);
+  if (!wrote.record || wrote.record.rev !== base.rev + 1 || wrote.record.kind !== stored) {
+    say(changedMeanwhile(name));
+    return 1;
+  }
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) {
+    say(`${name}: answered, but ${running} is running for it, so Claude's reading was not started. Say your answer again with --again when it has finished.`);
+    return 1;
+  }
+  const previous = readResult(ctx.home, found.name, "read");
+  const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
+  startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
+  if (holdsUntil !== null) {
+    say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
+    return 0;
+  }
+  return waitForReading(ctx, found, name, previous, began);
+}
+
+// --- Correcting a wrong answer (spec 2026-10-22, section 2, "Correcting a wrong answer"; section 1, "Episodes imported before this
+// design") ---
+
+/** What is said while a file a correction sets aside is not on this Mac, or not whole, once it was read through. */
+const asideComing = (name) => `Dropbox is still bringing ${name}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
+/** What a correction to a session says of the files it owes: they were not here to set aside, and the same answer again does. */
+const owedWords = (label) => `Dropbox is still bringing some of ${label}'s earlier files over to this Mac: say your answer again in a minute, and they are set aside too.`;
+/** The note on this Mac that a correction of the episode `found` was refused once for a file not here (comingWhy). */
+const comingNote = (ctx, found) => join(episodeWork(ctx.home, found.name), "aside-coming");
+
+/** Why a correction of the video `name` waits for a file Dropbox has not brought (asideComing): after the first such refusal on this
+    Mac, it says to ask Jason if it does not come, since a file gone for good never will. Which it is is noted on this Mac's own disk,
+    never in the episode, and the note goes once a correction or a sweep is written (forgetComing). */
+function comingWhy(ctx, found, name) {
+  const note = comingNote(ctx, found);
+  if (existsSync(note)) return `${asideComing(name)} Ask Jason if it does not come.`;
+  try {
+    mkdirSync(dirname(note), { recursive: true });
+    writeFileSync(note, "");
+  } catch (e) {
+    // Said the first time again, next time.
+  }
+  return asideComing(name);
+}
+
+/** Forget that a correction of the episode `found` waited for a file (comingWhy): it is written. */
+function forgetComing(ctx, found) {
+  try {
+    rmSync(comingNote(ctx, found), { force: true });
+  } catch (e) {
+    // It says to ask Jason a time early, next time.
+  }
+}
+/** What is said when a correction set a hand-off aside from final/ (spec 2: "the next one written is the next revision"). */
+const handoffAside = (name) => `${name}'s hand-off is set aside in history/: the next one written is its next revision.`;
+/** What is said, naming no file and no folder, when a session's files could not be set aside: `code`, the error's. */
+const asideFailed = (code) => `Nothing was changed: its earlier files could not be set aside in history/ (${code}).`;
+/** What is said of the files that stayed in final/ after a correction, by what each is (`whats`), never by name. */
+const stayedWords = (name, whats) => `${name}: ${listed(whats)} stayed in final/: ${whats.length === 1 ? "it" : "they"} could not be taken out. Tell Jason.`;
+/** The spec's words to her when a video read as another kind is answered as a session. */
+const WORDS_GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+/** Said after the words of an empty revision not written, when nothing stayed in final/. */
+const OUT_OF_SHARED = "Its files are out of the shared folder.";
+/** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
+    for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
+    held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
+const emptyWritten = (label, n, gone = true) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`;
+const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
+const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
+const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
+const emptyV1 = (label) => `The empty session revision of ${label} is written once this Mac hands off version 2: ask Jason.`;
+/** Why `--version-of` is refused on a session that owes its empty revision: the same answer alone writes it. */
+const owedLinked = (label) => `The empty session revision of ${label} is still owed: say it again without --version-of.`;
+
+/** Whether a session still owes the BRIMM Ops page its empty revision: `kind … session --again` marked it "owed" (session.emptyRevision)
+    when it could not write it, and no hand-off has been written for it since (record.finished: its own finish writes a session
+    revision too). */
+const revisionOwed = (record) => record.session !== null && typeof record.session === "object" && record.session.emptyRevision === "owed" && !record.finished;
+
+/** Whether a session answered so after it was read as another kind (it has `session.emptyRevision`) still owes a sweep of final/: a
+    file its record lists there, or one there, that is no session's own hand-off (earlierFiles, finalOnly), as one that Dropbox had
+    not brought when it was answered, or brought since. The same answer again sweeps it (emptyRevisionAgain). */
+const sweepOwed = (folder, record) => record.session !== null && typeof record.session === "object" && !Array.isArray(record.session) && record.session.emptyRevision !== undefined
+  && earlierFiles(folder, record, { session: true, finalOnly: true }).rels.length > 0;
+
+/** Whether a file, by its name or its path, is one a reading of Claude's writes: Claude's notes, the Reel suggestions (reels.json and
+    the copy she reads) or a session's teachings. A set-aside copy in history/ ("<stamp> <name>") is one too. */
+const readingFile = (rel) => /(?:^|[/ ])reels\.json$|\.(?:edit-notes|reel-suggestions)\.txt$|\.principles\.json$/.test(rel);
+
+/** Whether Claude has read the video of `record`, in the episode's `folder`: its record holds a reading, or held one that a
+    correction let go (null); or the files of one are among `rels` (those set aside now, and those owed: listed, and not here yet),
+    or the record lists them, or they were set aside into its history/ before; or `restored` (the rules' plan put back, which a raw
+    reading's plan had replaced). Only then do its words say they have gone to Claude. */
+function readBefore(folder, record, { rels = [], restored = false } = {}) {
+  const listedFiles = record.files !== null && typeof record.files === "object" ? Object.keys(record.files) : [];
+  if (record.reading !== undefined || restored || [...rels, ...listedFiles].some(readingFile)) return true;
+  try {
+    return readdirSync(join(folder, "history"), { recursive: true }).some((rel) => readingFile(String(rel)));
+  } catch (e) {
+    return false;
+  }
+}
+
+/** The names of the files at the top of a folder, none when it cannot be read. */
+function topFiles(folder) {
+  try {
+    return readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Whether a file of final/ (`rel`, a path from the episode's folder) is one a correction to a kind that is not a session sets
+    aside: a hand-off or a text file (.json, .srt, .txt), and not one inside an export bundle. A finished video, a Story part and an
+    export stay where they are, and stay listed (the next finish puts its own in their place, replacing them by the rule). */
+const textInFinal = (rel) => /\.(json|srt|txt)$/i.test(rel) && !rel.split("/").slice(0, -1).some((part) => /\.fcpxmld$/i.test(part));
+
+/** Whether the file of final/ at `rel` is a client or group session's own hand-off, which holds no word of it: a version 2 hand-off
+    of kind session. One that is not here, or cannot be read, is not. */
+function sessionHandoffIn(folder, rel) {
+  if (!rel.endsWith(".brimm-ops.json")) return false;
+  try {
+    const h = JSON.parse(readFileSync(join(folder, rel), "utf8"));
+    return h !== null && typeof h === "object" && h.version === 2 && Boolean(h.video) && h.video.kind === "session";
+  } catch (e) {
+    return false;
+  }
+}
+
+/** What a file of final/ is, as she is told of one that stayed: never its name. */
+function whatInFinal(rel) {
+  if (rel.split("/").slice(1, -1).some((part) => /\.fcpxmld$/i.test(part))) return "an export";
+  if (rel.endsWith(".brimm-ops.json")) return "a hand-off";
+  if (rel.endsWith(".transcript.txt")) return "a transcript";
+  if (rel.endsWith(".srt")) return "captions";
+  if (rel.endsWith(".words.json")) return "word times";
+  if (isMedia(basename(rel))) return "a video";
+  return "a file";
+}
+/** What the files `rels` of final/ are, each said once, in their order. */
+const whatsInFinal = (rels) => [...new Set([...rels].sort().map(whatInFinal))];
+
+/** The files of `rels` (paths from the episode's folder) that are not on this Mac, or not whole on it. */
+const notReady = (ctx, found, rels) => rels.filter((rel) => !existsSync(join(found.folder, rel)) || !ctx.isWhole(join(found.folder, rel)));
+
+/** What `kind … --again` sets aside of the episode in `folder`, whose record is `record`, before a new reading (spec 2, "Correcting a
+    wrong answer"): only the text files of the earlier reading, never the video, the import's own files, or a rough cut, upright
+    version or preview, which stay where they are (spec 1, "Episodes imported before this design"), and the hand-off with what final/
+    holds beside it. A file counts whether it is on this Mac or only the record lists it, as one Dropbox has not brought over yet:
+    such a file is set aside once it is here, and the correction waits for it (notReady). That is { rels, restore, reels }:
+    - `rels`, the paths from the folder of each file to set aside, each once: the Reel suggestions (reels.json, and the copy she
+      reads) and Claude's notes; of a raw reading, the rough cut's captions and transcript it wrote, and the timeline version 0 was
+      rendered from (its entry in main.pushed); a session's teachings files (teachings.js isTeachingsFile), by any name it had; the
+      hand-off record.finished names; and of final/, every file in it or listed in it. Answered as a kind that is not a session,
+      final/'s hand-offs and text files go (textInFinal), and its videos and exports stay; answered as a session (`session`), every
+      file of final/ goes, but for a session's own hand-off. With `finalOnly`, final/ alone, as a session that owes its empty
+      revision sweeps it again; and the plan Claude read, with its cut log, when a raw reading kept the rules' plan in history/;
+    - `restore`, [path, from] for each file put back in its place from history/: the rules' plan and its cut log (reading.js
+      rulesPlanKept), so that the next reading starts from the plan the import made, as a raw video's does. A plan in place that is
+      that plan already is left alone, and set aside again never;
+    - `reels`, the numbers of the Reel suggestions in the reels.json set aside, which the record lets go with it.
+    This only reads. */
+function earlierFiles(folder, record, { session = false, finalOnly = false } = {}) {
+  const stem = basename(record.video.file, extname(record.video.file));
+  const listedFiles = record.files !== null && typeof record.files === "object" ? record.files : {};
+  const there = (rel) => existsSync(join(folder, rel));
+  const rels = [];
+  const add = (rel, always = false) => {
+    if ((always || there(rel) || Object.hasOwn(listedFiles, rel)) && !rels.includes(rel)) rels.push(rel);
+  };
+  const restore = [];
+  if (!finalOnly) {
+    const reading = record.reading !== null && typeof record.reading === "object" ? record.reading : {};
+    for (const rel of [REELS_FILE, `${stem}.reel-suggestions.txt`, `${stem}.edit-notes.txt`]) add(rel);
+    if (reading.kind === "raw") for (const rel of [`${stem}.rough-cut.srt`, `${stem}.rough-cut.transcript.txt`]) add(rel);
+    const v0 = (Array.isArray(record.main.pushed) ? record.main.pushed : []).find((p) => p.v === 0 && p.how === "render");
+    if (v0 && typeof v0.file === "string") add(v0.file);
+    for (const name of [...new Set([...topFiles(folder), ...Object.keys(listedFiles)])].filter(isTeachingsFile).sort()) add(name);
+  }
+  let finals = [];
+  try {
+    finals = filesUnder(join(folder, "final")).map((rel) => `final/${rel}`);
+  } catch (e) {
+    // There is no final/.
+  }
+  const handoff = record.finished && typeof record.finished.handoff === "string" && record.finished.handoff.startsWith("final/") ? [record.finished.handoff] : [];
+  for (const rel of [...new Set([...finals, ...Object.keys(listedFiles).filter((key) => key.startsWith("final/")), ...handoff])].sort()) {
+    if (session ? sessionHandoffIn(folder, rel) : !textInFinal(rel)) continue;
+    add(rel, true);
+  }
+  if (!finalOnly) {
+    const rules = rulesPlanKept(folder, stem);
+    const planRel = `${stem}.cut-plan.json`;
+    if (rules && there(planRel) && readFileSync(join(folder, planRel), "utf8") !== rules.text) {
+      add(planRel);
+      restore.push([planRel, rules.json]);
+      if (rules.txt) {
+        add(`${stem}.cut-plan.txt`);
+        restore.push([`${stem}.cut-plan.txt`, rules.txt]);
+      }
+    }
+  }
+  const reels = new Set();
+  if (rels.includes(REELS_FILE) && there(REELS_FILE)) {
+    try {
+      const read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+      for (const c of read.reels ? read.reels.candidates : []) reels.add(c.n);
+    } catch (e) {
+      // A list that cannot be read lets go no Reel of the record.
+    }
+  }
+  return { rels, restore, reels };
+}
+
+/** A free name in the episode's history/ for the file `rel` set aside at `stamp`, as every set-aside names one: "<stamp> <name>",
+    and "<stamp>-2 <name>" and on when that is taken, in the folder or by this set-aside (`taken`, which it is added to). */
+function asideName(folder, stamp, rel, taken) {
+  for (let n = 1; ; n++) {
+    const name = `history/${stamp}${n > 1 ? `-${n}` : ""} ${basename(rel)}`;
+    if (!taken.has(name) && !existsSync(join(folder, name))) {
+      taken.add(name);
+      return name;
+    }
+  }
+}
+
+/** Write a correction (`kind … --again`) by the rule: the files `aside` (earlierFiles) of the episode `found` are cloned whole into
+    history/ first, each listed there by the record; the rules' plan and its cut log are put back in their places; `handoff`, a
+    session's empty revision ({ rel, text }), is put into final/; then `next` is written on `base` (expectRev), listing none of the
+    files set aside; and only once it is written are they taken out of the episode. When the record cannot be written, what this put
+    in is taken out again and what it replaced is put back, each only while it is still this call's, and nothing is deleted: she is
+    told nothing was changed (or, when a file could not be put back, that the episode needs Jason; a copy of it is in history/).
+    With `quiet`, for a session, those words name no file and no folder. Afterwards final/ is looked at again: what stayed in it that
+    was to go (`session`: every file but a session's own hand-off and the one put in; otherwise the files set aside) is given back
+    as `stayed`, for her to be told by what it is. Resolves { code: 0, stayed } when written, { code: 1 } having said why. */
+async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { quiet = false, session = false } = {}) {
+  const { folder } = found;
+  const gone = undone(base, ctx.home);
+  if (gone) {
+    ctx.say(`${gone} Nothing was changed.`);
+    acceptRev(ctx.home, base.id, base.rev);
+    return { code: 1 };
+  }
+  const opts = ruleOpts(ctx);
+  const stamp = localStamp(new Date(ctx.now())).replace(/:/g, "-");
+  const work = join(runsFolder(ctx.home), `again-${process.pid}-${ctx.now()}`);
+  const put = textWriter({ work, ...opts });
+  const files = { ...base.files };
+  // The files put back in their places, and the hand-off put in: none of these is taken out after.
+  const placed = new Set([...aside.restore.map(([rel]) => rel), ...(handoff ? [handoff.rel] : [])]);
+  const copies = [];
+  const replaced = [];
+  const taken = new Set();
+  /** Put `text` in at `rel` by the rule, keeping what was there to put back. */
+  const putIn = (rel, text) => {
+    const at = join(folder, rel);
+    const there = existsSync(at);
+    replaced.push({ at, was: there ? readFileSync(at, "utf8") : null, ours: text });
+    mkdirSync(dirname(at), { recursive: true });
+    files[rel] = put(at, text, { replace: there }).bytes;
+  };
+  try {
+    if (aside.rels.length) mkdirSync(join(folder, "history"), { recursive: true });
+    for (const rel of aside.rels) {
+      const to = asideName(folder, stamp, rel, taken);
+      cloneIn(join(folder, rel), join(folder, to), opts);
+      copies.push(join(folder, to));
+      files[to] = statSync(join(folder, to)).size;
+      if (!placed.has(rel)) delete files[rel];
+    }
+    for (const [rel, from] of aside.restore) putIn(rel, readFileSync(join(folder, from), "utf8"));
+    if (handoff) putIn(handoff.rel, handoff.text);
+    writeEpisode(folder, { ...next, files }, { expectRev: base.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer: writerOf(ctx), home: ctx.home });
+  } catch (e) {
+    let lost = false;
+    for (const r of replaced.reverse()) {
+      try {
+        const now = existsSync(r.at) ? readFileSync(r.at, "utf8") : null;
+        if (now === r.ours || (now === null && r.was !== null)) {
+          if (r.was === null) rmSync(r.at, { force: true });
+          else put(r.at, r.was, { replace: existsSync(r.at) });
+        } else if (now !== r.was) lost = true;
+      } catch (p) {
+        lost = true;
+      }
+    }
+    // The copies in history/ are taken out again, but when a file could not be put back: then they are what is left of it.
+    if (!lost) for (const copy of copies) rmSync(copy, { force: true });
+    const changed = e.code === "CHANGED";
+    const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e);
+    if (lost) ctx.say(quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`);
+    else ctx.say(quiet && !changed ? asideFailed(e.code || "an error") : `Nothing was changed: ${why}.`);
+    return { code: 1 };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  // Each file set aside, whole in history/ and listed there by the record, leaves the episode.
+  for (const rel of aside.rels.filter((r) => !placed.has(r))) {
+    try {
+      rmSync(join(folder, rel), { force: true });
+    } catch (e) {
+      // The record lists it no more, and history/ holds it whole: what stayed in final/ is said below.
+    }
+  }
+  let left = [];
+  try {
+    left = filesUnder(join(folder, "final")).map((rel) => `final/${rel}`);
+  } catch (e) {
+    // There is no final/ any more.
+  }
+  const stayed = session ? left.filter((rel) => !placed.has(rel) && !sessionHandoffIn(folder, rel)) : aside.rels.filter((rel) => rel.startsWith("final/") && !placed.has(rel) && left.includes(rel));
+  return { code: 0, stayed };
+}
+
+/** A session's empty revision, for `record`, the session's record as it is to be written (with the last finish it had, for the
+    version of the hand-off on file), made at `at`: { revision, handoff: { rel, text }, finished, words } when it is to be written,
+    or { words } when it is not. It goes where handoffTarget says, with nothing in it: no principles, no Reels, no transcript (the
+    contract's handoff-v2-session-replacing). It is version 2 when this Mac's settings say so, when the hand-off on file is (writesV2For),
+    and when any hand-off of the episode's own, in its final/ or set aside in its history/, is. It is not written on a Mac that hands
+    off version 1 otherwise; nor when handoffTarget refuses it (a gap in the video's versions, said in H4's words, or an id it went to
+    the page under that its versions no longer lead to); nor when a hand-off of its own, of either version, went to the page under
+    another id than the one it would go under, since the page would keep that id's words (said by the id alone). */
+function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
+  const label = shownName(record);
+  const own = ownHandoffs(found.folder);
+  if (!writesV2For(ctx.settings, found.folder, record) && !own.some((h) => h.version === 2)) return { words: emptyV1(label) };
+  const target = handoffTarget({ root: ctx.root, settings: { ...ctx.settings, handoffVersion: 2 } }, { folder: found.folder, record });
+  if (target.refusal) {
+    const gap = chainGap(ctx.root, record);
+    return { words: gap ? emptyWaits(label, gap) : emptyRefused(label, target.refusal) };
+  }
+  const elsewhere = own.map(handoffIdIn).find((id) => id && id !== target.id);
+  if (elsewhere) return { words: emptyElsewhere(label, elsewhere) };
+  const made = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit, reels: [], session: {} });
+  const fault = handoffFaultV2(made);
+  if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
+  const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
+  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone) };
+}
+
+/** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
+    its words, and when it was not written, that its files are out of the shared folder, unless some stayed in final/, which are
+    said, by what they are. */
+function sayEmpty(ctx, label, empty, stayed) {
+  ctx.say(empty.handoff || stayed.length ? empty.words : `${empty.words} ${OUT_OF_SHARED}`);
+  if (stayed.length) ctx.say(stayedWords(label, whatsInFinal(stayed)));
+}
+
+/** Show a file in Finder, through this Mac's program runner: a hand-off for her to drop on the BRIMM Ops page. */
+async function showInFinder(ctx, path) {
+  try {
+    await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", path]);
+  } catch (e) {
+    // The file is there all the same.
+  }
+}
+
+/** The empty session revision a session still owes (revisionOwed), when `kind … session --again` is said again: it is written when
+    it can be now, and final/ is swept again either way, by earlierFiles (every file but a session's own hand-off, listed or not, as a
+    file the other Mac's finish put there that Dropbox brought over since), so that no word of it stays there. Nothing else of the
+    record changes, and it is not claimed: the record is written on the one read, as finish writes a session's hand-off. When it
+    still cannot be written and final/ holds nothing to set aside, it is refused, in the words of why, and nothing is written. */
+async function emptyRevisionAgain(ctx, found, record) {
+  const label = shownName(record);
+  const at = localStamp(new Date(ctx.now()));
+  const aside = earlierFiles(found.folder, record, { session: true, finalOnly: true });
+  // An empty revision written already is not written again: only the sweep it still owes (sweepOwed) is made.
+  const empty = revisionOwed(record) ? emptyRevisionOf(ctx, found, record, at, { gone: readBefore(found.folder, record, { rels: aside.rels }) }) : null;
+  if (!(empty && empty.handoff) && !aside.rels.length) return refuse(ctx, empty ? `${empty.words} ${OUT_OF_SHARED}` : `${label} is a client or group session already.`);
+  await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(join(found.folder, rel))));
+  if (notReady(ctx, found, aside.rels).length) return refuse(ctx, comingWhy(ctx, found, label));
+  const handoff = empty && empty.handoff;
+  const next = handoff ? { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished } : record;
+  const wrote = await setAsideWritten(ctx, found, record, next, aside, handoff, { quiet: true, session: true });
+  if (wrote.code !== 0) return 1;
+  forgetComing(ctx, found);
+  if (handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
+  if (empty) sayEmpty(ctx, label, empty, wrote.stayed);
+  else {
+    ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
+    if (wrote.stayed.length) ctx.say(stayedWords(label, whatsInFinal(wrote.stayed)));
+  }
+  sayVersionsToMark(ctx, found, next);
+  return !empty || handoff ? 0 : 1;
+}
+
+/** Say which other versions of the video of `record` (a session now, in the episode `found`) she must answer as a session too, each
+    by its label and short id, as the lists name it (listedAs), and never by a name or a file: every other version of it (finish.js
+    linksOf, besideOf) that is not a session not cleared itself. Each is held as a session until it is answered as one, and its own
+    `kind … session --again` sets its final/ aside: nothing is written into another version's folder from here (spec 1). Nothing is
+    said when there is none. */
+function sayVersionsToMark(ctx, found, record) {
+  const links = linksOf(ctx.root);
+  const seen = new Set([record.id]);
+  const names = [];
+  for (const one of links.besideOf(record, found.folder)) {
+    if (seen.has(one.record.id) || links.holdsSession(one)) continue;
+    seen.add(one.record.id);
+    const r = one.record;
+    const short = String(r.id).slice(-6);
+    names.push(typeof r.label === "string" && r.label.trim() ? `${r.label} (${short})` : recordKind(r) === null ? shownName(r) : heldName(r));
+  }
+  if (names.length === 1) ctx.say(`${shownName(record)} has another version, held as a client or group session until it is answered as one: answer ${names[0]} as a session too.`);
+  else if (names.length) ctx.say(`${shownName(record)} has other versions, each held as a client or group session until it is answered as one: answer ${listed(names)} as a session too.`);
+}
+
+/** Claim the episode `found`, whose record is `record`, for this Mac, as `open` does: the claim is written, Dropbox is given
+    CLAIM_WAIT_MS, and the record is read again. It must be the claim this command wrote, with no other record on top of it, even
+    one that keeps the claim. Resolves { record }, the record read again, or { code } once it has said why not: the record cannot
+    be read; Dropbox undid the claim (`again`, what she is to do, follows); another Mac's claim came across (`held`, given that
+    Mac); or a record was written on top of it (`changed`). It warns when this Mac seems to be offline. `kind` and `teachings`
+    claim a video so before they write on it. Each line it says goes through `said` first (kind's clearing says first that nothing
+    was cleared), and `onChanged`, when given, is waited for with the record on top before `changed` is said. */
+async function claimAndWait(ctx, found, record, { again, held, changed, said = (line) => line, onChanged = null }) {
+  const { say } = ctx;
+  const name = shownName(record);
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return { code: 1 };
+  await wait(CLAIM_WAIT_MS);
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    say(said(notRead(ctx, { ...found, read })));
+    return { code: 1 };
+  }
+  const undid = undone(read.record, ctx.home);
+  if (undid || !read.record.editing) {
+    say(said(`Dropbox undid this Mac's claim on ${name}. ${again}`));
+    if (undid) acceptRev(ctx.home, read.record.id, read.record.rev);
+    return { code: 1 };
+  }
+  if (read.record.editing.by !== ctx.machine) {
+    say(said(held(read.record.editing.by)));
+    return { code: 1 };
+  }
+  // Nothing is written on a claim but what the command writes next: any record on top of it, even one that keeps the claim, is
+  // not the claim this command wrote.
+  if (read.record.rev !== record.rev + 1) {
+    if (onChanged) await onChanged(read.record);
+    say(said(changed));
+    return { code: 1 };
+  }
+  if (!(await (ctx.deps.online || online)())) say(OFFLINE);
+  return { record: read.record };
+}
+
+/** Wait in the foreground for the reading just started of the episode `found` (named `name`), within READ_WAIT_MS and what this
+    command has left of COMMAND_BUDGET_MS from `began`, and say what it found as `status` says a result, or that a notice will
+    come. The reading's result is the one this run left, not `previous`, an older one: a reading that was done before is told apart
+    by when it ended. Resolves the command's code. */
+async function waitForReading(ctx, found, name, previous, began) {
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const waitFrom = ctx.now();
+  const budget = Math.min(READ_WAIT_MS, COMMAND_BUDGET_MS - (waitFrom - began));
+  for (;;) {
+    const result = readResult(ctx.home, found.name, "read");
+    if (result && (!previous || result.ended !== previous.ended || result.started !== previous.started)) {
+      ctx.say(ranLine(ctx, name, result, (text) => text, result.next, result.early === true && runningCommand(ctx.home, found.name, ctx.alive) === "read"));
+      return result.ok ? 0 : 1;
+    }
+    if (ctx.now() - waitFrom >= budget) break;
+    await wait(READ_POLL_MS);
+  }
+  ctx.say(`Claude is still reading ${name}. A notice will come on this Mac when it is done: then say "what did Claude find?"`);
+  return 0;
+}
+
+/** `leave "<video>"`: a video still waiting for its answer is left alone, as not for brimm-video: it is listed apart and never
+    asked about again. It can still be answered later by `kind`. It holds the answer lock of the episode while it writes, as `kind`
+    does, and reads the record under it. An answered video is refused; so is a video the other Mac is answering, which `leave`
+    does not claim. */
+export async function leaveCommand(ctx, rest) {
+  const { words } = flagsOf(rest, []);
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found } = got;
+  const lock = takeAnswerLock(ctx, found.name, "leave");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    const read = readEpisode(found.folder);
+    if (!read.record) {
+      ctx.say(notRead(ctx, { ...found, read }));
+      return 1;
+    }
+    if (read.newer) {
+      ctx.say(newerWhy(read.record));
+      return 1;
+    }
+    const { record } = read;
+    const name = namedAs(found, record);
+    if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
+    if (record.answer && record.answer.state === "not for brimm-video") {
+      ctx.say(`${name} is left already. It is not asked about again.`);
+      return 0;
+    }
+    const held = heldElsewhere(record, ctx.machine);
+    if (held) return refuse(ctx, beingAnswered(name, held.by));
+    const answer = { ...record.answer, state: "not for brimm-video", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())) };
+    return await save(ctx, { ...found, record }, { ...record, answer }, `${name}: left. It is not asked about again.`);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** Clone the file at `from` to `to` (copyFileSync with COPYFILE_FICLONE, which calls clonefile(2)), and never by copying its bytes:
+    a clone is made only on one disk, so it throws when the two are on different disks, as onSameDisk tells (COPYFILE_FICLONE would
+    copy a video of gigabytes byte by byte there; COPYFILE_FICLONE_FORCE is not there on macOS). `ctx.deps` may give stand-ins. */
+function cloneWhole(ctx, from, to) {
+  if (!(ctx.deps.sameDisk || onSameDisk)(from, dirname(to))) throw new Error("it is on another disk, where no clone can be made");
+  (ctx.deps.cloneFile || ((a, b) => copyFileSync(a, b, fsConstants.COPYFILE_FICLONE)))(from, to);
+}
+/** What `which` says when it opened the video's own file, whose name QuickTime Player's title bar shows. */
+const OWN_FILE = "Its copy could not be made, so it opened under its file's name, which QuickTime Player's title bar shows: share no screen while it is open.";
+
+/** `which "<video>"`: open the episode's video in QuickTime Player on this Mac, so that she can see which video it is. QuickTime
+    Player shows the name of the file it opens in its title bar, on a screen she may share: so it opens a clone of the video, named
+    by how the video is named (its label, for a video not yet answered or a session), in ~/BRIMM Video Work/<folder>/shown/, listed
+    by that folder's marker before it is made, as show's copies are, and taken away with them by `behind`. A clone takes no room and
+    no time; it is made only of a video whole on this Mac, and only as a clone, on one disk (cloneWhole). When it
+    cannot be made, or the video is not whole here (on the Mac that did not import it the file is online-only, and a clone would
+    have Dropbox bring it all over first), the video's own file is opened, and she is told its name shows in the title bar; QuickTime
+    Player then has Dropbox bring it over, which is said. It says nothing else of the video. */
+export async function whichCommand(ctx, rest) {
+  const { words } = flagsOf(rest, []);
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = namedAs(found, record);
+  const video = join(found.folder, record.video.file);
+  const here = ctx.isWhole(video);
+  let opened = "";
+  if (here) {
+    const dir = shownFolder(ctx.home, found.name);
+    try {
+      mkdirSync(dir, { recursive: true });
+      // The clone `which` made before goes first; the copies `show` made stay.
+      clearShownIn(dir, (listed) => !listed.endsWith(".txt"));
+      mkdirSync(dir, { recursive: true });
+      const named = freeShownName(dir, fileSafe(name), extname(record.video.file));
+      addShown(dir, named);
+      cloneWhole(ctx, video, join(dir, named));
+      opened = join(dir, named);
+    } catch (e) {
+      // The video itself is opened instead, and she is told so.
+    }
+  }
+  try {
+    ctx.openApp("QuickTime Player", opened || video);
+  } catch (e) {
+    return refuse(ctx, `${name}: ${e.message}`);
+  }
+  ctx.say(`Opened ${name} in QuickTime Player on this Mac.${opened ? "" : ` ${OWN_FILE}`}${here ? "" : ` ${ONLINE_ONLY}`}`);
+  return 0;
+}
+
+// --- A client or group session's teachings (spec 2026-10-22, sections 2, 3 and 8) ---
+
+const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
+/** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"), or that is
+    its video file's name, and what an edit of hers says of words that hold one. */
+const nameHolds = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
+const FILES_NAME = "That is the name of the video's file: give the session another name.";
+const NO_FILE_NAME = "That name cannot name the session's files: give it another.";
+const NAME_TOO_LONG = `That name is longer than ${SESSION_NAME_MOST} characters: give a shorter one.`;
+const editHolds = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
+/** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
+const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
+/** What `finish` says of a session on a Mac that hands off version 1, which has no session kind. */
+const SESSION_V1 = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What is said while a session's teachings or the files its names are seen from are not whole on this Mac yet. */
+const TEACHINGS_COMING = "Dropbox is still bringing its teachings over to this Mac: say it again in a minute.";
+
+/** "1 thing", "2 things". */
+const counted = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Some items of one of a session's lists, by their numbers, as she reads of them: "principle 3", "Reel ideas 1 and 2". */
+const itemsSaid = (key, ns) => {
+  const [, one, many] = ITEM_LISTS.find(([k]) => k === key);
+  return `${ns.length === 1 ? one : many} ${listed(ns.map(String))}`;
+};
+
+/** Whether a record is held back as a session: of kind session, or of another kind with a session mark not cleared. A video not
+    yet answered is not one. */
+const asSession = (record) => recordKind(record) === "session" || (recordKind(record) !== null && gated(record));
+/** Whether a record is a client or group session whose teachings may be asked for, decided and handed off: of kind session, its
+    mark not cleared. One whose mark she cleared by her click on the dialog is read as the kind she answered with it (F8). */
+const taughtSession = (record) => recordKind(record) === "session" && gated(record);
+
+/** The files `rels` of the episode `found` that are still not whole on this Mac once each one that was not has been read through
+    (dropbox.js readThrough, as a reading reads its files), so that Dropbox brings it down: the gate refuses `bring` for a
+    session, and a file online-only on this Mac would otherwise never come. */
+async function broughtOver(ctx, found, rels) {
+  for (const rel of rels.filter((r) => !ctx.isWhole(join(found.folder, r)))) {
+    try {
+      await (ctx.deps.readAll || readThrough)(join(found.folder, rel));
+    } catch (e) {
+      // It is said by what is still not whole.
+    }
+  }
+  return rels.filter((r) => !ctx.isWhole(join(found.folder, r)));
+}
+
+/** The names brimm-video can see in the session `found` (teachings.js sessionSeen), once what they are seen from is whole on this
+    Mac, read through if need be: { names } or { why }, which fails closed. */
+async function sessionNames(ctx, found) {
+  const { record } = found;
+  if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
+  const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+  return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names, hers: seen.hers };
+}
+
+/** Why a session's record may not be written on by this Mac now, in plain words, or "": another Mac has it, or a run is at work
+    on it. A `read` whose reading of the teachings asked for is in the record already is only making its late check, which
+    replaces no record: it does not stop her decisions or the hand-off; and with `read`, no `read` at all stops what is written
+    (her answer of the transcript only, which the reading refuses before its call once it is in the record). `what` says what
+    was not done. */
+function sessionBusy(ctx, found, record, what, { read = false } = {}) {
+  const name = shownName(record);
+  const held = heldElsewhere(record, ctx.machine);
+  if (held) return `${held.by} has ${name} open, so ${what}. Say it again once it is let go there.`;
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (!running || (read && running === "read")) return "";
+  const reading = sessionReading(record);
+  const asked = record.session && Date.parse(record.session.asked);
+  if (running === "read" && reading && Date.parse(reading.at) >= asked) return "";
+  return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+}
+
+/** `teachings "<session>" [--transcript-only]`: her answer to "what do you want from it?" for a client or group session (spec 2,
+    "The session mark"). With --transcript-only, her answer that its transcript stays on this Mac is recorded, and nothing goes
+    to Claude: the gate lets that through with the training gate off. Otherwise the session's one reading is asked for, refused,
+    with nothing asked or written, in this order: a video that is not a session; this Mac's training gate off, or lapsed, 90
+    days or more after Jason turned it on (the gate says these first); the claude command on this Mac signed in to another
+    account than the one Jason checked, or none it can say (`claude auth status`, reading.js accountOf); and this Mac's readings
+    off. Then it holds the answer lock, claims the session as `kind` does (claimAndWait), records that its teachings were asked
+    for, and when (`session.teachings` "asked", `session.asked`), and starts the reading detached (`read --kind session --rev
+    <rev>`), which reads it once for this ask, and waits for it in the foreground as `kind` does. Asked again after a reading, it
+    is read again: the earlier teachings are set aside, and its items numbered on. */
+export async function teachingsCommand(ctx, rest) {
+  const began = ctx.now();
+  const { words, flags } = flagsOf(rest, []);
+  if (Object.keys(flags).some((flag) => flag !== "transcript-only")) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: teachings are read only from one.`);
+  if (flags["transcript-only"]) return transcriptOnly(ctx, found, record);
+  const gate = teachingsWhy(ctx.settings, ctx.now());
+  if (gate) return refuse(ctx, gate);
+  const tools = ctx.deps.tools || findPrograms();
+  if (!tools.claude) return refuse(ctx, "Claude Code is not installed on this Mac, so Claude cannot read it.");
+  const work = join(runsFolder(ctx.home), `teachings-${process.pid}-${ctx.now()}`);
+  let account = "";
+  try {
+    account = await accountOf({ run: ctx.deps.run || runProgram, tools }, join(work, "account"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  const other = accountWhy(account, ctx.settings);
+  if (other) return refuse(ctx, other);
+  if (ctx.settings.readings === false) return refuse(ctx, READINGS_OFF);
+  const lock = takeAnswerLock(ctx, found.name, "teachings");
+  if (!lock) return refuse(ctx, busyWhy(name));
+  try {
+    return await askTeachings(ctx, found, began);
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** `teachings "<session>" --transcript-only`: her answer recorded, the session's record and nothing else. */
+async function transcriptOnly(ctx, found, record) {
+  const name = shownName(record);
+  const said = `${name}: its transcript stays on this Mac. Nothing goes to Claude.`;
+  // Her answer is recorded while the reading of an earlier ask still waits: that reading refuses, before it asks Claude anything,
+  // once the record no longer says her teachings are asked for.
+  const busy = sessionBusy(ctx, found, record, "her answer was not recorded", { read: true });
+  if (busy) return refuse(ctx, busy);
+  if (record.session && record.session.teachings === "transcript only") {
+    ctx.say(said);
+    return 0;
+  }
+  return save(ctx, { ...found, record }, { ...record, session: { ...record.session, teachings: "transcript only" } }, said);
+}
+
+/** What `teachings` does once it holds the answer lock of the session `found`: see teachingsCommand. */
+async function askTeachings(ctx, found, began) {
+  const read = readEpisode(found.folder);
+  if (!read.record) {
+    ctx.say(notRead(ctx, { ...found, read }));
+    return 1;
+  }
+  if (read.newer) {
+    ctx.say(newerWhy(read.record));
+    return 1;
+  }
+  const { record } = read;
+  const name = shownName(record);
+  const why = (r) => (!taughtSession(r) ? `${name} is not a client or group session: teachings are read only from one.` : sessionBusy(ctx, found, { ...r, reading: null }, "its teachings were not asked for"));
+  const first = why(record);
+  if (first) return refuse(ctx, first);
+  let base = record;
+  if (!record.editing || record.editing.by !== ctx.machine) {
+    const claim = await claimAndWait(ctx, found, record, { again: "Say it again.", held: (by) => `${by} has ${name} open, so its teachings were not asked for. Say it again once it is let go there.`, changed: `${name} changed meanwhile: say it again.` });
+    if (!claim.record) return claim.code;
+    base = claim.record;
+    const late = why(base);
+    if (late) return refuse(ctx, late);
+  }
+  const at = localStamp(new Date(ctx.now()));
+  if ((await save(ctx, { ...found, record: base }, { ...base, session: { ...base.session, teachings: "asked", asked: at } }, "")) !== 0) return 1;
+  // Right before the reading is started the record is the ask written, and nothing is at work on the episode.
+  const wrote = readEpisode(found.folder);
+  if (!wrote.record || wrote.record.rev !== base.rev + 1 || recordKind(wrote.record) !== "session") {
+    ctx.say(`${name} changed meanwhile: say it again.`);
+    return 1;
+  }
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) {
+    ctx.say(`${name}: its teachings are asked for, but ${running} is running for it, so Claude's reading was not started. Say it again when it has finished.`);
+    return 1;
+  }
+  const previous = readResult(ctx.home, found.name, "read");
+  startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", "session", "--rev", String(wrote.record.rev)] });
+  return waitForReading(ctx, found, name, previous, began);
+}
+
+/** `principles "<session>" [recurring] [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]` and `ideas "<session>" [keep … |
+    drop … | edit …]`: what Claude read in a client or group session, for her to decide item by item (spec 3, "Client or group
+    session"). With no words, each item as she reads it (teachings.js: a principle's example and key phrases first, its
+    source_context marked as hers only), with the line that brimm-video took out the names it could see, what it took out (by
+    field and why, never the name), and what she has decided of each. With words, sessions.js approve keeps, drops or changes
+    the items named, of the principles, the recurring principles (`recurring`) or the Reel ideas, and only the keys she may
+    change (EDITS); her decision of each, and what she changed, go into the record in one write (`session.decided`,
+    `session.edits`): the record alone marks an item approved, and only her command writes it (spec 8). Refused, writing nothing,
+    for a video that is not a session, before Claude has read its teachings, while another Mac has it or a run is at work on it,
+    and for what approve cannot do. */
+async function principles(ctx, rest) {
+  return sessionItems(ctx, rest, "principles");
+}
+async function ideas(ctx, rest) {
+  return sessionItems(ctx, rest, "ideas");
+}
+
+async function sessionItems(ctx, rest, command) {
+  const [said, ...words] = rest;
+  const got = episodeFor(ctx, said ? [said] : [], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const name = shownName(record);
+  if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: it has no ${command === "ideas" ? "Reel ideas" : "principles"} of its own.`);
+  const gate = teachingsWhy(ctx.settings, ctx.now());
+  if (gate) return refuse(ctx, gate);
+  let read = readTeachings(found.folder, record, ctx.isWhole);
+  if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, record, ctx.isWhole);
+  if (read.none) return refuse(ctx, `${name} has no teachings yet: Claude has not read it.`);
+  if (read.coming) return refuse(ctx, TEACHINGS_COMING);
+  if (read.why) return refuse(ctx, `${name}'s teachings cannot be read (${read.why}).`);
+  const items = itemsOf(read.teachings, record.session);
+  const recurring = command === "principles" && String(words[0] || "").toLowerCase() === "recurring";
+  const key = command === "ideas" ? "reelIdeas" : recurring ? "recurringPrinciples" : "principles";
+  const asked = recurring ? words.slice(1) : words;
+  if (!asked.length) return sayItems(ctx, name, record, read.teachings, items, command);
+  const busy = sessionBusy(ctx, found, record, "nothing was decided");
+  if (busy) return refuse(ctx, busy);
+  const done = approve(items[key], asked, EDITS[key]);
+  if (done.why) return refuse(ctx, done.why);
+  // What she changes is checked now, as her words, against the names brimm-video can see (teachings.js herWordsName), and
+  // refused when it holds one, saying which: the finish checks it again.
+  const changedTexts = done.items.flatMap((item) => {
+    const before = items[key].find((one) => one.n === item.n);
+    return EDITS[key].filter((field) => item[field] !== before[field]).map((field) => item[field]);
+  });
+  if (changedTexts.length) {
+    const seen = await sessionNames(ctx, { ...found, record });
+    if (seen.why) return refuse(ctx, seen.why);
+    const word = changedTexts.map((text) => herWordsName(text, seen.hers)).find(Boolean);
+    if (word) return refuse(ctx, editHolds(word));
+  }
+  // Her decision of each item, and what she changed of one, by the item's number.
+  const session = record.session;
+  const decided = { ...(session.decided || {}), [key]: { ...((session.decided || {})[key] || {}) } };
+  const edits = { ...(session.edits || {}) };
+  for (const item of done.items) {
+    const before = items[key].find((one) => one.n === item.n);
+    if (typeof item.approved === "boolean") decided[key][String(item.n)] = item.approved ? "kept" : "dropped";
+    const changed = EDITS[key].filter((field) => item[field] !== before[field]);
+    if (changed.length) edits[key] = { ...(edits[key] || {}), [String(item.n)]: { ...((edits[key] || {})[String(item.n)] || {}), ...Object.fromEntries(changed.map((field) => [field, item[field]])) } };
+  }
+  const next = { ...session, decided, ...(Object.keys(edits).length ? { edits } : {}) };
+  if ((await save(ctx, { ...found, record }, { ...record, session: next }, "")) !== 0) return 1;
+  const verb = asked[0].toLowerCase();
+  const end = asked.findIndex((w) => w.startsWith("--"));
+  const ns = [...new Set(asked.slice(1, end === -1 ? undefined : end).flatMap((w) => w.split(",")).map((w) => w.trim()).filter(Boolean).map(Number))];
+  ctx.say(`${name}: ${itemsSaid(key, ns)} ${verb === "keep" ? "kept" : verb === "drop" ? "dropped" : "changed and kept"}.`);
+  // What is still to decide, of every list, as the items stand now.
+  const now = itemsOf(read.teachings, next);
+  const open = ITEM_LISTS.map(([k]) => [k, now[k].filter((item) => typeof item.approved !== "boolean").map((item) => item.n)]).filter(([, left]) => left.length);
+  ctx.say(open.length ? `Still to decide: ${open.map(([k, left]) => itemsSaid(k, left)).join("; ")}.` : "Every item is decided: finish it to write its hand-off.");
+  return 0;
+}
+
+/** Say a session's items as she reads them (see principles): the principles and recurring principles, or the Reel ideas. */
+function sayItems(ctx, name, record, teachings, items, command) {
+  const session = record.session || {};
+  const status = (key, item) => {
+    const decided = ((session.decided || {})[key] || {})[String(item.n)];
+    const changed = Boolean(((session.edits || {})[key] || {})[String(item.n)]);
+    return decided === "kept" ? (changed ? "Kept, as you changed it." : "Kept.") : decided === "dropped" ? "Dropped." : "Not decided yet.";
+  };
+  const day = String(teachings.made || (sessionReading(record) || {}).at || "").slice(0, 10);
+  const skipped = teachings.skipped ? [teachings.skipped] : [];
+  const lines = command === "ideas"
+    ? [
+        `${name}: ${counted(items.reelIdeas.length, "Reel idea")}, from Claude's reading of ${day}.`, CHECK_NAMES, ...takenLines(teachings.dropped, ["Reel idea"]), ...skipped,
+        ...(items.reelIdeas.length ? items.reelIdeas.flatMap((r) => ideaLines(r, status("reelIdeas", r))) : ["Claude found no Reel ideas in it."]),
+        'Say keep, drop or edit, then the numbers: keep 1 3, drop 2, edit 3 --words "…".'
+      ]
+    : [
+        `${name}: ${counted(items.principles.length, "principle")} and ${counted(items.recurringPrinciples.length, "recurring principle")}, from Claude's reading of ${day}.`, CHECK_NAMES,
+        ...takenLines(teachings.dropped, ["Principle", "Recurring principle"]), ...skipped,
+        ...(items.principles.length ? items.principles.flatMap((p) => principleLines(p, status("principles", p))) : ["Claude found no principles in it."]),
+        ...items.recurringPrinciples.map((r) => recurringLine(r, status("recurringPrinciples", r))),
+        'Say keep, drop or edit, then the numbers: keep 1 3, drop 2, edit 3 --name "…". For a recurring principle, say recurring first: recurring keep 1.'
+      ];
+  for (const line of lines) ctx.say(line);
+  return 0;
+}
+
+/** Why the name `words` cannot be given to the session `found`, in plain words, or "": it holds a name brimm-video can see in
+    the session (sessions.js holdsName, against teachings.js sessionSeen), or what that is seen from is not whole on this Mac,
+    or cannot be read, which fails closed (spec 8, "A session's name"). */
+async function sessionNameWhy(ctx, found, words) {
+  const { record } = found;
+  const text = oneLine(words);
+  if (!text) return "";
+  // Its label is the session's own, and holds no one's name.
+  if (SESSION_LABEL.test(text)) return "";
+  if ([...text].length > SESSION_NAME_MOST) return NAME_TOO_LONG;
+  if (isFilesName(text, record)) return FILES_NAME;
+  // Its teachings files and its hand-off are named by it: a name that cannot name a file, as one that begins with a dot, is none.
+  if (!isTeachingsName(`${fileSafe(text)}.principles.json`)) return NO_FILE_NAME;
+  const seen = await sessionNames(ctx, found);
+  if (seen.why) return seen.why;
+  const word = herWordsName(text, seen.hers);
+  return word ? nameHolds(word) : "";
+}
+
+/** `finish "<session>"` for a client or group session: its own hand-off, of what she approved (finish.js finishSession), never the
+    Final Cut finish, which cannotFinish refuses for one. Refused while another Mac has it or a run is at work on it. */
+async function finishSessionCommand(ctx, found) {
+  const { record } = found;
+  const name = shownName(record);
+  const busy = sessionBusy(ctx, found, record, "its hand-off was not written");
+  if (busy) return refuse(ctx, busy);
+  let done = await finishSession(ctx, found, { host: ctx.settings.host });
+  if (done.coming && !(await broughtOver(ctx, found, done.coming)).length) done = await finishSession(ctx, found, { host: ctx.settings.host });
+  if (done.waits) return refuse(ctx, SESSION_V1);
+  if (done.coming) return refuse(ctx, "Dropbox is still bringing its teachings, or the words they are checked against, over to this Mac: say it again in a minute.");
+  if (done.why) {
+    for (const line of done.why.split("\n")) ctx.say(line);
+    return 1;
+  }
+  for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);
+  const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
+  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film. It is shown in Finder: drop it on the BRIMM Ops page.`);
+  return 0;
+}
+
+/** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
+    and is in no help. */
+const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 
@@ -2630,17 +5242,35 @@ export async function editMain(argv, deps = {}) {
     say(HELP);
     return 0;
   }
-  const ctx = contextFor({ ...deps, say });
-  if (ctx.why) {
-    say(ctx.why);
+  const made = contextFor({ ...deps, say });
+  if (made.why) {
+    // A Mac with no settings for episodes can still have her folder, and the lock on it is looked at all the same, for the checkout
+    // this edit.js runs from.
+    const refused = command === "behind" ? refuseIfLoosened({ home: homeOf(deps), checkout: dirname(dirname(fileURLToPath(import.meta.url))), deps }, say) : null;
+    if (refused !== null) return refused;
+    say(made.why);
     return 2;
   }
-  const run = COMMANDS[command];
+  // A command is one of COMMANDS' own names: a name every object has ("constructor", "toString") is no command.
+  const run = typeof command === "string" && Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : null;
   if (!run) {
     say(HELP);
     return 2;
   }
-  return run(ctx, rest);
+  // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
+  // before the command goes on: the folder a detached run is given by `--now` is found by it too.
+  const ctx = { ...made, asked: { command, words: rest } };
+  try {
+    return await run(ctx, rest);
+  } catch (e) {
+    // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
+    // any command on a Mac that does the light import, where any video's file may be named for a client: its error may name the
+    // video's file or folder, as a path does, so only its code is said, through the filter, and the command ends there. Any other
+    // is thrown as it always was.
+    if (!ctx.hidden.names.length && !ctx.hidden.switched && !lightImport(ctx.settings)) throw e;
+    ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
+    return 1;
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

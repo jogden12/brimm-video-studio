@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown, isDay } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -121,6 +121,13 @@ describe("a moment in the record", () => {
     assert.match(at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:30[+-]\d{2}:\d{2}$/);
     assert.equal(new Date(at).getTime(), new Date("2026-10-14T14:12:30Z").getTime());
     assert.equal(shown("2026-10-14T09:12:00-05:00"), "2026-10-14 09:12");
+  });
+});
+
+describe("a day in the record", () => {
+  it("is written 2026-10-23 and is a day the calendar has, as the hand-off's days are", () => {
+    for (const day of ["2026-10-23", "2024-02-29", "0001-01-01", "2026-12-31"]) assert.equal(isDay(day), true, day);
+    for (const bad of ["2026-02-30", "2025-02-29", "2026-13-01", "2026-00-10", "2026-10-00", "2026-10-32", "2026-1-3", "26-10-23", "2026-10-23T09:00:00-05:00", "2026-10-23 ", "", null, undefined, 20261023, ["2026-10-23"]]) assert.equal(isDay(bad), false, JSON.stringify(bad));
   });
 });
 

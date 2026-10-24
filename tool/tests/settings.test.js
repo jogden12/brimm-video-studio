@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed } from "../settings.js";
 
 const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
@@ -255,6 +255,18 @@ describe("the switch's settings", () => {
     assert.equal(teachingsOn(s, at - 24 * 60 * 60 * 1000), false);
     assert.equal(teachingsOn(s, new Date(at - 1)), false);
   });
+  it("say the teachings lapsed only once 90 days have passed since a whole setting turned them on", () => {
+    const s = { ...BASE, sessionTeachings: TEACHINGS };
+    const end = Date.parse("2026-10-22T20:00:00-04:00") + 90 * 24 * 60 * 60 * 1000;
+    assert.equal(teachingsLapsed(s, end - 1), false);
+    assert.equal(teachingsLapsed(s, end), true);
+    assert.equal(teachingsLapsed(s, new Date(end + 1)), true);
+    // Turned on later than now is off, not lapsed; and a setting that is off or not whole has nothing to lapse.
+    assert.equal(teachingsLapsed(s, Date.parse(TEACHINGS.at) - 1), false);
+    for (const off of [BASE, { ...BASE, sessionTeachings: null }, { ...BASE, sessionTeachings: { ...TEACHINGS, on: false } }, { ...BASE, sessionTeachings: { ...TEACHINGS, accounts: { cli: "a@b.c" } } }, undefined]) {
+      assert.equal(teachingsLapsed(off, end + 1), false, JSON.stringify(off));
+    }
+  });
   it("have teachings from sessions off unless they are there, on, and whole", () => {
     const now = Date.parse("2026-10-23T09:00:00-04:00");
     for (const s of [BASE, { ...BASE, sessionTeachings: null }, { ...BASE, sessionTeachings: { ...TEACHINGS, on: false } }, { ...BASE, sessionTeachings: { ...TEACHINGS, at: "yesterday" } },
@@ -416,7 +428,7 @@ describe("node settings.js set and sessions", () => {
 
   it("set changes the settings it is told, keeps the rest, says what changed, and ends with 0", () => {
     const t = mac();
-    // The light import and the Drop folder are written here as a later brimm-video would: set refuses them until they are built.
+    // The Drop folder is written here as a later brimm-video would: set refuses it until it is built.
     writeSettings(t.home, { import: "light", drop: "Drop", later: { x: 1 } });
     assert.equal(t.run("set", "--import", "full", "--readings", "off", "--handoff", "2", "--drop", "Unedited Video"), 0);
     assert.deepEqual(t.said, [
@@ -474,22 +486,31 @@ describe("node settings.js set and sessions", () => {
     unchanged(t);
     t.done();
   });
-  it("set refuses the light import until her chat's question is built, and the Drop folder until it is, changes nothing, and ends with 1", () => {
-    // Parts F and D take these refusals away.
+  it("set refuses the Drop folder until it is built, alone or beside the light import, changes nothing, and ends with 1", () => {
+    // Part D takes this refusal away.
     const t = mac();
-    const LIGHT = "The light import needs the question in her chat, which is not built yet.";
     const DROP = "The Drop folder is not built yet.";
-    for (const [argv, said] of [
-      [["--import", "light"], LIGHT],
-      [["--drop", "Drop"], DROP],
-      [["--readings", "off", "--import", "light"], LIGHT],
-      [["--drop", "Drop", "--handoff", "2"], DROP]
-    ]) {
+    for (const argv of [["--drop", "Drop"], ["--drop", "Drop", "--handoff", "2"], ["--import", "light", "--drop", "Drop"], ["--drop", "Drop", "--import", "light"]]) {
       t.said.length = 0;
       assert.equal(t.run("set", ...argv), 1, argv.join(" "));
-      assert.deepEqual(t.said, [said], argv.join(" "));
+      assert.deepEqual(t.said, [DROP], argv.join(" "));
     }
     unchanged(t);
+    t.done();
+  });
+  it("set writes the light import, now that the question in her chat is built, says so, and ends with 0", () => {
+    // Part F took its refusal away: the card she answers in her chat (her skill, F10).
+    const t = mac();
+    assert.equal(t.run("set", "--import", "light"), 0);
+    assert.deepEqual(t.said, ["The import is now light (it was full).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" });
+    assert.equal(lightImport(readSettings(t.home).settings), true);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--readings", "off", "--import", "light"), 0);
+    assert.deepEqual(t.said, ["Readings are now off (they were on).", "The import is light already.", `Written: ${settingsFile(t.home)}`]);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--import", "full"), 0);
+    assert.deepEqual(t.said, ["The import is now full (it was light).", `Written: ${settingsFile(t.home)}`]);
     t.done();
   });
   it("set says how it is used, changes nothing, and ends with 2, when it is asked wrongly", () => {
@@ -646,18 +667,51 @@ describe("node settings.js set and sessions", () => {
       "  Import:  light",
       "  Readings:  off",
       "  Hand-off version:  2",
-      `  Teachings from sessions:  on, turned on ${at} (the claude command: jason@example.com; the Code tab: sallie@example.com)`
+      `  Teachings from sessions:  on, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`
     ]);
     // After the 90 days it says they have lapsed.
     t.said.length = 0;
     assert.equal(settingsMain(["show"], { home: t.home, say: (line) => t.said.push(line), now: new Date(AT.getTime() + 91 * 86400000) }), 0);
-    assert.equal(t.said.at(-1), `  Teachings from sessions:  lapsed, turned on ${at} (the claude command: jason@example.com; the Code tab: sallie@example.com)`);
+    assert.equal(t.said.at(-1), `  Teachings from sessions:  lapsed, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`);
+    t.done();
+  });
+  it("show says the teachings are off, not lapsed, when they were turned on later than now: the clock was set back, as the gate reads it", () => {
+    const t = mac();
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com", "--app-account", "sallie@example.com");
+    const at = readSettings(t.home).settings.sessionTeachings.at;
+    const states = [];
+    for (const days of [-1, 0, 89, 90, 91]) {
+      const said = [];
+      assert.equal(settingsMain(["show"], { home: t.home, say: (line) => said.push(line), now: new Date(Date.parse(at) + days * 86400000) }), 0);
+      states.push(said.at(-1));
+    }
+    const shown = (state) => `  Teachings from sessions:  ${state}, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`;
+    assert.deepEqual(states, [shown("off"), shown("on"), shown("on"), shown("lapsed"), shown("lapsed")]);
+    t.done();
+  });
+  it("show says neither account the teachings were turned on for: what it prints may reach a chat", () => {
+    const t = mac();
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com (Ogden Studio Org)", "--app-account", "sallie@example.com");
+    for (const now of [AT, new Date(AT.getTime() + 91 * 86400000)]) {
+      const said = [];
+      assert.equal(settingsMain(["show"], { home: t.home, say: (line) => said.push(line), now }), 0);
+      assert.ok(said.some((line) => line.startsWith("  Teachings from sessions:  ")), said.join("\n"));
+      for (const account of ["jason@example.com", "sallie@example.com", "Ogden Studio Org"]) assert.ok(!said.join("\n").includes(account), account);
+    }
+    // From the command line too.
+    const shown = spawnSync(process.execPath, [SETTINGS, "show"], { encoding: "utf8", env: { HOME: t.home, PATH: process.env.PATH } });
+    assert.equal(shown.status, 0);
+    assert.match(shown.stdout, /\(the claude command: \(not shown\); the Code tab: \(not shown\)\)/);
+    for (const account of ["jason@example.com", "sallie@example.com"]) assert.ok(!shown.stdout.includes(account), account);
     t.done();
   });
   it("--help says how set and sessions are used", () => {
     const t = setup();
     assert.equal(t.asked("--help"), 0);
     assert.match(t.said[0], /node settings\.js set \[--import light\|full\] \[--readings on\|off\] \[--handoff 1\|2\] \[--drop Drop\|"Unedited Video"\]/);
+    // What set refuses is said, and only that: Drop, until the Drop folder is built. The light import is not refused.
+    assert.match(t.said[0], /Drop is refused until the Drop folder is built/);
+    assert.doesNotMatch(t.said[0], /light[^\n]*(refused|not built)|(refused|not built)[^\n]*light/);
     assert.match(t.said[0], /node settings\.js sessions --teachings on --cli-account <email> --app-account <email>/);
     assert.match(t.said[0], /node settings\.js sessions --teachings off/);
     t.done();

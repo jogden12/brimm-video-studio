@@ -4,8 +4,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { studioFiles } from "../studio.js";
 
-/** The words of each slice of phase 4 that has landed. None may be left under "Not ready yet". Each task adds its own. */
-const LANDED = ["captions", "spelling", "words on screen", "lower third", "graphic", "Pictures folder", "make it Bright", "style", "cut", "Hormozi"];
+/** The words of each slice of phase 4 that has landed, and of the switch's fork (F10: the card, sessions and their teachings,
+    what Claude found). None may be left under "Not ready yet". Each task adds its own. */
+const LANDED = ["captions", "spelling", "words on screen", "lower third", "graphic", "Pictures folder", "make it Bright", "style", "cut", "Hormozi",
+  "card", "session", "teachings", "principles", "Reel ideas", "new version", "spellings", "what did Claude find"];
 
 describe("her skill's Not ready yet", () => {
   const skill = studioFiles({ checkout: "/c", node: "/n" })[".claude/skills/brimm-edit/SKILL.md"];

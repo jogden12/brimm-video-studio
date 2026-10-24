@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns, clearCrashes, heldBy } from "../filing.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { readStatuses, writeStatus } from "../importing.js";
+import { zoomTimeOf } from "../kinds.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const SETTINGS = { version: 1, machine: "Mac Studio", root: ROOT, checkout: "/Users/jasonogden/Claude Code/BRIMM video" };
@@ -184,10 +185,27 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     const held = t.statuses().filter((s) => ZOOM.includes(s.video)).sort((a, b) => a.video.localeCompare(b.video));
     assert.equal(held.length, 3);
     for (const { at, ...status } of held) {
-      assert.deepEqual(status, { version: 1, machine: "Mac Studio", pid: process.pid, video: status.video, bytes: bytesOf(status.video), seconds: null, step: "Held", held: HELD });
+      // Its label is its Zoom time alone, the part of its name Zoom's own names match (final fix 19).
+      assert.deepEqual(status, { version: 1, machine: "Mac Studio", pid: process.pid, video: status.video, bytes: bytesOf(status.video), seconds: null, step: "Held", held: HELD, label: zoomTimeOf(status.video) });
       assert.ok(Number.isFinite(Date.parse(at)), at);
     }
-    for (const name of ZOOM) assert.equal(t.logs.filter((line) => line === `${name}: ${HELD}`).length, 1, t.logs.join("\n"));
+    for (const name of ZOOM) assert.equal(t.logs.filter((line) => line === `${zoomTimeOf(name)}: ${HELD}`).length, 1, t.logs.join("\n"));
+    t.done();
+  });
+  it("name a Zoom download renamed with a client's words after Zoom's own name by its Zoom time alone, in the log and the status (final fix 19)", async () => {
+    const RENAMED = "GMT20261020-150000_Recording_Jane Doe coaching.mp4";
+    const t = drop([RENAMED]);
+    await t.run();
+    assert.equal(zoomTimeOf(RENAMED), "GMT20261020-150000_Recording");
+    assert.deepEqual(t.imported, []);
+    assert.deepEqual(t.statuses().map((s) => [s.video, s.label, s.held]), [[RENAMED, "GMT20261020-150000_Recording", HELD]]);
+    assert.ok(t.logs.includes(`GMT20261020-150000_Recording: ${HELD}`), t.logs.join("\n"));
+    assert.doesNotMatch(t.logs.join("\n"), /jane|coaching/i);
+    // It leaves the folder: the status goes, and the log names it so too.
+    rmSync(join(t.folder, RENAMED));
+    await t.run();
+    assert.deepEqual(t.statuses(), []);
+    assert.doesNotMatch(t.logs.join("\n"), /jane|coaching/i);
     t.done();
   });
   it("are held by the status for the next run too, which says so again", async () => {
@@ -196,7 +214,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     t.logs.length = 0;
     await t.run();
     assert.deepEqual(t.imported, []);
-    assert.deepEqual(t.logs.filter((line) => line.startsWith(`${ZOOM[0]}:`)), [`${ZOOM[0]}: ${HELD}`]);
+    assert.deepEqual(t.logs.filter((line) => line.startsWith(`${zoomTimeOf(ZOOM[0])}:`)), [`${zoomTimeOf(ZOOM[0])}: ${HELD}`]);
     assert.equal(t.statuses().length, 1);
     t.done();
   });
@@ -234,7 +252,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     t.logs.length = 0;
     await t.run();
     assert.deepEqual(t.statuses().map((s) => s.bytes), [31]);
-    assert.ok(t.logs.includes(`${ZOOM[0]}: ${HELD}`), t.logs.join("\n"));
+    assert.ok(t.logs.includes(`${zoomTimeOf(ZOOM[0])}: ${HELD}`), t.logs.join("\n"));
     // Taken lightly no more, it is imported as before, and the status that held it is gone.
     t.deps.light = false;
     await t.run();

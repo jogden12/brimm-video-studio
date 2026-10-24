@@ -25,6 +25,7 @@ import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
 import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
 import { fingerprintOf } from "../versions.js";
+import { zoomTimeOf } from "../kinds.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -4925,7 +4926,8 @@ describe("the light import", () => {
     assert.deepEqual(statuses.map((s) => [s.video, s.machine, s.held]).sort(), [[ZOOM, "Mac Studio", ZOOM_HELD], ["audio1449382767.m4a", "Mac Studio", ZOOM_HELD]]);
     // The Mac looked in the folder each minute of the late check's wait, and said it once.
     assert.ok(t.waits.length > 3, t.waits.join(", "));
-    for (const name of [ZOOM, "audio1449382767.m4a"]) assert.equal(t.logs.filter((line) => line === `${name}: ${ZOOM_HELD}`).length, 1, t.logs.join("\n"));
+    // Each is named by its Zoom time alone (final fix 19).
+    for (const name of [zoomTimeOf(ZOOM), "audio1449382767.m4a"]) assert.equal(t.logs.filter((line) => line === `${name}: ${ZOOM_HELD}`).length, 1, t.logs.join("\n"));
     assert.deepEqual(t.notes, [READY]);
     t.done();
   });

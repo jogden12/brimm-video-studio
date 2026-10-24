@@ -6,7 +6,7 @@
 // Version 1, in handoff.js, is unchanged and still read by the page.
 // Nothing here touches a disk or runs a program.
 import { FORMAT } from "./handoff.js";
-import { kindOf } from "./episode.js";
+import { kindOf, isDay } from "./episode.js";
 import { tidyTranscript } from "./shared/transcript.js";
 import { keptWords, lengthOf, timelineAt } from "./clock.js";
 
@@ -124,12 +124,12 @@ export function onPictureOf(record) {
 export const fromSuggestionOf = (reel) => (has(reel, "fromSuggestion") ? reel.fromSuggestion : reel.n);
 
 /** How many of a suggestion's words, in 100, the final video must keep for the suggestion to be kept (spec section 8). */
-const KEPT_IN_100 = 70;
+export const KEPT_IN_100 = 70;
 /** How many words `first` and `last` hold when the suggestion did not say. */
 const OPENING_WORDS = 4;
 /** A time to the hundredth of a second, as inMain (handoff.js) gives its times: a sum such as 4.35 * 100 comes to 434.99999…,
     which is still 4.35. */
-const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
+export const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
 
 /** A raw video's Reel suggestions on the final main video's clock (spec section 8, "One suggestion shape"). `suggestions` are
     as they are stored, `{ n, start, end, stretches, first, last, why, point }` in seconds of the raw video, and `words` the
@@ -188,12 +188,6 @@ const number = (v) => typeof v === "number" && Number.isFinite(v);
 const seconds = (v) => number(v) && v > 0;
 const whole = (v) => Number.isInteger(v) && v >= 1;
 const strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
-/** A day, as 2026-10-23, that the calendar has: not 2026-02-30. */
-const day = (v) => {
-  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  const at = new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(at.getTime()) && at.toISOString().startsWith(v);
-};
 /** Captions the BRIMM Ops page can read: tidyTranscript, the page's own reader, makes lines of them. */
 const captions = (srt) => text(srt) && /-->/.test(srt) && tidyTranscript(srt).startsWith("[");
 /** The first key `o` holds that the contract does not name, as words, or "". */
@@ -218,7 +212,7 @@ export function handoffFaultV2(h) {
   if (!KINDS.includes(v.kind)) return "The video's kind is none of finished, raw, session or short video.";
   if (has(v, "title")) return "A video has no title in it: titles live on the BRIMM Ops page.";
   if (!text(v.name)) return "The video has no name.";
-  if (!day(v.recorded) || !["video", "import"].includes(v.recordedFrom)) return "The day it was recorded, or where that day was read from, is missing.";
+  if (!isDay(v.recorded) || !["video", "import"].includes(v.recordedFrom)) return "The day it was recorded, or where that day was read from, is missing.";
   const fault = unknown("The video", v, VIDEO);
   if (fault) return fault;
   const kind = v.kind;
@@ -302,7 +296,7 @@ export function handoffFaultV2(h) {
       }
       if (kind === "session") {
         if (!has(r, "clientAgreed")) return `${which} has no clientAgreed: a session's Reel is made only once the client's agreement is noted, as a date.`;
-        if (!day(r.clientAgreed)) return `${which}'s clientAgreed is not a date written like 2026-10-23: the day the agreement was noted, never who.`;
+        if (!isDay(r.clientAgreed)) return `${which}'s clientAgreed is not a date written like 2026-10-23: the day the agreement was noted, never who.`;
       } else if (has(r, "inMain")) {
         if (!isObject(r.inMain) || !within(r.inMain.start, r.inMain.end)) return `${which}'s place in the main video is not a stretch of it.`;
         const extra = unknown(`${which}'s place in the main video`, r.inMain, STRETCH);

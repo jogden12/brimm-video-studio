@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { editMain, finishEpisode, freeLibrary, status, titleEpisode } from "../edit.js";
 import { episodeWork, fromFinalCutFolder, libraryFor, writeSettings } from "../settings.js";
 import { resultFile, readResult } from "../detached.js";
-import { setup, episodeFor, episodeAs, reread, EDITED, NOT_YET, PROJECT, FOLDER, ID } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, EDITED, NOT_YET, PROJECT, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Final Cut's files at the end of the made-up edit: each part Shared, the main and Reel 1 exported after their Shares, and
     Reel 2 never exported. */
@@ -189,8 +189,9 @@ describe("finish, the part that looks and asks, with hand-off version 2", () => 
       assert.deepEqual(t.started, [], kind);
       t.done();
     }
-    // A finished video's name is its file's, and a short video's is too: either finishes with it.
-    for (const [kind, more] of [["finished", {}], ["short video", { title: null, reels: [] }]]) {
+    // A short video's name is its file's: it finishes with it. (A finished video's is too; but it is not edited in Final Cut, and
+    // its hand-off comes from its spellings card: final fix 5.)
+    for (const [kind, more] of [["short video", { title: null, reels: [] }]]) {
       const t = v2();
       assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER, ...more } }), { yes: true, noHandEdits: ["reel 2"] }), 0, `${kind}: ${t.said()}`);
       assert.doesNotMatch(t.said(), /Give the episode its name first/, kind);
@@ -198,15 +199,16 @@ describe("finish, the part that looks and asks, with hand-off version 2", () => 
       t.done();
     }
   });
-  it("refuses a new version whose earlier version is not on this Mac, or names it back, by its label or else its name, and writes nothing", async () => {
+  // An answered video that is not a session is named by its name, as edit.js names it (episode.js shownName), label or none.
+  it("refuses a new version whose earlier version is not on this Mac, or names it back, by its name as edit.js names it, and writes nothing", async () => {
     const FIRST = "e-20261010-7c1d2e";
     const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
     const first = (t, record = {}) => episodeAs(t, { id: FIRST, name: "2026-10-10 Pricing talk, first cut (Mac Studio)", record: { kind: "raw", ...record } });
     const missing = (who) => `${who} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`;
     const cases = [
-      [() => {}, { label: LABEL }, missing(LABEL)],
+      [() => {}, { label: LABEL }, missing(NAME)],
       [() => {}, {}, missing(EDITED.name.text)],
-      [(t) => first(t, { versionOf: ID }), { label: LABEL }, `${LABEL} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`]
+      [(t) => first(t, { versionOf: ID }), { label: LABEL }, `${NAME} and the video it names as its earlier version (${FIRST}) each say they are a version of the other: ask Jason. Nothing was written.`]
     ];
     for (const [before, more, words] of cases) {
       const t = v2();
@@ -263,10 +265,10 @@ describe("finish, the part that looks and asks, for a video already handed off a
     assert.equal(t.started.length, 1);
     t.done();
   });
-  it("refuses a new version whose earlier version is not on this Mac, by its label, as version 2 does", async () => {
+  it("refuses a new version whose earlier version is not on this Mac, by its name as edit.js names it, as version 2 does", async () => {
     const { t, found } = handedOff(2, { versionOf: FIRST, label: LABEL });
     assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1);
-    assert.ok(t.said().split("\n").includes(`${LABEL} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`), t.said());
+    assert.ok(t.said().split("\n").includes(`${NAME} is a new version of a video that is not on this Mac yet (${FIRST}). Wait for Dropbox to bring it over, then say it again. Nothing was written.`), t.said());
     assert.deepEqual(t.started, []);
     assert.equal(reread(found).rev, found.record.rev, "no claim was written");
     t.done();
@@ -307,10 +309,11 @@ describe("finish, the part that looks and asks, with hand-off version 1", () => 
 // transcript may ever be in (spec 2026-10-22, section 2). So it refuses them at once, in either version of the hand-off, before it
 // looks in any folder: no part line, no "Looked in" line and no file name is printed, and no claim is written.
 describe("finish, the part that looks and asks, for a session and for a video not yet answered", () => {
-  it("refuses it at once, by its label or else as 'This video', and prints no file name, no part line and no folder it looked in", async () => {
+  it("refuses it at once, as edit.js names it (a session by its session label, a video not answered by its label or else its short id), and prints no file name, no part line and no folder it looked in", async () => {
     for (const version of [undefined, 1, 2]) {
-      for (const [what, kind, words] of NOT_YET) {
-        for (const [label, who] of [["Video of 14 Oct, 09:12 (Mac Studio)", "Video of 14 Oct, 09:12 (Mac Studio)"], [undefined, "This video"]]) {
+      for (const [what, kind, words, named] of NOT_YET) {
+        for (const label of ["Video of 14 Oct, 09:12 (Mac Studio)", undefined]) {
+          const who = named(label);
           const t = setup();
           if (version) {
             writeSettings(t.home, { handoffVersion: version });

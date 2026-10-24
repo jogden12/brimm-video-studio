@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, writeEpisode, recordFile, RECORD_VERSION } from "../episode.js";
+import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, writeEpisode, recordFile, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
 const REEL = { n: 2, status: "picked", from: 1, to: 9, title: "t", why: "", files: [], pushed: [] };
@@ -140,10 +141,54 @@ describe("the record's layout 3", () => {
       assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
     }
     assert.match(episodeFault({ ...made(), session: "yes" }), /session/);
+    // The keys she may change are sessions.js's own (F7 fix 11).
+    assert.deepEqual(SESSION_EDITS, EDITS);
+    // A session's teachings asked for, when, and her decisions and changes of what Claude read, item by item (F7).
+    const decided = { principles: { 1: "kept", 3: "dropped" }, recurringPrinciples: { 2: "kept" }, reelIdeas: { 4: "dropped" } };
+    const edits = { principles: { 1: { name: "Price the outcome", example_application: "A florist names her price." } }, recurringPrinciples: { 2: { text: "Decide once." } }, reelIdeas: { 4: { idea: "One number", words: "Every Monday.", why: "Short." } } };
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided, edits } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, decided: {}, edits: {} } }), "");
+    for (const bad of [
+      { asked: "later" }, { asked: 4 },
+      { decided: "all" }, { decided: { principles: { 1: "yes" } } }, { decided: { principles: { 0: "kept" } } }, { decided: { principles: { one: "kept" } } }, { decided: { ideas: { 1: "kept" } } }, { decided: { principles: [] } },
+      { edits: [] }, { edits: { principles: { 1: { steps: "x" } } } }, { edits: { principles: { 1: { name: "" } } } }, { edits: { recurringPrinciples: { 1: { name: "x" } } } },
+      { edits: { reelIdeas: { 1: { principle: "2" } } } }, { edits: { principles: { 1: "x" } } }, { edits: { principles: { x: { name: "a" } } } }, { edits: { other: { 1: { text: "a" } } } }
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
+    }
+    // The empty session revision a video answered again as a session owes the BRIMM Ops page, or the revision it was written as (F9b).
+    for (const emptyRevision of ["owed", 1, 4]) assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), "", String(emptyRevision));
+    for (const emptyRevision of [null, "", "yes", 0, -1, 1.5, true]) assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), /session/, JSON.stringify(emptyRevision));
+    // A client's agreement to a Reel cut from a session (F8b): the Reel idea's number and the day it was noted, and no other key,
+    // since who agreed stays on one Mac and the record keeps only that it was noted.
+    const DAY = "2026-10-23";
+    for (const agreed of [[], [{ n: 1, at: DAY }], [{ n: 2, at: DAY }, { n: 11, at: "2024-02-29" }]]) {
+      assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, agreed } }), "", JSON.stringify(agreed));
+    }
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "finished", session: { ...SESSION, agreed: [{ n: 3, at: DAY }], cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } } }), "");
+    for (const agreed of [
+      null, "all", {}, [1], [null], ["2026-10-23"],
+      [{ n: 0, at: DAY }], [{ n: "2", at: DAY }], [{ n: 1.5, at: DAY }], [{ n: -1, at: DAY }], [{ n: null, at: DAY }], [{ at: DAY }],
+      [{ n: 1 }], [{ n: 1, at: null }], [{ n: 1, at: 20261023 }], [{ n: 1, at: "2026-02-30" }], [{ n: 1, at: "2025-02-29" }], [{ n: 1, at: "2026-13-01" }],
+      [{ n: 1, at: "2026-10-23T09:00:00-05:00" }], [{ n: 1, at: "2026-10-23T00:00:00Z" }], [{ n: 1, at: "23 Oct" }], [{ n: 1, at: "2026-1-3" }],
+      [{ n: 1, at: DAY, who: "Jane Doe" }], [{ n: 1, at: DAY, by: "Mac Studio" }], [{ n: 1, at: DAY }, { n: 2, at: DAY, text: "x" }], [{ n: 1, at: DAY }, { n: 2 }]
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed } }), /session/, JSON.stringify(agreed));
+    }
+    // Both on one session mark (the merge of F8b into F9b): each is checked as its own side checks it, whatever the other holds.
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, agreed: [{ n: 2, at: DAY }], emptyRevision: 3 } }), "");
+    assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed: [{ n: 2, at: DAY, who: "Jane Doe" }], emptyRevision: "owed" } }), /session/);
+    assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed: [{ n: 2, at: DAY }], emptyRevision: 0 } }), /session/);
     for (const bad of [{ kind: "" }, { model: 1 }, { at: "later" }, { on: "" }, { account: null }, { outcome: "" }]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, ...bad } }), /reading/, JSON.stringify(bad));
     }
     assert.match(episodeFault({ ...made(), reading: "done" }), /reading/);
+    // A session's reading names its teachings file, in the episode's own folder (F7 fix 11).
+    assert.equal(episodeFault({ ...made(), reading: { ...READING, kind: "session", principles: "Session, 2026-10-22.principles.json" } }), "");
+    for (const principles of ["../x.principles.json", "/tmp/x.principles.json", "history/x.principles.json", "x.json", "", ".principles.json", 4]) {
+      assert.match(episodeFault({ ...made(), reading: { ...READING, kind: "session", principles } }), /reading/, JSON.stringify(principles));
+    }
   });
   it("is written as version 3 for an unanswered record, stays at 3, and is never written without a kind it needs", () => {
     const folder = mkdtempSync(join(tmpdir(), "layout-"));

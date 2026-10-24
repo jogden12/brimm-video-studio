@@ -90,6 +90,9 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
+    // No test reads this computer's own Claude settings: `behind` looks at the environment and the managed settings folder
+    // (edit.js lockLoosened), and here they are empty and in the test's own folder.
+    env: {}, managedDir: join(dir, "managed"),
     wait: async (ms) => {
       waits.push(ms);
       clock += ms;
@@ -151,10 +154,14 @@ export const EDITED = {
 
 /** What the Final Cut finish refuses for now, in either version of the hand-off: a client or group session, whose own finish
     comes with its teachings, and a video not yet answered, which has no kind to finish as. Each as [what it is, the record's
-    own fields, the refusal as a function of how the video is named]. */
+    own fields, the refusal as a function of how the video is named, how the video is named as a function of its label]. A
+    session's name is its session label, as `kind` writes it in the same write as its mark (edit.js answerKind), and each
+    refusal names the video as edit.js names it (episode.js shownName): a session by that name, a video not yet answered by its
+    label, else by its short id. */
+const SESSION_NAME = "Session, 2026-10-14";
 export const NOT_YET = [
-  ["a client or group session", { kind: "session" }, (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`],
-  ["a video not yet answered", { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } }, (who) => `${who} is not answered yet: say what it is first. Nothing was written.`]
+  ["a client or group session", { kind: "session", name: { text: SESSION_NAME, placeholder: false } }, (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`, () => SESSION_NAME],
+  ["a video not yet answered", { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } }, (who) => `${who} is not answered yet: say what it is first. Nothing was written.`, (label) => label || `a video not yet answered (${ID.slice(-6)})`]
 ];
 
 /** The files the import put in the episode folder: the raw video, its cut plan, and the two clips it cut. */

@@ -1,10 +1,16 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio, on this Mac's own disk: her sessions in the Claude app run there. It
 // holds a CLAUDE.md, the folder's settings for Claude Code, the brimm-edit skill, and Pictures/ for her own pictures. The
-// settings let her session run brimm-video's edit.js and nothing else: they deny the editing and web tools, lock the
-// permission mode, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook answers in
-// every mode, which a mode alone does not: the Code tab may not honour dontAsk, and a mode picked there overrides the
-// folder's default. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes edit.js's path,
-// outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
+// settings let her session run brimm-video's edit.js and nothing else: they deny the editing and web tools, turn the Auto
+// and Bypass modes off, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook
+// answers in every mode, which a mode alone does not: a mode picked in the Code tab overrides the folder's default. So the
+// folder's mode is "default", not dontAsk: dontAsk denies AskUserQuestion, the card she answers what a video is on (spec
+// 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
+// settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
+// off. What a settings file in her folder, or the user's or the managed settings, can change of that is not for this file but for
+// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when her folder has
+// a .claude/settings.local.json, when its own .claude/settings.json no longer holds the lock (lockBroken, here), or when the user
+// settings or the managed settings turn hooks off. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
+// edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -19,20 +25,44 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
 
 /** The folder's settings for Claude Code. The hook runs in exec form, with no shell, so each path is one argument as it is,
     and a hook that cannot run blocks the call (onFailure, Claude Code 2.1.295 or later) rather than letting it through. It
-    is given her folder, which reads must stay in. */
+    is given her folder, which reads must stay in. Hooks are said to be on (disableAllHooks false): the mode rests on it. */
 function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
-      defaultMode: "dontAsk",
+      defaultMode: "default",
       allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`],
       deny: ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "mcp__*", "Monitor", "RemoteTrigger", "SendMessage"],
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
     },
+    disableAllHooks: false,
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
     }
   };
+}
+
+/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on,
+    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is true: absent, as main's studio.js wrote
+    the folder, or false, it turns no hook off), "guard" (no entry with the guard
+    hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
+    node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
+    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date". */
+export function lockBroken(settings, { checkout, folder }) {
+  const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const want = settingsOf({ checkout, node: "", folder });
+  const entry = want.hooks.PreToolUse[0];
+  const hook = entry.hooks[0];
+  const broken = [];
+  if (settings.disableAllHooks === true) broken.push("hooks");
+  const entries = object(settings.hooks) && Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : [];
+  const guarded = entries.some((e) => object(e) && e.matcher === entry.matcher && Array.isArray(e.hooks)
+    && e.hooks.some((h) => object(h) && h.type === hook.type && h.command === hook.command && h.onFailure === hook.onFailure && Array.isArray(h.args) && h.args[0] === hook.args[0] && h.args[2] === hook.args[2]));
+  if (!guarded) broken.push("guard");
+  const permissions = object(settings.permissions) ? settings.permissions : {};
+  if (permissions.disableBypassPermissionsMode !== want.permissions.disableBypassPermissionsMode) broken.push("bypass");
+  if (permissions.disableAutoMode !== want.permissions.disableAutoMode) broken.push("auto");
+  return broken;
 }
 
 /** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. */
