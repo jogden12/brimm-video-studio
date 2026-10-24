@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, printWhy, gated } from "./gate.js";
+import { UNSCOPED, gateFor, printWhy, gated, leftAlone, sessionNotCleared } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -2381,7 +2381,17 @@ function recordDifferences(a, b) {
   ].filter(([, x, y]) => x !== y);
   const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
   const shown = (what) => ["Who has it open", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
-  const said = names ? rows.map(([what, x, y]) => (shown(what) ? [withoutNames(what, names, [], { paths: false }), x, y] : [what, null, null])) : rows;
+  // What each side is, and its session mark, in words of brimm-video's own that name nothing, so that she sees which side holds the
+  // answer or the mark that keeping the other would drop (resolveIn refuses that).
+  const kindWords = (r) => (recordKind(r) === null ? (leftAlone(r) ? "left alone" : "not answered yet") : KIND_SAID[recordKind(r)]);
+  const markWords = (r) => (r.session === undefined || r.session === null ? "none" : sessionNotCleared(r) ? "marked, not cleared" : "cleared by her click");
+  const gatedRow = ([what, x, y]) => {
+    if (shown(what)) return [withoutNames(what, names, [], { paths: false }), x, y];
+    if (what === "Kind") return ["What it is", kindWords(a), kindWords(b)];
+    if (what === "Session") return ["Its session mark", markWords(a), markWords(b)];
+    return [what, null, null];
+  };
+  const said = names ? rows.map(gatedRow).filter(([, x, y]) => x === null || x !== y) : rows;
   // Two sides are never said to hold the same unless they do, but for their rev and who wrote them.
   return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
@@ -2433,6 +2443,16 @@ async function resolveConflict(ctx, rest) {
 
 /** What resolve says when keeping either side here could lose a change. */
 const NEEDS_JASON = "A conflict needs Jason: tell him the episode's name.";
+
+/** Why the side `kept` of a record's conflict may not be kept over the side `other`, in plain words, or "": `other` marks the video a
+    client or group session not cleared (gate.js sessionNotCleared: kind session, or a mark not cleared by her click) and `kept` is
+    not one, which would clear the mark with no dialog; or `other` holds her answer and `kept` is a video waiting for its answer,
+    which would take the answer back. Each names the video as edit.js names it (shownName). */
+function keptOverWhy(kept, other) {
+  if (sessionNotCleared(other) && !sessionNotCleared(kept)) return `One side marks ${shownName(other)} a client or group session: keep that side; the mark is cleared only by her click (say "clear the session mark").`;
+  if (recordKind(other) !== null && recordKind(kept) === null) return `One side has ${shownName(kept)} answered: keep that side; an answer is changed only by saying what it is again.`;
+  return "";
+}
 
 /** An error's words for a person: the copy rule's own "Nothing was copied." and the closing full stop taken off. */
 const plainWhy = (e) => String(e && e.message ? e.message : e).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
@@ -2532,6 +2552,12 @@ async function resolveIn(ctx, found, keep) {
   }
   if (blocked) return refuse(ctx, blocked);
   if (isRecord && keep === "B" && !copyRecord) return refuse(ctx, "The copy cannot be read, so it cannot be kept. Keep A.");
+  // A side is never kept over one that marks the video a session not cleared (only her click on the dialog clears a mark), nor
+  // over one that holds her answer, which keeping the other would take back.
+  if (isRecord && copyRecord && !sameRecord(record, copyRecord)) {
+    const why = keptOverWhy(keep === "B" ? copyRecord : record, keep === "B" ? record : copyRecord);
+    if (why) return refuse(ctx, why);
+  }
   const aHere = existsSync(at(of));
   if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B, or ask Jason.`);
   // 1. Set aside, by the rule, every file this step replaces or deletes, and see each is whole there. A record copy kept as B,

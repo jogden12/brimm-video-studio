@@ -368,6 +368,52 @@ describe("a raw reading on a Mac the video is not on yet (item 6)", () => {
   });
 });
 
+describe("resolve never clears a session mark, nor takes back an answer, by keeping the other side (item 14)", () => {
+  const SESSION = { kind: "session", answer: { ...ANSWERED, private: "yes" }, name: { text: SESSION_NAME, placeholder: false }, session: markOf(null), editing: null };
+  // The other Mac's take-over, written on the claim before the mark: no mark, and the name it had.
+  const FINISHED = { kind: "finished", answer: ANSWERED, session: undefined, name: { text: "Pricing talk", placeholder: true }, editing: { by: "Sallie's laptop", since: AT } };
+  const WAITING = { kind: null, answer: { state: "needs your answer", guess: "raw", seen: "", came: "camera", match: null } };
+  /** The made-up video with `inForce` on its record, and Dropbox's conflicted copy of that record holding `copy`. */
+  function conflicted(t, inForce, copy) {
+    const found = episodeFor(t, { record: { version: 3, label: LABEL, ...inForce }, files: LIGHT });
+    const rel = "record/0001 (Sallie's laptop's conflicted copy 2026-10-20).json";
+    writeFileSync(join(found.folder, rel), recordText({ ...found.record, ...copy }));
+    return { found, rel };
+  }
+  const MARKS = `One side marks ${SESSION_NAME} a client or group session: keep that side; the mark is cleared only by her click (say "clear the session mark").`;
+  const ANSWERS = (who) => `One side has ${who} answered: keep that side; an answer is changed only by saying what it is again.`;
+  for (const [what, inForce, copy, keep, said, words] of [
+    ["the session in force, the copy a take-over of its claim", SESSION, FINISHED, "B", MARKS, SESSION_NAME],
+    ["the copy the session, the record in force another kind", FINISHED, SESSION, "A", MARKS, SESSION_NAME],
+    ["the copy answered, the record in force waiting for its answer", WAITING, FINISHED, "A", ANSWERS(LABEL), LABEL]
+  ]) {
+    it(`refuses, with the record, history/ and the copy as they were: ${what}`, async () => {
+      const t = setup();
+      const { found, rel } = conflicted(t, inForce, copy);
+      const shown = await on(t.ctx.deps, "resolve", words);
+      assert.equal(shown.code, 0, shown.text);
+      const before = readFileSync(join(found.folder, rel), "utf8");
+      const r = await on(t.ctx.deps, "resolve", words, "--keep", keep);
+      assert.deepEqual([r.code, r.said], [1, [said]]);
+      assert.deepEqual([readdirSync(join(found.folder, "record")).sort(), existsSync(join(found.folder, "history")), readFileSync(join(found.folder, rel), "utf8")], [["0001 (Sallie's laptop's conflicted copy 2026-10-20).json", "0001.json"], false, before]);
+      assert.doesNotMatch(r.text, /Pricing/);
+      // The other side is kept as before.
+      const other = await on(t.ctx.deps, "resolve", words, "--keep", keep === "A" ? "B" : "A");
+      assert.equal(other.code, 0, other.text);
+      t.done();
+    });
+  }
+  it("shows what each side is, and whether it is marked, in words that name nothing", async () => {
+    const t = setup();
+    conflicted(t, FINISHED, SESSION);
+    const r = await on(t.ctx.deps, "resolve", SESSION_NAME);
+    assert.ok(r.said.includes("  What it is: A: finished by your editor; B: a client or group session"), r.text);
+    assert.ok(r.said.includes("  Its session mark: A: none; B: marked, not cleared"), r.text);
+    assert.doesNotMatch(r.text, /Pricing/);
+    t.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();
