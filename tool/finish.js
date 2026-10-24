@@ -316,10 +316,31 @@ const heldSession = (record) => kindOf(record) !== null && gated(record);
       the id such an episode went to the page under;
     - `holdsSession(one)`: whether an episode, as { folder, record }, is a client or group session whose mark is not cleared, by
       the gate's predicate (a video not yet answered is none), its record or any conflicted copy of its records: the gate holds a
-      video by any of them. */
+      video by any of them;
+    - `besideOf(record, folder)`: the other versions of the record's video, as { folder, record }: every episode of Episodes whose
+      walk ends at the id the record's own walk ends at (the members of setOf, as the hand-off writers read them), the record's own
+      episode left out by its id. Episodes are grouped so once, the first time it is asked;
+    - `sessionsBeside(record, folder)`: those of them that hold a session not cleared (holdsSession). A video one of whose versions
+      does is held as a session (edit.js), fail closed, until it is answered as one itself or that mark is cleared. */
 export function linksOf(root) {
   const view = viewOf(root);
   const through = (id) => view.all().filter((one) => one.record && walk(view, one.record, one.folder).chain.some((link) => link.record.id === id));
+  const holdsSession = (one) => [one.record, ...view.copiesOf(one.folder)].some(heldSession);
+  let groups = null;
+  /** The episodes whose walk ends at `first`, read the first time any is asked for. */
+  const groupOf = (first) => {
+    if (!groups) {
+      groups = new Map();
+      for (const one of view.all()) {
+        if (!one.record) continue;
+        const at = walk(view, one.record, one.folder).first;
+        if (!groups.has(at)) groups.set(at, []);
+        groups.get(at).push(one);
+      }
+    }
+    return groups.get(first) || [];
+  };
+  const besideOf = (record, folder) => groupOf(walk(view, record, folder || null).first).filter((one) => one.record.id !== record.id);
   return {
     find: (id) => view.find(id),
     chainOf: (record, folder) => {
@@ -335,7 +356,9 @@ export function linksOf(root) {
     setOf: (first) => setOf(view, { chain: [], first }),
     throughOf: through,
     handedOffThrough: (id) => through(id).filter((one) => handedOff(one.folder, one.record)),
-    holdsSession: (one) => [one.record, ...view.copiesOf(one.folder)].some(heldSession)
+    holdsSession,
+    besideOf,
+    sessionsBeside: (record, folder) => besideOf(record, folder).filter(holdsSession)
   };
 }
 

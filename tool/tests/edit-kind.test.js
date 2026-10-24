@@ -1234,10 +1234,11 @@ describe("kind: the version it is of, and how it came (fix round 1, 4 to 6)", ()
     // The older video is marked a session afterwards.
     const older = readEpisode(join(t.root, "Episodes", FOLDER)).record;
     writeFileSync(recordFile(join(t.root, "Episodes", FOLDER), 2), recordText({ ...older, rev: 2, ...SESSION_OF }));
-    const refused = await on(t.ctx.deps, "kind", "Coaching call", "raw", "--private", "no", "--again");
-    assert.deepEqual([refused.code, refused.said], [1, ["That video is a client or group session, so this new version is one too: answer it as a session."]]);
+    // It is held as a session from then on (final fix 1): named and found by its label, and answered only as one.
+    const refused = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--again");
+    assert.deepEqual([refused.code, refused.said], [1, [`${LABEL} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`]]);
     assert.deepEqual([readEpisode(added.folder).record.rev, t.started, t.waits], [2, [], []]);
-    const allowed = await on(t.ctx.deps, "kind", "Coaching call", "session", "--private", "yes", "--again");
+    const allowed = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--again");
     assert.equal(allowed.code, 0, allowed.text);
     assert.equal(readEpisode(added.folder).record.versionOf, ID);
     t.done();
@@ -1352,6 +1353,10 @@ describe("kind --version-of, and the links around it (F3b)", () => {
   const GONE = (handed, name) => `${handed} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
   /** The words of rule (e). */
   const SESSION_SET = (label) => `${label} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
+  /** The words for a video held as a session already, one of whose versions is a session not cleared (final fix 1): found by its
+      label or short id, named by its label, or with none as "a video (<short id>)". */
+  const HELD_AS = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
+  const MINE = `a video (${ID.slice(-6)})`;
   /** Nothing was written, no claim was made, and nothing was started: the record `found` as it was. */
   const writesNothing = (t, found, rev = 1) => assert.deepEqual([readEpisode(found.folder).record.rev, t.started, t.waits], [rev, [], []]);
   /** Write the next record of the episode in `found`: the one there with `over` laid on it. */
@@ -1664,8 +1669,8 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       // S is a session, a new version of the video (allowed: a session may be a version of anything).
       answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { ...SESSION_FIELDS, label: "Video of 11 Oct", versionOf: ID } });
       const other = answeredVideo(t, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
-      const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", ANOTHER);
-      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(NAME)]]);
+      const r = await on(t.ctx.deps, "kind", ID.slice(-6), "finished", "--private", "no", "--again", "--version-of", ANOTHER);
+      assert.deepEqual([r.code, r.said], [1, [HELD_AS(MINE)]]);
       writesNothing(t, mine);
       assert.equal(readEpisode(mine.folder).record.versionOf ?? null, null);
       assert.equal(readEpisode(other.folder).record.rev, 1);
@@ -1677,10 +1682,10 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       answeredVideo(t, { id: HANDED, folder: "2026-10-18 Third cut (Mac Studio)", file: "Third cut.mov", over: { versionOf: ID } });
       answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { ...SESSION_FIELDS, label: "Video of 11 Oct", versionOf: HANDED } });
       answeredVideo(t, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
-      const refused = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", ANOTHER);
-      assert.deepEqual([refused.code, refused.said], [1, [SESSION_SET(NAME)]]);
+      const refused = await on(t.ctx.deps, "kind", ID.slice(-6), "finished", "--private", "no", "--again", "--version-of", ANOTHER);
+      assert.deepEqual([refused.code, refused.said], [1, [HELD_AS(MINE)]]);
       // A session answer may be a version of anything.
-      const session = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again", "--version-of", ANOTHER);
+      const session = await on(t.ctx.deps, "kind", ID.slice(-6), "session", "--private", "yes", "--again", "--version-of", ANOTHER);
       assert.equal(session.code, 0, session.text);
       t.done();
       const u = setup();
@@ -1698,7 +1703,7 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       answeredVideo(t, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
       duringWaits(t, CLAIM_WAIT_MS, () => rewrite(s, { versionOf: ID }));
       const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", ANOTHER);
-      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(NAME)]]);
+      assert.deepEqual([r.code, r.said], [1, [HELD_AS(NAME)]]);
       t.done();
     });
   });
@@ -1723,8 +1728,8 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       const s = answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { versionOf: ID } });
       writeFileSync(join(s.folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-20).json"), recordText({ ...readEpisode(s.folder).record, ...SESSION_FIELDS, label: "Video of 11 Oct" }));
       answeredVideo(t, { id: ANOTHER, folder: "2026-10-12 Another (Mac Studio)", file: "Another.mov" });
-      const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", ANOTHER);
-      assert.deepEqual([r.code, r.said], [1, [SESSION_SET(NAME)]]);
+      const r = await on(t.ctx.deps, "kind", ID.slice(-6), "finished", "--private", "no", "--again", "--version-of", ANOTHER);
+      assert.deepEqual([r.code, r.said], [1, [HELD_AS(MINE)]]);
       t.done();
     });
   });
@@ -1784,12 +1789,13 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       first(t);
       answeredVideo(t, { id: ELSEWHERE, folder: "2026-10-11 Elsewhere (Mac Studio)", file: "Elsewhere.mov", over: { ...SESSION_FIELDS, label: "Video of 11 Oct", versionOf: ID } });
       const h = answeredVideo(t, { id: HANDED, folder: "2026-10-18 Third cut (Mac Studio)", file: "Third cut.mov", over: { kind: "raw", versionOf: ID, finished: FINISHED } });
-      const refused = await on(t.ctx.deps, "kind", "Third cut", "finished", "--private", "no", "--again");
-      assert.deepEqual([refused.code, refused.said], [1, [SESSION_SET("Third cut")]]);
+      // It is held as a session: found by its label, and answered only as one (final fix 1).
+      const refused = await on(t.ctx.deps, "kind", `Video of ${HANDED}`, "finished", "--private", "no", "--again");
+      assert.deepEqual([refused.code, refused.said], [1, [HELD_AS(`Video of ${HANDED}`)]]);
       assert.deepEqual([readEpisode(h.folder).record.rev, t.started, t.waits], [1, [], []]);
-      const named = await on(t.ctx.deps, "kind", "Third cut", "raw", "--private", "no", "--again", "--version-of", ID);
-      assert.deepEqual([named.code, named.said], [1, [SESSION_SET("Third cut")]]);
-      const session = await on(t.ctx.deps, "kind", "Third cut", "session", "--private", "yes", "--again");
+      const named = await on(t.ctx.deps, "kind", `Video of ${HANDED}`, "raw", "--private", "no", "--again", "--version-of", ID);
+      assert.deepEqual([named.code, named.said], [1, [HELD_AS(`Video of ${HANDED}`)]]);
+      const session = await on(t.ctx.deps, "kind", `Video of ${HANDED}`, "session", "--private", "yes", "--again");
       assert.equal(session.code, 0, session.text);
       t.done();
     });

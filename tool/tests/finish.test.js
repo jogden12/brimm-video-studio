@@ -1921,7 +1921,8 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
         const how = `${earlier ? "earlier" : "later"}: ${what}`;
         const before = episodesTree(t);
         const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
-        assert.deepEqual([r.code, r.text], [1, refusedAs(SHOWN)], how);
+        // It is held as a session (final fix 1): the gate refuses spell before anything of it is read.
+        assert.deepEqual([r.code, r.text], [1, "This video is a version of a client or group session: answer it as a session too, or ask Jason."], how);
         assert.deepEqual(episodesTree(t), before, `${how}: final/ and the record as they were, and no spelling kept`);
         t.done();
       }

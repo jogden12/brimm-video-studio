@@ -833,7 +833,8 @@ describe("spell … offers, where the hand-off would go", () => {
     firstCut(t, { record: { kind: "session" } });
     const before = tree(t);
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
-    assert.deepEqual([r.code, r.text], [1, `${SHOWN} is a version of a client or group session: ask Jason. Nothing was written.`]);
+    // It is held as a session (final fix 1): the gate refuses spell before anything of it is read.
+    assert.deepEqual([r.code, r.text], [1, "This video is a version of a client or group session: answer it as a session too, or ask Jason."]);
     assert.deepEqual(tree(t), before);
     assert.equal(reread(found).offers.answered, undefined);
     t.done();

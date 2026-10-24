@@ -6,14 +6,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { HELP, SHOWN_MARKER, editMain } from "../edit.js";
-import { recordText } from "../episode.js";
+import { readEpisode, recordFile, recordText } from "../episode.js";
 import { handoffTarget } from "../finish.js";
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
 import { askBlocked } from "../unedited.js";
-import { setup, episodeFor, episodeAs, reread, FOLDER, ID } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -411,6 +412,127 @@ describe("resolve never clears a session mark, nor takes back an answer, by keep
     assert.ok(r.said.includes("  Its session mark: A: none; B: marked, not cleared"), r.text);
     assert.doesNotMatch(r.text, /Pricing/);
     t.done();
+  });
+});
+
+// --- Items 1 and 15: a session mark follows a video's other versions, held as sessions (fail closed) ---
+
+const OLD = "e-20261010-a0a0a0";
+const OLD_FOLDER = "2026-10-10 Coaching Jane Doe (Mac Studio)";
+const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+/** Put `text` at `rel` in `folder`. */
+const lay = (folder, rel, text) => {
+  mkdirSync(dirname(join(folder, rel)), { recursive: true });
+  writeFileSync(join(folder, rel), text);
+};
+/** A version 2 hand-off of the video whose first id is `id`, at `revision`. */
+const handoff2 = (id, revision) => JSON.stringify({ format: "brimm-video hand-off", version: 2, revision, video: { id } });
+/** The older video A, finished and handed off as version 2 (revision 1) under its own id, its final/ holding its transcripts, named
+    for a client; and its later version B (the made-up episode), finished and handed off under A's id (revision 2). `aOver` and
+    `bOver` are laid on their records. */
+function twoVersions(t, { aOver = {}, bOver = {} } = {}) {
+  writeSettings(t.home, { handoffVersion: 2 });
+  const older = episodeAs(t, { id: OLD, name: OLD_FOLDER, record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Coaching Jane Doe", placeholder: false }, finished: { revision: 1, at: AT, on: "Mac Studio", handoff: "final/Coaching Jane Doe.brimm-ops.json", parts: {} }, ...aOver } });
+  lay(older.folder, "final/Coaching Jane Doe.brimm-ops.json", handoff2(OLD, 1));
+  lay(older.folder, "final/Talk.srt", "1\n00:00:00,000 --> 00:00:02,000\nJane Doe told me her prices\n");
+  lay(older.folder, "final/Talk.transcript.txt", "[0:00] Jane Doe told me her prices\n");
+  lay(older.folder, "Talk.transcript.txt", "[0:00] Jane Doe told me her prices\n");
+  const newer = episodeFor(t, {
+    record: { version: 3, kind: "finished", answer: ANSWERED, label: LABEL, versionOf: OLD, editing: null, name: { text: "Pricing talk", placeholder: true }, finished: { revision: 2, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} }, ...bOver },
+    files: { "Pricing talk.mp4": "v", "Pricing talk.cut-plan.json": "{}", "final/Pricing talk.brimm-ops.json": handoff2(OLD, 2), "final/Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nJane Doe told me her prices\n", "final/Pricing talk.transcript.txt": "[0:00] Jane Doe told me her prices" }
+  });
+  return { older, newer };
+}
+/** What final/ of `found` holds. */
+const finalOf = (found) => listAll(join(found.folder, "final"));
+/** A line said of A, held: by its short id, as it has no label. */
+const A = "a video (a0a0a0)";
+
+describe("a session mark follows the video's other versions: each is held as a session until answered as one (items 1, 15)", () => {
+  it("B marked while A is handed off: names A to answer too, writes nothing into A's folder, and holds A as a session", async () => {
+    const t = setup();
+    const { older, newer } = twoVersions(t);
+    const aFinal = finalOf(older);
+    const r = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.includes(`${SESSION_NAME} has another version, held as a client or group session until it is answered as one: answer ${A} as a session too.`), r.text);
+    assert.deepEqual(finalOf(newer), [`${SESSION_NAME}.brimm-ops.json`]);
+    // Spec 1: nothing is written into another version's folder.
+    assert.deepEqual([finalOf(older), reread(older).rev], [aFinal, 1]);
+    // A is held: found by its short id and named so, never by its folder or its name; nothing of its words reaches the chat.
+    const words = await on(t.ctx.deps, "show", "Coaching Jane Doe", "transcript");
+    assert.equal(words.code, 1);
+    assert.doesNotMatch(words.text, /told me/);
+    const shown = await on(t.ctx.deps, "show", "a0a0a0", "transcript");
+    assert.deepEqual([shown.code, shown.said], [0, [`Opened ${A}'s transcript in TextEdit on this Mac.`]]);
+    const spell = await on(t.ctx.deps, "spell", "a0a0a0", "add", "Jane", "Jayne");
+    assert.deepEqual([spell.code, spell.said], [1, [HELD]]);
+    for (const [command, ...rest] of [["finish"], ["push"], ["title"], ["ask"], ["teachings"], ["name", "Another name"]]) {
+      const refused = await on(t.ctx.deps, command, "a0a0a0", ...rest);
+      assert.deepEqual([refused.code, refused.said], [1, [HELD]], command);
+    }
+    const again = await on(t.ctx.deps, "kind", "a0a0a0", "finished", "--private", "no", "--again");
+    assert.deepEqual([again.code, again.said], [1, [`${A} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`]]);
+    const episodes = await on(t.ctx.deps, "episodes");
+    assert.ok(episodes.said.includes(`  ${A}: a version of a client or group session, of 0:10, id a0a0a0`), episodes.text);
+    // Only what she said is said back of it.
+    for (const r2 of [r, words, shown, spell, again, episodes]) assert.doesNotMatch(r2.text.replace('"Coaching Jane Doe"', ""), SECRET);
+    assert.equal(reread(older).rev, 1);
+    t.done();
+  });
+  it("A's own kind … session --again then sweeps A's final/, and names no version still to answer", async () => {
+    const t = setup();
+    const { older } = twoVersions(t);
+    assert.equal((await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again")).code, 0);
+    const r = await on(t.ctx.deps, "kind", "a0a0a0", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    const record = reread(older);
+    assert.deepEqual([record.kind, record.session.cleared], ["session", null]);
+    assert.deepEqual(finalOf(older), [`${record.name.text}.brimm-ops.json`]);
+    assert.doesNotMatch(r.text, /another version|other versions/);
+    assert.doesNotMatch(r.text, SECRET);
+    t.done();
+  });
+  it("A marked while B is handed off: names B by its label to answer too, and holds B, whose own answer sweeps its final/", async () => {
+    const t = setup();
+    const { older, newer } = twoVersions(t);
+    const bFinal = finalOf(newer);
+    const r = await on(t.ctx.deps, "kind", "Coaching Jane Doe", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    const label = reread(older).name.text;
+    assert.ok(r.said.includes(`${label} has another version, held as a client or group session until it is answered as one: answer ${LABEL} (3fa9c1) as a session too.`), r.text);
+    assert.deepEqual([finalOf(newer), reread(newer).rev], [bFinal, 1]);
+    const shown = await on(t.ctx.deps, "show", LABEL, "transcript");
+    assert.equal(shown.code, 1, shown.text);
+    assert.doesNotMatch(shown.text, /told me/);
+    assert.deepEqual((await on(t.ctx.deps, "spell", LABEL, "add", "Jane", "Jayne")).said, [HELD]);
+    assert.equal((await on(t.ctx.deps, "show", "Pricing talk", "transcript")).code, 1, "not found by its name");
+    const own = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes", "--again");
+    assert.equal(own.code, 0, own.text);
+    assert.deepEqual(finalOf(newer), [`${reread(newer).name.text}.brimm-ops.json`]);
+    t.done();
+  });
+  it("holds a newer version of a session, and an older one whose newer version is marked; clearing that mark lifts it", async () => {
+    const MARKED = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: "Session, 2026-10-10", placeholder: false } };
+    for (const [what, aOver, bOver, held, said] of [
+      ["a newer version of a session", MARKED, {}, () => "Pricing talk", LABEL],
+      ["an older one whose newer version is marked", {}, { ...MARKED, name: { text: SESSION_NAME, placeholder: false } }, (t) => "Coaching Jane Doe", A]
+    ]) {
+      const t = setup();
+      const { older, newer } = twoVersions(t, { aOver, bOver });
+      const session = aOver.kind ? older : newer;
+      const other = aOver.kind ? newer : older;
+      const id = other.record.id.slice(-6);
+      assert.deepEqual((await on(t.ctx.deps, "spell", id, "add", "Jane", "Jayne")).said, [HELD], what);
+      assert.equal((await on(t.ctx.deps, "spell", held(t), "add", "Jane", "Jayne")).code, 1, `${what}: not found by its name`);
+      assert.ok((await on(t.ctx.deps, "episodes")).said.some((line) => line.startsWith(`  ${said}: a version of a client or group session`)), what);
+      // Her click on the dialog clears the session's mark: then the other is held no more.
+      const cleared = readEpisode(session.folder).record;
+      writeFileSync(recordFile(session.folder, cleared.rev + 1), recordText({ ...cleared, rev: cleared.rev + 1, kind: "finished", session: markOf(CLICKED) }));
+      const spell = await on(t.ctx.deps, "spell", id, "add", "Jane", "Jayne");
+      assert.notDeepEqual(spell.said, [HELD], `${what}: ${spell.text}`);
+      t.done();
+    }
   });
 });
 

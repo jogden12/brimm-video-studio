@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, printWhy, gated, leftAlone, sessionNotCleared } from "./gate.js";
+import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -261,7 +261,9 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
       to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
       refuses every command. With today's settings and records it is passed over, as it always was.
     - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
-      by the record in force. A copy that is not shaped as a record (recordShaped) is not asked. */
+      by the record in force. A copy that is not shaped as a record (recordShaped) is not asked.
+    - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
+      lets run, the commands of a video not yet answered. */
 function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
@@ -271,6 +273,11 @@ function gateOf(ctx, e, records, said, inForce) {
   const lapsed = teachingsLapsed(ctx.settings, ctx.now());
   for (const record of records.filter(recordShaped)) {
     const why = gateFor(ctx.asked.command, record, { teachingsOn: on, lapsed, said }, ctx.asked.words);
+    if (why) return refused(why);
+  }
+  // A video one of whose other versions is a session not cleared is held as a session (episodeAt's `held`): fail closed.
+  if (e.held) {
+    const why = heldGateFor(ctx.asked.command);
     if (why) return refused(why);
   }
   return null;
@@ -287,8 +294,12 @@ async function leaveGateResult(ctx, found, command) {
     newer }. `read` is what readEpisode gave; `inForce` is the record in force: the whole one, or for a conflicted episode the
     newest whole record past its copies; `records` are the records it is known by, and all that is read of it: that one, and for
     a conflicted episode each conflicted copy of a record, as it is, which may not be whole. `newer` is the record a newer
-    brimm-video wrote, when one did, the one past the copies included; null otherwise. */
-function episodeAt(ctx, name) {
+    brimm-video wrote, when one did, the one past the copies included; null otherwise. `held` is whether the episode is held as
+    a session though none of its records is gated: one of them is answered, and one of its other versions (finish.js linksOf,
+    sessionsBeside), in its record or a conflicted copy of it, is a session not cleared. It is read only when it is asked, through
+    `links` when it is given (one reading of Episodes for every episode a command looks at), and is false for one a newer
+    brimm-video wrote. */
+function episodeAt(ctx, name, links = null) {
   const folder = join(ctx.episodes, name);
   const read = readEpisode(folder);
   const past = read.code === "CONFLICTED" ? readEpisode(folder, { pastCopies: true }) : null;
@@ -296,15 +307,38 @@ function episodeAt(ctx, name) {
   const copies = past ? conflictedCopies(folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(folder, c))) : [];
   const records = (read.record ? [read.record] : past ? [inForce, ...copies] : []).filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
   const newer = read.newer ? read.record : past && past.newer ? past.record : null;
-  return { name, folder, read, inForce, records, newer };
+  let held;
+  return {
+    name, folder, read, inForce, records, newer,
+    get held() {
+      if (held === undefined) {
+        const shaped = records.filter(recordShaped);
+        held = !newer && !shaped.some(gated) && shaped.some((r) => recordKind(r) !== null && (links || (links = linksOf(ctx.root))).sessionsBeside(r, folder).length > 0);
+      }
+      return held;
+    }
+  };
 }
 
 /** Whether an episode is gated (gate.js): any record it is known by is a video not yet answered or a session not cleared, so
-    that a conflicted copy of one names it so, as the gate asks it. A copy not shaped as a record is not asked. */
-const isGated = (e) => e.records.filter(recordShaped).some(gated);
+    that a conflicted copy of one names it so, as the gate asks it; or it is held as a session (episodeAt's `held`). A copy not
+    shaped as a record is not asked. */
+const isGated = (e) => e.records.filter(recordShaped).some(gated) || e.held;
 
-/** The record a gated episode is named by: the first of its records that is gated. */
-const gatedRecord = (e) => e.records.filter(recordShaped).find(gated);
+/** The record a gated episode is named by: the first of its records that is gated, or for one held as a session, its record in
+    force. */
+const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held ? e.inForce : undefined);
+
+/** How a video held as a session is named, wherever a gated one is named by its label (shownName): by its label, or with none (a
+    video from before the switch), as "a video (<short id>)", never by its name, which may be its file's. */
+const heldName = (r) => (typeof r.label === "string" && r.label.trim() ? r.label : `a video (${String(r.id).slice(-6)})`);
+
+/** How the record `r` of a gated episode is named: as shownName names a gated record, and by heldName when it is held as a session
+    (`held`) and not gated itself. */
+const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
+
+/** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
+const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
 
 /** An episode whose record cannot be read at all, as it is named on a Mac that does the light import: by the day and the Mac its
     folder's name begins and ends with (names.js episodeFolderName), as "an episode of 2026-10-22 from the Mac Studio whose
@@ -326,7 +360,7 @@ function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
     const r = gatedRecord(e);
-    return `${shownName(r)} (${String(r.id).slice(-6)})`;
+    return `${gatedName(r, e.held)} (${String(r.id).slice(-6)})`;
   }
   if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
   return e.name;
@@ -345,7 +379,7 @@ function secretsOf(ctx, e) {
   const isRecord = (r) => r !== null && typeof r === "object" && !Array.isArray(r);
   const history = recordNumbers(e.folder).map((n) => recordFile(e.folder, n)).filter((file) => ctx.isWhole(file)).map(recordAt);
   const all = [...e.records, ...history].filter(isRecord);
-  const labels = all.flatMap((r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""]).filter(Boolean);
+  const labels = all.flatMap((r) => [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""]).filter(Boolean);
   const given = all.map((r) => (isRecord(r.name) && typeof r.name.text === "string" ? r.name.text : "")).filter((n) => n && !labels.includes(n));
   const parts = all.flatMap((r) => [r.main, ...(Array.isArray(r.reels) ? r.reels : [])]).filter(isRecord);
   const projects = parts.flatMap((part) => (Array.isArray(part.pushed) ? part.pushed : [])).map((p) => (isRecord(p) ? p.project : ""));
@@ -400,24 +434,26 @@ function notRead(ctx, found, said = found.name) {
     by its own name, label and id as well, since `name` never renames its folder: by the newest whole record past the copies,
     and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
     there. Its `read` still says it is conflicted, so every command but `resolve` refuses it. In the lists of episodes it says,
-    each is named as listedAs names it: never a gated one by its folder.
+    each is named as listedAs names it: never a gated one by its folder. A video held as a session (episodeAt's `held`) is gated
+    so too, found by its label and short id, and `held` is true in what is given back.
     When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
     gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
     read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
     line the command says after hold nothing of its names (hideNames). */
 export function findEpisode(ctx, said) {
-  // An import that has not finished has no whole record, and is not an episode yet.
-  const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE");
+  // An import that has not finished has no whole record, and is not an episode yet. The versions of each are read once.
+  const links = linksOf(ctx.root);
+  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE");
   const known = (e) => e.records;
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
   // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)").
-  const labelled = (r) => {
-    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : ""].filter(Boolean);
+  const labelled = (e, r) => {
+    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""].filter(Boolean);
     return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
   };
-  const byLabel = all.filter((e) => known(e).some((r) => labelled(r).some((label) => spaced(label) === spaced(said))));
+  const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(said))));
   const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
   // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
   // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
@@ -430,7 +466,7 @@ export function findEpisode(ctx, said) {
     // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
     // foresaw names none of it (editMain).
     if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
-    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read };
+    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
@@ -570,8 +606,9 @@ function episodeLines(ctx, e, left, all, links) {
   const clean = cleanFor(ctx, e);
   if (isGated(e)) {
     const named = gatedRecord(e);
-    const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : "a client or group session, of";
-    lines.push(`  ${shownName(named)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    const held = e.held && !gated(named);
+    const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
+    lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null) lines.push(...cardLines(named, all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
   } else {
@@ -610,11 +647,11 @@ const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boole
     other, on a Mac that does not, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
-  const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
+  const links = linksOf(ctx.root);
+  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
   const shown = all.filter((e) => !isLeft(e));
   const left = all.filter(isLeft);
-  // The versions of a video are read from Episodes once, and only when a card has a video to offer a new version of.
-  const links = linksOf(ctx.root);
   if (!shown.length && !left.length) say("No episodes yet.");
   else if (shown.length) {
     say("Episodes, newest first:");
@@ -656,7 +693,7 @@ export async function episodes(ctx) {
       // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
       const label = labelIn(statuses, video, mac);
       const holding = holdingOf({ root: ctx.root, video, bytes: found.size });
-      if (!light && !label && !(holding && gated(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      if (!light && !label && !(holding && (gated(holding.record) || (recordKind(holding.record) !== null && links.sessionsBeside(holding.record).length)))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
       else {
         const who = label || capital(unlabelled(video, found.size));
         waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
@@ -684,7 +721,7 @@ export async function episodes(ctx) {
   for (const name of work) {
     const library = join(workFolder(ctx.home), name, `${name}.fcpbundle`);
     if (!statSync(library, { throwIfNoEntry: false })) continue;
-    const named = listedAs(ctx, episodeAt(ctx, name));
+    const named = listedAs(ctx, episodeAt(ctx, name, links));
     say(`  ${named === name ? `${name}.fcpbundle` : `The library of ${named}`}: ${sizeText(folderSize(library))}`);
   }
   try {
@@ -1290,20 +1327,22 @@ export async function status(ctx, rest) {
   const imports = importLines(ctx, fits);
   if (imports.length) lines.push("Imports:", ...imports);
   let local = [];
+  // The versions of the episodes are read from Episodes once, for those held as sessions.
+  const links = linksOf(ctx.root);
   try {
     // An episode is found by its folder's name, or by its own name as findEpisode finds it.
     const named = words.length ? findEpisode(ctx, rest.join(" ")) : {};
     // A gated episode is found by its label or its ids alone (findEpisode), never by words of its folder's name.
     local = readdirSync(workFolder(ctx.home)).filter((n) => {
       if (n.startsWith(".") || !(n === named.name || fits(n))) return false;
-      const e = n === named.name || !words.length ? null : episodeAt(ctx, n);
+      const e = n === named.name || !words.length ? null : episodeAt(ctx, n, links);
       return !e || e.newer || !isGated(e);
     }).sort();
   } catch (e) {
     // There is no BRIMM Video Work yet.
   }
   for (const folder of local) {
-    const e = episodeAt(ctx, folder);
+    const e = episodeAt(ctx, folder, links);
     const shown = listedAs(ctx, e);
     const clean = cleanFor(ctx, e);
     const run = runningRun(ctx.home, folder, ctx.alive);
@@ -2039,8 +2078,9 @@ async function show(ctx, rest) {
   const { found, record } = got;
   const stem = basename(record.video.file, extname(record.video.file));
   const [ending, what] = SHOWN[kind];
-  // What it prints goes into her chat: of a video not answered or a session, nothing; a copy opens on this Mac instead.
-  if (printWhy(record)) return showCopy(ctx, found, record, `${stem}${ending}`, what);
+  // What it prints goes into her chat: of a video not answered or a session, or one held as a session, nothing; a copy opens on this
+  // Mac instead.
+  if (printWhy(record) || found.held) return showCopy(ctx, found, record, `${stem}${ending}`, what);
   const file = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
   const path = join(found.folder, file);
   if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
@@ -2133,7 +2173,7 @@ function freeShownName(dir, base, ending) {
     is made, and only what the marker lists is ever taken away. The copy is named by the video's name, never its file's. A file
     Dropbox has not brought whole yet is copied all the same: reading it is what brings it, and it is small. */
 function showCopy(ctx, found, record, rel, what) {
-  const name = shownName(record);
+  const name = namedAs(found, record);
   const from = join(found.folder, rel);
   if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
   const dir = shownFolder(ctx.home, found.name);
@@ -3786,6 +3826,9 @@ const logNotWritten = (holds) => `The log on this Mac could not be written: the 
 const noMarkToClear = (name) => `${name} has no session mark to clear.`;
 /** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
 const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
+/** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
+    video being answered. */
+const heldAnswer = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
 /** Why a video that is not a session cannot be a version of a video one of whose versions is (the whole set of versions, not only
     the one named): `name` is the video being answered. */
 const sessionSet = (name) => `${name} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
@@ -3853,6 +3896,8 @@ function lateCheckAt(ctx, record) {
     - a video that may be a session, answered as anything else without --not-a-session: one the import saw came from Zoom or is
       sound alone, a Zoom download by its file's name (a record from before the switch has no answer to say so), and one whose
       facts the import could not read, until she has answered it (her click on the dialog says it is not one);
+    - a video held as a session (one of its other versions, as finish.js linksOf sessionsBeside reads them, is a session not
+      cleared), answered as anything but a session, but by --clear-session of its own mark: it is answered only as a session;
     - --version-of: an answered video on this Mac that is not archived and is not this one, by id or short id (a short id two
       videos have is not taken for either); a session not cleared is a version of only by a session;
     - and, read from Episodes each time it is asked (finish.js linksOf), for that target, which is looked up again and checked as
@@ -3869,7 +3914,7 @@ function lateCheckAt(ctx, record) {
       move the id the handed-off video went to the page under, and is said of that video, the later one;
     - the other Mac's claim, and a detached run at work on the episode. */
 function answerWhy(ctx, found, record, plan) {
-  const name = shownName(record);
+  const name = namedAs(found, record);
   const { stored } = plan;
   const was = recordKind(record);
   if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
@@ -3907,6 +3952,9 @@ function answerWhy(ctx, found, record, plan) {
   }
   // What links the target to this video, and to a session, as Episodes holds it now: one reading, each time this is asked.
   const links = linksOf(ctx.root);
+  // A video one of whose other versions is a session not cleared is held as one (spec 1 forbids writing into another version's
+  // folder, so the mark cannot follow it there): it is answered only as a session itself, until that mark is cleared.
+  if (stored !== "session" && !plan.clearSession && links.sessionsBeside(record, found.folder).length) return heldAnswer(name);
   // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
   // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
   const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
@@ -4127,7 +4175,7 @@ async function answerKind(ctx, found, plan, began) {
     return 1;
   }
   const { record } = read;
-  const name = shownName(record);
+  const name = namedAs(found, record);
   const why = answerWhy(ctx, found, record, plan);
   if (why) return refuse(ctx, why);
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
@@ -4212,11 +4260,13 @@ async function answerKind(ctx, found, plan, began) {
   const written = aside ? await setAsideWritten(ctx, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(ctx, { ...found, record: base }, next, ""), stayed: [] };
   if (written.code !== 0) return 1;
   if (stored === "session") {
-    // It is a session from now on: nothing the command says after this holds the names it had.
+    // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
+    // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
     hideNames(ctx, episodeAt(ctx, found.name));
     if (empty && empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
+    sayVersionsToMark(ctx, found, next);
     return 0;
   }
   if (plan.clearSession) {
@@ -4576,7 +4626,28 @@ async function emptyRevisionAgain(ctx, found, record) {
   if (wrote.code !== 0) return 1;
   if (empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
   sayEmpty(ctx, label, empty, wrote.stayed);
+  sayVersionsToMark(ctx, found, next);
   return empty.handoff ? 0 : 1;
+}
+
+/** Say which other versions of the video of `record` (a session now, in the episode `found`) she must answer as a session too, each
+    by its label and short id, as the lists name it (listedAs), and never by a name or a file: every other version of it (finish.js
+    linksOf, besideOf) that is not a session not cleared itself. Each is held as a session until it is answered as one, and its own
+    `kind … session --again` sets its final/ aside: nothing is written into another version's folder from here (spec 1). Nothing is
+    said when there is none. */
+function sayVersionsToMark(ctx, found, record) {
+  const links = linksOf(ctx.root);
+  const seen = new Set([record.id]);
+  const names = [];
+  for (const one of links.besideOf(record, found.folder)) {
+    if (seen.has(one.record.id) || links.holdsSession(one)) continue;
+    seen.add(one.record.id);
+    const r = one.record;
+    const short = String(r.id).slice(-6);
+    names.push(typeof r.label === "string" && r.label.trim() ? `${r.label} (${short})` : recordKind(r) === null ? shownName(r) : heldName(r));
+  }
+  if (names.length === 1) ctx.say(`${shownName(record)} has another version, held as a client or group session until it is answered as one: answer ${names[0]} as a session too.`);
+  else if (names.length) ctx.say(`${shownName(record)} has other versions, each held as a client or group session until it is answered as one: answer ${listed(names)} as a session too.`);
 }
 
 /** Claim the episode `found`, whose record is `record`, for this Mac, as `open` does: the claim is written, Dropbox is given
@@ -4661,7 +4732,7 @@ export async function leaveCommand(ctx, rest) {
       return 1;
     }
     const { record } = read;
-    const name = shownName(record);
+    const name = namedAs(found, record);
     if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
     if (record.answer && record.answer.state === "not for brimm-video") {
       ctx.say(`${name} is left already. It is not asked about again.`);
@@ -4699,7 +4770,7 @@ export async function whichCommand(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = got;
-  const name = shownName(record);
+  const name = namedAs(found, record);
   const video = join(found.folder, record.video.file);
   const here = ctx.isWhole(video);
   let opened = "";

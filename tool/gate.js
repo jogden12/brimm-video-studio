@@ -28,6 +28,8 @@ export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this
 /** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */
 export const TEACHINGS_LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
+/** What a video one of whose other versions is a client or group session not cleared is refused in (heldGateFor). */
+export const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** A whole number from 1, as a person types it: no sign, no zero in front, no fraction. */
@@ -107,6 +109,16 @@ export function gateFor(command, record, { teachingsOn = false, lapsed = false, 
   if (!teachingsOn) return lapsed ? TEACHINGS_LAPSED : TEACHINGS_OFF;
   if ((command === "reel" || command === "render") && !reelWords(command, record, words, said)) return REEL_NOT_AGREED;
   return "";
+}
+
+/** Why `command` may not run for a video held as a session: one that is not a session itself, nor gated, but one of whose other
+    versions (finish.js linksOf, sessionsBeside: its version set as the hand-off writers read it) is a client or group session whose
+    mark is not cleared. It fails closed, as for a session: only the commands of UNANSWERED run, which answer it (`kind`, as a session
+    too), say which it is, open a copy of it, hand it over or sort out a conflict; every other is refused, in HELD's words, until it
+    is answered as a session itself or that mark is cleared. "" when it may run; a command that names no episode is not gated. */
+export function heldGateFor(command) {
+  if (UNSCOPED.includes(command) || UNANSWERED.includes(command)) return "";
+  return HELD;
 }
 
 /** Why `show` may not print a file of the episode with this `record` into the chat, in plain words, or "" when it may. The gate

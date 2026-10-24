@@ -141,6 +141,9 @@ const WRITTEN = (n) => `The empty session revision of ${SESSION_NAME} is written
 /** The same, of a video no reading of Claude's ran on (no reading in its record, none of a reading's files): its words did not go
     to Claude (final fix 12). */
 const UNREAD = (n) => `The empty session revision of ${SESSION_NAME} is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
+/** What the mark and the empty revision say of the session's other version, held as a session until it is answered as one (final fix
+    1): by its label and short id, or with no label by its short id. */
+const ALSO = (named) => `${SESSION_NAME} has another version, held as a client or group session until it is answered as one: answer ${named} as a session too.`;
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 
 /** The made-up video answered and read as finished, and handed off as version 2 by her answer to the spellings card. */
@@ -450,7 +453,7 @@ describe("kind … session --again: the empty session revision", () => {
     const once = historyOf(found);
     const now = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
     assert.equal(now.code, 0, now.text);
-    assert.deepEqual(now.said, [UNREAD(2)]);
+    assert.deepEqual(now.said, [UNREAD(2), ALSO("a video (aaaaaa)")]);
     assert.deepEqual(historyOf(found), once);
     record = reread(found);
     const handoff = JSON.parse(readFileSync(join(found.folder, "final", `${SESSION_NAME}.brimm-ops.json`), "utf8"));
@@ -557,8 +560,9 @@ describe("kind … --again and the video a record is a version of (amendment b, 
     older(t);
     episodeAs(t, { id: "e-20261011-c0c0c0", name: "2026-10-11 A call (Mac Studio)", record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, session: MARK, name: { text: "Session, 2026-10-11", placeholder: false }, label: "Video of 11 Oct, 09:12 (Mac Studio)", versionOf: OLD } });
     const found = episodeFor(t, { record: answered("raw", { versionOf: OLD, name: { text: NAME, placeholder: false } }), files: LIGHT_FILES });
-    const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again");
-    assert.deepEqual([r.code, r.said], [1, [`${NAME} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`]]);
+    // It is held as a session (final fix 1): named and found by its label, and answered only as a session.
+    const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no", "--again");
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`]]);
     assert.equal(reread(found).rev, 1);
     t.done();
   });
@@ -703,7 +707,7 @@ describe("fix round 1: files the record lists that are not on this Mac yet", () 
     writeFileSync(join(found.folder, "final", "Pricing talk.transcript.txt"), "LATE WORDS");
     episodeAs(t, { id: OLD, name: "2026-10-01 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
     const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
-    assert.deepEqual([r.code, r.said], [0, [UNREAD(2)]]);
+    assert.deepEqual([r.code, r.said], [0, [UNREAD(2), ALSO("a video (aaaaaa)")]]);
     assert.deepEqual(finalOf(found), [`${SESSION_NAME}.brimm-ops.json`]);
     assert.ok(historyOf(found).some(([name, text]) => name === "Pricing talk.transcript.txt" && text === "LATE WORDS"));
     t.done();
@@ -772,7 +776,7 @@ describe("fix round 1: the empty revision goes only where every hand-off of the 
     assert.ok(first.said.includes(WAITS_FOR(MISSING)), first.text);
     episodeAs(t, { id: MISSING, name: "2026-10-01 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
     const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
-    assert.deepEqual([r.code, r.said], [0, [UNREAD(2)]]);
+    assert.deepEqual([r.code, r.said], [0, [UNREAD(2), ALSO("a video (aaaaaa)")]]);
     const handoff = JSON.parse(readFileSync(join(found.folder, "final", `${SESSION_NAME}.brimm-ops.json`), "utf8"));
     assert.deepEqual([handoff.version, handoff.video.id, handoff.revision], [2, MISSING, 2]);
     t.done();
