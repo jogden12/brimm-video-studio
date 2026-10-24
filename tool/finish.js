@@ -447,7 +447,8 @@ function revisionIn({ members, folders }, first, handoffsAt = (folder) => handof
     every hand-off for the video's id (handoffIdOf) in final/ and history/ of the folders of its versions (setOf), its session's
     items too, of the Reels each version's record holds, of each version's reels.json and those set aside into its history/
     (their `highest`, and each candidate's number), and of each version's teachings files, in its folder and set aside into its
-    history/ (the numbers of their principles, recurring principles and Reel ideas). Numbers never repeat within a video, across
+    history/ (the numbers of their principles, recurring principles and Reel ideas), and of the numbers each version's record
+    holds a client's agreement for (`session.agreed`). Numbers never repeat within a video, across
     asking again, asking for a session's teachings again, a corrected kind and a new version (spec 2026-10-22, section 8), so a
     new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it is not given.
     This only reads. */
@@ -461,6 +462,8 @@ export function highestNumberOf(root, record, folder) {
   };
   for (const at of folders) for (const h of handoffsBeside(join(at, "final"))) if (handoffFor(h, walked.first)) [...numbersOf(h), ...sessionNumbersOf(h.session)].forEach(take);
   for (const { record: one } of members) for (const reel of Array.isArray(one.reels) ? one.reels : []) take(reel && reel.n);
+  // A number a client's agreement was noted for stays taken, whatever else is lost: a new Reel idea must not inherit it.
+  for (const { record: one } of members) for (const agreed of one.session && Array.isArray(one.session.agreed) ? one.session.agreed : []) take(agreed && agreed.n);
   for (const at of new Set(members.map((one) => one.folder).filter(Boolean))) {
     for (const list of reelsListsIn(at)) {
       take(list.highest);

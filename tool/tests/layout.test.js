@@ -159,6 +159,27 @@ describe("the record's layout 3", () => {
     // The empty session revision a video answered again as a session owes the BRIMM Ops page, or the revision it was written as (F9b).
     for (const emptyRevision of ["owed", 1, 4]) assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), "", String(emptyRevision));
     for (const emptyRevision of [null, "", "yes", 0, -1, 1.5, true]) assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), /session/, JSON.stringify(emptyRevision));
+    // A client's agreement to a Reel cut from a session (F8b): the Reel idea's number and the day it was noted, and no other key,
+    // since who agreed stays on one Mac and the record keeps only that it was noted.
+    const DAY = "2026-10-23";
+    for (const agreed of [[], [{ n: 1, at: DAY }], [{ n: 2, at: DAY }, { n: 11, at: "2024-02-29" }]]) {
+      assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, agreed } }), "", JSON.stringify(agreed));
+    }
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT } }), "");
+    assert.equal(episodeFault({ ...made(), kind: "finished", session: { ...SESSION, agreed: [{ n: 3, at: DAY }], cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } } }), "");
+    for (const agreed of [
+      null, "all", {}, [1], [null], ["2026-10-23"],
+      [{ n: 0, at: DAY }], [{ n: "2", at: DAY }], [{ n: 1.5, at: DAY }], [{ n: -1, at: DAY }], [{ n: null, at: DAY }], [{ at: DAY }],
+      [{ n: 1 }], [{ n: 1, at: null }], [{ n: 1, at: 20261023 }], [{ n: 1, at: "2026-02-30" }], [{ n: 1, at: "2025-02-29" }], [{ n: 1, at: "2026-13-01" }],
+      [{ n: 1, at: "2026-10-23T09:00:00-05:00" }], [{ n: 1, at: "2026-10-23T00:00:00Z" }], [{ n: 1, at: "23 Oct" }], [{ n: 1, at: "2026-1-3" }],
+      [{ n: 1, at: DAY, who: "Jane Doe" }], [{ n: 1, at: DAY, by: "Mac Studio" }], [{ n: 1, at: DAY }, { n: 2, at: DAY, text: "x" }], [{ n: 1, at: DAY }, { n: 2 }]
+    ]) {
+      assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed } }), /session/, JSON.stringify(agreed));
+    }
+    // Both on one session mark (the merge of F8b into F9b): each is checked as its own side checks it, whatever the other holds.
+    assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, teachings: "asked", asked: AT, agreed: [{ n: 2, at: DAY }], emptyRevision: 3 } }), "");
+    assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed: [{ n: 2, at: DAY, who: "Jane Doe" }], emptyRevision: "owed" } }), /session/);
+    assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, agreed: [{ n: 2, at: DAY }], emptyRevision: 0 } }), /session/);
     for (const bad of [{ kind: "" }, { model: 1 }, { at: "later" }, { on: "" }, { account: null }, { outcome: "" }]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, ...bad } }), /reading/, JSON.stringify(bad));
     }

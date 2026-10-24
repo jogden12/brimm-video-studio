@@ -155,7 +155,7 @@ describe("gateFor, a session whose mark is cleared, and the records of every oth
 });
 
 describe("gateFor, a Reel cut from a session", () => {
-  const agreed = (...ns) => session({ session: { marked: AT, cleared: null, agreed: ns.map((n) => ({ n, at: AT })) } });
+  const agreed = (...ns) => session({ session: { marked: AT, cleared: null, agreed: ns.map((n) => ({ n, at: AT.slice(0, 10) })) } });
   const LABEL = "Session, 2026-10-22";
   /** On, and asked to find the episode by what the first word says: the label, as findEpisode was asked it. */
   const TAUGHT = { teachingsOn: true, said: LABEL };
@@ -198,7 +198,7 @@ describe("gateFor, a Reel cut from a session", () => {
     }
   });
   it("takes an agreement only as a list of { n, at }: a missing list, or one that is not a list, agrees to nothing", () => {
-    for (const bad of [undefined, null, "all", { n: 2 }, 2, [2], [null], ["2"], [{ at: AT }], [{ n: "2" }]]) {
+    for (const bad of [undefined, null, "all", { n: 2 }, 2, [2], [null], ["2"], [{ at: AT.slice(0, 10) }], [{ n: "2" }]]) {
       assert.equal(gateFor("reel", session({ session: { marked: AT, cleared: null, agreed: bad } }), TAUGHT, [LABEL, "make", "2"]), REEL_NOT_AGREED, JSON.stringify(bad));
     }
     assert.equal(gateFor("reel", session({ session: undefined }), TAUGHT, [LABEL, "make", "2"]), REEL_NOT_AGREED, "a kind of session and no mark agrees to nothing");

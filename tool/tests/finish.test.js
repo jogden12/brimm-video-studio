@@ -2004,6 +2004,19 @@ describe("the highest number ever given to a suggestion or a Reel of a video", (
     assert.deepEqual(all(), [8, 8]);
     t.done();
   });
+  it("counts the numbers a client's agreement was noted for, so that no new item takes one (F8b fix 4)", () => {
+    const t = setup();
+    const mark = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: "asked", cleared: null };
+    const old = original(t, { kind: "session", session: { ...mark, agreed: [{ n: 3, at: "2026-10-22" }, { n: 7, at: "2026-10-22" }] } });
+    assert.equal(highestNumberOf(t.root, old.record), 7);
+    // A later version of the video numbers on from it too.
+    const next = later(t, SECOND, ID);
+    assert.equal(highestNumberOf(t.root, next.record), 7);
+    // A session with no agreement and no file holding a number has none to count.
+    const bare = episodeAs(t, { id: "e-20261023-0a0a0a", name: "2026-10-23 Another talk (Mac Studio)", record: { kind: "session", session: mark } });
+    assert.equal(highestNumberOf(t.root, bare.record), 0);
+    t.done();
+  });
   it("is what numbersTakenWords and handoffTarget's `taken` hold a session's items to as well (F7 fix 8)", () => {
     // A session's hand-off giving principle 1, recurring principle 2 and Reel idea 3 again is refused, in plain words.
     const record = { id: ID, kind: "session", name: { text: "Session, 2026-10-22", placeholder: false }, session: { marked: "2026-10-22T10:00:00-05:00", cleared: null } };

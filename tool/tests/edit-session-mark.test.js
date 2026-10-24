@@ -478,6 +478,13 @@ describe("read --kind session: the session's one reading", () => {
     assert.deepEqual(kept.dropped.map((d) => d.field), ["Principle 8's steps, entry 2", "Principle 9's example_application", "Principle 9's source_context", "Principle 10's name", "Recurring principle 9's text", "Reel idea 10's words"]);
     t.done();
   });
+  it("numbers on from a number a client's agreement was noted for, though no file of the video holds it (F8b fix 4)", async () => {
+    const { found, t } = await readSession({ over: { session: { ...MARK, teachings: "asked", asked: ASKED, agreed: [{ n: 7, at: "2026-10-20" }] } } });
+    const kept = JSON.parse(fileOf(found, TEACHINGS_JSON));
+    assert.deepEqual(kept.principles.map((p) => p.n), [8, 9, 10]);
+    assert.deepEqual(kept.reelIdeas.map((r) => r.n), [8, 9, 10]);
+    t.done();
+  });
   it("is one reading for each ask: a second run for the same ask is refused, and nothing is asked", async () => {
     const { t, found, asks } = await readSession();
     const before = snapshot(found);
@@ -519,7 +526,8 @@ describe("read --kind session: the session's one reading", () => {
     await on(t.ctx.deps, "principles", LABEL, "keep", "1");
     const asked = localStamp(new Date(t.now()));
     const record = reread(found);
-    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, session: { ...record.session, asked } }));
+    // A client's agreement was noted for one of the Reel ideas she decided.
+    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, session: { ...record.session, asked, agreed: [{ n: 2, at: "2026-10-20" }] } }));
     await t.ctx.deps.wait(2000);
     state.reply = { ...REPLY, frameworks: [REPLY.frameworks[0]], recurring_principles: ["Decide once."], reel_ideas: [] };
     const r = await on(t.ctx.deps, ...readArgs(record.rev + 1));
@@ -532,9 +540,10 @@ describe("read --kind session: the session's one reading", () => {
     assert.equal(readFileSync(join(found.folder, "history", aside(".reel-ideas.txt")), "utf8"), first.ideas);
     const kept = JSON.parse(fileOf(found, TEACHINGS_JSON));
     assert.deepEqual([kept.principles.map((p) => p.n), kept.recurringPrinciples.map((p) => p.n)], [[4], [4]]);
-    // Her decisions were of the earlier items: none is carried to the new ones.
+    // Her decisions were of the earlier items: none is carried to the new ones, nor is a client's agreement to one of them (F8b fix 4).
     const now = reread(found);
     assert.equal(now.session.decided, undefined);
+    assert.equal(now.session.agreed, undefined);
     assert.equal(episodeFault(now), "");
     t.done();
   });
