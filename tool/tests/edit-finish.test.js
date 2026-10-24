@@ -189,8 +189,9 @@ describe("finish, the part that looks and asks, with hand-off version 2", () => 
       assert.deepEqual(t.started, [], kind);
       t.done();
     }
-    // A finished video's name is its file's, and a short video's is too: either finishes with it.
-    for (const [kind, more] of [["finished", {}], ["short video", { title: null, reels: [] }]]) {
+    // A short video's name is its file's: it finishes with it. (A finished video's is too; but it is not edited in Final Cut, and
+    // its hand-off comes from its spellings card: final fix 5.)
+    for (const [kind, more] of [["short video", { title: null, reels: [] }]]) {
       const t = v2();
       assert.equal(await finishEpisode(t.ctx, episodeFor(t, { record: { ...EDITED, kind, name: PLACEHOLDER, ...more } }), { yes: true, noHandEdits: ["reel 2"] }), 0, `${kind}: ${t.said()}`);
       assert.doesNotMatch(t.said(), /Give the episode its name first/, kind);

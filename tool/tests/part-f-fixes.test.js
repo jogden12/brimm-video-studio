@@ -146,6 +146,30 @@ describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 
   });
 });
 
+describe("finish of a video that is not edited in Final Cut (item 5)", () => {
+  const FINISHED = { revision: 2, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} };
+  for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip she answered"]]) {
+    it(`says of ${what} that its hand-off comes from its spellings, or is written already, or waits for version 2, and names no folder`, async () => {
+      for (const [settings, over, said] of [
+        [{ handoffVersion: 2 }, {}, 'Pricing talk is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
+        [{ handoffVersion: 2 }, { finished: FINISHED }, "Pricing talk's hand-off is written already, as revision 2: a spelling changed writes its next revision."],
+        [{ handoffVersion: 1 }, {}, "Pricing talk's hand-off is written from its spellings once this Mac hands off version 2: ask Jason."]
+      ]) {
+        const t = setup();
+        writeSettings(t.home, settings);
+        const found = episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: LABEL, ...over }, files: LIGHT });
+        for (const argv of [["finish", "Pricing talk"], ["finish", "Pricing talk", "--yes"]]) {
+          const r = await on(t.ctx.deps, ...argv);
+          assert.deepEqual([r.code, r.said], [1, [said]], `${kind} ${JSON.stringify(settings)} ${JSON.stringify(over)} ${argv.join(" ")}`);
+          assert.ok(!r.text.includes(t.dir), r.text);
+        }
+        assert.deepEqual([t.calls, t.started, reread(found).rev], [[], [], 1]);
+        t.done();
+      }
+    });
+  }
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

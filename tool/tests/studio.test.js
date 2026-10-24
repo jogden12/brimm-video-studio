@@ -307,12 +307,13 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "A bare yes or no in the chat is unclear: ask again.", 'Only on "It is not a session", run the same `kind` with `--not-a-session` added']) assert.ok(zoom.includes(words), words);
     assert.doesNotMatch(zoom, /really not one/);
   });
-  it("knows what edit.js and the reading tell her to say: what did Claude find, and clear the session mark", () => {
+  it("knows what edit.js and the reading tell her to say: what did Claude find, clear the session mark, and show me the spellings", () => {
     const notice = /const noticeOf = \(name\) => `Claude has read \$\{name\}: say "([^"]+)"`/.exec(source("reading.js"));
     const mark = /: say "(clear the session mark)"\./.exec(source("edit.js"));
-    assert.ok(notice && mark, "the words to say are not where they were");
+    const spellings = /Say "(show me the spellings)"\./.exec(source("edit.js"));
+    assert.ok(notice && mark && spellings, "the words to say are not where they were");
     // Each begins its row's "She says" cell; her own plain words for it may follow there.
-    for (const phrase of [notice[1], mark[1]]) assert.ok(skill.split("\n").some((line) => /^\| "[^|]*\|/.test(line) && line.toLowerCase().startsWith(`| "${phrase.toLowerCase()}"`)), phrase);
+    for (const phrase of [notice[1], mark[1], spellings[1]]) assert.ok(skill.split("\n").some((line) => /^\| "[^|]*\|/.test(line) && line.toLowerCase().startsWith(`| "${phrase.toLowerCase()}"`)), phrase);
   });
   it("runs behind, then episodes, then the cards, at the start of each session, and episodes then the cards for what's waiting", () => {
     const start = sectionOf(skill, "## At the start of each session");

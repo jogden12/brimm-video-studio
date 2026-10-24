@@ -1330,8 +1330,9 @@ describe("finish, with hand-off version 2", () => {
       t.done();
     }
   });
-  it("gives a raw video's main.onPicture as the lines of its name titles, in order, and a finished video's none", async () => {
-    for (const [kind, written, drawn] of [["episode", "raw", true], ["raw", "raw", true], ["finished", "finished", false]]) {
+  it("gives a raw video's main.onPicture as the lines of its name titles, in order", async () => {
+    // A finished video is not finished in Final Cut: its hand-off comes from its spellings card, with no onPicture (final fix 5).
+    for (const [kind, written, drawn] of [["episode", "raw", true], ["raw", "raw", true]]) {
       const t = setup();
       handoffVersion(t, 2);
       const found = await asked(t, { ...EDITED, kind, main: { ...EDITED.main, texts: TEXTS } });

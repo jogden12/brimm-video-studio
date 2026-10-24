@@ -1691,9 +1691,10 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // claim is written.
   const notYet = cannotFinish(record);
   if (notYet) return refuse(ctx, notYet);
-  // A version 1 hand-off holds an episode (a raw video) or a short video, and never a finished one: refused at once too, before any
-  // part is looked for or transcribed.
-  if (recordKind(record) === "finished" && !writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, handoffFromSpellingsWaits(shownName(record)));
+  // A finished video, and an iPhone clip she answered, are not edited in Final Cut: their hand-off is written from their spellings
+  // (saveSpellings), as version 2, which a version 1 hand-off could not hold. Said at once too, before any part is looked for or
+  // transcribed, and with no folder named.
+  if (!hasFinalCut(record)) return refuse(ctx, notInFinalCut(ctx, found, record));
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
   // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
   // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
@@ -3056,6 +3057,14 @@ const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2
 /** What `finish` says of a video whose hand-off is written from its spellings (a finished video, an iPhone clip she answered) on a
     Mac that hands off version 1. */
 const handoffFromSpellingsWaits = (name) => `${name}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`;
+/** What `finish` says of a video that has no Final Cut (hasFinalCut), `found` with its `record`: on a Mac that hands off version 1,
+    that its hand-off waits for version 2; once it is written, its revision; otherwise that it comes from the spellings card. */
+function notInFinalCut(ctx, found, record) {
+  const name = shownName(record);
+  if (!writesV2For(ctx.settings, found.folder, record)) return handoffFromSpellingsWaits(name);
+  if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.`;
+  return `${name} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
+}
 const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
 /** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
     her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
