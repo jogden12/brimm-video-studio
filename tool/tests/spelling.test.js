@@ -2,9 +2,11 @@
 // final transcripts.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spellingFault, withSpelling, spellWords, respelledPart, respelledHandoff } from "../spelling.js";
+import { readFileSync } from "node:fs";
+import { spellingFault, withSpelling, spellWords, respelledPart, respelledHandoff, respelledHandoffV2 } from "../spelling.js";
 import { spelled } from "../final-transcript.js";
 import { buildHandoff, handoffFault } from "../handoff.js";
+import { handoffFaultV2 } from "../handoff-v2.js";
 
 const SALLIE = [["Sally", "Sallie"]];
 
@@ -60,5 +62,53 @@ describe("the final transcripts, spelled again", () => {
     const next = respelledHandoff(handoff, { record: now, srts: { main: srt("Sallie.") }, revision: 2, made: "2026-10-21T09:00:00-05:00", madeOn: "Sallie's laptop", commit: "e72a170" });
     assert.deepEqual([next.episode.name, next.episode.title, next.main.file], ["Pricing, part one", "What to charge, and why", "m.mov"]);
     assert.equal(handoffFault(next), "");
+  });
+});
+
+describe("the hand-off made again as version 2", () => {
+  const FIXTURE = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
+  const srt = (words) => `1\n00:00:01,000 --> 00:00:02,000\n${words}\n\n`;
+  const GIVEN = { revision: 7, made: "2026-10-23T09:00:00-04:00", madeOn: "Sallie's laptop", commit: "e72a170" };
+  it("keeps what a version 2 hand-off held, with each part's captions as spelled now, the video's first id and its name now", () => {
+    const was = FIXTURE("handoff-v2-raw");
+    const before = JSON.stringify(was);
+    // A new version of the video, named again since: the hand-off keeps the first version's id, given.
+    const record = { id: "e-20261023-0b1c2d", kind: "raw", name: { text: "Pricing: when to raise it, again" }, video: { recorded: "2026-10-20", recordedFrom: "video" }, main: { texts: [] }, reels: [] };
+    const srts = { main: srt("Folks ask me what to charge."), "reel 2": srt("Some folks wait."), "reel 4": srt("Someone asked me.") };
+    const next = respelledHandoffV2(was, { ...GIVEN, record, id: was.video.id, srts, spellings: [["People", "Folks"]] });
+    assert.equal(handoffFaultV2(next), "");
+    assert.deepEqual([next.version, next.revision, next.made, next.madeOn, next.madeBy], [2, 7, GIVEN.made, "Sallie's laptop", "brimm-video e72a170"]);
+    assert.deepEqual(next.video, { id: "e-20261020-c4e5a7", kind: "raw", name: "Pricing: when to raise it, again", recorded: "2026-10-20", recordedFrom: "video" });
+    assert.deepEqual(next.main, { ...was.main, srt: srts.main }, "the words on its picture are what the finished file holds, kept");
+    // The suggestions' first and last words are the main video's words, spelled as its captions are now.
+    assert.deepEqual(next.suggestions, [was.suggestions[0], { ...was.suggestions[1], first: "Folks ask me what" }]);
+    assert.deepEqual(next.reels, was.reels.map((r) => ({ ...r, srt: srts[`reel ${r.n}`] })), "each Reel's title, file, place and suggestion kept");
+    assert.equal(next.session, null);
+    assert.equal(JSON.stringify(was), before, "the hand-off given is not changed");
+  });
+  it("never makes up a suggestion's words: one missing from the hand-off given is still missing, and the check refuses it", () => {
+    const was = FIXTURE("handoff-v2-raw");
+    delete was.suggestions[1].first;
+    const record = { id: "e-20261020-c4e5a7", kind: "raw", name: { text: "Pricing: when to raise it?" }, video: { recorded: "2026-10-20", recordedFrom: "video" }, main: { texts: [] }, reels: [] };
+    const next = respelledHandoffV2(was, { ...GIVEN, record, id: was.video.id, srts: { main: was.main.srt, "reel 2": was.reels[0].srt, "reel 4": was.reels[1].srt }, spellings: [["People", "Folks"]] });
+    assert.equal("first" in next.suggestions[1], false);
+    assert.equal(handoffFaultV2(next), "Suggestion 3 has no first words.");
+  });
+  it("is made from a version 1 hand-off as a finish makes version 2: the words on the picture and each Reel's suggestion from the record, and no title", () => {
+    const was = buildHandoff({
+      record: { id: "e-20261014-3fa9c1", kind: "episode", name: { text: "Pricing talk" }, video: { recorded: "2026-10-14", recordedFrom: "video" }, title: { text: "Price like you mean it", approved: true } },
+      revision: 2, made: "2026-10-20T15:00:00-05:00", madeOn: "Mac Studio", commit: "c709b57",
+      main: { file: "m.mov", seconds: 9, srt: srt("Sally.") },
+      reels: [{ n: 1, title: "Know your costs", file: "r1.mov", seconds: 7, inMain: { start: 1, end: 8 }, srt: srt("Sally.") }, { n: 3, title: "The opening", file: "r3.mov", seconds: 4, srt: srt("Sally.") }]
+    });
+    const texts = [{ id: "t2", kind: "lower-third", at: 6, for: 3, lines: ["Alex Hormozi"] }, { id: "t1", kind: "lower-third", at: 1, for: 3, lines: ["Sallie Ogden", "Founder, The BRIMM"] }];
+    const record = { id: "e-20261014-3fa9c1", kind: "episode", name: { text: "Pricing talk" }, video: { recorded: "2026-10-14", recordedFrom: "video" }, title: { text: "Price like you mean it", approved: true }, main: { texts }, reels: [{ n: 1, title: "Know your costs" }, { n: 3, title: "The opening" }] };
+    const next = respelledHandoffV2(was, { ...GIVEN, record, id: "e-20261014-3fa9c1", srts: { main: srt("Sallie."), "reel 1": srt("Sallie."), "reel 3": srt("Sallie.") }, spellings: [["Sally", "Sallie"]] });
+    assert.equal(handoffFaultV2(next), "");
+    assert.deepEqual([next.version, next.revision, "episode" in next, "suggestions" in next, next.session], [2, 7, false, false, null]);
+    assert.deepEqual(next.video, { id: "e-20261014-3fa9c1", kind: "raw", name: "Pricing talk", recorded: "2026-10-14", recordedFrom: "video" });
+    assert.doesNotMatch(JSON.stringify(next), /Price like you mean it/);
+    assert.deepEqual(next.main, { file: "m.mov", seconds: 9, srt: srt("Sallie."), onPicture: ["Sallie Ogden", "Founder, The BRIMM", "Alex Hormozi"] });
+    assert.deepEqual(next.reels.map((r) => [r.n, r.title, r.file, r.inMain, r.srt, r.fromSuggestion]), [[1, "Know your costs", "r1.mov", { start: 1, end: 8 }, srt("Sallie."), 1], [3, "The opening", "r3.mov", undefined, srt("Sallie."), 3]]);
   });
 });

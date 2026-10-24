@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, SETTABLE, WRITTEN } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -257,6 +257,18 @@ describe("the switch's settings", () => {
     assert.equal(teachingsOn(s, at - 24 * 60 * 60 * 1000), false);
     assert.equal(teachingsOn(s, new Date(at - 1)), false);
   });
+  it("say the teachings lapsed only once 90 days have passed since a whole setting turned them on", () => {
+    const s = { ...BASE, sessionTeachings: TEACHINGS };
+    const end = Date.parse("2026-10-22T20:00:00-04:00") + 90 * 24 * 60 * 60 * 1000;
+    assert.equal(teachingsLapsed(s, end - 1), false);
+    assert.equal(teachingsLapsed(s, end), true);
+    assert.equal(teachingsLapsed(s, new Date(end + 1)), true);
+    // Turned on later than now is off, not lapsed; and a setting that is off or not whole has nothing to lapse.
+    assert.equal(teachingsLapsed(s, Date.parse(TEACHINGS.at) - 1), false);
+    for (const off of [BASE, { ...BASE, sessionTeachings: null }, { ...BASE, sessionTeachings: { ...TEACHINGS, on: false } }, { ...BASE, sessionTeachings: { ...TEACHINGS, accounts: { cli: "a@b.c" } } }, undefined]) {
+      assert.equal(teachingsLapsed(off, end + 1), false, JSON.stringify(off));
+    }
+  });
   it("have teachings from sessions off unless they are there, on, and whole", () => {
     const now = Date.parse("2026-10-23T09:00:00-04:00");
     for (const s of [BASE, { ...BASE, sessionTeachings: null }, { ...BASE, sessionTeachings: { ...TEACHINGS, on: false } }, { ...BASE, sessionTeachings: { ...TEACHINGS, at: "yesterday" } },
@@ -418,8 +430,8 @@ describe("node settings.js set and sessions", () => {
 
   it("set changes the settings it is told, keeps the rest, says what changed, and ends with 0", () => {
     const t = mac();
-    // The light import and the Drop folder are written here as a later brimm-video, or the installer, would: set refuses the light
-    // import until it is built, and never changes the drop folder, which the installer switches.
+    // The Drop folder is written here as the installer would write it: set never changes the drop folder, which the installer
+    // switches.
     writeSettings(t.home, { import: "light", drop: "Drop", later: { x: 1 } });
     assert.equal(t.run("set", "--import", "full", "--readings", "off", "--handoff", "2", "--drop", "Drop"), 0);
     assert.deepEqual(t.said, [
@@ -477,24 +489,20 @@ describe("node settings.js set and sessions", () => {
     unchanged(t);
     t.done();
   });
-  it("set refuses the light import until her chat's question is built, changes nothing, and ends with 1", () => {
-    // Part F takes this refusal away. The Drop folder is built: the installer makes it (Part D).
+  const SWITCHED = (to) => `The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "Mac Studio" --drop ${to} "${ROOT}"`;
+  it("set refuses a change of the drop folder alone, beside other settings and beside the light import, changes nothing, and ends with 1", () => {
+    // Part F refused Drop here "until it is built". Part D built it, and the installer switches it: set says so, and changes
+    // nothing, the light import told with it included.
     const t = mac();
-    const LIGHT = "The light import needs the question in her chat, which is not built yet.";
-    for (const [argv, said] of [
-      [["--import", "light"], LIGHT],
-      [["--readings", "off", "--import", "light"], LIGHT],
-      // A refused setting changes none of the others told with it, the drop folder among them.
-      [["--drop", "Drop", "--import", "light"], LIGHT]
-    ]) {
+    const DROP = SWITCHED("Drop");
+    for (const argv of [["--drop", "Drop"], ["--drop", "Drop", "--handoff", "2"], ["--import", "light", "--drop", "Drop"], ["--drop", "Drop", "--import", "light"]]) {
       t.said.length = 0;
       assert.equal(t.run("set", ...argv), 1, argv.join(" "));
-      assert.deepEqual(t.said, [said], argv.join(" "));
+      assert.deepEqual(t.said, [DROP], argv.join(" "));
     }
     unchanged(t);
     t.done();
   });
-  const SWITCHED = (to) => `The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "Mac Studio" --drop ${to} "${ROOT}"`;
   it("set refuses to change the drop folder, in either direction, says the installer switches it and how to see what it would do, changes nothing, and ends with 1", () => {
     // set wrote the setting with no check of the old folder, no new folder, no marker and no change to the launch agent: the agent
     // went on watching the old folder, and the import then skipped every video it found there.
@@ -522,6 +530,21 @@ describe("node settings.js set and sessions", () => {
     assert.equal(t.run("set", "--drop", "Drop", "--readings", "off"), 0);
     assert.deepEqual(t.said, ["The drop folder is Drop already.", "Readings are now off (they were on).", `Written: ${settingsFile(t.home)}`]);
     assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, drop: "Drop", readings: false });
+    t.done();
+  });
+  it("set writes the light import, now that the question in her chat is built, says so, and ends with 0", () => {
+    // Part F took its refusal away: the card she answers in her chat (her skill, F10).
+    const t = mac();
+    assert.equal(t.run("set", "--import", "light"), 0);
+    assert.deepEqual(t.said, ["The import is now light (it was full).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" });
+    assert.equal(lightImport(readSettings(t.home).settings), true);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--readings", "off", "--import", "light"), 0);
+    assert.deepEqual(t.said, ["Readings are now off (they were on).", "The import is light already.", `Written: ${settingsFile(t.home)}`]);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--import", "full"), 0);
+    assert.deepEqual(t.said, ["The import is now full (it was light).", `Written: ${settingsFile(t.home)}`]);
     t.done();
   });
   it("set says how it is used, changes nothing, and ends with 2, when it is asked wrongly", () => {
@@ -678,18 +701,54 @@ describe("node settings.js set and sessions", () => {
       "  Import:  light",
       "  Readings:  off",
       "  Hand-off version:  2",
-      `  Teachings from sessions:  on, turned on ${at} (the claude command: jason@example.com; the Code tab: sallie@example.com)`
+      `  Teachings from sessions:  on, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`
     ]);
     // After the 90 days it says they have lapsed.
     t.said.length = 0;
     assert.equal(settingsMain(["show"], { home: t.home, say: (line) => t.said.push(line), now: new Date(AT.getTime() + 91 * 86400000) }), 0);
-    assert.equal(t.said.at(-1), `  Teachings from sessions:  lapsed, turned on ${at} (the claude command: jason@example.com; the Code tab: sallie@example.com)`);
+    assert.equal(t.said.at(-1), `  Teachings from sessions:  lapsed, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`);
+    t.done();
+  });
+  it("show says the teachings are off, not lapsed, when they were turned on later than now: the clock was set back, as the gate reads it", () => {
+    const t = mac();
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com", "--app-account", "sallie@example.com");
+    const at = readSettings(t.home).settings.sessionTeachings.at;
+    const states = [];
+    for (const days of [-1, 0, 89, 90, 91]) {
+      const said = [];
+      assert.equal(settingsMain(["show"], { home: t.home, say: (line) => said.push(line), now: new Date(Date.parse(at) + days * 86400000) }), 0);
+      states.push(said.at(-1));
+    }
+    const shown = (state) => `  Teachings from sessions:  ${state}, turned on ${at} (the claude command: (not shown); the Code tab: (not shown))`;
+    assert.deepEqual(states, [shown("off"), shown("on"), shown("on"), shown("lapsed"), shown("lapsed")]);
+    t.done();
+  });
+  it("show says neither account the teachings were turned on for: what it prints may reach a chat", () => {
+    const t = mac();
+    t.run("sessions", "--teachings", "on", "--cli-account", "jason@example.com (Ogden Studio Org)", "--app-account", "sallie@example.com");
+    for (const now of [AT, new Date(AT.getTime() + 91 * 86400000)]) {
+      const said = [];
+      assert.equal(settingsMain(["show"], { home: t.home, say: (line) => said.push(line), now }), 0);
+      assert.ok(said.some((line) => line.startsWith("  Teachings from sessions:  ")), said.join("\n"));
+      for (const account of ["jason@example.com", "sallie@example.com", "Ogden Studio Org"]) assert.ok(!said.join("\n").includes(account), account);
+    }
+    // From the command line too.
+    const shown = spawnSync(process.execPath, [SETTINGS, "show"], { encoding: "utf8", env: { HOME: t.home, PATH: process.env.PATH } });
+    assert.equal(shown.status, 0);
+    assert.match(shown.stdout, /\(the claude command: \(not shown\); the Code tab: \(not shown\)\)/);
+    for (const account of ["jason@example.com", "sallie@example.com"]) assert.ok(!shown.stdout.includes(account), account);
     t.done();
   });
   it("--help says how set and sessions are used", () => {
     const t = setup();
     assert.equal(t.asked("--help"), 0);
     assert.match(t.said[0], /node settings\.js set \[--import light\|full\] \[--readings on\|off\] \[--handoff 1\|2\] \[--drop Drop\|"Unedited Video"\]/);
+    // What set refuses is said: a change of the drop folder, which the installer switches. Nothing is said to be not built yet:
+    // the light import and the Drop folder are both built, and the light import is not refused.
+    assert.match(t.said[0], /It does not change the drop folder: it is switched by the installer/);
+    assert.match(t.said[0], /A change of it is refused, and nothing is changed: it says the installer's line/);
+    assert.doesNotMatch(t.said[0], /not built|until it is built/);
+    assert.doesNotMatch(t.said[0], /light[^\n]*(refused|not built)|(refused|not built)[^\n]*light/);
     assert.match(t.said[0], /node settings\.js sessions --teachings on --cli-account <email> --app-account <email>/);
     assert.match(t.said[0], /node settings\.js sessions --teachings off/);
     t.done();
@@ -752,7 +811,6 @@ describe("node settings.js marker", () => {
 
 describe("node settings.js write and plan, with the settings of the switch", () => {
   const AT = new Date("2026-10-23T10:00:00-04:00");
-  const LIGHT = "The light import needs the question in her chat, which is not built yet.";
   const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
   const LATE = "A video that is already imported leaves the old folder once its late check has passed: run this again after that.";
   const KEPT = "Delete each of these from the old folder by hand, then run this again.";
@@ -875,22 +933,30 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     assert.equal(readSettings(t.home).settings.readings, true);
     t.done();
   });
-  it("write and plan refuse the light import as set does, until her chat's question is built, by the same words, and write nothing", async () => {
+  it("write and plan take the light import as set does, now that her chat's question is built: plan says it, and write writes it", async () => {
+    // Part F built the question in her chat and took set's refusal of the light import away; write and plan refused it by the same
+    // code, which is gone, and take it too.
     const t = mac();
     const before = t.held();
-    for (const command of ["plan", "write"]) {
-      for (const more of [["--import", "light"], ["--drop", "Drop", "--import", "light", "--readings", "off"]]) {
-        t.said.length = 0;
-        assert.equal(await t.run(command, ...t.told, ...more), 1, `${command} ${more.join(" ")}`);
-        assert.deepEqual(t.said, [LIGHT]);
-        assert.equal(t.held(), before);
-      }
+    for (const more of [["--import", "light"], ["--drop", "Drop", "--import", "light", "--readings", "off"]]) {
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, ...more), 0, `plan ${more.join(" ")}`);
+      assert.equal(JSON.parse(t.said[0]).import, "light", `plan ${more.join(" ")}`);
+      assert.equal(t.held(), before);
     }
-    // The same on a Mac that has no settings yet: nothing is made.
+    assert.deepEqual(t.said.slice(1), ["The drop folder is now: Unedited Video", "The drop folder will be: Drop"]);
+    // write writes what plan printed, to the letter, with the drop folder and readings told with it.
+    const planned = t.said[0];
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--import", "light", "--readings", "off"), 0);
+    assert.deepEqual(t.said, [`Written: ${t.file}`]);
+    assert.equal(t.held(), `${planned}\n`);
+    assert.equal(lightImport(readSettings(t.home).settings), true);
+    // The same on a Mac that has no settings yet: write makes them, with the light import.
     const none = setup();
-    assert.equal(await settingsMain(["write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT, "--import", "light"], { home: none.home, say: (line) => none.said.push(line) }), 1);
-    assert.deepEqual(none.said, [LIGHT]);
-    assert.equal(existsSync(settingsFile(none.home)), false);
+    assert.equal(await settingsMain(["write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT, "--import", "light"], { home: none.home, say: (line) => none.said.push(line) }), 0);
+    assert.deepEqual(none.said, [`Written: ${settingsFile(none.home)}`]);
+    assert.deepEqual(readSettings(none.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" });
     none.done();
     t.done();
   });
@@ -1313,14 +1379,16 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.done();
     });
     it("counts a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
-      // The videos came under the light import whatever this run says of it, so they are not named; the full import is written
-      // straight into the file, as the light import is, since set and write refuse the light one until it is built.
-      const t = mac({ import: "light" });
-      put(t.folder(), "Coaching call Jane Doe.mp4");
-      const said = await refused(t, "--drop", "Drop", "--import", "full");
-      assert.ok(!said.join("\n").includes("Jane Doe"), said.join("\n"));
-      assert.equal(said[1], `  1 video waits in ${t.folder()}.`);
-      t.done();
+      // The videos came under the light import whatever this run says of it, so they are not named: told the light import over a
+      // file of today's import, and told today's over a file of the light one.
+      for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "full"]]) {
+        const t = mac(held);
+        put(t.folder(), "Coaching call Jane Doe.mp4");
+        const said = await refused(t, "--drop", "Drop", "--import", told);
+        assert.ok(!said.join("\n").includes("Jane Doe"), said.join("\n"));
+        assert.equal(said[1], `  1 video waits in ${t.folder()}.`, told);
+        t.done();
+      }
     });
     const READABLE = "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again.";
     const HEAD_UNREAD = "Not written: the drop folder would change from Unedited Video to Drop, and the old one could not be looked at:";

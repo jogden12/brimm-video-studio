@@ -2,7 +2,7 @@
 // hold the file's name. None of it needs a video, a disk or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine } from "../kinds.js";
+import { isZoomName, cameFrom, guessKind, labelFor, sessionLabel, numbered, seenLine, isSeenLine, namesOf, withoutNames } from "../kinds.js";
 
 /** A cut plan holding `n` ranges the rules cut as `kind`, among a few that are kept and some pauses. */
 const plan = (n, kind = "retake") => ({
@@ -220,5 +220,80 @@ describe("what was seen, in a line", () => {
   });
   it("leaves the retakes out when there is no plan, since the rules never counted them", () => {
     for (const plan of [null, undefined]) assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan, came: "camera" }), "wide, 42:10");
+  });
+});
+
+describe("what was seen, as a line a record may hold (isSeenLine)", () => {
+  it("is true of every line seenLine makes: each shape, with and without retakes, in minutes and in hours", () => {
+    for (const facts of [{ ...WIDE, duration: 2530 }, { ...UPRIGHT, duration: 45 }, { ...WIDE, duration: 3725 }, { width: 0, height: 0, duration: 1800 }, { ...WIDE, duration: 90000 }]) {
+      for (const p of [plan(0), plan(1), plan(2), plan(12), null]) assert.ok(isSeenLine(seenLine({ facts, plan: p, came: "camera" })), seenLine({ facts, plan: p, came: "camera" }));
+    }
+  });
+  it("is false of anything else: other words, a line break, a path or a name, or anything that is not text", () => {
+    for (const bad of ["", "wide", "tall, 2:00", "wide, 2:00, 3 retakes\n", "wide, 2:00\n    Guess: raw", "wide, 2:00\r", " wide, 2:00", "wide, 2:00, -1 retakes", "wide, 2:00, 1 retakes and more", "Coaching call Jane Doe.mov", "/Users/sallie/Dropbox/a.mov", "wide, 2:00, 3 retakes, 4", null, undefined, 5, {}, ["wide, 2:00"]]) assert.equal(isSeenLine(bad), false, JSON.stringify(bad));
+  });
+});
+
+describe("withoutNames, a line about a video named by its label", () => {
+  const DROPPED = "/Users/sallie/Dropbox/BRIMM Video/Unedited Video/Mac Studio/Coaching call Jane Doe.mov";
+  const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
+  it("knows a file by its name, its name without its ending and its file-safe form, and by the path it was given", () => {
+    assert.deepEqual(namesOf(DROPPED), [DROPPED, "Coaching call Jane Doe.mov", "Coaching call Jane Doe"]);
+    assert.deepEqual(namesOf("Pricing: what?.mov"), ["Pricing: what?.mov", "Pricing: what?", "Pricing- what-"]);
+    assert.deepEqual(namesOf(undefined, ""), []);
+  });
+  it("puts each name as \"the video\", whatever its case, and only where it stands as a whole word", () => {
+    const names = namesOf("Talk.mov");
+    assert.equal(withoutNames("talk.mov failed, and Talk.transcript.txt is missing", names), "the video failed, and the video.transcript.txt is missing");
+    assert.equal(withoutNames("Talking about it", names), "Talking about it");
+  });
+  it("puts each path as \"a file\", spaces and an episode's bracketed folder and all, up to where it ends", () => {
+    // The path it was given is a name of the video's; another path to it is a path.
+    assert.equal(withoutNames(`the sound could not be read (${DROPPED}: Invalid data found)`, namesOf(DROPPED)), "the sound could not be read (the video: Invalid data found)");
+    assert.equal(withoutNames(`the sound could not be read (/tmp/run/Coaching call Jane Doe.mov: Invalid data found)`, namesOf(DROPPED)), "the sound could not be read (a file: Invalid data found)");
+    assert.equal(withoutNames("ENOENT: no such file or directory, open '/x/BRIMM Video/Episodes/2026-10-20 Talk (Mac Studio)/record/0001.json'", []), "ENOENT: no such file or directory, open 'a file'");
+    // A bracketed part at a path's very end cannot be told from words in brackets after it: it is left, and holds no name.
+    assert.equal(withoutNames("It is in /x/BRIMM Video/Episodes/2026-10-20 Talk (Mac Studio) (it is 2 bytes there).", namesOf("Talk.mov")), "It is in a file (Mac Studio) (it is 2 bytes there).");
+    assert.equal(withoutNames("Reel 1/2, and/or", []), "Reel 1/2, and/or");
+  });
+  it("keeps what it is told to keep as it is, though a name is a word of it", () => {
+    assert.equal(withoutNames(`${LABEL}: Video.mov could not be read`, namesOf("Video.mov"), [LABEL]), `${LABEL}: the video could not be read`);
+    assert.equal(withoutNames(`${LABEL} and 1.mov`, namesOf("1.mov"), [LABEL]), `${LABEL} and the video`);
+  });
+});
+
+describe("withoutNames, the names of a file named with a short or common word (F2 fix 7)", () => {
+  const LINES = [
+    "This video is waiting for its answer: say what it is first.",
+    "This is a client or group session: that is not done for one.",
+    "Teachings from sessions are not turned on for this Mac yet: ask Jason.",
+    "reel 1:00, for 3 minutes",
+    "a client or group session",
+    "Reel 1 is picked. Say \"show reel 1 in Final Cut\" to have it pushed.",
+    "edit/main.v0.fcpxml is missing, and the main video is 1.5 seconds long."
+  ];
+  it("leaves the gate's words and the tool's own lines whole for a file named 1, a, Main or Session", () => {
+    for (const stem of ["1", "a", "Main", "Session"]) for (const line of LINES) assert.equal(withoutNames(line, namesOf(`${stem}.mov`), [], { paths: false }), line, `${stem}: ${line}`);
+  });
+  it("still finds such a name as a file's, in a conflicted copy's name, and in an episode folder's", () => {
+    const names = namesOf("1.mov");
+    assert.equal(withoutNames("1.mov and 1.transcript.txt are here", names), "the video and the video.transcript.txt are here");
+    assert.equal(withoutNames("1 (Sallie's laptop's conflicted copy 2026-10-20).srt", names), "the video (Sallie's laptop's conflicted copy 2026-10-20).srt");
+    assert.equal(withoutNames("in 2026-10-20 1 (Mac Studio)", names), "in 2026-10-20 the video (Mac Studio)");
+    assert.equal(withoutNames("Session.transcript.txt, and Session on its own", namesOf("Session.mov")), "the video.transcript.txt, and the video on its own");
+  });
+  it("finds a name of several words in every form and case", () => {
+    const names = [...namesOf("Coaching call Jane Doe.mov"), "2026-10-20 Coaching call Jane Doe (Mac Studio)"];
+    for (const line of ["Coaching call Jane Doe.transcript.txt", "coaching call jane doe", "/x/Episodes/2026-10-20 Coaching call Jane Doe (Mac Studio)/edit", "Coaching call Jane Doe (Sallie's laptop's conflicted copy 2026-10-20).srt", "COACHING CALL JANE DOE.MOV"]) {
+      assert.doesNotMatch(withoutNames(line, names, [], { paths: false }), /jane|coaching/i, line);
+    }
+  });
+  it("leaves every other path alone when told not to take paths out", () => {
+    const line = "Looked in /Users/sallie/BRIMM Video Work/From Final Cut and /x/Episodes/2026-10-20 Coaching call Jane Doe (Mac Studio)/edit for: .";
+    assert.equal(withoutNames(line, ["2026-10-20 Coaching call Jane Doe (Mac Studio)"], [], { paths: false }), "Looked in /Users/sallie/BRIMM Video Work/From Final Cut and /x/Episodes/the video/edit for: .");
+  });
+  it("keeps the space between a path and a kept text after it", () => {
+    const LABEL = "Video of 20 Oct, 15:00 (Mac Studio)";
+    assert.equal(withoutNames(`Looked in /a/b ${LABEL}`, [], [LABEL]), `Looked in a file ${LABEL}`);
   });
 });

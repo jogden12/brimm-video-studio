@@ -9,6 +9,11 @@ import { fcpxml, checkFcpxml } from "./fcpxml.js";
 import { stamp } from "./shared/text.js";
 import { basename, extname, join } from "node:path";
 import { cropsFor, stretchesOf, fitReel } from "./reframe.js";
+import { isAnswered, shownName } from "./episode.js";
+import { gated } from "./gate.js";
+import { suggestionsOnClock, KEPT_IN_100 } from "./handoff-v2.js";
+import { spelled } from "./final-transcript.js";
+import { timelineAt } from "./clock.js";
 
 /** The size of a preview, in pixels: half a Reel's each way. */
 export const PREVIEW = { width: 540, height: 960 };
@@ -120,8 +125,11 @@ const listed = (path) => `file '${String(path).replace(/'/g, "'\\''")}'`;
       and given its own when it is whole.
     `video` is the raw video, `ranges` the candidate's stretches, `fps` and `duration` as previewStretches takes them, and
     `size` the picture's {width, height} as it is shown. Anything previewStretches refuses is refused, and so is a size that
-    cannot be read. */
-export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null }) {
+    cannot be read. A candidate with no crops yet, which a reading suggested (reels.json version 2), is refused first, in the
+    words of every reader that needs crops (notMadeWords), by its number `n` when it is given; one with a crop on some stretches
+    and not on others says which stretch has none. */
+export function previewSteps({ video, ranges, out, fps, duration, work, size, streams = null, n }) {
+  if (Array.isArray(ranges) && ranges.length && ranges.every((range) => !(range && range.crop))) throw new Error(notMadeWords(n));
   if (!(size && Number.isInteger(size.width) && size.width > 0 && Number.isInteger(size.height) && size.height > 0)) throw new Error(`A preview needs the size of the video's picture, and this one cannot be read: ${size && size.width} by ${size && size.height}`);
   const stretches = previewStretches({ ranges, fps, duration });
   const most = perPart(size);
@@ -183,10 +191,22 @@ export function reelCandidates({ clips, plan, facts, stills }) {
 export const REELS_FILE = "reels.json";
 export const previewPath = (n) => `previews/reel-${n}.mp4`;
 
-/** The layout of reels.json. It is raised only when its shape changes, and a reader refuses a higher one. */
-const REELS_VERSION = 1;
+/** The layout of reels.json. It is raised only when its shape changes, and a reader refuses a higher one. Version 2 (spec
+    2026-10-22, section 3, "reels.json version 2") adds the candidate a reading suggests: its stretches have no crops yet,
+    since no face is looked for until she asks to make it, it has no preview, and its `title` is "". A list that holds such a
+    candidate is written at version 2, so that a Mac that knows version 1 alone says a newer brimm-video wrote it, rather than
+    that a candidate cannot be read; any other list is written at version 1, as it always was. */
+export const REELS_VERSION = 2;
 
-/** reels.json, as it is written: the candidates of `video`, made by the import or by `ask` (`by`) at the moment `made`.
+/** Whether a candidate is one a reading suggested and nobody has made yet: a stretch of it has no crop. A candidate with no
+    stretch at all is not one: it has nothing to show, and says so in its own words. */
+export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candidate.ranges.some((range) => !(range && range.crop));
+
+/** What a command that needs a Reel's crops says of a candidate that is not made yet, by its number `n`, or with none. */
+export const notMadeWords = (n) => (n === undefined ? "This Reel is not made yet: make it first." : `Reel ${n} is not made yet: say "make Reel ${n}" first.`);
+
+/** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment
+    `made`, at version 2 when a candidate has no crops (uncropped), and at version 1 otherwise.
     `none` says why there are no candidates, and is left out when there are some. `highest` is the highest number ever given
     to a Reel of this episode, kept so that asking Claude again never gives a number twice: a candidate that is let go takes
     its number out of every list. It is at least the highest number among the candidates. `cannotAsk` says why asking Claude
@@ -194,15 +214,17 @@ const REELS_VERSION = 1;
     left out when there are candidates. Whether Claude can be asked again otherwise is for the Mac that shows the list to
     say (edit.js reels). */
 export const reelsFile = ({ video, by, made, candidates, none = "", cannotAsk = "", rulesOnly = false, highest = 0 }) => ({
-  format: "brimm-video reels", version: REELS_VERSION, video, by, made,
+  format: "brimm-video reels", version: candidates.some(uncropped) ? REELS_VERSION : 1, video, by, made,
   highest: Math.max(highest, 0, ...candidates.map((c) => c.n)),
   ...(none && !candidates.length ? { none } : {}), ...(cannotAsk && !candidates.length ? { cannotAsk } : {}),
   ...(rulesOnly && !candidates.length ? { rulesOnly: true } : {}), candidates
 });
 
 /** reels.json as it was read: {reels}, or {why} it cannot be used. Only what the previews, the listing and a Reel's project
-    are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. */
-export function readReels(text) {
+    are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. A stretch at
+    version 2 may have no crop (a candidate a reading suggested, not made yet); at version 1 each has its own. `known` is the
+    newest version this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. */
+export function readReels(text, { known = REELS_VERSION } = {}) {
   let reels;
   try {
     reels = JSON.parse(text);
@@ -211,11 +233,11 @@ export function readReels(text) {
   }
   const not = { why: "it is not a list of Reel candidates this tool wrote" };
   if (!reels || reels.format !== "brimm-video reels" || !Number.isInteger(reels.version)) return not;
-  if (reels.version > REELS_VERSION) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
+  if (reels.version > known) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
   if (typeof reels.video !== "string" || !Array.isArray(reels.candidates)) return not;
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);
-  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start && isCrop(r.crop);
+  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start && (isCrop(r.crop) || (reels.version >= 2 && r.crop === undefined));
   // A preview is opened in QuickTime Player and brought over by Dropbox, so it may be in one place only: its own in previews/.
   const isPreview = (c) => c.preview === undefined || c.preview === null || c.preview === previewPath(c.n);
   const bad = reels.candidates.findIndex((c) => !c || !Number.isInteger(c.n) || c.n < 1 || !Array.isArray(c.ranges) || !c.ranges.every(isRange) || !isPreview(c));
@@ -260,14 +282,102 @@ export function reelProject({ video, facts, candidate, plan, planRanges = plan.r
 /** What a Reel is now, in the record's words, as the list says it. */
 const NOW = { candidate: "A candidate", picked: "Picked", dropped: "Dropped", finished: "Finished" };
 
+/** The lines after the list of candidates: the record's Reels that reels.json does not hold, which are the clips the import cut,
+    of an episode imported before phase 3, and any other the record lists before Dropbox has brought the list that holds it.
+    Each kind is a line and a blank one after it; none when there are none. */
+function reelsNotListed(reels, record) {
+  const listed = new Set(reels.candidates.map((c) => c.n));
+  const others = (record.reels || []).filter((r) => !listed.has(r.n));
+  const cut = (r) => (Array.isArray(r.files) ? r.files : []).some((f) => /\.reel-\d+\.mp4$/i.test(f));
+  const said = (list) => list.map((r) => `Reel ${r.n}, ${r.status === "candidate" ? "a candidate" : r.status}`).join("; ");
+  return [
+    ...(others.some(cut) ? [`Reels the import cut as clips: ${said(others.filter(cut))}.`, ""] : []),
+    ...(others.some((r) => !cut(r)) ? [`Reels the record lists that reels.json does not hold yet: ${said(others.filter((r) => !cut(r)))}.`, ""] : [])
+  ];
+}
+
+/** A suggestion's stretches, in seconds of the video: its own, or all of it from its start to its end when it holds none. */
+const stretchesOfSuggestion = (c) => (c.ranges.length ? c.ranges : [{ start: c.start, end: c.end }]);
+
+/** The parts of a suggestion's stretches that lie in the clock's pieces, each { start, end } in seconds of the video: what the
+    clock keeps of them. Whatever lies between two stretches is none of them, even where the clock keeps it too. */
+const keptOfStretches = (c, clock) => stretchesOfSuggestion(c).flatMap((s) => clock.map((p) => ({ start: Math.max(s.start, p.from), end: Math.min(s.end, p.to) })).filter((i) => i.end > i.start));
+
+/** How many seconds a list of { start, end } holds. */
+const secondsIn = (list) => list.reduce((sum, i) => sum + i.end - i.start, 0);
+
+/** Where a suggestion lies on the clock she is reading, by its time alone, for a video with no words file: { start, end,
+    seconds } with its times on the clock and the seconds of its stretches the clock keeps; or null when fewer than 70 in 100 of
+    the seconds of its stretches lie in the clock's pieces (as for a suggestion placed by its words, handoff-v2.js
+    suggestionsOnClock), or none does. Its start and end are where the clock puts the first and the last moment of it that it
+    keeps. */
+function placedByTime(c, clock) {
+  const inside = keptOfStretches(c, clock);
+  if (!inside.length || secondsIn(inside) * 100 < secondsIn(stretchesOfSuggestion(c)) * KEPT_IN_100) return null;
+  return { start: timelineAt(clock, Math.min(...inside.map((i) => i.start))), end: timelineAt(clock, Math.max(...inside.map((i) => i.end))), seconds: secondsIn(inside) };
+}
+
+/** Where a suggestion lies on the clock she is reading (`now`, clockFor's read, with a clock): placed by its words when the
+    read has the recording's words, as the hand-off places a suggestion (handoff-v2.js suggestionsOnClock, which says what it
+    keeps), and by its time otherwise. { start, end, seconds, first?, last? } on that clock: `first` and `last` the words it opens
+    and closes with there, when it is placed by its words, and `seconds` those of its own stretches the clock keeps (not the
+    gap between two of them that the clock keeps too, which a run of its words bridges); or null when what it says is cut now. */
+function placedOn(c, now) {
+  if (!(Array.isArray(now.words) && now.words.length)) return placedByTime(c, now.clock);
+  const [one] = suggestionsOnClock({ suggestions: [{ n: c.n, start: c.start, end: c.end, stretches: c.ranges, first: c.first, last: c.last, why: c.reason, point: c.point }], words: now.words, clock: now.clock });
+  return one ? { start: one.start, end: one.end, seconds: secondsIn(keptOfStretches(c, now.clock)), first: one.first, last: one.last } : null;
+}
+
+/** The list of the Reel suggestions of a video of the switch (a video she has answered the card of): a reading's suggestions,
+    each as it is on the clock she is reading (`now`, clockFor's read), the video named as everything edit.js prints names it
+    (episode.js shownName), never by `reels.video`, the file's name. A short video gets no Reels. With none, why there are none,
+    with no offer to ask Claude again. Otherwise the head line says which clock the times are on, and each suggestion has its
+    times there, its length, what it is now, the words it opens and closes with there, why Claude picked it, whether it fits a
+    Reel, its preview when it has one, and the word to check. A suggestion whose words are cut now says so ("Cut now"), with the
+    words it had. With no clock (`now` null, or a read that could not be made) the times are the recording's own. The words a
+    suggestion had, which the clock does not give, are spelled as the episode spells its words (spelling.js). */
+function suggestionsText(reels, record, now) {
+  const name = shownName(record);
+  if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
+  if (!reels.candidates.length) return `There are no Reel suggestions of ${name}${reels.none ? `: ${reels.none}` : ""}.\n`;
+  const status = new Map((record.reels || []).map((r) => [r.n, r.status]));
+  const on = now && Array.isArray(now.clock) ? now : null;
+  const spell = (said) => (said ? spelled(said, record.spellings || []) : said);
+  const blocks = reels.candidates.map((c) => {
+    const state = NOW[status.get(c.n)] || NOW.candidate;
+    const where = on ? placedOn(c, on) : { start: c.start, end: c.end, seconds: c.seconds };
+    // Where it is cut now, or where only its time places it, the words it had are the ones it was suggested with.
+    const { first = spell(c.first), last = spell(c.last) } = where || {};
+    const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why: ${c.reason}`];
+    if (!where) return [`${c.n}. Cut now: its words were cut from ${on.on}. ${state}.`, ...about].filter(Boolean).join("\n");
+    const seconds = Math.round(where.seconds);
+    return [
+      `${c.n}. ${stamp(where.start)} to ${stamp(where.end)}, ${seconds} second${seconds === 1 ? "" : "s"}. ${state}.`,
+      ...about,
+      !c.fits.fits && `   It does not fit a Reel. ${c.fits.why}`,
+      c.preview && `   Preview: ${c.preview}`,
+      c.check && `   ${c.check}`
+    ].filter(Boolean).join("\n");
+  });
+  return [`Reel suggestions of ${name}: ${reels.candidates.length}, with times on ${on ? on.on : "the recording's own clock"}.`, "", ...blocks.flatMap((block) => [block, ""]), ...reelsNotListed(reels, record)].join("\n");
+}
+
 /** The list of the Reel candidates, to show a person: for each its number, where it is in the raw video, its length, what it
     is now, its words for the screen and why Claude picked it, whether it fits a Reel, its preview or why it has none, and the
     word to check when it starts or ends with no pause. With none, why there are none, and how to ask again only when asking
     again can work: a short video gets no Reels, and `whyNot`, why Claude cannot be asked now on the Mac that shows the list
     (as `ask` would say), is said instead of the offer. After the candidates, the Reels of the record that are none of them,
     which are the clips the import cut of an episode imported before phase 3. `record` is the episode's record, for its kind
-    and for what each Reel is now: one it does not know of is a candidate. */
-export function reelsText(reels, record, whyNot = "") {
+    and for what each Reel is now: one it does not know of is a candidate.
+    For a video she has answered the card of (episode.js isAnswered) it is the list of suggestions on the clock she is reading,
+    `now` being clockFor's read of the main video, or null (suggestionsText); `whyNot` is then not said, since asking Claude again
+    is not offered. So it is for a record the gate holds (gate.js gated: a video not yet answered, or a session not cleared),
+    whatever its answer says, so that no line of this can name `reels.video` for one: it is named by its label. For any other
+    record it is this list, as it always was, whatever `now` is: layoutOf is not asked, since it turns 3 for an old video that only
+    holds a version with a `how`. A bare shape with no `kind` at all is no record a session reads (episode.js refuses one), and is
+    not held by the gate here. */
+export function reelsText(reels, record, whyNot = "", now = null) {
+  if (isAnswered(record) || (record.kind !== undefined && gated(record))) return suggestionsText(reels, record, now);
   const name = reels.video;
   if (record.kind === "short video") return `${name} is a short video, and a short video gets no Reels.\n`;
   if (!reels.candidates.length) {
@@ -286,17 +396,7 @@ export function reelsText(reels, record, whyNot = "") {
       c.check && `   ${c.check}`
     ].filter(Boolean).join("\n");
   });
-  // The record's Reels that reels.json does not hold: the clips the import cut, of an episode imported before phase 3, and any
-  // other the record lists before Dropbox has brought the list that holds it.
-  const listed = new Set(reels.candidates.map((c) => c.n));
-  const others = (record.reels || []).filter((r) => !listed.has(r.n));
-  const cut = (r) => (Array.isArray(r.files) ? r.files : []).some((f) => /\.reel-\d+\.mp4$/i.test(f));
-  const said = (list) => list.map((r) => `Reel ${r.n}, ${r.status === "candidate" ? "a candidate" : r.status}`).join("; ");
-  const after = [
-    ...(others.some(cut) ? [`Reels the import cut as clips: ${said(others.filter(cut))}.`, ""] : []),
-    ...(others.some((r) => !cut(r)) ? [`Reels the record lists that reels.json does not hold yet: ${said(others.filter((r) => !cut(r)))}.`, ""] : [])
-  ];
-  return [`Reel candidates of ${name}: ${reels.candidates.length}.`, "", ...blocks.flatMap((block) => [block, ""]), ...after].join("\n");
+  return [`Reel candidates of ${name}: ${reels.candidates.length}.`, "", ...blocks.flatMap((block) => [block, ""]), ...reelsNotListed(reels, record)].join("\n");
 }
 
 /** The candidates and the record's Reels after Claude is asked again (`ask`): {candidates, entries, added, highest, ignored}.

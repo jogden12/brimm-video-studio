@@ -152,6 +152,13 @@ describe("buildHandoff and handoffFault", () => {
     assert.equal(h.episode.name, "Pricing: what to charge?");
     assert.equal(handoffFault(h), "");
   });
+  it("writes a raw video answered again as raw (its kind \"raw\", which an episode from before the switch is) as an episode, which version 1 knows (final fix 4)", () => {
+    const h = buildHandoff({ ...GIVEN, record: { ...RECORD, version: 3, kind: "raw" } });
+    assert.equal(h.episode.kind, "episode");
+    assert.equal(handoffFault(h), "");
+    assert.equal(buildHandoff(GIVEN).episode.kind, "episode");
+    assert.equal(buildHandoff({ ...GIVEN, record: { ...RECORD, kind: "short video" }, reels: [] }).episode.kind, "short video");
+  });
   it("gives a title only when it is approved", () => {
     assert.equal(buildHandoff({ ...GIVEN, record: { ...RECORD, kind: "short video", title: { ...RECORD.title, approved: false } }, reels: [] }).episode.title, null);
   });

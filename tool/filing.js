@@ -12,13 +12,14 @@ import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
-import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode } from "./episode.js";
+import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
 import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
-import { isZoomName } from "./kinds.js";
+import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
+import { gated } from "./gate.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -139,7 +140,9 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
     fingerprint
   });
   const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
-  log(`${video}: filed into Episodes as "${found.name}"${found.reused ? ", in the folder an import that stopped had made" : ""}.`);
+  // A light import's video is named by its label, and its episode by its id: the folder's name is the file's.
+  const reused = found.reused ? ", in the folder an import that stopped had made" : "";
+  log(label ? `${label}: filed into Episodes as ${record.id}${reused}.` : `${video}: filed into Episodes as "${found.name}"${reused}.`);
   return { name: found.name, path, record, entries };
 }
 
@@ -152,7 +155,7 @@ const STATUS_EVERY_MS = 60 * 1000;
     while a step runs, by the timer `every`. `fail(why)` writes the status with why the import failed, and the status is left.
     `end` stops the timer and leaves the status: the late check takes it away. A status that cannot be written costs nothing
     but itself: the log says so once, and the work goes on. A light import gives its video's `label`, which every status
-    carries. */
+    carries, and which the log names the video by. */
 export function statusReporter(inner, { root, machine, video, bytes, importId = "", label = "", writeText, log = () => {}, pid = process.pid, now = () => Date.now(), every = setInterval, cancel = clearInterval }) {
   const status = { version: 1, machine, pid, ...(importId ? { import: importId } : {}), video, bytes, seconds: null, step: "Waiting to start", ...(label ? { label } : {}) };
   let told = false;
@@ -160,7 +163,8 @@ export function statusReporter(inner, { root, machine, video, bytes, importId = 
     try {
       writeStatus(root, { ...status, ...more, at: localStamp(new Date(now())) }, writeText);
     } catch (e) {
-      if (!told) log(`${video}: its status could not be written into Episodes/.importing (${String(e.message).replace(/\.$/, "")}). The work goes on.`);
+      const why = String(e.message).replace(/\.$/, "");
+      if (!told) log(`${label || video}: its status could not be written into Episodes/.importing (${label ? withoutNames(why, namesOf(video), [label]) : why}). The work goes on.`);
       told = true;
     }
   };
@@ -206,7 +210,7 @@ export function statusReporter(inner, { root, machine, video, bytes, importId = 
     The design says a video matches an episode by its size and its length. The size is enough here: this guard runs before
     ffprobe has read the length, the name must match too, and two recordings of one name and one size to the byte are not
     met in practice. Matching the length as well would mean an ffprobe of every video in the drop folder at every run. */
-export function heldBy({ root, video, bytes, now = Date.now() }) {
+export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
   // A status that failed or found a problem says most, then one that says the video is held, then an episode that holds the
   // video, then an import running. A running import, and a hold, keep only a video of their own size: one dropped again under
   // the same name, as a corrected export, is another recording.
@@ -218,7 +222,7 @@ export function heldBy({ root, video, bytes, now = Date.now() }) {
   if (problem) return `copied in, but the late check found a problem: ${String(problem.problem).replace(/\.$/, "")}.`;
   const left = held.find((status) => importState(status, now) === "held");
   if (left) return String(left.held);
-  const episode = episodeHolding({ root, video, bytes });
+  const episode = episodeHolding({ root, video, bytes, gatedAs });
   if (episode) return episode;
   if (held.length) return `it is being imported on ${held[0].machine}.`;
   return "";
@@ -241,11 +245,15 @@ export function holdingEpisode({ root, video, bytes }) {
   return null;
 }
 
-/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size.
-    "" when none does. */
-export function episodeHolding({ root, video, bytes }) {
+/** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size
+    (holdingEpisode). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
+    label and short id (shownName): its folder holds the file's name, which may be a client's. `gatedAs` gives the name of a
+    record named so ("" for one named by its folder): edit.js gives one that names a video held as a session so too. */
+export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : "") }) {
   const held = holdingEpisode({ root, video, bytes });
-  return held ? `already imported as ${held.name}. It stays in the drop folder until its late check passes, or for a person to delete.` : "";
+  if (!held) return "";
+  const as = gatedAs(held.record);
+  return `already imported as ${as ? `${as} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,
@@ -348,8 +356,14 @@ function waitingStatus(pending, deps, step) {
     and the pending check stay, so that the next run checks again and the video is never imported twice. Gives back
     { ok, problems }. */
 export function finishLate(pending, deps) {
-  const { log = () => {}, notify = () => {} } = deps;
-  const opts = ruleOpts(deps);
+  const { notify = () => {} } = deps;
+  // A light import's video is named by its label, and its episode by its id, in every line of its late check; and what the check
+  // finds, which names a file of it and its folder, is said in the log and its status with nothing of the file's names in it.
+  const who = pending.label || pending.video;
+  const plain = (text) => (pending.label ? withoutNames(text, [...namesOf(pending.video, pending.drop), pending.name, pending.folder], [pending.label]) : text);
+  const logged = deps.log || (() => {});
+  const log = (line) => logged(plain(line));
+  const opts = ruleOpts({ ...deps, log });
   // The video in the drop folder is the work copy of the raw video only while it is the file that was imported: one dropped
   // again under the same name is another recording, and is never copied in for it, nor deleted.
   const same = sameFile(pending.drop, pending.dropFile);
@@ -360,38 +374,38 @@ export function finishLate(pending, deps) {
     try {
       if (same) rmSync(pending.drop, { force: true });
     } catch (e) {
-      log(`${pending.video}: could not be taken out of the drop folder (${e.code || e.message}). Delete it there by hand.`);
+      log(`${who}: could not be taken out of the drop folder (${e.code || e.message}). Delete it there by hand.`);
     }
     try {
       removeStatus(pending.root, pending.video, pending.machine, pending.importId || "");
       rmSync(pendingFile(deps.episode.home, pending.id), { force: true });
     } catch (e) {
-      log(`${pending.video}: its late check passed, but it could not be put away (${e.code || e.message}). The next run checks it again.`);
+      log(`${who}: its late check passed, but it could not be put away (${e.code || e.message}). The next run checks it again.`);
     }
-    log(`${pending.video}: the late check passed: every file of "${pending.name}" is whole in Dropbox. ${same ? "The video is taken out of the drop folder." : "The video in the drop folder is another file of that name now, so it is left there."}`);
+    log(`${who}: the late check passed: every file of ${pending.label ? `its episode, ${pending.id},` : `"${pending.name}"`} is whole in Dropbox. ${same ? "The video is taken out of the drop folder." : "The video in the drop folder is another file of that name now, so it is left there."}`);
     return { ok: true, problems };
   }
-  for (const problem of problems) log(`${pending.video}: the late check found a problem: ${problem}`);
-  const said = problems.join(" ");
+  for (const problem of problems) log(`${who}: the late check found a problem: ${problem}`);
+  const said = plain(problems.join(" "));
   if (!pending.problem) {
     // A light import's video is named by its label, as in every notice of its import: a notice may show on a shared screen.
     notify(`Dropbox lost a file of ${pending.label || basename(pending.video, extname(pending.video))}. The video stays in the drop folder; see the log.`);
     try {
-      noteProblem(pending, said, deps);
+      noteProblem(pending, said, { ...deps, log });
     } catch (e) {
-      log(`${pending.video}: the problem could not be written into its cut plan (${String(e.message).replace(/\.$/, "")}).`);
+      log(`${who}: the problem could not be written into its cut plan (${String(e.message).replace(/\.$/, "")}).`);
     }
   }
   pending.problem = said;
   try {
     writePending(deps.episode.home, pending);
   } catch (e) {
-    log(`${pending.video}: its late check could not be kept for the next run (${e.code || e.message}).`);
+    log(`${who}: its late check could not be kept for the next run (${e.code || e.message}).`);
   }
   try {
     writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step: "Late check", at: localStamp(new Date(Date.now())), problem: said, ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...opts }));
   } catch (e) {
-    log(`${pending.video}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
+    log(`${who}: its status could not say the problem (${String(e.message).replace(/\.$/, "")}).`);
   }
   return { ok: false, problems };
 }
@@ -433,16 +447,17 @@ const ZOOM_HELD = "Zoom downloads are taken from a later version. Put this one i
 const holdsZoom = (name, deps) => Boolean(deps.light) && isZoomName(name);
 
 /** Hold the video `name` in the drop folder `dir`: write the status that says why it is not imported, as a new file by the
-    rule, so that both Macs' `episodes` say it. It is held whether or not the status could be written, and the log says so,
-    once, when it could not. */
+    rule, so that both Macs' `episodes` say it. Its label is its Zoom time alone (kinds.js zoomTimeOf), by which every command on
+    either Mac names it, and so does the log: a download renamed with a client's words after Zoom's own name is never named by
+    them. It is held whether or not the status could be written, and the log says so, once, when it could not. */
 function hold(name, dir, deps, told) {
   const { episode, log = () => {}, clock = Date.now } = deps;
   const work = join(runsFolder(episode.home), `held-${process.pid}-${clock()}`);
   try {
     const bytes = statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0;
-    writeStatus(episode.root, { version: 1, machine: episode.machine, pid: process.pid, video: name, bytes, seconds: null, step: "Held", at: localStamp(new Date(clock())), held: ZOOM_HELD }, textWriter({ work, ...ruleOpts(deps) }));
+    writeStatus(episode.root, { version: 1, machine: episode.machine, pid: process.pid, video: name, bytes, seconds: null, step: "Held", at: localStamp(new Date(clock())), held: ZOOM_HELD, label: zoomTimeOf(name) }, textWriter({ work, ...ruleOpts(deps) }));
   } catch (e) {
-    if (!told.has(`status:${name}`)) log(`${name}: its status could not be written into Episodes/.importing (${String(e.message).replace(/\.$/, "")}). It is held all the same.`);
+    if (!told.has(`status:${name}`)) log(`${zoomTimeOf(name)}: its status could not be written into Episodes/.importing (${String(withoutNames(e.message, namesOf(name), [zoomTimeOf(name)])).replace(/\.$/, "")}). It is held all the same.`);
     told.add(`status:${name}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -462,7 +477,9 @@ function releaseHeld(dir, deps) {
     try {
       removeStatus(episode.root, status.video, episode.machine, status.import || "");
     } catch (e) {
-      log(`${status.video}: the status that said it was held could not be taken away (${String(e.message).replace(/\.$/, "")}).`);
+      // A Zoom download is named by its Zoom time alone, or its label, and why holds no name of its file.
+      const who = status.label || zoomTimeOf(status.video) || status.video;
+      log(`${who}: the status that said it was held could not be taken away (${String(who === status.video ? e.message : withoutNames(e.message, namesOf(status.video), [who])).replace(/\.$/, "")}).`);
     }
   }
 }
@@ -476,9 +493,16 @@ const LOOK_AGAIN_MS = 60 * 1000;
     the folder with a status that says why until the import takes them; then, while any late check of this run is not yet
     due, a wait of a minute at most, a look for videos that arrived meanwhile, and each late check that has come due. The
     Mac is kept awake while there is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those
-    held, each with `held`. */
+    held, each with `held`. In a light import the log names no video by its file, which may be named for a client: a video by
+    the label its status carries, or as "A video in the drop folder", and why it is held with nothing of its file's names in it.
+    A Zoom download is named by its Zoom time alone (kinds.js zoomTimeOf), the part of its name that is Zoom's: the time and a
+    number. */
 export async function importEpisodes(dir, deps, importOne) {
   const { episode, log = () => {}, wait, clock = Date.now, keepAwake = caffeinate } = deps;
+  /** How the log names the video `name` in the drop folder: by its file, as always, and in a light import by its label, or as "A
+      video in the drop folder", unless Zoom named it. `labels` gives the labels the statuses carried, by the video's file. */
+  const named = (name, labels = labelsNow()) => (!deps.light ? name : isZoomName(name) ? zoomTimeOf(name) : labels.get(name) || "A video in the drop folder");
+  const labelsNow = () => new Map(readStatuses(episode.root).filter(({ status }) => status && status.machine === episode.machine && status.label).map(({ status }) => [status.video, status.label]));
   const results = [];
   // The files tried in this run, by name, inode and size: a video dropped again under the same name is another file. A video
   // held by an episode or a status is looked at again each minute, and the log says why once.
@@ -529,7 +553,7 @@ export async function importEpisodes(dir, deps, importOne) {
       log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
       return;
     }
-    if (first) log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");
+    if (first) log(names.length ? `Looked in the folder: ${names.length} waiting${deps.light ? "" : ` (${names.join(", ")})`}.` : "Looked in the folder: nothing is waiting.");
     for (const name of names) {
       const id = key(name);
       let held = heldBy({ root: episode.root, video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0 });
@@ -538,7 +562,7 @@ export async function importEpisodes(dir, deps, importOne) {
       if (held) {
         if (!told.has(`${id}:${held}`)) {
           told.add(`${id}:${held}`);
-          log(`${name}: ${held}`);
+          log(deps.light ? `${named(name)}: ${withoutNames(held, namesOf(name), [named(name)])}` : `${name}: ${held}`);
           results.push({ ok: true, name, held });
         }
         continue;
@@ -564,7 +588,7 @@ export async function importEpisodes(dir, deps, importOne) {
       if (!result.ok && !result.arriving && !result.filed) {
         const said = readStatuses(episode.root).some(({ status }) => status && status.video === name && status.machine === episode.machine && status.failed);
         if (said) failed.set(id, name);
-        else log(`${name}: its import failed, and its status, which would say so, could not be written, so it is not tried again in this run.`);
+        else log(`${named(name)}: its import failed, and its status, which would say so, could not be written, so it is not tried again in this run.`);
       }
       if (result.filed) progressed = true;
       // A video still arriving is looked at again.
@@ -573,7 +597,8 @@ export async function importEpisodes(dir, deps, importOne) {
     }
   };
   clearRuns(episode.home, deps.alive || isRunning);
-  for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${video}: an import of it on this Mac stopped before it was done, so it is imported again.`);
+  const before = labelsNow();
+  for (const video of clearCrashes({ root: episode.root, machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${named(video, before)}: an import of it on this Mac stopped before it was done, so it is imported again.`);
   finishDue(true);
   await importWaiting(true);
   while (changed) {

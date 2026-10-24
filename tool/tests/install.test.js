@@ -828,7 +828,6 @@ describe("the drop folder kept on the Mac (--machine)", { skip: notAMac }, () =>
 });
 
 describe("the drop folder the installer switches (--machine, --drop), asked what it would do", { skip: notAMac }, () => {
-  const LIGHT = "The light import needs the question in her chat, which is not built yet.";
   const ADVICE = "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again.";
   /** A folder made for one test that stands for BRIMM Video in Dropbox. `old` and `drop` make this Mac's folders in it. */
   function box() {
@@ -931,9 +930,21 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.deepEqual(shown(bare), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), readings: false });
     d.done();
   });
-  it("refuses the light import until it is built, by settings.js's words, before anything is shown or changed", () => {
+  it("takes the light import, now that her chat's question is built: --print shows \"import\": \"light\" in the settings it would write, and changes nothing", () => {
     const d = box();
-    for (const settings of [undefined, d.mine()]) refusedWith(askWith({ settings }, "--print", "--machine", "Mac Studio", "--import", "light", d.root), [LIGHT], Boolean(settings));
+    for (const settings of [undefined, d.mine(), d.mine({ import: "full" })]) {
+      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", "--import", "light", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes('\n  "import": "light"'), r.out);
+      assert.deepEqual(shown(r), { ...(settings || d.mine()), version: 1, import: "light" });
+      assert.deepEqual([r.left, r.ran], [settings ? SETTINGS_LEFT : [], ""]);
+      assert.match(r.out, /\nNothing was changed\.\n$/);
+    }
+    // With the switch of the drop folder and the hand-off told beside it, as the switch to the light import is made.
+    const all = ask("--print", "--machine", "Mac Studio", "--drop", "Drop", "--import", "light", "--handoff", "2", d.root);
+    assert.equal(all.status, 0, all.err + all.out);
+    assert.deepEqual(shown(all), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), drop: "Drop", import: "light", handoffVersion: 2 });
+    changedNothing(all);
     d.done();
   });
   it("refuses a value that will not do, and settings in the file that will not do, by settings.js's words", () => {

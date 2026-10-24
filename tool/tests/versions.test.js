@@ -317,3 +317,14 @@ describe("matchVersion", () => {
     });
   });
 });
+
+describe("matchVersion, a session's mark as the gate reads it (F2 fix 8)", () => {
+  it("leaves out an episode whose mark says cleared in any way but her click on the dialog", () => {
+    const said = words(TALK);
+    const mine = { seconds: 800, fingerprint: fingerprintOf(said), words: said };
+    const base = { id: "e-20261020-aaaaaa", folder: "A", kind: "finished", archived: false, seconds: 800, fingerprint: fingerprintOf(said) };
+    for (const cleared of [true, "no", 1, { at: AT }]) {
+      assert.equal(matchVersion(mine, [{ ...base, session: { marked: AT, on: "Mac Studio", teachings: null, cleared } }], () => said), null, JSON.stringify(cleared));
+    }
+  });
+});

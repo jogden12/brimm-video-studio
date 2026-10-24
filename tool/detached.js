@@ -37,11 +37,17 @@ function holder(home, folder) {
   }
 }
 
-/** The command a detached run is at for an episode on this Mac, or "" when none is: a lock whose run is no longer running
-    was left by a run that died, and counts as none. */
-export function runningCommand(home, folder, alive = isRunning) {
+/** The detached run at work on an episode on this Mac, { pid, command }, or null when none is: a lock whose run is no longer
+    running was left by a run that died, and counts as none. */
+export function runningRun(home, folder, alive = isRunning) {
   const held = holder(home, folder);
-  return held && alive(held.pid) ? held.command : "";
+  return held && alive(held.pid) ? { pid: held.pid, command: held.command } : null;
+}
+
+/** The command a detached run is at for an episode on this Mac, or "" when none is (runningRun). */
+export function runningCommand(home, folder, alive = isRunning) {
+  const run = runningRun(home, folder, alive);
+  return run ? run.command : "";
 }
 
 /** Write a file whole on this Mac's own disk: under a name of this run's own, then renamed, which is safe there. */
@@ -82,7 +88,7 @@ const GUARD_STALE_MS = 10000;
       so one run alone takes a free lock;
     - a lock whose run is not running is taken away only by the run that holds the takeover guard (taken by a hard link too),
       and only when its text is still, word for word, the dead run's: no live run's lock is ever taken away. */
-function takeEpisodeLock(lock, command, alive) {
+export function takeEpisodeLock(lock, command, alive) {
   const text = JSON.stringify({ pid: process.pid, command, nonce: randomUUID() });
   const mine = `${lock}.${process.pid}.${randomUUID().slice(0, 8)}`;
   const guard = `${lock}.takeover`;
@@ -141,7 +147,7 @@ function takeEpisodeLock(lock, command, alive) {
 
 /** Let the episode's lock go, when it is still this run's own (its text is the one taken): a lock some other run holds is
     never taken away. */
-function releaseEpisodeLock(lock, text) {
+export function releaseEpisodeLock(lock, text) {
   if (textOf(lock) === text) rmSync(lock, { force: true });
 }
 
@@ -150,28 +156,62 @@ function releaseEpisodeLock(lock, text) {
     { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. The bring of a take-over
     that brought every file also resolves `takeOver`, { by, since, next }: the claim it was for, and what to say next while
     that claim stands, which the result keeps. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
-    work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. */
-export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now }, work) {
+    work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. `clean` is what
+    each line of the result is written as, which `status` prints into Sallie's chat: for a video not yet answered, or a session,
+    the line with nothing of the video's names in it (edit.js), and for any other the line as it is. An error of its own, as a
+    folder in BRIMM Video Work that cannot be made or a result that cannot be written, names the episode's folder: it is thrown
+    said through `clean` too, so that nothing of it reaches the log or the chat otherwise.
+    `work` is given { early }: a run whose own work is done before it ends (a reading, whose copies have their late check still
+    to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and with
+    this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the run
+    ends. An early result that cannot be written costs nothing: the final one is still written. */
+export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
   const lock = lockOf(home, folder);
-  mkdirSync(episodeWork(home, folder), { recursive: true });
-  const took = takeEpisodeLock(lock, command, alive);
+  /** The error `e` as `clean` says it: the same error when that changes nothing, as for every episode today. */
+  const cleaned = (e) => {
+    const message = String(e && e.message ? e.message : e);
+    const said = clean(message);
+    return said === message ? e : Object.assign(new Error(said), e && e.code ? { code: e.code } : {});
+  };
+  let took;
+  try {
+    mkdirSync(episodeWork(home, folder), { recursive: true });
+    took = takeEpisodeLock(lock, command, alive);
+  } catch (e) {
+    throw cleaned(e);
+  }
   if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
+  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
+  const early = (done) => {
+    try {
+      writeWhole(resultFile(home, folder, command), JSON.stringify({ ...resultOf(done), early: true, pid: process.pid }, null, 2) + "\n");
+    } catch (e) {
+      // The final result is written all the same.
+    }
+  };
   let done;
   try {
     keepAwake(process.pid);
-    done = await work();
+    done = await work({ early });
   } catch (e) {
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
-  const result = { version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: done.made || [], failed: done.failed || [], next: done.next || "" };
-  if (done.takeOver) result.takeOver = done.takeOver;
+  const result = resultOf(done);
+  if (done.takeOver) result.takeOver = { ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
+  let failure = null;
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");
-  } finally {
-    releaseEpisodeLock(lock, took.text);
+  } catch (e) {
+    failure = cleaned(e);
   }
+  try {
+    releaseEpisodeLock(lock, took.text);
+  } catch (e) {
+    failure = failure || cleaned(e);
+  }
+  if (failure) throw failure;
   return result;
 }
 

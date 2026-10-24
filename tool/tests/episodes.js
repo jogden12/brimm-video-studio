@@ -5,7 +5,7 @@
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
+import { layoutOf, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { contextFor } from "../edit.js";
 import { episodesFolder, fromFinalCutFolder, writeSettings } from "../settings.js";
 import { captionsOf } from "../lib.js";
@@ -90,6 +90,9 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
+    // No test reads this computer's own Claude settings: `behind` looks at the environment and the managed settings folder
+    // (edit.js lockLoosened), and here they are empty and in the test's own folder.
+    env: {}, managedDir: join(dir, "managed"),
     wait: async (ms) => {
       waits.push(ms);
       clock += ms;
@@ -149,6 +152,18 @@ export const EDITED = {
   ]
 };
 
+/** What the Final Cut finish refuses for now, in either version of the hand-off: a client or group session, whose own finish
+    comes with its teachings, and a video not yet answered, which has no kind to finish as. Each as [what it is, the record's
+    own fields, the refusal as a function of how the video is named, how the video is named as a function of its label]. A
+    session's name is its session label, as `kind` writes it in the same write as its mark (edit.js answerKind), and each
+    refusal names the video as edit.js names it (episode.js shownName): a session by that name, a video not yet answered by its
+    label, else by its short id. */
+const SESSION_NAME = "Session, 2026-10-14";
+export const NOT_YET = [
+  ["a client or group session", { kind: "session", name: { text: SESSION_NAME, placeholder: false } }, (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`, () => SESSION_NAME],
+  ["a video not yet answered", { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } }, (who) => `${who} is not answered yet: say what it is first. Nothing was written.`, (label) => label || `a video not yet answered (${ID.slice(-6)})`]
+];
+
 /** The files the import put in the episode folder: the raw video, its cut plan, and the two clips it cut. */
 const IMPORTED = {
   "Pricing talk.mp4": "the raw video",
@@ -173,6 +188,17 @@ export function episodeFor(t, { record = {}, files = IMPORTED } = {}) {
   const first = newEpisode({ id: ID, machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "Pricing talk.mp4", bytes: sizes["Pricing talk.mp4"] || 1, seconds: 23.423, created: "2026-10-14T09:00:00-05:00" }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" }, files: sizes });
   writeFileSync(recordFile(folder, 1), recordText({ ...first, rev: 1, ...record }));
   return { folder, name: FOLDER, record: readEpisode(folder).record };
+}
+
+/** Another episode in the made-up root, with its own folder and id: the import's first record with `record` laid over it, at
+    the layout it then holds. Returns `found`, as the commands are given it. */
+export function episodeAs(t, { id, name, record = {} }) {
+  const folder = join(t.root, "Episodes", name);
+  mkdirSync(join(folder, "record"), { recursive: true });
+  const made = newEpisode({ id, machine: "Mac Studio", at: "2026-10-22T09:12:00-05:00", video: { file: "Talk.mp4", bytes: 1, seconds: 10, created: "2026-10-22T09:00:00-05:00" }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } });
+  const next = { ...made, rev: 1, ...record };
+  writeFileSync(recordFile(folder, 1), recordText({ ...next, version: layoutOf(next) }));
+  return { folder, name, record: readEpisode(folder).record };
 }
 
 /** The episode's newest record, read again. */

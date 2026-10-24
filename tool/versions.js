@@ -3,6 +3,7 @@
 // first, from the records; then the fingerprints, from the records; and only then the words of one episode, counted in order.
 // Nothing here touches a disk or runs a program: the words of an episode come from a function the caller gives.
 import { normalWords } from "./handoff.js";
+import { gated } from "./gate.js";
 
 /** The words in one run, and the most hashes a fingerprint keeps. */
 const RUN = 5;
@@ -100,8 +101,8 @@ export function inOrderCount(a, b) {
 }
 
 /** Whether a record is one a new file may be a version of: answered (its kind is not null), not a session (neither its kind
-    nor a mark that has not been cleared), and not archived. */
-const askable = (c) => c.kind != null && c.kind !== "session" && !(c.session && !c.session.cleared) && !c.archived;
+    nor a mark that has not been cleared, as the gate reads one: cleared only by her click on the dialog), and not archived. */
+const askable = (c) => !gated(c) && c.kind !== "session" && !c.archived;
 
 /** Whether two lengths differ by no more than a fifth of the longer. A length that is not a number of seconds is no length. */
 const alike = (a, b) => Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0 && 5 * Math.abs(a - b) <= Math.max(a, b);

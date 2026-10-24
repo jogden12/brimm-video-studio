@@ -10,7 +10,8 @@
 // told (--import, --handoff, --drop, and --rules-only as readings off): `plan` says what `write` would write, and refuses what
 // `write` would, before the installer changes anything. A switch of the drop folder is refused while the old folder still holds
 // work. That look is switch.js's, which reads the status files and the episodes, and this file reaches it by a dynamic import:
-// importing.js and filing.js import this file, and a static import here would make the three a cycle.
+// importing.js and filing.js import this file, and a static import here would make the three a cycle. `set` changes the
+// settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
 //                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
@@ -119,6 +120,14 @@ export function teachingsOn(s, now = Date.now()) {
   return age >= 0 && age < TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
 }
 
+/** Whether the teachings from sessions are off on this Mac because Jason's check has lapsed: the settings say, whole, that he
+    turned them on, and 90 days or more have passed since. Off for any other reason (never turned on, turned on later than now)
+    is not lapsed. `now` is as teachingsOn takes it. */
+export function teachingsLapsed(s, now = Date.now()) {
+  const t = s?.sessionTeachings;
+  return teachingsWhole(t) && Number(now) - Date.parse(t.at) >= TEACHINGS_DAYS * 24 * 60 * 60 * 1000;
+}
+
 /** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words, and {mend}, what Jason does
     about it, as a sentence. Any field a later version of brimm-video adds is kept as it is. install.sh --machine makes
     settings that are not there and mends a file that is not JSON; it mends a setting that is wrong only when it is told that
@@ -197,9 +206,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, as set reads them, and any setting it is not told is kept.
-                               It refuses what set refuses, and a switch of the drop folder while the old drop folder
-                               still holds a video, or an import of this Mac failed or found a problem: it says which
-                               (by label where there is one), and what to do first
+                               It refuses a value set would refuse, and a switch of the drop folder while the old drop
+                               folder still holds a video, or an import of this Mac failed or found a problem: it says
+                               which (by label where there is one), and what to do first
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
@@ -209,7 +218,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
-                               makes the new folder, marks it and points the import at it, after it has checked the old one
+                               makes the new folder, marks it and points the import at it, after it has checked the old one.
+                               A change of it is refused, and nothing is changed: it says the installer's line that shows
+                               what the switch would do
   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
                                record that Jason has checked that the setting letting Anthropic train on chats is off on
                                both accounts that touch a session, the one the claude command is signed in to and the one
@@ -244,7 +255,7 @@ function pairsOf(rest, options) {
 const OF_SET = () => Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option]));
 
 /** What `write` and `plan` are told, as the fields of the settings: { fields }, or { code, said } when it is asked wrongly (2),
-    or refused (1): what `set` refuses it refuses by the same code (notBuilt), and a value that will not do by the same readers. */
+    or refused (1): a value that will not do, by the same readers `set` has. */
 function fieldsToldBy(rest) {
   const told = pairsOf(rest, { ...WRITTEN, ...OF_SET() });
   if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) return { code: 2, said: HELP };
@@ -253,8 +264,6 @@ function fieldsToldBy(rest) {
     values[option] = SETTABLE[option].read(told[option]);
     if (values[option] === undefined) return { code: 1, said: `Not written: ${option} takes ${SETTABLE[option].takes}.` };
   }
-  const refused = notBuilt(values);
-  if (refused) return { code: 1, said: refused };
   const fields = { machine: told.machine, root: told.root, checkout: told.checkout };
   const fault = settingsFault({ version: 1, ...fields });
   if (fault) return { code: 1, said: `Not written: ${fault}.` };
@@ -263,9 +272,9 @@ function fieldsToldBy(rest) {
 }
 
 /** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
-    refuses by. It refuses what is not built, a value that will not do, and settings that would not do once written, and
-    when the drop folder changes, a drop folder that still holds work (switch.js), which it looks at by a dynamic import: so it
-    gives back a promise then, and the result itself when it needs no such look. `now` is a time, for the status files. */
+    refuses by. It refuses a value that will not do, settings that would not do once written, and, when the drop folder
+    changes, a drop folder that still holds work (switch.js), which it looks at by a dynamic import: so it gives back a promise
+    then, and the result itself when it needs no such look. `now` is a time, for the status files. */
 function planned(home, rest, now) {
   const told = fieldsToldBy(rest);
   if (!told.fields) return { code: told.code, said: [told.said] };
@@ -384,22 +393,8 @@ function localTime(d) {
   return `${local}${off < 0 ? "-" : "+"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
-/** What `set`, `write` and `plan` refuse until it is built, by option and value, and why: the light import, until the question in
-    her chat exists (Part F), which takes this away. */
-const NOT_BUILT = [["--import", "light", "The light import needs the question in her chat, which is not built yet."]];
-
-/** Why the first of the values `values`, by option, is refused as not built yet, in plain words: "" when none is. */
-function notBuilt(values) {
-  for (const [option, value] of Object.entries(values)) {
-    const refused = NOT_BUILT.find(([o, v]) => o === option && v === value);
-    if (refused) return refused[2];
-  }
-  return "";
-}
-
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
-    left, and said to be. What is not built yet is refused (NOT_BUILT), and so is a change of the drop folder, which the
-    installer makes: nothing is changed. */
+    left, and said to be. A change of the drop folder is refused, since the installer makes it: nothing is changed. */
 function set(home, rest, say) {
   const told = pairsOf(rest, OF_SET());
   if (!told || !Object.keys(told).length) {
@@ -413,11 +408,6 @@ function set(home, rest, say) {
       say(`Not changed: ${option} takes ${SETTABLE[option].takes}.`);
       return 1;
     }
-  }
-  const refused = notBuilt(values);
-  if (refused) {
-    say(refused);
-    return 1;
   }
   const got = usable(home);
   if (got.why) {
@@ -498,7 +488,9 @@ function sessions(home, rest, say, now) {
 }
 
 /** `show`: the settings, with the folders found from them, or why there are none. The settings of the switch are said when
-    the file has them. */
+    the file has them, but not the two accounts the teachings from sessions were turned on for, each said as "(not shown)":
+    what this prints may reach a chat, and an account's email is not to. `sessions --teachings on` says them once, to Jason,
+    who typed them. */
 function show(home, say, now) {
   const got = usable(home);
   if (got.why) {
@@ -518,8 +510,7 @@ function show(home, say, now) {
   if (s.readings !== undefined) say(`  Readings:  ${s.readings ? "on" : "off"}`);
   if (s.handoffVersion !== undefined) say(`  Hand-off version:  ${s.handoffVersion}`);
   if (s.sessionTeachings) {
-    const { at, accounts } = s.sessionTeachings;
-    say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : "lapsed"}, turned on ${at} (the claude command: ${accounts.cli}; the Code tab: ${accounts.app})`);
+    say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : teachingsLapsed(s, now) ? "lapsed" : "off"}, turned on ${s.sessionTeachings.at} (the claude command: (not shown); the Code tab: (not shown))`);
   }
   return 0;
 }

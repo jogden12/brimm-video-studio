@@ -12,6 +12,9 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, wri
 import { basename, dirname, extname, join } from "node:path";
 import { localDay } from "./shared/text.js";
 import { writtenFile } from "./settings.js";
+import { fileSafe } from "./names.js";
+// gate.js takes kindOf from here: each is used only when called, so neither needs the other to have been read first.
+import { gated } from "./gate.js";
 
 /** The folder of an episode's records. */
 export const RECORD_DIR = "record";
@@ -102,13 +105,44 @@ const isId = (v) => typeof v === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(v);
 const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
   && (a.match === undefined || a.match === null || isId(a.match))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
+/** The keys of each list of a session's items that she may change by her command, by the list: sessions.js EDITS, which a test
+    holds this to (episode.js reads no module of a session's). */
+export const SESSION_EDITS = { principles: ["name", "category", "description", "example_application"], recurringPrinciples: ["text"], reelIdeas: ["idea", "words", "why"] };
+/** An item's number, as a key of an object: a whole number from 1, as she says it. */
+const isItemKey = (k) => /^[1-9]\d*$/.test(k);
+/** For each list of a session's items, something kept by the item's number: each list's object of numbers, each number's
+    `each`. */
+const byItem = (v, each) => isObject(v) && Object.entries(v).every(([list, items]) => Object.hasOwn(SESSION_EDITS, list) && isObject(items) && Object.entries(items).every(([n, x]) => isItemKey(n) && each(x, list)));
+/** Her decision of an item, and her change of one: the keys she may change, each to words. */
+const isDecision = (d) => d === "kept" || d === "dropped";
+const isEdit = (e, list) => isObject(e) && Object.entries(e).every(([key, text]) => SESSION_EDITS[list].includes(key) && isText(text));
+/** A day as the calendar has it, written 2026-10-23: not 2026-02-30. */
+export const isDay = (v) => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const at = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().startsWith(v);
+};
+/** A client's agreement to a Reel cut from a session, as `reel … --client-agreed` records it: the Reel idea's number, a whole
+    number from 1, and the day it was noted. Nothing else: who agreed stays on the Mac that noted it. */
+const isAgreement = (a) => isObject(a) && Object.keys(a).every((k) => k === "n" || k === "at") && Number.isInteger(a.n) && a.n >= 1 && isDay(a.at);
 /** The mark of a client or group session (layout 3): when and where it was marked, whether its teachings were asked for, and
-    when it was cleared, if it was: confirmed by her click on a dialog. */
+    when it was cleared, if it was: confirmed by her click on a dialog. Once her teachings are asked for, when (`asked`); and
+    what she decided of each item Claude read (`decided`, "kept" or "dropped", by list and number) and what she changed of one
+    (`edits`), which only her command writes (spec 2026-10-22, section 8); and the Reel ideas a client's agreement to cutting a
+    Reel from the session was noted for, by number and day (`agreed`). A video read as another kind and answered again as a
+    session owes the BRIMM Ops page an empty session revision (`emptyRevision`): "owed" until it is written, then the revision it
+    was written as (edit.js, `kind … session --again`). */
 const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
-  && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"));
+  && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))
+  && (x.asked === undefined || isTime(x.asked)) && (x.decided === undefined || byItem(x.decided, isDecision)) && (x.edits === undefined || byItem(x.edits, isEdit))
+  && listOf(x.agreed, isAgreement)
+  && (x.emptyRevision === undefined || x.emptyRevision === "owed" || (Number.isInteger(x.emptyRevision) && x.emptyRevision >= 1));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
-    ended. */
-const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome);
+    ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
+    own folder. */
+const isTeachingsFile = (v) => typeof v === "string" && v.length > ".principles.json".length && v.endsWith(".principles.json") && !/[/\\]/.test(v) && !v.startsWith(".");
+const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome)
+  && (x.principles === undefined || isTeachingsFile(x.principles));
 /** A field of layout 3 that may be missing or null, and is checked when it is there. */
 const optional = (v, ok) => v === undefined || v === null || ok(v);
 
@@ -118,6 +152,34 @@ export function kindOf(r) {
   const kind = isObject(r) ? r.kind : null;
   if (kind === "episode") return "raw";
   return KINDS.includes(kind) ? kind : null;
+}
+
+/** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
+    session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
+    and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its
+    own), or by its short id when it has none; every other record by its name, as today. It fails closed for every record the
+    gate holds (gate.js gated): a session is named by its name, which is its label (F3 sets it in the same write as the mark,
+    and F7 checks any rename), but never by a name that is still its file's; and a record of another kind whose session mark is
+    not cleared is named by its label, and either of them, with no label, as "a client or group session (<short id>)". A
+    record that has no name to give, as a conflicted copy that is not whole may be, is named by its short id. */
+export function shownName(r) {
+  const short = isObject(r) && typeof r.id === "string" ? r.id.slice(-6) : "";
+  const label = isObject(r) && isText(r.label) ? r.label : "";
+  if (kindOf(r) === null) return label || `a video not yet answered (${short})`;
+  const name = isObject(r.name) && isText(r.name.text) ? r.name.text : "";
+  if (!gated(r)) return name || `an episode (${short})`;
+  if (r.kind === "session" && name && !filesName(r)) return name;
+  return label || `a client or group session (${short})`;
+}
+
+/** Whether a record's name is still its video file's: a placeholder, or the file's name, with or without its ending and in the
+    file-safe form, whatever its case. */
+function filesName(r) {
+  if (r.name.placeholder === true) return true;
+  const file = isObject(r.video) && isText(r.video.file) ? r.video.file : "";
+  const stem = basename(file, extname(file));
+  const same = (a, b) => a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase();
+  return Boolean(file) && [file, stem, fileSafe(stem)].some((n) => same(n, r.name.text));
 }
 
 /** The layout a record is written at: 3 once it holds anything of the switch (a kind other than "episode" or "short video",
@@ -130,6 +192,11 @@ export function layoutOf(r) {
   if (!["episode", "short video"].includes(r.kind) || Boolean(r.answer) || Boolean(r.session) || Boolean(r.reading) || Boolean(r.versionOf) || withHow(r.main) || (r.reels || []).some(withHow)) return 3;
   return (r.spellings || []).length > 0 || layered(r.main) || (r.reels || []).some(layered) || Boolean(r.brand && r.brand.logo) ? 2 : 1;
 }
+
+/** Whether she has answered the card about a video (layout 3): its `answer` says "answered". A video from before the switch has no
+    answer. This is what the switch's reading of times and its list of Reel suggestions turn on, and not layoutOf, which turns
+    3 for an old video that only holds a version with a `how` (a render, or a push so marked). */
+export const isAnswered = (r) => isObject(r) && isObject(r.answer) && r.answer.state === "answered";
 
 /** A new episode's id, made once at the import and never changed: "e-", the day without its dashes, and six hex digits, as
     "e-20261014-3fa9c1". `rand` gives a number from 0 up to 1, as Math.random does: a test gives a stand-in. */
@@ -371,7 +438,8 @@ export const acceptRev = (home, id, rev) => noteWritten(home, id, rev);
     their own, and this is what stands for it. */
 export function undone(record, home) {
   if (!isObject(record) || !Number.isInteger(record.rev) || record.rev >= lastWritten(home, record.id)) return "";
-  const name = isObject(record.name) && isText(record.name.text) ? record.name.text : record.id;
+  // A video not yet answered is named by its label: its name is still the file's (shownName).
+  const name = kindOf(record) === null ? shownName(record) : isObject(record.name) && isText(record.name.text) ? record.name.text : record.id;
   return `Dropbox undid this Mac's last change to ${name}. Say it again.`;
 }
 
@@ -449,10 +517,11 @@ export function filesProblems(folder, record, { stat = statSync } = {}) {
 export const heldElsewhere = (record, machine) => (record.editing && record.editing.by !== machine ? record.editing : null);
 
 /** Why a command that writes the record, pushes or puts files into the episode must not change it now, because another Mac
-    has it open (spec section 1, "Picking an episode up"), in plain words: "" when nobody does, or `machine` does. */
+    has it open (spec section 1, "Picking an episode up"), in plain words: "" when nobody does, or `machine` does. The episode is
+    named as everything edit.js prints names it (shownName). */
 export const heldText = (record, machine) => {
   const held = heldElsewhere(record, machine);
-  return held ? `${held.by} has ${record.name.text} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
+  return held ? `${held.by} has ${shownName(record)} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
 };
 
 /** The record with `machine` editing it since `at`. */

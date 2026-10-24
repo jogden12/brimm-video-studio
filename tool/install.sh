@@ -335,8 +335,9 @@ if [[ "$machined" == "yes" ]]; then
   [[ -z "$rules_only" ]] || switch_args+=(--readings off)
   switch_args+=("${switch_options[@]}")
   # The one check, before anything changes, with --print and without: settings.js says what it would write, or why it refuses
-  # (a value that will not do, what is not built yet, and a switch of the drop folder while the old folder holds work). Its
-  # answer is the settings shown below, and the drop folder is the one they name: --drop, else the settings', else Unedited Video.
+  # (a value that will not do, settings that will not do once written, and a switch of the drop folder while the old folder
+  # holds work). Its answer is the settings shown below, and the drop folder is the one they name: --drop, else the settings',
+  # else Unedited Video.
   planned=""
   if [[ -n "$settings_node" ]]; then
     if ! settings_plan "$settings_node"; then
