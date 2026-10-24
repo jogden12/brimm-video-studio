@@ -19,6 +19,9 @@ import { dropFolder, importingFolder, pendingFolder, sameFolder } from "./settin
 /** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
 const codeOf = (e) => (e && e.code) || "an error";
 
+/** A name that begins a line with a capital, as edit.js says "A video of 1.2 GB". */
+const capital = (text) => text[0].toUpperCase() + text.slice(1);
+
 /** The names in `folder`: { names }, none when the folder is not there, or { code } when it cannot be read. Only a folder that
     is not there is empty: one that macOS has not let node read (it asks about Dropbox) is not known to be. */
 function namesIn(folder) {
@@ -51,20 +54,24 @@ function namesIn(folder) {
     (gate.js gatedAsOf, over the versions of the video, finish.js linksOf: a video not yet answered, a session not cleared, and an
     answered video one of whose other versions is such a session) is named as edit.js names that record (gatedName): a gated one
     by its label or else its short id, one held as a session by its label or else as "a video" with its short id; under either
-    import, and never counted. A video whose holder cannot be told (Episodes, or an episode's records, cannot be read) is named
-    by what it is and its size, under either import (kinds.js unlabelled). Any other video, or status, that has no label is
-    counted and not named when `light` says the import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to reach a chat),
-    and is named by its video's file name when the import is today's. A status is never named by its own file's name; and what
-    it says of why it failed is left out, as it may hold a file's name. */
+    import, and never counted. A video whose holder cannot be told (Episodes itself cannot be read, or an episode that could be
+    the video's, in a folder named for it, cannot be) is named by what it is and its size, "A video of 1.2 GB", under either
+    import (kinds.js unlabelled). Any other video, or status, that has no label is not named by its file when `light` says the
+    import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to
+    reach a chat): a waiting or kept one, whose advice takes a file out of the old folder, is named by what it is and its size,
+    and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
+    old folder. Under today's import it is named by its video's file name. A status is never named by its own file's name; and
+    what it says of why it failed is left out, as it may hold a file's name. */
 export function heldInOld({ root, machine, old, light, home, now = Date.now() }) {
   const folder = dropFolder(root, machine, old);
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));
   const heldAs = (holding) => (holding && holding.record && namedAs(holding.record) ? gatedName(holding.record, true) : "");
-  // A video whose holder cannot be told (holdingEpisode's `unknown`: Episodes, or an episode's records, cannot be read) may be a
-  // session's: it is named by what it is and its size, as edit.js names a video with no label, under either import.
-  const unknownAs = (holding, video, bytes) => (holding && holding.unknown ? unlabelled(video, bytes) : "");
+  // A video whose holder cannot be told (holdingEpisode's `unknown`: Episodes itself, or an episode that could be the video's,
+  // cannot be read) may be a session's: it is named by what it is and its size, as edit.js names a video with no label, under
+  // either import.
+  const unknownAs = (holding, video, bytes) => (holding && holding.unknown ? capital(unlabelled(video, bytes)) : "");
   const unreadable = [];
   const inFolder = namesIn(folder);
   if (inFolder.code) unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
@@ -72,7 +79,9 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   const importing = namesIn(importingFolder(root));
   if (importing.code) unreadable.push(`  The import status files, in ${importingFolder(root)}, could not be read (${importing.code}), so whether an import failed is not known.`);
   const mine = importing.code ? [] : readStatuses(root, now).map((s) => s.status).filter((status) => status && status.machine === machine);
-  const lines = new Set();
+  // The lines of the kinds whose advice takes a file out of the old folder (work: failed and waiting; kept) are lists, not sets: two
+  // videos named alike, by what they are and their size, are both said.
+  const lines = [];
   const problem = new Set();
   const named = new Set();
   const trouble = mine.filter((s) => ["failed", "problem"].includes(importState(s, now))).sort((a, b) => a.video.localeCompare(b.video));
@@ -119,7 +128,7 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     if (isFailed) {
       // A failed import whose video has since been taken out of the folder cannot be tried again: only its status file holds it.
       const gone = here ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
-      lines.add(`  ${name || status.video}: its import failed${gone}.`);
+      lines.push(`  ${name || status.video}: its import failed${gone}.`);
     } else {
       // A late check that found a problem makes itself again from the video in the old folder, which is why the video stays there.
       // With the video gone it cannot be made, and there is nothing for a person to take away: Jason looks at it.
@@ -130,18 +139,21 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   }
   const still = (m) => (m === 0 ? "none have" : m === 1 ? "1 has" : `${m} have`);
   const [failed, failedHere] = counts.failed;
-  if (failed === 1) lines.add(`  1 import failed, and its video is ${failedHere ? "still in" : "not in"} the old folder${failedHere ? "" : " now"}.`);
-  else if (failed) lines.add(`  ${failed} imports failed, of which ${still(failedHere)} the video still in the old folder.`);
+  // A failed import whose video is gone is cleared only by taking its status file away, which is said as the named form says it.
+  const onlyStatus = `only its status file, in ${importingFolder(root)}, holds`;
+  if (failed === 1) lines.push(`  1 import failed, and its video is ${failedHere ? "still in the old folder" : `not in the old folder now: ${onlyStatus} this, and a person takes it away by hand`}.`);
+  else if (failed) lines.push(`  ${failed} imports failed, of which ${still(failedHere)} the video still in the old folder${failed > failedHere ? `; of each whose video is gone, ${onlyStatus} it, and a person takes it away by hand` : ""}.`);
   const [problems, problemsHere] = counts.problem;
   if (problems === 1) problem.add(`  1 late check found a problem, and its video is ${problemsHere ? "still in" : "not in"} the old folder${problemsHere ? "" : " now"}.`);
   else if (problems) problem.add(`  ${problems} late checks found a problem, of which ${still(problemsHere)} the video still in the old folder.`);
   if (problemsHere) problemHere = true;
   if (problems > problemsHere) problemGone = true;
-  const kept = new Set();
+  const kept = [];
   const running = new Set();
-  let counted = 0;
-  let keptCounted = 0;
   let runningCounted = 0;
+  // Under the light import, a waiting or kept video with no label is named by what it is and its size, never by its file: its
+  // advice takes a file out of the old folder, and a count would not say which.
+  const unnamed = (video, bytes) => (light ? capital(unlabelled(video, bytes)) : video);
   for (const video of videos.filter((v) => !named.has(v))) {
     // A video that cannot be looked at (a link that goes round in a circle) is a video all the same, whose size is not known.
     let bytes;
@@ -160,19 +172,14 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     if (pending) owe(label, video, pending);
     else if (held) {
       if (owing.code) continue;
-      if (!label && light) keptCounted += 1;
-      else kept.add(`  ${label || video}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
+      kept.push(`  ${label || unnamed(video, bytes)}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
     } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
       // This Mac's import is at work on it now, and will make its late check from this video: it is to be waited for and left there.
       if (!label && light) runningCounted += 1;
       else running.add(`  ${label || video}: it is being imported now.`);
-    } else if (label) lines.add(`  ${label}: waits in ${folder}.`);
-    else if (light) counted += 1;
-    else lines.add(`  ${video}: waits in ${folder}.`);
+    } else lines.push(`  ${label || unnamed(video, bytes)}: waits in ${folder}.`);
   }
-  if (counted) lines.add(`  ${counted === 1 ? "1 video waits" : `${counted} videos wait`} in ${folder}.`);
   if (runningCounted) running.add(runningCounted === 1 ? "  1 video is being imported now." : `  ${runningCounted} videos are being imported now.`);
   if (importedCounted) imported.add(importedCounted === 1 ? "  1 video is already imported, and its late check is still to come." : `  ${importedCounted} videos are already imported, and their late checks are still to come.`);
-  if (keptCounted) kept.add(keptCounted === 1 ? "  1 video is already imported, and nothing of this Mac's import will take it out of the old folder." : `  ${keptCounted} videos are already imported, and nothing of this Mac's import will take them out of the old folder.`);
-  return { work: [...lines], running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept: [...kept], unreadable };
+  return { work: lines, running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept, unreadable };
 }

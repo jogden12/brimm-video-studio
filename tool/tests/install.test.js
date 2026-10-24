@@ -1051,7 +1051,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.doesNotMatch(r.out, /\(Mac Studio\) 1\.json|Theirs|Light\.mov|sound could not/);
     d.done();
   });
-  it("under the light import, names a waiting video by its label when it has one and counts it when it has none: no part of a client's file name is shown", () => {
+  it("under the light import, names a waiting video by its label when it has one, and by what it is and its size when it has none: no part of a client's file name is shown", () => {
     const d = box();
     const old = d.folder("Unedited Video");
     writeFileSync(join(old, "Coaching call Jane Doe.mp4"), "12345");
@@ -1059,10 +1059,11 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const light = d.mine({ import: "light" });
     const counted = askWith({ settings: light }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
     assert.equal(counted.status, 2, counted.out);
-    assert.ok(counted.out.includes(`\n  2 videos wait in ${old}.\n`), counted.out);
+    // Two alike are both said, so that each is one to take out.
+    assert.ok(counted.out.includes(`\n  A video of 5 bytes: waits in ${old}.\n  A video of 5 bytes: waits in ${old}.\n`), counted.out);
     d.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)" });
     const labelled = askWith({ settings: light }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
-    assert.ok(labelled.out.includes(`\n  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.\n  1 video waits in ${old}.\n`), labelled.out);
+    assert.ok(labelled.out.includes(`\n  Video of 22 Oct, 10:40 (Mac Studio): waits in ${old}.\n  A video of 5 bytes: waits in ${old}.\n`), labelled.out);
     for (const r of [counted, labelled]) assert.doesNotMatch(r.out, /Jane|Doe|Coaching|Sales call/);
     d.done();
   });

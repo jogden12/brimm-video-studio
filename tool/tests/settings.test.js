@@ -1281,7 +1281,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 0);
       t.done();
     });
-    it("counts an imported video that has no label under the light import, by whether a late check is owed for it, and names none", async () => {
+    it("under the light import counts an imported video owed a late check that has no label, and names a kept one by what it is and its size, never by its file", async () => {
       const t = mac({ import: "light" });
       const old = t.folder();
       put(old, "Coaching call Jane Doe.mp4", "12345");
@@ -1291,11 +1291,11 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       put(old, "Sales call Acme Ltd.mov", "123456");
       t.episode("2026-10-22 Sales call (Mac Studio)", "Sales call Acme Ltd.mov", 6);
       const said = await refused(t, "--drop", "Drop");
-      assert.deepEqual(said, [HEAD, "  1 video is already imported, and its late check is still to come.", LATE, "  1 video is already imported, and nothing of this Mac's import will take it out of the old folder.", KEPT]);
+      assert.deepEqual(said, [HEAD, "  1 video is already imported, and its late check is still to come.", LATE, KEPT_LINE("A video of 6 bytes"), KEPT]);
       put(old, "Pricing call Acme Ltd.mov", "1234567");
       t.episode("2026-10-22 Pricing call (Mac Studio)", "Pricing call Acme Ltd.mov", 7);
       const two = await refused(t, "--drop", "Drop");
-      assert.deepEqual(two, [HEAD, "  1 video is already imported, and its late check is still to come.", LATE, "  2 videos are already imported, and nothing of this Mac's import will take them out of the old folder.", KEPT]);
+      assert.deepEqual(two, [HEAD, "  1 video is already imported, and its late check is still to come.", LATE, KEPT_LINE("A video of 7 bytes"), KEPT_LINE("A video of 6 bytes"), KEPT]);
       assert.ok(!/Jane|Doe|Acme|Coaching|Sales|Pricing/.test([...said, ...two].join("\n")), [...said, ...two].join("\n"));
       t.done();
     });
@@ -1487,10 +1487,10 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         const said = [];
         try {
           said.push(...(await refused(t, "--drop", "Drop")));
-          assert.deepEqual(said, [HEAD, `  a video of 5 bytes: waits in ${old}.`, ADVICE], JSON.stringify(held));
+          assert.deepEqual(said, [HEAD, `  A video of 5 bytes: waits in ${old}.`, ADVICE], JSON.stringify(held));
           owe(t, JD_FOLDER, JD, 5, old);
           const owed = await refused(t, "--drop", "Drop");
-          assert.deepEqual(owed, [HEAD, `  a video of 5 bytes: already imported; its late check is still to come (due at ${due}).`, LATE], JSON.stringify(held));
+          assert.deepEqual(owed, [HEAD, `  A video of 5 bytes: already imported; its late check is still to come (due at ${due}).`, LATE], JSON.stringify(held));
           said.push(...owed);
         } finally {
           chmodSync(shut, 0o755);
@@ -1516,10 +1516,38 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    it("under the light import names a waiting or kept video that has no label by what it is and its size, so that Jason can tell which to take out or delete, and lists two alike apart", async () => {
+      // Their advice takes a file out of the old folder: a count does not say which. Failed, problem, owed and running stay counted.
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      put(old, "Coaching call Jane Doe.mp4", "12345");
+      put(old, "Pricing call Acme Ltd.mov", "123456");
+      put(old, "Sales call Acme Ltd.mov", "123456");
+      t.episode("2026-10-22 Pricing call Acme Ltd (Mac Studio)", "Pricing call Acme Ltd.mov", 6);
+      t.episode("2026-10-22 Sales call Acme Ltd (Mac Studio)", "Sales call Acme Ltd.mov", 6);
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, `  A video of 5 bytes: waits in ${old}.`, ADVICE, KEPT_LINE("A video of 6 bytes"), KEPT_LINE("A video of 6 bytes"), KEPT]);
+      assert.ok(!/Jane|Doe|Acme|Coaching|Pricing|Sales/.test(said.join("\n")), said.join("\n"));
+      t.done();
+    });
+    it("under the light import says of a counted failed import whose video is gone what clears it: only its status file holds it, and a person takes it away", async () => {
+      const t = mac({ import: "light" });
+      const old = t.folder();
+      const status = join(t.root, "Episodes", ".importing");
+      t.status("Coaching call Jane Doe.mp4", { failed: "x" });
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  1 import failed, and its video is not in the old folder now: only its status file, in ${status}, holds this, and a person takes it away by hand.`, ADVICE]);
+      put(old, "Sales call Acme Ltd.mov", "12345");
+      t.status("Sales call Acme Ltd.mov", { failed: "x" });
+      t.status("Pricing call Acme Ltd.mov", { failed: "x" });
+      const said = await refused(t, "--drop", "Drop");
+      assert.deepEqual(said, [HEAD, `  3 imports failed, of which 1 has the video still in the old folder; of each whose video is gone, only its status file, in ${status}, holds it, and a person takes it away by hand.`, ADVICE]);
+      assert.ok(!/Jane|Doe|Acme|Coaching|Pricing|Sales/.test(said.join("\n")), said.join("\n"));
+      t.done();
+    });
     it("tells a video's holder unknown only when an episode that cannot be read is named for that video, by this Mac or another", async () => {
       // An episode that cannot be read, named for another video, does not stop this one being named as today; one named for it,
       // by either Mac, could be a session's, and it is named by what it is and its size.
-      for (const [folder, said] of [["2026-10-19 Budget (Mac Studio)", "Talk.mov"], ["2026-10-22 Talk (Sallie's laptop)", "a video of 5 bytes"], ["2026-10-22 Talk (Mac Studio)-2", "a video of 5 bytes"]]) {
+      for (const [folder, said] of [["2026-10-19 Budget (Mac Studio)", "Talk.mov"], ["2026-10-22 Talk (Sallie's laptop)", "A video of 5 bytes"], ["2026-10-22 Talk (Mac Studio)-2", "A video of 5 bytes"]]) {
         const t = mac();
         const old = t.folder();
         put(old, "Talk.mov", "12345");
@@ -1602,14 +1630,14 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       }
       t.done();
     });
-    it("under the light import counts a waiting video that has no label, and does not name it: its name may be a client's", async () => {
+    it("under the light import names a waiting video that has no label by what it is and its size, and never by its file: its name may be a client's", async () => {
       const t = mac({ import: "light" });
       const old = t.folder();
       put(old, "Coaching call Jane Doe.mp4");
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  1 video waits in ${old}.`, ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  A video of 5 bytes: waits in ${old}.`, ADVICE]);
       put(old, "Sales call Acme Ltd.mov");
       const two = await refused(t, "--drop", "Drop");
-      assert.deepEqual(two, [HEAD, `  2 videos wait in ${old}.`, ADVICE]);
+      assert.deepEqual(two, [HEAD, `  A video of 5 bytes: waits in ${old}.`, `  A video of 5 bytes: waits in ${old}.`, ADVICE]);
       // With a label, by the label: from this Mac's status, or from the episode that holds the video.
       t.status("Coaching call Jane Doe.mp4", { bytes: 5, label: "Video of 22 Oct, 10:40 (Mac Studio)", at: STOPPED });
       put(old, "Coaching call Jane Doe.mp4", "12345");
@@ -1631,7 +1659,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const said = await refused(t, "--drop", "Drop");
       const gone = `, and its video is not in the old folder now: only its status file, in ${join(t.root, "Episodes", ".importing")}, holds this, and a person takes it away by hand`;
       // Counted apart by whether the video is still in the old folder, which decides what is to be done: no names.
-      assert.deepEqual(said, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`, "  2 imports failed, of which 1 has the video still in the old folder.", ADVICE, "  1 late check found a problem, and its video is not in the old folder now.", PROBLEM_GONE]);
+      assert.deepEqual(said, [HEAD, `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`, `  2 imports failed, of which 1 has the video still in the old folder; of each whose video is gone, only its status file, in ${join(t.root, "Episodes", ".importing")}, holds it, and a person takes it away by hand.`, ADVICE, "  1 late check found a problem, and its video is not in the old folder now.", PROBLEM_GONE]);
       assert.ok(!/Jane|Doe|Acme|Coaching|Sales/.test(said.join("\n")), said.join("\n"));
       // The video that is there with a status that is counted is not counted again as a video that waits.
       assert.ok(!said.some((line) => /wait/.test(line)), said.join("\n"));
@@ -1643,13 +1671,13 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       put(old, "A.mov");
       t.status("A.mov", { failed: "x" });
       t.status("Gone.mov", { failed: "x" });
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  2 imports failed, of which 1 has the video still in the old folder.", ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  2 imports failed, of which 1 has the video still in the old folder; of each whose video is gone, only its status file, in ${join(t.root, "Episodes", ".importing")}, holds it, and a person takes it away by hand.`, ADVICE]);
       put(old, "B.mov");
       t.status("B.mov", { failed: "x" });
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  3 imports failed, of which 2 have the video still in the old folder.", ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  3 imports failed, of which 2 have the video still in the old folder; of each whose video is gone, only its status file, in ${join(t.root, "Episodes", ".importing")}, holds it, and a person takes it away by hand.`, ADVICE]);
       rmSync(join(old, "A.mov"));
       rmSync(join(old, "B.mov"));
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  3 imports failed, of which none have the video still in the old folder.", ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  3 imports failed, of which none have the video still in the old folder; of each whose video is gone, only its status file, in ${join(t.root, "Episodes", ".importing")}, holds it, and a person takes it away by hand.`, ADVICE]);
       const one = mac({ import: "light" });
       put(one.folder(), "C.mov");
       one.status("C.mov", { failed: "x" });
@@ -1661,7 +1689,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       one.done();
       t.done();
     });
-    it("counts a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
+    it("names a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
       // The videos came under the light import whatever this run says of it, so they are not named: told the light import over a
       // file of today's import, and told today's over a file of the light one.
       for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "full"]]) {
@@ -1669,7 +1697,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         put(t.folder(), "Coaching call Jane Doe.mp4");
         const said = await refused(t, "--drop", "Drop", "--import", told);
         assert.ok(!said.join("\n").includes("Jane Doe"), said.join("\n"));
-        assert.equal(said[1], `  1 video waits in ${t.folder()}.`, told);
+        assert.equal(said[1], `  A video of 5 bytes: waits in ${t.folder()}.`, told);
         t.done();
       }
     });
@@ -1705,7 +1733,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         chmodSync(old, 0o755);
       }
       // Readable again, the video that is there is what stops it.
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  1 video waits in ${old}.`, ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  A video of 5 bytes: waits in ${old}.`, ADVICE]);
       t.done();
     });
     it("refuses when the status files cannot be read: what is not known is not taken for none", async () => {
@@ -1740,7 +1768,8 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         // stat of it fails with ELOOP, which once escaped the check as an unhandled rejection with a stack trace holding the path.
         symlinkSync("Coaching call Jane Doe.mp4", join(old, "Coaching call Jane Doe.mp4"));
         const said = await refused(t, "--drop", "Drop");
-        assert.deepEqual(said, [HEAD, light ? `  1 video waits in ${old}.` : `  Coaching call Jane Doe.mp4: waits in ${old}.`, ADVICE]);
+        // Its size cannot be told, so it is named by what it is alone.
+        assert.deepEqual(said, [HEAD, light ? `  A video: waits in ${old}.` : `  Coaching call Jane Doe.mp4: waits in ${old}.`, ADVICE]);
         if (light) assert.ok(!/Jane|Doe/.test(said.join("\n")), said.join("\n"));
         t.done();
       }
