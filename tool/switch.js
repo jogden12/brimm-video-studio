@@ -7,14 +7,14 @@
 // and names a video as edit.js does (gate.js), and they read settings.js, so settings.js reaches this file by a dynamic import
 // from the command that needs it, and not by a static one: a static import would make them a cycle.
 import { readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { isMedia } from "./lib.js";
 import { clockTime, dueAt, holdingEpisode, readPendings } from "./filing.js";
 import { linksOf } from "./finish.js";
 import { gatedAsOf, gatedName } from "./gate.js";
 import { unlabelled } from "./kinds.js";
 import { importState, readStatuses } from "./importing.js";
-import { dropFolder, importingFolder } from "./settings.js";
+import { dropFolder, importingFolder, sameFolder } from "./settings.js";
 
 /** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
 const codeOf = (e) => (e && e.code) || "an error";
@@ -84,7 +84,7 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   // waited for and never taken out, before a failed import of it or its wait. A late check that found a problem stays owed (the
   // next run checks again), and stays a problem, with its own advice: try it again with retry, and leave the video there.
   const pendings = home ? readPendings(home) : [];
-  const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && resolve(String(p.root)) === resolve(root));
+  const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && sameFolder(String(p.root), root));
   const imported = new Set();
   let importedCounted = 0;
   /** The line of a video owed a late check, `pending`, named `name`, or counted when it has no name under the light import. */

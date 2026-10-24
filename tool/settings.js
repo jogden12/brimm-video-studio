@@ -276,8 +276,8 @@ function fieldsToldBy(rest) {
 }
 
 /** Whether two folders are the same: by their real paths when both are there, so that one reached by a link is the same as the
-    one it leads to; by how they are spelt, resolved, otherwise. */
-function sameFolder(a, b) {
+    one it leads to; by how they are spelt, resolved, otherwise. switch.js compares the BRIMM Video a late check names so too. */
+export function sameFolder(a, b) {
   try {
     return realpathSync(a) === realpathSync(b);
   } catch (e) {
@@ -312,9 +312,11 @@ function planned(home, rest, now) {
   const oldMachine = typeof held.machine === "string" && !machineFault(held.machine) ? held.machine : settings.machine;
   const oldFolder = dropFolder(oldRoot, oldMachine, from);
   const newFolder = dropFolder(settings.root, settings.machine, to);
-  if (sameFolder(oldFolder, newFolder)) return { settings, fields: told.fields, from, to };
-  // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
+  // The same folder is the same BRIMM Video (by its real path: it is there, as a drop folder may not be yet), the same Mac and the
+  // same drop folder's name.
   const moved = !sameFolder(oldRoot, settings.root) || oldMachine !== settings.machine;
+  if (!moved && from === to) return { settings, fields: told.fields, from, to };
+  // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
   const light = lightImport(held) || lightImport(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")

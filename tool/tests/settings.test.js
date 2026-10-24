@@ -1254,7 +1254,10 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const old = t.folder();
       put(old, "Budget.mov", "123456");
       t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6);
-      for (const spelt of [`${t.root}/`, `${t.root}/../BRIMM Video`]) {
+      // And through a link to BRIMM Video, compared by its real path as the folders are.
+      const link = join(t.home, "Link to BRIMM Video");
+      symlinkSync(t.root, link);
+      for (const spelt of [`${t.root}/`, `${t.root}/../BRIMM Video`, link]) {
         writePending(t.home, { version: 1, id: "e-20261022-000001", name: "2026-10-20 Budget (Mac Studio)", folder: join(t.root, "Episodes", "2026-10-20 Budget (Mac Studio)"), video: "Budget.mov", bytes: 6, seconds: 120, drop: join(old, "Budget.mov"), work: "/nowhere", entries: [], lastCopy, root: spelt, machine: "Mac Studio", planTxt: "x.cut-plan.txt" });
         assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE], spelt);
       }
@@ -1419,6 +1422,18 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.equal(await t.run("plan", ...t.told, "--root", link), 0, t.said.join("\n"));
       // Told the link and Drop: a switch of the drop folder alone, said as one.
       assert.deepEqual(await refused(t, "--root", link, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, ADVICE]);
+      t.done();
+    });
+    it("takes a link to the same BRIMM Video for the same though no drop folder is there yet: the Mac and the drop folder named the same, nothing moves", async () => {
+      // With no drop folder yet its real path cannot be found, so the roots are compared, which are there, with the Mac and the
+      // drop folder's name: a failed import of this Mac, its video gone, does not stop a run that changes nothing.
+      const t = mac();
+      t.status("Talk.mov", { failed: "x" });
+      const link = join(t.home, "Link to BRIMM Video");
+      symlinkSync(t.root, link);
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, "--root", link), 0, t.said.join("\n"));
+      assert.ok(!t.said.some((line) => line.startsWith("The old drop folder: ")), t.said.join("\n"));
       t.done();
     });
     it("matches the statuses and late checks of the file's Mac, in its BRIMM Video, when the run is told another Mac", async () => {
