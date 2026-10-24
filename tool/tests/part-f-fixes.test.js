@@ -9,7 +9,7 @@ import fs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile
 import { dirname } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import { HELP, SHOWN_MARKER, editMain } from "../edit.js";
+import { COMMAND_NAMES, HELP, SHOWN_MARKER, editMain } from "../edit.js";
 import { readEpisode, recordFile, recordText } from "../episode.js";
 import { handoffTarget } from "../finish.js";
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
@@ -645,6 +645,27 @@ describe("\"it was a session after all\" with a listed file of final/ that is no
     assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [NOT]);
     assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} Ask Jason if it does not come.`]);
     t.done();
+  });
+});
+
+describe("the README's rows for the commands of the fork (item 7)", () => {
+  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+  /** The rows of the README's tables whose command cell starts with `command`. */
+  const rowsOf = (command) => readme.split("\n").filter((line) => line.startsWith("|") && new RegExp(`^\\|(?: "[^|]*" \\|)? \`${command}[ \`]`).test(line));
+  it("has a row for every command the help gives", () => {
+    const given = COMMAND_NAMES.filter((name) => HELP.includes(`node edit.js ${name} `) || HELP.includes(`node edit.js ${name}\n`));
+    assert.ok(given.length >= 25, given.join(" "));
+    // `finish` has a section of its own, and `ideas` shares the row of `principles`.
+    for (const name of given.filter((n) => !["finish", "ideas"].includes(n))) assert.ok(rowsOf(name).length, `the README has no row for ${name}`);
+    assert.ok(rowsOf("principles").some((row) => row.includes('`ideas "<session>"')));
+  });
+  it("gives kind every flag of its usage, and the rows of leave, which, a client's agreement and retry's label", () => {
+    const [kind] = rowsOf("kind");
+    for (const flag of ["--private yes\\|no", "--version-of <id>\\|none", "--not-a-session", "--again", "--clear-session", "--here"]) assert.ok(kind.includes(flag), flag);
+    assert.match(rowsOf("leave")[0], /not for brimm-video/);
+    assert.match(rowsOf("which")[0], /clone/);
+    assert.ok(rowsOf("reel").some((row) => row.startsWith('| `reel "<label>" <n> --client-agreed` |')));
+    assert.match(rowsOf("retry")[0], /by the label a light import's status gives it/);
   });
 });
 
