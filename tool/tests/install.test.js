@@ -905,12 +905,34 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
     assert.ok(help.includes("Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a video only once its person has said what it is, and never a session's file name."), help);
   });
-  it("says at its end that the old folder holds no video and that Jason deletes it, so that none is dropped there by habit: its closing lines, read, not run", () => {
+  it("says at its end that the old folder, the one settings.js checked, is no longer watched, and that Jason checks it is still empty, then deletes it: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
     const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
     const said = closing.replace(/"\n +say "/g, " ");
-    assert.ok(said.includes('say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. It holds no video. Jason deletes it by hand, so that no video is dropped there by habit: a video there is never imported."'), said);
+    assert.ok(said.includes('if [[ -n "$old_folder" && -d "$old_folder" ]]; then'), said);
+    assert.ok(said.includes('say "The old drop folder, $old_folder, is no longer watched. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported."'), said);
     assert.ok(!text.includes("once it is empty"), "no word of waiting for it to be empty: the switch is refused while it is not");
+  });
+  it("names as the old drop folder the one the settings name, of their Mac in their BRIMM Video, when it is told another Mac or another BRIMM Video", () => {
+    // The old folder is the one settings.js checked, the file's: never the told Mac's folder, which may be the other Mac's, live.
+    const d = box();
+    const mine = d.folder("Unedited Video");
+    writeFileSync(join(mine, ".brimm-watched-by"), "Mac Studio\n");
+    const theirs = d.folder("Unedited Video", "Sallie's laptop");
+    writeFileSync(join(theirs, "Her talk.mov"), "video");
+    const OLD = (folder) => `  The old drop folder:  ${folder}, no longer watched once this is done, and left as it is.`;
+    const other = askWith({ settings: d.mine() }, "--print", "--machine", "Sallie's laptop", "--drop", "Drop", d.root);
+    assert.equal(other.status, 0, other.err + other.out);
+    assert.ok(other.out.includes(`\n${OLD(mine)}`), other.out);
+    assert.doesNotMatch(other.out, /The old drop folder: {2}[^\n]*Sallie's laptop/);
+    // Only BRIMM Video told anew, the drop folder named the same: the folder left behind is named all the same.
+    const moved = join(d.dir, "Moved", "BRIMM Video");
+    mkdirSync(moved, { recursive: true });
+    const root = askWith({ settings: d.mine() }, "--print", "--machine", "Mac Studio", moved);
+    assert.equal(root.status, 0, root.err + root.out);
+    assert.ok(root.out.includes(`\n${OLD(mine)}`), root.out);
+    assert.ok(root.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${moved}/Unedited Video/Mac Studio\n`), root.out);
+    d.done();
   });
   it("says nothing of an old folder when the drop folder is not switched, or the old folder is not there", () => {
     const d = box();

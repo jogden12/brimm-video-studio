@@ -215,9 +215,10 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
-                               teachings from sessions, shown as (not shown), and then the import it will be, and the drop
-                               folder as it is now and as it will be, a line each, or why it would refuse it. Nothing is
-                               written. install.sh asks this before it changes anything
+                               teachings from sessions, shown as (not shown), and then the import it will be, the drop
+                               folder as it is now and as it will be, and, when the folder watched changes, the old one's
+                               whole path, a line each, or why it would refuse it. Nothing is written. install.sh asks this
+                               before it changes anything
   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
@@ -319,7 +320,7 @@ function planned(home, rest, now) {
   return import("./switch.js")
     .then(({ heldInOld }) => {
       const { work, running, problem, problemHere, problemGone, imported, kept, unreadable } = heldInOld({ root: oldRoot, machine: oldMachine, old: from, light, home, now: Number(now) });
-      if (![work, running, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to };
+      if (![work, running, problem, imported, kept, unreadable].some((lines) => lines.length)) return { settings, fields: told.fields, from, to, old: oldFolder };
       const head = unreadable.length && ![work, running, problem, imported, kept].some((lines) => lines.length) ? "and the old one could not be looked at:" : "and work is not finished in the old one:";
       // Each kind of line is followed by the advice for it alone: what to do about a failed import is not what to do about a late
       // check that found a problem (leave its video where it is), nor about an import at work (wait for it), nor an imported video.
@@ -366,7 +367,8 @@ function write(home, rest, say, now) {
 
 /** `plan`: the settings `write` would write, whole, as JSON (the emails of the accounts of the teachings from sessions shown as
     "(not shown)"), then the import it will be ("light" or "full"), and the drop folder now and as it will be, each on a line of
-    its own, and nothing written; or the lines `write` would refuse by. Gives the number it ends with, or a promise of it when the
+    its own, and, when the folder watched changes, the old one's whole path, the one checked, on a line after them; and nothing
+    written; or the lines `write` would refuse by. Gives the number it ends with, or a promise of it when the
     drop folder changes. */
 function plan(home, rest, say, now) {
   return afterwards(planned(home, rest, now), (result) => {
@@ -386,6 +388,8 @@ function plan(home, rest, say, now) {
     say(`The import will be: ${lightImport(result.settings) ? "light" : "full"}`);
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
+    // And when the folder watched changes, the whole path of the old one, which was checked: the installer names it as the one left.
+    if (result.old) say(`The old drop folder: ${result.old}`);
     return 0;
   });
 }

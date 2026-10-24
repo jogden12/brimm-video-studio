@@ -352,12 +352,19 @@ if [[ "$machined" == "yes" ]]; then
     fi
   fi
   # The import it will be, and the drop folder as it is now and as it will be, are the last three lines of what it says, each as it
-  # says them, which are read as lines and never as JSON: what cannot be read refuses, and is never taken for today's import or
-  # Unedited Video. The settings are the lines above. With no node, the settings written are today's.
+  # says them, and after them, when the folder watched changes, the whole path of the old one, which it checked: all read as lines
+  # and never as JSON. What cannot be read refuses, and is never taken for today's import or Unedited Video. The settings are the
+  # lines above. With no node, the settings written are today's. The old folder named below is that line's alone, so that it is
+  # always the one checked: the folder of the Mac and BRIMM Video the settings name, not of those this run is told.
   old_drop_name="Unedited Video"
   drop_name="Unedited Video"
+  old_folder=""
   if [[ -n "$settings_node" ]]; then
     plan_lines=("${(@f)planned}")
+    if [[ "${plan_lines[-1]-}" == "The old drop folder: "* ]]; then
+      old_folder="${plan_lines[-1]#The old drop folder: }"
+      plan_lines=("${(@)plan_lines[1,-2]}")
+    fi
     import_line="${plan_lines[-3]-}"
     now_line="${plan_lines[-2]-}"
     will_line="${plan_lines[-1]-}"
@@ -365,7 +372,8 @@ if [[ "$machined" == "yes" ]]; then
     old_drop_name="${now_line#The drop folder is now: }"
     drop_name="${will_line#The drop folder will be: }"
     if [[ "$import_line" != "The import will be: "* || "$now_line" != "The drop folder is now: "* || "$will_line" != "The drop folder will be: "* ]] ||
-       [[ "$import_name" != ("light"|"full") || "$old_drop_name" != ("Drop"|"Unedited Video") || "$drop_name" != ("Drop"|"Unedited Video") ]]; then
+       [[ "$import_name" != ("light"|"full") || "$old_drop_name" != ("Drop"|"Unedited Video") || "$drop_name" != ("Drop"|"Unedited Video") ]] ||
+       [[ "${plan_lines[-4]-}" == "The old drop folder: "* || ( -n "$old_folder" && "$old_folder" != /* ) ]]; then
       say "The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:"
       say "$planned"
       say ""
@@ -427,9 +435,9 @@ if [[ -n "$machine" ]]; then
   say "  BRIMM Video:  $root"
   say "  Its drop folder, to make in Dropbox and watch:  $drop"
   say "  Its marker there, $marker, saying:  $machine"
-  # When the drop folder is switched, the one it was is no longer watched, and is left as it is: nothing in Dropbox is deleted.
-  if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
-    say "  The old drop folder:  $root/$old_drop_name/$machine, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported"
+  # When the folder watched changes, the one it was is no longer watched, and is left as it is: nothing in Dropbox is deleted.
+  if [[ -n "$old_folder" && -d "$old_folder" ]]; then
+    say "  The old drop folder:  $old_folder, no longer watched once this is done, and left as it is. It holds no video now, since the switch is refused while it does, and Jason deletes it by hand so that no video is dropped there by habit: a video there is never imported"
   fi
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
@@ -656,8 +664,8 @@ if [[ -n "$machine" ]]; then
   else
     say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
   fi
-  if [[ "$drop_name" != "$old_drop_name" && -d "$root/$old_drop_name/$machine" ]]; then
-    say "The old drop folder, $root/$old_drop_name/$machine, is no longer watched, and is left as it is. It holds no video. Jason deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
+  if [[ -n "$old_folder" && -d "$old_folder" ]]; then
+    say "The old drop folder, $old_folder, is no longer watched. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
   fi
   if [[ -n "$studio_why" ]]; then
     say "Her folder for Claude was not written: $studio_why."

@@ -861,7 +861,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     assert.equal(await t.run("plan", ...t.told, "--drop", "Drop"), 0);
     // The settings, then, each on a line of its own for the installer to read without parsing JSON, the import it would be, and the
     // drop folder as it is and as it would be.
-    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: t.root, checkout: CHECKOUT, import: "light", readings: false, handoffVersion: 2, later: { x: 1 }, drop: "Drop" });
     assert.equal(t.held(), before);
     // It is what write then writes, to the letter.
@@ -917,9 +917,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
     assert.equal(JSON.parse(t.said[0]).later, "\u0000");
     t.said.length = 0;
-    // Told the other, it says both.
+    // Told the other, it says both, and the old folder's whole path, which the installer names as the one left.
     assert.equal(await t.run("plan", ...t.told, "--drop", "Unedited Video"), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
     t.done();
   });
   it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
@@ -946,7 +946,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.equal(JSON.parse(t.said[0]).import, "light", `plan ${more.join(" ")}`);
       assert.equal(t.held(), before);
     }
-    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
     // write writes what plan printed, to the letter, with the drop folder and readings told with it.
     const planned = t.said[0];
     t.said.length = 0;
