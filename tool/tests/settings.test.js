@@ -1342,6 +1342,48 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    // A video held by an answered record one of whose other versions is a session not cleared is held as a session (edit.js
+    // gatedAsOf, through finish.js linksOf), and is named as edit.js names such a record: by its label, else as "a video" with its
+    // short id, whatever this Mac's import, and never by its file.
+    const FINISHED = { version: 3, kind: "finished", answer: { ...ANSWER, private: "no" } };
+    const SESSION_BESIDE = (cleared = null) => ({ ...SESSION_HELD, id: "e-20261022-000002", versionOf: "e-20261022-000001", session: { ...SESSION_HELD.session, cleared } });
+    it("names a video an answered record holds, while a session not cleared is beside it, by its label or as a video with its short id, owed or kept, under either import", async () => {
+      for (const held of [{}, { import: "light" }]) {
+        for (const owed of [true, false]) {
+          const t = mac(held);
+          const old = t.folder();
+          put(old, "Coaching call Jane Doe.mp4", "12345");
+          t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "", FINISHED);
+          t.episode("2026-10-23 Coaching call Jane Doe again (Mac Studio)", "Coaching call Jane Doe again.mp4", 9, "", SESSION_BESIDE());
+          if (owed) owe(t, "2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, old);
+          const said = await refused(t, "--drop", "Drop");
+          const what = `${JSON.stringify(held)} ${owed ? "owed" : "kept"}`;
+          assert.deepEqual(said, owed
+            ? [HEAD, `  a video (000001): already imported; its late check is still to come (due at ${due}).`, LATE]
+            : [HEAD, KEPT_LINE("a video (000001)"), KEPT], what);
+          // With a label, by the label.
+          t.episode("2026-10-22 Coaching call Jane Doe (Mac Studio)", "Coaching call Jane Doe.mp4", 5, "Video of 22 Oct, 10:00 (Mac Studio)", FINISHED);
+          const labelled = await refused(t, "--drop", "Drop");
+          assert.deepEqual(labelled.slice(0, 2), [HEAD, owed
+            ? `  Video of 22 Oct, 10:00 (Mac Studio): already imported; its late check is still to come (due at ${due}).`
+            : KEPT_LINE("Video of 22 Oct, 10:00 (Mac Studio)")], what);
+          assert.ok(!CLIENT.test([...said, ...labelled].join("\n")), [...said, ...labelled].join("\n"));
+          t.done();
+        }
+      }
+    });
+    it("keeps the file name of a video an answered record holds under today's import once the session beside it is cleared, or when none is", async () => {
+      const cleared = { at: "2026-10-23T10:00:00-04:00", on: "Mac Studio", to: "finished", confirmed: "dialog" };
+      for (const beside of [SESSION_BESIDE(cleared), null]) {
+        const t = mac();
+        const old = t.folder();
+        put(old, "Talk.mov", "12345");
+        t.episode("2026-10-22 Talk (Mac Studio)", "Talk.mov", 5, "", FINISHED);
+        if (beside) t.episode("2026-10-23 Talk again (Mac Studio)", "Talk again.mov", 9, "", beside);
+        assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, KEPT_LINE("Talk.mov"), KEPT], beside ? "cleared" : "none");
+        t.done();
+      }
+    });
     it("keeps the file name of a video an answered record that is not a session holds, under today's import, owed a late check or kept", async () => {
       const t = mac();
       const old = t.folder();

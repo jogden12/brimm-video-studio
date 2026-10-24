@@ -5,8 +5,10 @@
 // is refused. tests/gate.test.js walks every name in COMMAND_NAMES against them.
 //
 // This file is pure: it is given the command's name, the episode's record and the command's words, and reads nothing. edit.js
-// asks it wherever it finds the episode a command names (findEpisode), which reads records only.
-import { kindOf } from "./episode.js";
+// asks it wherever it finds the episode a command names (findEpisode), which reads records only. It also says how a gated record,
+// and one held as a session, is named (gatedName, gatedAsOf), for edit.js and for the installer's check of the old drop folder
+// (switch.js), which are given the versions of a video (finish.js linksOf) to ask it with.
+import { kindOf, shownName } from "./episode.js";
 
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
 export const UNSCOPED = ["episodes", "status", "behind", "retry"];
@@ -55,6 +57,22 @@ export const leftAlone = (record) => isObject(record) && kindOf(record) === null
     whose mark is not cleared. Such a record is named by its label in everything edit.js prints (shownName, in episode.js), and
     never by its folder or its file. Anything that is not a record is not one. */
 export const gated = (record) => isObject(record) && (kindOf(record) === null || sessionNotCleared(record));
+
+/** Whether a record has a label of the import's to be named by. */
+export const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
+
+/** How a video held as a session is named, wherever a gated one is named by its label (shownName): by its label, or with none (a
+    video from before the switch), as "a video (<short id>)", never by its name, which may be its file's. */
+export const heldName = (r) => (isLabelled(r) ? r.label : `a video (${String(r.id).slice(-6)})`);
+
+/** How the record `r` of a gated episode is named: as shownName names a gated record, and by heldName when it is held as a session
+    (`held`) and not gated itself. */
+export const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
+
+/** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
+    episodeHolding's `gatedAs`, which says its short id after it), through `links` (finish.js linksOf): as shownName names a gated
+    record, one held as a session by its label or as "a video", and "" for any other, which is named by its folder. */
+export const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : kindOf(record) !== null && links.sessionsBeside(record).length > 0 ? (isLabelled(record) ? record.label : "a video") : "");
 
 /** The words of a command as the gate reads them. A detached run is started as `<command> --now <folder> <words…>` (detached.js),
     and the folder stands where the person said the episode: so those words are read as `<folder> <words…>`. */
