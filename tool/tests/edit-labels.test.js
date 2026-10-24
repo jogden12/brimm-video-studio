@@ -747,6 +747,45 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     await withCopy("a raw video with a conflicted copy left alone", { ...answered, kind: "raw" }, { kind: null, answer: { ...ANSWER, state: "not for brimm-video" } }, true);
     t.done();
   });
+  it("leaves out the Maybe line when the match's other versions hold a session not cleared, as `kind --version-of` refuses such a target", async () => {
+    // A is finished and answered; S is a session, its mark not cleared, that is a version of A; B waits, and its words matched A.
+    const sessionMark = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+    const cleared = { ...sessionMark, cleared: { at: AT, on: "Mac Studio", to: "a client", confirmed: "dialog" } };
+    const A = { ...TARGET, over: { kind: "finished", answer: ANSWERED, name: NAMED } };
+    const S = { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", label: "Video of 19 Oct, 10:00 (Mac Studio)" };
+    const asSession = { kind: "session", answer: ANSWERED, name: { text: SESSION, placeholder: false }, versionOf: TARGET.id };
+    const lines = ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"];
+    const said = async (t) => (await cardOf(t)).lines;
+    // The control: with A alone, and with a later version of A that is no session, A is offered.
+    const { t } = waiting({ match: TARGET.id }, A);
+    assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+    const later = clientEpisode(t, { ...S, over: { kind: "finished", answer: ANSWERED, name: NAMED, versionOf: TARGET.id } });
+    assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+    rmSync(later.folder, { recursive: true, force: true });
+    // S, a session not cleared, among A's versions: A is not offered, and nothing of S is said under B.
+    const session = clientEpisode(t, { ...S, over: { ...asSession, session: sessionMark } });
+    const { lines: without, said: all } = await cardOf(t);
+    assert.deepEqual(without, lines);
+    assert.ok(!all.some((line) => line.includes("Maybe a new version of")), all.join("\n"));
+    // ...and kind would refuse it all the same, which is why the card does not offer it.
+    const refused = await on(depsOf(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d");
+    assert.deepEqual([refused.code, /would be a version of a client or group session/.test(refused.said.join("\n"))], [1, true], refused.said.join("\n"));
+    // The same when its mark is only in a conflicted copy of a record that says it is finished.
+    rmSync(session.folder, { recursive: true, force: true });
+    const copy = clientEpisode(t, { ...S, over: { kind: "finished", answer: ANSWERED, name: NAMED, versionOf: TARGET.id } });
+    assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+    conflictedRecord(copy.folder, { kind: "session", session: sessionMark, name: { text: SESSION, placeholder: false } });
+    assert.deepEqual(await said(t), lines);
+    rmSync(copy.folder, { recursive: true, force: true });
+    // A session whose mark she cleared is no longer held, and does not stop it; and a session that is a version of something else does not.
+    const done = clientEpisode(t, { ...S, over: { ...asSession, session: cleared } });
+    assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+    rmSync(done.folder, { recursive: true, force: true });
+    const other = clientEpisode(t, { ...S, over: { ...asSession, session: sessionMark, versionOf: undefined } });
+    assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
+    rmSync(other.folder, { recursive: true, force: true });
+    t.done();
+  });
   it("says nothing of the card under a video she answered, left alone, or a session, whatever its answer holds", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });

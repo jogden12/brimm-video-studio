@@ -523,9 +523,11 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
     known by that record, is not the video itself, is not archived, was not written by a newer brimm-video, and has every record
     it is known by, the one in force and each conflicted copy, answered and neither gated nor a session (gate.js gated, which
     reads a video not answered or left alone, and a session not cleared). An episode with one record that is not is named by its
-    label in its own line, and would be given away by its name in this one. It is named as shownName names it, with its kind in
-    the words `kind` says (KIND_SAID). */
-function cardLines(named, others) {
+    label in its own line, and would be given away by its name in this one. Nor is it offered when one of its versions is a
+    session not cleared: `links` (finish.js linksOf) gives the versions of the video it starts from, earlier, later and beside it,
+    each by its record and its conflicted copies, as answerWhy reads them for `kind --version-of`, which refuses such a target.
+    It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). */
+function cardLines(named, others, links) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
   const lines = [];
@@ -533,7 +535,8 @@ function cardLines(named, others) {
   if (Object.hasOwn(CAME_WORDS, answer.came)) lines.push(`    Came: ${CAME_WORDS[answer.came]}`);
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
-  if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")) {
+  if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
+    && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
     lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
   }
   return lines;
@@ -545,9 +548,9 @@ function cardLines(named, others) {
     answer, a client or group session, or a video left alone (`left`), with no folder; its title, which Claude may have made of
     its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
     answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
-    the episodes `episodes` lists. An episode whose record cannot be read is named as listedAs names it, and so is one a newer
-    brimm-video wrote. */
-function episodeLines(ctx, e, left, all) {
+    the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
+    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. */
+function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
   if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    Not right: ${e.read.why}.`];
@@ -559,7 +562,7 @@ function episodeLines(ctx, e, left, all) {
     const named = gatedRecord(e);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : "a client or group session, of";
     lines.push(`  ${shownName(named)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
-    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all));
+    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
@@ -600,14 +603,16 @@ export async function episodes(ctx) {
   const all = folders(ctx).map((name) => episodeAt(ctx, name)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
   const shown = all.filter((e) => !isLeft(e));
   const left = all.filter(isLeft);
+  // The versions of a video are read from Episodes once, and only when a card has a video to offer a new version of.
+  const links = linksOf(ctx.root);
   if (!shown.length && !left.length) say("No episodes yet.");
   else if (shown.length) {
     say("Episodes, newest first:");
-    for (const e of shown) for (const line of episodeLines(ctx, e, false, all)) say(line);
+    for (const e of shown) for (const line of episodeLines(ctx, e, false, all, links)) say(line);
   }
   if (left.length) {
     say("Left alone, not for brimm-video:");
-    for (const e of left) for (const line of episodeLines(ctx, e, true, all)) say(line);
+    for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
   // The videos in each Mac's drop folder.
   const drops = join(ctx.root, "Unedited Video");
