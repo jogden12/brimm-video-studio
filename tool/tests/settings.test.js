@@ -1468,6 +1468,25 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    it("says a video this Mac owes a late check is one to wait for before any other kind, a failed import or a late check's problem included, and never to take it out", async () => {
+      // An owed late check is made from the video in the old folder: whatever else a status says of it, it is waited for.
+      for (const status of [{ failed: "the sound could not be read" }, { problem: "Budget.rough-cut.mp4 is short" }]) {
+        for (const held of [{}, { import: "light" }]) {
+          const t = mac(held);
+          const old = t.folder();
+          put(old, "Budget.mov", "123456");
+          t.status("Budget.mov", { bytes: 6, ...status });
+          owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+          const said = await refused(t, "--drop", "Drop");
+          const what = `${Object.keys(status)[0]} ${JSON.stringify(held)}`;
+          assert.deepEqual(said, held.import
+            ? [HEAD, "  1 video is already imported, and its late check is still to come.", LATE]
+            : [HEAD, `  Budget.mov: already imported; its late check is still to come (due at ${due}).`, LATE], what);
+          assert.ok(!said.some((line) => /take the video out|delete/.test(line)), said.join("\n"));
+          t.done();
+        }
+      }
+    });
     it("says a video this Mac owes a late check is one to wait for whatever holds it: no episode, or an import at work on it too", async () => {
       const t = mac();
       const old = t.folder();

@@ -39,8 +39,9 @@ function namesIn(folder) {
     late check found a problem: it is made again from the video in the old folder, so the video is to stay there, and
     `problemHere` and `problemGone` say whether some have their video there and some have not. `imported` is a video for which
     `home`, this Mac's own folder, holds a late check this Mac still has to make, whatever holds it (an episode, none, or one
-    that cannot be read) and whatever else is said of it: the video leaves the folder once the check has passed, is to be
-    waited for and never taken out, and its line says when it is due. `kept` is a video an episode holds already, with no such
+    that cannot be read) and whatever else is said of it, a failed import or a late check's problem of it included, while the
+    video is in the old folder: the video leaves the folder once the check has passed, is to be waited for and never taken
+    out, and its line says when it is due. `kept` is a video an episode holds already, with no such
     check (its late check has passed, or it is a copy of an imported video), so nothing of this Mac's import will take it out,
     and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which
     holds no video's name: the old folder, or the status files. `now` is a time in milliseconds, for the status files.
@@ -79,12 +80,30 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   const counts = { failed: [0, 0], problem: [0, 0] };
   let problemHere = false;
   let problemGone = false;
+  // The late checks this Mac still owes, and the one it owes for a video of that size in the old folder: owed, the video is to be
+  // waited for and never taken out, whatever else is said of it, a failed import or a late check's problem included.
+  const pendings = home ? readPendings(home) : [];
+  const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && resolve(String(p.root)) === resolve(root));
+  const imported = new Set();
+  let importedCounted = 0;
+  /** The line of a video owed a late check, `pending`, named `name`, or counted when it has no name under the light import. */
+  const owe = (name, video, pending) => {
+    if (!name && light) importedCounted += 1;
+    else imported.add(`  ${name || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
+  };
   for (const status of trouble) {
     named.add(status.video);
     const isFailed = importState(status, now) === "failed";
     const here = inFolder.code ? true : videos.includes(status.video);
     const holder = holdingEpisode({ root, video: status.video, bytes: status.bytes });
     const name = heldAs(holder) || status.label || unknownAs(holder, status.video, status.bytes);
+    // Owed a late check, and its video still in the old folder: it is one to wait for. With its video gone, its status says what
+    // is to be done, as below.
+    const owedNow = here ? owedFor(status.video, status.bytes) : undefined;
+    if (owedNow) {
+      owe(name, status.video, owedNow);
+      continue;
+    }
     if (light && !name) {
       const count = counts[isFailed ? "failed" : "problem"];
       count[0] += 1;
@@ -112,12 +131,9 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
   else if (problems) problem.add(`  ${problems} late checks found a problem, of which ${still(problemsHere)} the video still in the old folder.`);
   if (problemsHere) problemHere = true;
   if (problems > problemsHere) problemGone = true;
-  const pendings = home ? readPendings(home) : [];
-  const imported = new Set();
   const kept = new Set();
   const running = new Set();
   let counted = 0;
-  let importedCounted = 0;
   let keptCounted = 0;
   let runningCounted = 0;
   for (const video of videos.filter((v) => !named.has(v))) {
@@ -134,11 +150,9 @@ export function heldInOld({ root, machine, old, light, home, now = Date.now() })
     // A late check this Mac still owes for it comes first, whatever holds it: the video is then to be waited for, and never taken
     // out, since the check is made from it. Else an episode that holds it holds it for good: its late check has passed, or it is a
     // copy of an imported video, and filing.js leaves it in the drop folder for a person to delete.
-    const pending = pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && resolve(String(p.root)) === resolve(root));
-    if (pending) {
-      if (!label && light) importedCounted += 1;
-      else imported.add(`  ${label || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
-    } else if (held) {
+    const pending = owedFor(video, bytes);
+    if (pending) owe(label, video, pending);
+    else if (held) {
       if (!label && light) keptCounted += 1;
       else kept.add(`  ${label || video}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
     } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
