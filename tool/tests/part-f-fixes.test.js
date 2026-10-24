@@ -561,6 +561,41 @@ describe("two sessions not cleared in one video's versions: each mark can be cle
   });
 });
 
+describe("a waiting video whose import matched a video since marked a session, or a version of one (item 2)", () => {
+  const MATCHED = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
+  const WAITS = { version: 3, kind: null, label: LABEL, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera", match: OLD } };
+  const SESSION_OLD = { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, name: { text: "Session, 2026-10-10", placeholder: false }, label: "Video of 10 Oct, 09:12 (Mac Studio)", session: markOf(null) };
+  /** The match as the session itself, and as a video one of whose later versions is the session. */
+  const worlds = [
+    ["the match is a session", (t) => episodeAs(t, { id: OLD, name: OLD_FOLDER, record: SESSION_OLD })],
+    ["the match's version set holds one", (t) => {
+      episodeAs(t, { id: OLD, name: OLD_FOLDER, record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Coaching Jane Doe", placeholder: false } } });
+      episodeAs(t, { id: "e-20261012-b1b1b1", name: "2026-10-12 Another (Mac Studio)", record: { ...SESSION_OLD, label: "Video of 12 Oct, 09:12 (Mac Studio)", name: { text: "Session, 2026-10-12", placeholder: false }, versionOf: OLD } });
+    }]
+  ];
+  for (const [what, world] of worlds) {
+    it(`refuses any answer but a session, writing nothing and reading nothing, and the card says it may be a session's new version: ${what}`, async () => {
+      const t = setup();
+      t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "CLAUDE" };
+      world(t);
+      const found = episodeFor(t, { record: WAITS, files: LIGHT });
+      const episodes = await on(t.ctx.deps, "episodes");
+      const card = episodes.said.slice(episodes.said.indexOf(`  ${LABEL}: a video waiting for your answer, of 0:23, id 3fa9c1`));
+      assert.deepEqual(card.slice(0, 5), [`  ${LABEL}: a video waiting for your answer, of 0:23, id 3fa9c1`, "    Seen: wide, 0:23, no retakes", "    Came: from a camera", "    Guess: finished by your editor", "    Maybe a new version of a client or group session."], episodes.text);
+      assert.doesNotMatch(episodes.text, SECRET);
+      for (const kind of ["finished", "raw", "clip"]) {
+        const r = await on(t.ctx.deps, "kind", LABEL, kind, "--private", "no");
+        assert.deepEqual([r.code, r.said], [1, [MATCHED]], kind);
+      }
+      assert.deepEqual([reread(found).rev, t.started, t.waits], [1, [], []]);
+      const session = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes");
+      assert.equal(session.code, 0, session.text);
+      assert.equal(reread(found).kind, "session");
+      t.done();
+    });
+  }
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

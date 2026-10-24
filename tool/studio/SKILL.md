@@ -19,6 +19,7 @@ The card's words are a proposal, for Jason and Sallie to settle.
 
 `episodes` names a video waiting for her answer by its label, as "<label>: a video waiting for your answer, of 42:10, id 1a2b3c", and may add under it lines that start "Seen:", "Came:", "Guess:" and "Maybe a new version of:". For each such video in turn, one `AskUserQuestion`, never two videos in one card, with two questions. Above each card, say its Seen and Came lines, when given, in one line, and that she can say "which one is it?" first.
 1. "What is <label>?", with these answers, in this order (a Maybe line wins over a Guess line):
+   - Maybe a new version of a client or group session (the line names no video): "Client or group session", "Finished by your editor", "Raw with retakes", "iPhone clip". Tell her it holds most of the words of a client or group session, so `kind` takes no other answer for it
    - Maybe a new version of a video finished by your editor or an iPhone clip: "A new version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
    - Maybe a new version of a video raw with retakes: "A finished version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
    - Guess finished by your editor: "Finished by your editor", "Raw with retakes", "iPhone clip", "Client or group session"

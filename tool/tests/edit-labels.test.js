@@ -696,7 +696,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     assert.ok(said.length > lines.length);
     t.done();
   });
-  it("leaves out the whole Maybe line when the match names no record, or a session, or a record it cannot read, or one not answered anywhere", async () => {
+  it("leaves out the whole Maybe line when the match names no record, or a record it cannot read, or one not answered anywhere, and says only that it may be a session's for a session", async () => {
     const sessionMark = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
     const cleared = { ...sessionMark, cleared: { at: AT, on: "Mac Studio", to: "a client", confirmed: "dialog" } };
     const asSession = { name: { text: SESSION, placeholder: false } };
@@ -705,49 +705,52 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     const CLIENT = { ...TARGET, folder: "2026-10-18 Coaching call Jane Doe (Mac Studio)", video: "Coaching call Jane Doe.mov" };
     const stem = { text: "Coaching call Jane Doe", placeholder: true };
     const { t } = waiting({ match: TARGET.id });
-    // Each case: what the match is, its record laid on a finished video's, and whether `episodes` lists it (an archived video is not).
+    // Each case: what the match is, its record laid on a finished video's, whether `episodes` lists it (an archived video is not),
+    // and whether it is a session not cleared, which the card says it may be a new version of, naming none (final fix 2).
     const cases = [
-      ["no record with that id", null, false],
-      ["a session, its mark not cleared", { kind: "session", answer: ANSWERED, session: sessionMark, ...asSession }, true],
-      ["a session with no mark at all", { kind: "session", answer: ANSWERED, ...asSession }, true],
+      ["no record with that id", null, false, false],
+      ["a session, its mark not cleared", { kind: "session", answer: ANSWERED, session: sessionMark, ...asSession }, true, true],
+      ["a session with no mark at all", { kind: "session", answer: ANSWERED, ...asSession }, true, true],
       // A session whose mark she cleared is no longer gated: it is listed as an answered video is, by its folder, as it always was.
-      ["a session, its mark cleared", { kind: "session", answer: ANSWERED, session: cleared, ...asSession }, true, TARGET],
-      ["a finished video marked a session, not cleared", { kind: "finished", answer: ANSWERED, session: sessionMark, name: stem }, true],
-      ["an archived video", { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: stem }, false],
-      ["a video a newer brimm-video wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true]
+      ["a session, its mark cleared", { kind: "session", answer: ANSWERED, session: cleared, ...asSession }, true, false, TARGET],
+      ["a finished video marked a session, not cleared", { kind: "finished", answer: ANSWERED, session: sessionMark, name: stem }, true, true],
+      ["an archived video", { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: stem }, false, false],
+      ["a video a newer brimm-video wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true, false]
     ];
-    const noMaybe = (said, what, base) => {
-      assert.ok(!said.some((line) => line.includes("Maybe a new version of")), `${what}: ${said.join("\n")}`);
+    const SESSIONS_LINE = "    Maybe a new version of a client or group session.";
+    const noMaybe = (said, what, base, session = false) => {
+      assert.ok(!said.some((line) => line.includes("Maybe a new version of") && line !== SESSIONS_LINE), `${what}: ${said.join("\n")}`);
+      assert.equal(said.includes(SESSIONS_LINE), session, `${what}: ${said.join("\n")}`);
       if (base === CLIENT) assert.doesNotMatch(said.join("\n"), SECRET, what);
     };
-    for (const [what, over, listed, base = CLIENT] of cases) {
+    for (const [what, over, listed, session, base = CLIENT] of cases) {
       const target = over ? clientEpisode(t, { ...base, over }) : null;
       const { lines, said } = await cardOf(t);
-      noMaybe(said, what, base);
+      noMaybe(said, what, base, session);
       assert.equal(said.some((line) => line.includes("0d0d0d")), listed, `${what}: ${said.join("\n")}`);
-      assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"], what);
+      assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", ...(session ? [SESSIONS_LINE] : [])], what);
       if (target) rmSync(target.folder, { recursive: true, force: true });
     }
     // The same of an episode with a conflicted copy, where the record in force is read past the copy: archived in force; a copy that
     // is a session not cleared; and a copy that is not answered, or that was left alone, beside an answered video in force, whose
     // own line then names it by its label, as the gate does for any record of an episode, so that no line may name it by its name.
-    const withCopy = async (what, over, copy, listed, base = CLIENT) => {
+    const withCopy = async (what, over, copy, listed, base = CLIENT, session = false) => {
       const target = clientEpisode(t, { ...base, over });
       conflictedRecord(target.folder, copy);
       const { said } = await cardOf(t);
-      noMaybe(said, what, base);
+      noMaybe(said, what, base, session);
       assert.ok(said.some((line) => line.startsWith(`  ${CLIENT.label}: `)) === listed, `${what}: ${said.join("\n")}`);
       rmSync(target.folder, { recursive: true, force: true });
     };
     const answered = { kind: "finished", answer: ANSWERED, name: stem };
     // (An answered video that is not gated is listed by its folder, a conflicted one too, as it always was: so this one is not client-named.)
     await withCopy("an archived video with a conflicted copy", { ...answered, name: NAMED, archived: { at: AT } }, { archived: null }, false, TARGET);
-    await withCopy("a finished video with a session's conflicted copy", answered, { kind: "session", session: sessionMark, ...asSession }, false);
+    await withCopy("a finished video with a session's conflicted copy", answered, { kind: "session", session: sessionMark, ...asSession }, false, CLIENT, true);
     await withCopy("a finished video with a conflicted copy not answered", answered, { kind: null, answer: ANSWER }, true);
     await withCopy("a raw video with a conflicted copy left alone", { ...answered, kind: "raw" }, { kind: null, answer: { ...ANSWER, state: "not for brimm-video" } }, true);
     t.done();
   });
-  it("leaves out the Maybe line when the match's other versions hold a session not cleared, as `kind --version-of` refuses such a target", async () => {
+  it("says only that it may be a session's new version when the match's other versions hold a session not cleared, as `kind` takes only a session for it", async () => {
     // A is finished and answered; S is a session, its mark not cleared, that is a version of A; B waits, and its words matched A.
     const sessionMark = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
     const cleared = { ...sessionMark, cleared: { at: AT, on: "Mac Studio", to: "a client", confirmed: "dialog" } };
@@ -762,20 +765,22 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     const later = clientEpisode(t, { ...S, over: { kind: "finished", answer: ANSWERED, name: NAMED, versionOf: TARGET.id } });
     assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
     rmSync(later.folder, { recursive: true, force: true });
-    // S, a session not cleared, among A's versions: A is not offered, and nothing of S is said under B.
+    // S, a session not cleared, among A's versions: A is not offered, and nothing of S is said under B but that B may be a new
+    // version of a session (final fix 2).
+    const SESSIONS_LINE = "    Maybe a new version of a client or group session.";
     const session = clientEpisode(t, { ...S, over: { ...asSession, session: sessionMark } });
     const { lines: without, said: all } = await cardOf(t);
-    assert.deepEqual(without, lines);
-    assert.ok(!all.some((line) => line.includes("Maybe a new version of")), all.join("\n"));
-    // ...and kind would refuse it all the same, which is why the card does not offer it.
+    assert.deepEqual(without, [...lines, SESSIONS_LINE]);
+    assert.ok(!all.some((line) => line.includes("Maybe a new version of") && line !== SESSIONS_LINE), all.join("\n"));
+    // ...and kind takes no answer for B but a session.
     const refused = await on(depsOf(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d");
-    assert.deepEqual([refused.code, /would be a version of a client or group session/.test(refused.said.join("\n"))], [1, true], refused.said.join("\n"));
+    assert.deepEqual([refused.code, refused.said], [1, ["This video holds most of the words of a client or group session: answer it as a session, or ask Jason."]]);
     // The same when its mark is only in a conflicted copy of a record that says it is finished.
     rmSync(session.folder, { recursive: true, force: true });
     const copy = clientEpisode(t, { ...S, over: { kind: "finished", answer: ANSWERED, name: NAMED, versionOf: TARGET.id } });
     assert.deepEqual(await said(t), [...lines, maybe("Pricing talk", "finished by your editor")]);
     conflictedRecord(copy.folder, { kind: "session", session: sessionMark, name: { text: SESSION, placeholder: false } });
-    assert.deepEqual(await said(t), lines);
+    assert.deepEqual(await said(t), [...lines, SESSIONS_LINE]);
     rmSync(copy.folder, { recursive: true, force: true });
     // A session whose mark she cleared is no longer held, and does not stop it; and a session that is a version of something else does not.
     const done = clientEpisode(t, { ...S, over: { ...asSession, session: cleared } });

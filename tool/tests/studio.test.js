@@ -260,7 +260,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     for (const words of ["`AskUserQuestion`", "never two videos in one card", '"What is <label>?"', '"Is it a private session with a client or a group?": "Yes", "No"',
       "The card's words are a proposal, for Jason and Sallie to settle"]) assert.ok(card().includes(words), words);
   });
-  it("offers Client or group session in every order it writes out, never first, each order led by its own guess or new version", () => {
+  it("offers Client or group session in every order it writes out, never first but for a new version of a session, each order led by its own guess or new version", () => {
     // Each order is a line of the card's section: "- <when>: "<answer>", "<answer>", …", <when> being a Guess line, a Maybe line
     // or neither, in the words episodes gives them (Ruling 1).
     const orders = card().split("\n").filter((line) => /^\s+- [^"]+: "/.test(line)).map((line) => {
@@ -277,6 +277,12 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       assert.ok(answers.length <= 4, said);
       assert.equal(new Set(answers).size, answers.length, said);
       assert.ok(answers.includes(SESSION), said);
+      // A video that may be a new version of a session is offered as a session first (final fix 2): kind takes no other answer.
+      if (when.startsWith("Maybe a new version of a client or group session")) {
+        assert.deepEqual(answers, [SESSION, ...BASE], said);
+        seen.add("maybe session");
+        continue;
+      }
       assert.notEqual(answers[0], SESSION, said);
       const guess = /^Guess (.+)$/.exec(when);
       const maybe = /^Maybe a new version of a video (.+)$/.exec(when);
@@ -296,7 +302,9 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
         seen.add("none");
       }
     }
-    assert.deepEqual([...seen].sort(), ["guess an iPhone clip", "guess finished by your editor", "guess raw with retakes", "maybe other", "maybe raw", "none"]);
+    assert.deepEqual([...seen].sort(), ["guess an iPhone clip", "guess finished by your editor", "guess raw with retakes", "maybe other", "maybe raw", "maybe session", "none"]);
+    // The skill listens for the line as edit.js says it.
+    assert.match(source("edit.js"), /lines\.push\("    Maybe a new version of a client or group session\."\)/);
   });
   it("says the Seen and Came lines above the card, and that she can ask which one it is first", () => {
     for (const words of ["say its Seen and Came lines, when given, in one line", 'she can say "which one is it?" first']) assert.ok(card().includes(words), words);

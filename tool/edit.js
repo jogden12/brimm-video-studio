@@ -571,7 +571,9 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
     it for what links it: `links` (finish.js linksOf) is asked as answerWhy asks it, whether its chain of versions cannot be followed to
     its first (a gap: an episode not on this Mac; or a loop), whether that chain holds the waiting video itself, and whether one of
     the versions of the video it starts from, earlier, later and beside it, is a session not cleared (in the record or a conflicted
-    copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). */
+    copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). A match that is itself a session not
+    cleared, or one of whose versions is (matchedSession), gives the line "Maybe a new version of a client or group session." in its
+    place, naming none: her skill then offers "Client or group session" first, and `kind` takes no other answer for it. */
 function cardLines(named, others, links) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
@@ -579,6 +581,12 @@ function cardLines(named, others, links) {
   if (isSeenLine(answer.seen)) lines.push(`    Seen: ${answer.seen}`);
   if (Object.hasOwn(CAME_WORDS, answer.came)) lines.push(`    Came: ${CAME_WORDS[answer.came]}`);
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
+  // A match that is a session not cleared, or a version of one, is offered as such, naming none (edit.js answerWhy then takes only
+  // a session for it).
+  if (matchedSession(links, named)) {
+    lines.push("    Maybe a new version of a client or group session.");
+    return lines;
+  }
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
   if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
     && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
@@ -3826,6 +3834,17 @@ const logNotWritten = (holds) => `The log on this Mac could not be written: the 
 const noMarkToClear = (name) => `${name} has no session mark to clear.`;
 /** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
 const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
+/** Why a video whose import matched a session's words (matchedSession) is answered only as one. */
+const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
+/** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
+    session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
+    sessionsBeside), as Episodes holds it now. A match this Mac cannot read says nothing. */
+function matchedSession(links, record) {
+  const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
+  if (typeof id !== "string" || id === record.id) return false;
+  const match = links.find(id);
+  return Boolean(match) && (links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).length > 0);
+}
 /** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
     video being answered. */
 const heldAnswer = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
@@ -3960,6 +3979,9 @@ function answerWhy(ctx, found, record, plan) {
   // A video one of whose other versions is a session not cleared is held as one (spec 1 forbids writing into another version's
   // folder, so the mark cannot follow it there): it is answered only as a session itself, until that mark is cleared.
   if (stored !== "session" && !plan.clearSession && links.sessionsBeside(record, found.folder).length) return heldAnswer(name);
+  // A video whose import found most of the words of a video since marked a session, or of a version of one, in it (answer.match)
+  // holds that session's words: it is answered only as a session (her card says it may be one).
+  if (stored !== "session" && matchedSession(links, record)) return MATCHED_SESSION;
   // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
   // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
   const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
