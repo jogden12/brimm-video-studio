@@ -23,7 +23,7 @@
 //   node settings.js show
 //   node settings.js marker "<drop folder>" "<this Mac>"
 //   node settings.js studio --node "<path to node>"
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -274,6 +274,16 @@ function fieldsToldBy(rest) {
   return { fields };
 }
 
+/** Whether two folders are the same: by their real paths when both are there, so that one reached by a link is the same as the
+    one it leads to; by how they are spelt, resolved, otherwise. */
+function sameFolder(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch (e) {
+    return resolve(a) === resolve(b);
+  }
+}
+
 /** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
     refuses by. It refuses a value that will not do, settings that would not do once written, and, when the drop folder
     changes, a drop folder that still holds work (switch.js), which it looks at by a dynamic import: so it gives back a promise
@@ -301,9 +311,9 @@ function planned(home, rest, now) {
   const oldMachine = typeof held.machine === "string" && !machineFault(held.machine) ? held.machine : settings.machine;
   const oldFolder = dropFolder(oldRoot, oldMachine, from);
   const newFolder = dropFolder(settings.root, settings.machine, to);
-  if (resolve(oldFolder) === resolve(newFolder)) return { settings, fields: told.fields, from, to };
+  if (sameFolder(oldFolder, newFolder)) return { settings, fields: told.fields, from, to };
   // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
-  const moved = resolve(oldRoot) !== resolve(settings.root) || oldMachine !== settings.machine;
+  const moved = !sameFolder(oldRoot, settings.root) || oldMachine !== settings.machine;
   const light = lightImport(held) || lightImport(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")

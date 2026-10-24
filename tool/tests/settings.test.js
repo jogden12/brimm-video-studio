@@ -1408,6 +1408,19 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.equal(await t.run("plan", ...t.told, "--root", elsewhere), 0);
       t.done();
     });
+    it("takes the same BRIMM Video reached by a link for the same, by its real path: no move, and a switch is said by the folder's name", async () => {
+      const t = mac();
+      const old = t.folder();
+      put(old, "Talk.mov", "12345");
+      const link = join(t.home, "Link to BRIMM Video");
+      symlinkSync(t.root, link);
+      // Told the link, the drop folder named the same: the same folder, not looked at, as when nothing changes.
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, "--root", link), 0, t.said.join("\n"));
+      // Told the link and Drop: a switch of the drop folder alone, said as one.
+      assert.deepEqual(await refused(t, "--root", link, "--drop", "Drop"), [HEAD, `  Talk.mov: waits in ${old}.`, ADVICE]);
+      t.done();
+    });
     it("matches the statuses and late checks of the file's Mac, in its BRIMM Video, when the run is told another Mac", async () => {
       const t = mac();
       const old = t.folder();
