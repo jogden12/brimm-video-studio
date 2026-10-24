@@ -975,6 +975,11 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     writeFileSync(join(drop, "Talk.mov"), "video");
     const said = (await on(depsOf(t), "episodes")).said;
     assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
+    // Held by an answered episode, with a conflicted copy of its record: by its file, and the episode by its folder, as today.
+    const e = clientEpisode(t, { folder: "2026-10-18 Talk (Mac Studio)", video: "Talk.mov", id: "e-20261018-0d0d0d", label: "", over: { kind: "finished", answer: ANSWERED } });
+    conflictedRecord(e.folder);
+    const held = (await on(depsOf(t), "episodes")).said;
+    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]);
     t.done();
   });
 });
