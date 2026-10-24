@@ -18,7 +18,7 @@ import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from 
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
-import { isZoomName, namesOf, withoutNames } from "./kinds.js";
+import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated } from "./gate.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
@@ -444,16 +444,17 @@ const ZOOM_HELD = "Zoom downloads are taken from a later version. Put this one i
 const holdsZoom = (name, deps) => Boolean(deps.light) && isZoomName(name);
 
 /** Hold the video `name` in the drop folder `dir`: write the status that says why it is not imported, as a new file by the
-    rule, so that both Macs' `episodes` say it. It is held whether or not the status could be written, and the log says so,
-    once, when it could not. */
+    rule, so that both Macs' `episodes` say it. Its label is its Zoom time alone (kinds.js zoomTimeOf), by which every command on
+    either Mac names it, and so does the log: a download renamed with a client's words after Zoom's own name is never named by
+    them. It is held whether or not the status could be written, and the log says so, once, when it could not. */
 function hold(name, dir, deps, told) {
   const { episode, log = () => {}, clock = Date.now } = deps;
   const work = join(runsFolder(episode.home), `held-${process.pid}-${clock()}`);
   try {
     const bytes = statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0;
-    writeStatus(episode.root, { version: 1, machine: episode.machine, pid: process.pid, video: name, bytes, seconds: null, step: "Held", at: localStamp(new Date(clock())), held: ZOOM_HELD }, textWriter({ work, ...ruleOpts(deps) }));
+    writeStatus(episode.root, { version: 1, machine: episode.machine, pid: process.pid, video: name, bytes, seconds: null, step: "Held", at: localStamp(new Date(clock())), held: ZOOM_HELD, label: zoomTimeOf(name) }, textWriter({ work, ...ruleOpts(deps) }));
   } catch (e) {
-    if (!told.has(`status:${name}`)) log(`${name}: its status could not be written into Episodes/.importing (${String(e.message).replace(/\.$/, "")}). It is held all the same.`);
+    if (!told.has(`status:${name}`)) log(`${zoomTimeOf(name)}: its status could not be written into Episodes/.importing (${String(withoutNames(e.message, namesOf(name), [zoomTimeOf(name)])).replace(/\.$/, "")}). It is held all the same.`);
     told.add(`status:${name}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -473,7 +474,9 @@ function releaseHeld(dir, deps) {
     try {
       removeStatus(episode.root, status.video, episode.machine, status.import || "");
     } catch (e) {
-      log(`${status.video}: the status that said it was held could not be taken away (${String(e.message).replace(/\.$/, "")}).`);
+      // A Zoom download is named by its Zoom time alone, or its label, and why holds no name of its file.
+      const who = status.label || zoomTimeOf(status.video) || status.video;
+      log(`${who}: the status that said it was held could not be taken away (${String(who === status.video ? e.message : withoutNames(e.message, namesOf(status.video), [who])).replace(/\.$/, "")}).`);
     }
   }
 }
@@ -489,12 +492,13 @@ const LOOK_AGAIN_MS = 60 * 1000;
     Mac is kept awake while there is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those
     held, each with `held`. In a light import the log names no video by its file, which may be named for a client: a video by
     the label its status carries, or as "A video in the drop folder", and why it is held with nothing of its file's names in it.
-    A Zoom download is named by its file, which is Zoom's, made of the time and a number. */
+    A Zoom download is named by its Zoom time alone (kinds.js zoomTimeOf), the part of its name that is Zoom's: the time and a
+    number. */
 export async function importEpisodes(dir, deps, importOne) {
   const { episode, log = () => {}, wait, clock = Date.now, keepAwake = caffeinate } = deps;
   /** How the log names the video `name` in the drop folder: by its file, as always, and in a light import by its label, or as "A
       video in the drop folder", unless Zoom named it. `labels` gives the labels the statuses carried, by the video's file. */
-  const named = (name, labels = labelsNow()) => (!deps.light || isZoomName(name) ? name : labels.get(name) || "A video in the drop folder");
+  const named = (name, labels = labelsNow()) => (!deps.light ? name : isZoomName(name) ? zoomTimeOf(name) : labels.get(name) || "A video in the drop folder");
   const labelsNow = () => new Map(readStatuses(episode.root).filter(({ status }) => status && status.machine === episode.machine && status.label).map(({ status }) => [status.video, status.label]));
   const results = [];
   // The files tried in this run, by name, inode and size: a video dropped again under the same name is another file. A video
@@ -555,7 +559,7 @@ export async function importEpisodes(dir, deps, importOne) {
       if (held) {
         if (!told.has(`${id}:${held}`)) {
           told.add(`${id}:${held}`);
-          log(deps.light && !isZoomName(name) ? `${named(name)}: ${withoutNames(held, namesOf(name))}` : `${name}: ${held}`);
+          log(deps.light ? `${named(name)}: ${withoutNames(held, namesOf(name), [named(name)])}` : `${name}: ${held}`);
           results.push({ ok: true, name, held });
         }
         continue;

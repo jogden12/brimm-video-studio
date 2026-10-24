@@ -293,6 +293,35 @@ describe("which opens a clone named by the video's label, never its file (item 1
   });
 });
 
+describe("a Zoom download renamed with a client's words is named by its Zoom time alone (item 19)", () => {
+  const RENAMED = "GMT20261020-150000_Recording_Jane Doe coaching.mp4";
+  const HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
+  /** The made-up Mac, its drop folder holding the renamed download, and the hold the light import writes of it. */
+  function held(settings) {
+    const t = setup();
+    writeSettings(t.home, settings);
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, RENAMED), "zoom");
+    mkdirSync(join(t.root, "Episodes", ".importing"), { recursive: true });
+    writeFileSync(join(t.root, "Episodes", ".importing", `${RENAMED} (Mac Studio) 1.json`), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 1, video: RENAMED, bytes: 4, seconds: null, step: "Held", at: AT, held: HELD, label: "GMT20261020-150000_Recording" }));
+    return t;
+  }
+  it("in episodes and retry, on the Mac that does the light import and on one that does not", async () => {
+    for (const settings of [{ import: "light" }, {}]) {
+      const t = held(settings);
+      const episodes = await on(t.ctx.deps, "episodes");
+      assert.ok(episodes.said.some((line) => line.startsWith("  GMT20261020-150000_Recording, in the Mac Studio's drop folder, for ") && line.endsWith(`: ${HELD}`)), `${JSON.stringify(settings)}\n${episodes.text}`);
+      for (const said of [RENAMED, "GMT20261020-150000_Recording"]) {
+        const retry = await on(t.ctx.deps, "retry", said);
+        assert.deepEqual([retry.code, retry.said], [1, [`GMT20261020-150000_Recording is held: ${HELD}`]], `${JSON.stringify(settings)} ${said}`);
+      }
+      for (const text of [episodes.text]) assert.doesNotMatch(text, SECRET);
+      t.done();
+    }
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

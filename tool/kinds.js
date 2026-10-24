@@ -13,8 +13,18 @@ const list = (v) => (Array.isArray(v) ? v : []);
     sound and picture files of a meeting ("audio1449382767.m4a", "video1449382767.mp4"). */
 const ZOOM_NAMES = [/^GMT\d{8}-\d{6}_Recording/, /^(audio|video)\d{8,}\.(m4a|mp4)$/];
 
-/** Whether a file's name is one of Zoom's. */
+/** Whether a file's name is one of Zoom's. Zoom's own names are matched by how they start, so a download renamed with words after
+    them is one too ("GMT20261013-142933_Recording_Jane Doe.mp4"). */
 export const isZoomName = (name) => typeof name === "string" && ZOOM_NAMES.some((re) => re.test(basename(name)));
+
+/** How a Zoom download is named in every line, status and log: by the part of its name that Zoom's own names match, its Zoom time
+    alone ("GMT20261013-142933_Recording", "audio1449382767.m4a"), never by words a person put after it, which may be a client's. ""
+    for a name that is not Zoom's. */
+export function zoomTimeOf(name) {
+  if (typeof name !== "string") return "";
+  const matched = ZOOM_NAMES.map((re) => re.exec(basename(name))).find(Boolean);
+  return matched ? matched[0] : "";
+}
 
 /** Whether the picture is upright or square, as episodeKind takes it. A file with no picture is not. */
 const upright = (facts) => facts.height > 0 && facts.width <= facts.height;
