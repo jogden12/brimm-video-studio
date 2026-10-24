@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, isLabelled, heldName, gatedName, gatedAsOf } from "./gate.js";
+import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -355,9 +355,8 @@ function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
     const r = gatedRecord(e);
-    // A video held as a session with no label is named by its short id already: it is said once.
-    if (e.held && !gated(r) && !isLabelled(r)) return heldName(r);
-    return `${gatedName(r, e.held)} (${String(r.id).slice(-6)})`;
+    // A gated video, or one held as a session, with no label is named by its short id already: it is said once.
+    return withShortId(gatedName(r, e.held), r);
   }
   if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
   return e.name;

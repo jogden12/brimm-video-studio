@@ -876,6 +876,32 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
   });
 });
 
+describe("a gated record with no label, named by its short id once", () => {
+  // shownName names a gated record that has no label by its short id ("a client or group session (0c0c0c)"): a list, or the line of
+  // a video an episode holds, that says the short id after the name says it once.
+  const UNLABELLED_SESSION = { kind: "session", answer: ANSWERED, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } };
+  it("is listed once by its short id among the episodes a command names", () => {
+    const t = setup();
+    clientEpisode(t, { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", label: "", over: UNLABELLED_SESSION });
+    clientEpisode(t, { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED } });
+    const why = findEpisode(ctxOf(t), "nothing fits this").why;
+    assert.equal(why, 'No episode fits "nothing fits this". The episodes are: a client or group session (0c0c0c) and 2026-10-18 Pricing talk (Mac Studio).');
+    t.done();
+  });
+  it("is said once by its short id as what holds a video waiting in the drop folder", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    clientEpisode(t, { label: "", over: UNLABELLED_SESSION });
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, VIDEO), "video");
+    const said = (await on(depsOf(t), "episodes")).said;
+    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete."), said.join("\n"));
+    assert.doesNotMatch(said.join("\n"), SECRET);
+    t.done();
+  });
+});
+
 describe("the import statuses, status and retry, of a light import", () => {
   it("name a labelled status by its label, with no path or file name in why it failed", async () => {
     const t = setup();

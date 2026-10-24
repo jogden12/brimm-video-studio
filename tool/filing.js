@@ -19,7 +19,7 @@ import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, write
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
-import { gated } from "./gate.js";
+import { gated, withShortId } from "./gate.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -253,7 +253,7 @@ export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gate
   const held = holdingEpisode({ root, video, bytes });
   if (!held) return "";
   const as = gatedAs(held.record);
-  return `already imported as ${as ? `${as} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+  return `already imported as ${as ? withShortId(as, held.record) : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,

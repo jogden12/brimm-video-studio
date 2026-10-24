@@ -69,6 +69,13 @@ export const heldName = (r) => (isLabelled(r) ? r.label : `a video (${String(r.i
     (`held`) and not gated itself. */
 export const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
 
+/** A name of the record `r` with its short id after it, as a list of episodes, or the line of a video an episode holds, says it:
+    once, since shownName and heldName already end with it when they name a record by its short id for want of a label. */
+export const withShortId = (name, r) => {
+  const id = `(${String(r.id).slice(-6)})`;
+  return name.endsWith(id) ? name : `${name} ${id}`;
+};
+
 /** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
     episodeHolding's `gatedAs`, which says its short id after it), through `links` (finish.js linksOf): as shownName names a gated
     record, one held as a session by its label or as "a video", and "" for any other, which is named by its folder. */
