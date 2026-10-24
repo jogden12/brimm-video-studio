@@ -4886,7 +4886,8 @@ export async function editMain(argv, deps = {}) {
     say(made.why);
     return 2;
   }
-  const run = COMMANDS[command];
+  // A command is one of COMMANDS' own names: a name every object has ("constructor", "toString") is no command.
+  const run = typeof command === "string" && Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : null;
   if (!run) {
     say(HELP);
     return 2;
