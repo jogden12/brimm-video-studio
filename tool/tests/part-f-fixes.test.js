@@ -322,6 +322,52 @@ describe("a Zoom download renamed with a client's words is named by its Zoom tim
   });
 });
 
+describe("a raw reading on a Mac the video is not on yet (item 6)", () => {
+  const NOT_HERE = 'Video of 14 Oct, 09:12 (Mac Studio) is a raw video of 2.0 GB that is not on this Mac yet: reading it here brings it all over first, which may take a while. Say "read it here" to go on, or leave it for the Mac Studio.';
+  /** The made-up video, imported on the Mac Studio, as her laptop sees it: online-only, its video not whole there. */
+  function online(t, record, settings = {}) {
+    const found = episodeFor(t, { record: { version: 3, label: LABEL, video: { file: "Pricing talk.mp4", bytes: 2 * 1024 ** 3, seconds: 23.423, recorded: "2026-10-14", recordedFrom: "video" }, ...record }, files: LIGHT });
+    const deps = { ...t.ctx.deps, settings: { ...t.ctx.settings, machine: "Sallie's laptop", ...settings }, isWhole: (path) => !path.endsWith("Pricing talk.mp4") };
+    return { found, deps };
+  }
+  const WAITING = { kind: null, answer: { state: "needs your answer", guess: "raw", seen: "", came: "camera", match: null } };
+  it("refuses without --here, writing nothing and claiming nothing, so that the other Mac may answer it", async () => {
+    for (const [what, record, argv] of [["a first answer", WAITING, [LABEL, "raw", "--private", "no"]], ["an answer again", { kind: "finished", answer: ANSWERED, editing: null }, [LABEL, "raw", "--private", "no", "--again"]]]) {
+      const t = setup();
+      const { found, deps } = online(t, record);
+      const r = await on(deps, "kind", ...argv);
+      assert.deepEqual([r.code, r.said], [1, [NOT_HERE.replace("Video of 14 Oct, 09:12 (Mac Studio)", record.kind ? "Pricing talk" : LABEL)]], what);
+      assert.deepEqual([reread(found).rev, t.started, t.waits], [1, [], []], what);
+      t.done();
+    }
+  });
+  it("answers and reads it here with --here, as before", async () => {
+    const t = setup();
+    const { found, deps } = online(t, WAITING);
+    const r = await on(deps, "kind", LABEL, "raw", "--private", "no", "--here");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).kind, "raw");
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1, 3)), [["read", "--now"]]);
+    t.done();
+  });
+  it("asks nothing of a raw video whole on this Mac, of another kind, or on a Mac whose readings are off", async () => {
+    for (const [what, kind, more] of [["finished", "finished", {}], ["clip", "clip", {}], ["readings off", "raw", { readings: false }]]) {
+      const t = setup();
+      const { found, deps } = online(t, WAITING, more);
+      const r = await on(deps, "kind", LABEL, kind, "--private", "no");
+      assert.ok(!r.said.includes(NOT_HERE), `${what}: ${r.text}`);
+      assert.notEqual(reread(found).kind, null, what);
+      t.done();
+    }
+    const t = setup();
+    const found = episodeFor(t, { record: { version: 3, label: LABEL, ...WAITING }, files: LIGHT });
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).kind, "raw");
+    t.done();
+  });
+});
+
 describe("a command's name is one of edit.js's own (item 21)", () => {
   it("prints the help and ends with 2 for a name every object has, as for any word that is no command", async () => {
     const t = setup();

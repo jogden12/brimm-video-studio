@@ -37,11 +37,13 @@ Run `kind` only with both answers, and only when they agree: "Client or group se
 | "Raw with retakes", and No, when the Maybe line's video is raw | `kind "<label>" raw --private no --version-of <id>`: tell her it starts as a new raw video, and its edits begin again |
 | "Client or group session", and Yes | `kind "<label>" session --private yes`, then "A client or group session", below |
 | Other: "leave it" / "it's not for brimm-video" | `leave "<label>"`: it is not asked about again |
+| "Read it here", when `kind` says a raw video is not on this Mac yet | the same `kind` again with `--here` added: `kind "<label>" raw --private no --here`, or, for an answer given again, `kind "<video>" raw --private no --again --here`. Tell her it comes over first, which may take a while |
+| "Leave it for the Mac Studio" (or the Mac `kind` names) | Nothing: that Mac answers it |
 | Other: anything else ("not now", "it's a podcast") | Nothing |
 
 When she answered anything but "Client or group session", and the Came line says it came as a Zoom download or as sound alone, or `kind` says to ask first whether it is a client or group session, ask her on one `AskUserQuestion`: "It came from Zoom (or: it is sound alone), which is often a client or group session. Which is it?", or, when no Came line says either, "It may be a Zoom download or sound alone, which is often a client or group session. Which is it?", with the answers "It is a client or group session", "It is not a session". A bare yes or no in the chat is unclear: ask again. Only on "It is not a session", run the same `kind` with `--not-a-session` added, as `kind "<label>" finished --private no --not-a-session`; on "It is a client or group session", `kind "<label>" session --private yes`.
 
-Then tell her what `kind` says, in plain words: when Claude reads it, or that a notice will come. When it says what Claude made, go on as for "What did Claude find?".
+Then tell her what `kind` says, in plain words: when Claude reads it, or that a notice will come. When it says what Claude made, go on as for "What did Claude find?". When it says a raw video is not on this Mac yet, ask her on one `AskUserQuestion`, with its size: "Read it here", "Leave it for the Mac Studio" (or the Mac it names), and run nothing until she answers.
 
 ## What she says, and what to run
 

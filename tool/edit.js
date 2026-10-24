@@ -73,7 +73,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
-                     [--again] [--clear-session]
+                     [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
                                         session with yes, anything else with no). The video is claimed for this Mac, the
                                         answer is recorded, and Claude reads it, detached, unless it is a session: that is
@@ -84,7 +84,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         at once an empty session revision of its hand-off. --version-of names the video this
                                         is a new version of, or none; --not-a-session says a Zoom download or sound alone is
                                         none; --clear-session, with --again and what the video really is, clears a session
-                                        mark: it asks on a dialog on this Mac, and only her click clears it
+                                        mark: it asks on a dialog on this Mac, and only her click clears it. A raw video not
+                                        on this Mac yet is read here only with --here, which brings it all over first
   node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
   node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
   node edit.js teachings "<session>" [--transcript-only]
@@ -3766,6 +3767,13 @@ const ASK_FOR_TEACHINGS = "Ask her whether she wants its teachings (principles a
 const ONLINE_ONLY = "It is online-only on this Mac: Dropbox brings it over first, which may take a few minutes for a long video.";
 const OFFLINE = "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.";
 
+/** Why a raw video, `record`, is not read on this Mac without --here: its video is not here yet, and how large it is. The Mac to
+    leave it for is the one that imported it, unless that is this one. */
+function notHereYet(ctx, record) {
+  const by = record.imported && typeof record.imported.on === "string" && record.imported.on && record.imported.on !== ctx.machine ? spokenMac(record.imported.on) : "the other Mac";
+  return `${shownName(record)} is a raw video of ${sizeText(record.video.bytes)} that is not on this Mac yet: reading it here brings it all over first, which may take a while. Say "read it here" to go on, or leave it for ${by}.`;
+}
+
 /** Why the other Mac, `by`, stops `name` from being answered or left now. */
 const beingAnswered = (name, by) => `${name} is being answered on ${by}. Nothing was changed.`;
 /** What is said when the record changed under an answer that was being written: nothing more is done. */
@@ -3998,7 +4006,7 @@ export async function kindCommand(ctx, rest) {
   const lock = takeAnswerLock(ctx, got.found.name, "kind");
   if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
   try {
-    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), clearSession, versionOf: versionOf && !unlink ? versionOf[0].trim() : "", unlink, target: null }, began);
+    return await answerKind(ctx, got.found, { stored: ANSWER_KEPT[asked], given, again: Boolean(flags.again), notASession: Boolean(flags["not-a-session"]), clearSession, versionOf: versionOf && !unlink ? versionOf[0].trim() : "", unlink, here: Boolean(flags.here), target: null }, began);
   } finally {
     releaseEpisodeLock(lock.file, lock.text);
   }
@@ -4098,6 +4106,10 @@ async function answerKind(ctx, found, plan, began) {
   if (why) return refuse(ctx, why);
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
+  // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
+  // brings it all over first: only with --here, her "read it here". Otherwise nothing is written or claimed, so that the other Mac
+  // may answer it (spec 2, "Which Mac reads it").
+  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(join(found.folder, record.video.file))) return refuse(ctx, notHereYet(ctx, record));
   // A video answered before is being corrected: what its earlier reading and its hand-off left in the shared folder is set aside
   // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
   // claimed.

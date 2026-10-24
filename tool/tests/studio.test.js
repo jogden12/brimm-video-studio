@@ -226,6 +226,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       ["kind, answered again", /^kind "<video>" raw --private no --again$/],
       ["kind, a session after all", /^kind "<video>" session --private yes --again$/],
       ["kind, the session mark cleared", /^kind "<label>" <kind> --private no --again --clear-session$/],
+      ["kind, a raw video read on this Mac though it is not here yet", /^kind "<label>" raw --private no --here$/],
+      ["kind, a raw video answered again and read here", /^kind "<video>" raw --private no --again --here$/],
       ["leave", /^leave "<label>"$/],
       ["which", /^which "<label>"$/],
       ["the teachings", /^teachings "<label>"$/],
@@ -372,7 +374,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     // The flags of the fork are among those checked, so that this cannot go blind.
-    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
+    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
       assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
     }
     // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).
@@ -428,6 +430,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       if (made) episodeAs(t, { id: "e-20261014-5a5a5a", name: "2026-10-14 Talk (Mac Studio)", record: made.record });
       const deps = {
         ...t.ctx.deps, statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }), kickstart: () => {}, agentRunning: () => false, running: async () => false,
+        // A raw video read "here" is one not whole on this Mac, which only --here reads: elsewhere every file is whole.
+        ...(span.includes("--here") ? { isWhole: (path) => !path.endsWith(".mp4") } : {}),
         run: async (cmd, args, asked) => (cmd === "/usr/bin/git" ? { code: 0, stdout: "0\n", stderr: "" } : t.ctx.deps.run(cmd, args, asked))
       };
       const said = [];

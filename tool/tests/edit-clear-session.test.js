@@ -639,7 +639,7 @@ describe("kind --clear-session: where it is said and what the record may hold", 
     const said = [];
     assert.equal(await editMain(["--help"], { say: (line) => said.push(line) }), 0);
     const help = said.join("\n");
-    assert.match(help.replace(/\n\s+/g, " "), /\[--not-a-session\] \[--again\] \[--clear-session\] her answer/);
+    assert.match(help.replace(/\n\s+/g, " "), /\[--not-a-session\] \[--again\] \[--clear-session\] \[--here\] her answer/);
     assert.match(help.replace(/\n\s+/g, " "), /--clear-session, with --again and what the video really is, clears a session mark: it asks on a dialog on this Mac, and only her click clears it/);
   });
   it("is refused by the record's check unless the mark was cleared by a click on the dialog, with a Mac and a kind", () => {
