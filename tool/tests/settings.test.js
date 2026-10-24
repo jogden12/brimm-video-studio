@@ -1481,6 +1481,23 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
+    it("keeps a late check that found a problem a problem, with its advice, though this Mac owes it the check: it is tried again with retry", async () => {
+      // A problem's late check stays owed (filing.js keeps it for the next run), so owed-first would hide every problem: Z1's line
+      // and advice stay, and they never say to take the video out.
+      for (const held of [{}, { import: "light" }]) {
+        const t = mac(held);
+        const old = t.folder();
+        put(old, "Budget.mov", "123456");
+        t.status("Budget.mov", { bytes: 6, problem: "Budget.rough-cut.mp4 is short" });
+        owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, held.import
+          ? [HEAD, "  1 late check found a problem, and its video is still in the old folder.", PROBLEM_HERE]
+          : [HEAD, "  Budget.mov: it was copied in, but its late check found a problem.", PROBLEM_HERE], JSON.stringify(held));
+        assert.ok(!said.some((line) => /take the video out|delete|still to come/.test(line)), said.join("\n"));
+        t.done();
+      }
+    });
     it("tells a video's holder unknown only when an episode that cannot be read is named for that video, by this Mac or another", async () => {
       // An episode that cannot be read, named for another video, does not stop this one being named as today; one named for it,
       // by either Mac, could be a session's, and it is named by what it is and its size.
@@ -1499,9 +1516,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         t.done();
       }
     });
-    it("says a video this Mac owes a late check is one to wait for before any other kind, a failed import or a late check's problem included, and never to take it out", async () => {
-      // An owed late check is made from the video in the old folder: whatever else a status says of it, it is waited for.
-      for (const status of [{ failed: "the sound could not be read" }, { problem: "Budget.rough-cut.mp4 is short" }]) {
+    it("says a video this Mac owes a late check is one to wait for before a failed import of it, and never to take it out", async () => {
+      // An owed late check is made from the video in the old folder: a failed status of it is waited for as the check is.
+      for (const status of [{ failed: "the sound could not be read" }]) {
         for (const held of [{}, { import: "light" }]) {
           const t = mac(held);
           const old = t.folder();
