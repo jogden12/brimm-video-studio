@@ -3852,12 +3852,17 @@ const MATCHED_SESSION = "This video holds most of the words of a client or group
     session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
     sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
     and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
-    cleared). A match this Mac cannot read says nothing. */
-function matchedSession(links, record) {
+    cleared). And for a clearing of its mark (`clearing`, with the video's own `folder`), a match among the video's own versions (the
+    same first id) says nothing: each mark of a set is cleared by a click of its own, and the video cleared is then held as a session
+    while another of them is marked (STILL_HELD). A match outside its own versions still counts. A match this Mac cannot read says
+    nothing. */
+function matchedSession(links, record, { clearing = false, folder = null } = {}) {
   const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
   if (typeof id !== "string" || id === record.id) return false;
   const match = links.find(id);
-  return Boolean(match) && (links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id));
+  if (!match) return false;
+  if (clearing && links.firstOf(match.record, match.folder) === links.firstOf(record, folder)) return false;
+  return links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id);
 }
 /** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
     video being answered. */
@@ -3995,7 +4000,7 @@ function answerWhy(ctx, found, record, plan) {
   if (stored !== "session" && !plan.clearSession && links.sessionsBeside(record, found.folder).length) return heldAnswer(name);
   // A video whose import found most of the words of a video since marked a session, or of a version of one, in it (answer.match)
   // holds that session's words: it is answered only as a session (her card says it may be one).
-  if (stored !== "session" && matchedSession(links, record)) return MATCHED_SESSION;
+  if (stored !== "session" && matchedSession(links, record, { clearing: plan.clearSession, folder: found.folder })) return MATCHED_SESSION;
   // Whether some episode among `members` is a client or group session not cleared, by its record or any conflicted copy of it. The
   // session being cleared is not counted among them, its conflicted copies included: it is the one that is being cleared.
   const sessionAmong = (members) => members.some((one) => !(plan.clearSession && one.record.id === record.id) && links.holdsSession(one));
