@@ -7,7 +7,7 @@
 // open and QuickTime Player are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
@@ -644,5 +644,236 @@ describe("ask, for a video she has answered", () => {
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["ask", "--now", FOLDER]]);
     assert.equal(reread(found).rev, 1);
     t.done();
+  });
+});
+
+// --- Fix round 1 (F9b's reviews) ---
+
+/** A hand-off's JSON, of version 2 under `id`, or of version 1 under the episode's id `id`. */
+const H2 = (id, revision, extra = {}) => JSON.stringify({ format: "brimm-video hand-off", version: 2, revision, video: { id }, ...extra });
+const H1 = (id, revision) => JSON.stringify({ format: "brimm-video hand-off", version: 1, revision, episode: { id } });
+/** The made-up video answered as finished and handed off (record.finished naming final/'s hand-off), with `files` in its folder
+    besides the import's, its record with `over` laid on it. */
+const handedOffWith = (t, files, over = {}) => episodeFor(t, {
+  record: answered("finished", { editing: null, finished: { revision: 1, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} }, ...over }),
+  files: { ...LIGHT_FILES, ...files }
+});
+const COMING = `Dropbox is still bringing ${NAME}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
+const SESSION_COMING = `Dropbox is still bringing ${SESSION_NAME}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
+
+describe("fix round 1: files the record lists that are not on this Mac yet", () => {
+  it("1. refuses, writing nothing, while a final/ file the record lists is not here; once Dropbox brings it, sets it aside and lists it no more", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(ID, 1), "final/Pricing talk.transcript.txt": "THE SESSION'S WORDS" });
+    rmSync(join(found.folder, "final", "Pricing talk.transcript.txt"));
+    const refused = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([refused.code, refused.said], [1, [COMING]]);
+    assert.deepEqual([reread(found).rev, existsSync(join(found.folder, "history")), finalOf(found)], [1, false, ["Pricing talk.brimm-ops.json"]]);
+    writeFileSync(join(found.folder, "final", "Pricing talk.transcript.txt"), "THE SESSION'S WORDS");
+    const r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(finalOf(found), [`${SESSION_NAME}.brimm-ops.json`]);
+    assert.deepEqual(Object.keys(reread(found).files).filter((k) => k.startsWith("final/")), [`final/${SESSION_NAME}.brimm-ops.json`]);
+    assert.equal(Object.fromEntries(historyOf(found))["Pricing talk.transcript.txt"], "THE SESSION'S WORDS");
+    t.done();
+  });
+  it("1. refuses so too for the hand-off record.finished names, and for a listed file of the reading, that are not here", async () => {
+    for (const [gone, files] of [["final/Pricing talk.brimm-ops.json", {}], ["reels.json", { "reels.json": "{}\n" }], [`${SESSION_NAME}.principles.txt`, { [`${SESSION_NAME}.principles.txt`]: "Principles\n" }]]) {
+      const t = setup();
+      const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H1(ID, 1), ...files });
+      rmSync(join(found.folder, gone));
+      const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
+      assert.deepEqual([r.code, r.said, reread(found).rev, t.started], [1, [COMING], 1, []], gone);
+      t.done();
+    }
+  });
+  it("1. sweeps final/ through what it sets aside when an owed revision is written: a file that came over since goes into history/", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const OLD = "e-20261001-aaaaaa";
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(OLD, 1) }, { versionOf: OLD });
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again")).code, 0);
+    assert.deepEqual(finalOf(found), []);
+    // The other Mac's transcript, which Dropbox brings over only now, and is no file the record lists.
+    mkdirSync(join(found.folder, "final"), { recursive: true });
+    writeFileSync(join(found.folder, "final", "Pricing talk.transcript.txt"), "LATE WORDS");
+    episodeAs(t, { id: OLD, name: "2026-10-01 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([r.code, r.said], [0, [WRITTEN(2)]]);
+    assert.deepEqual(finalOf(found), [`${SESSION_NAME}.brimm-ops.json`]);
+    assert.ok(historyOf(found).some(([name, text]) => name === "Pricing talk.transcript.txt" && text === "LATE WORDS"));
+    t.done();
+  });
+  it("1. sweeps such a file out of final/ even while the owed revision still waits, and says it waits", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const OLD = "e-20261001-aaaaaa";
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(OLD, 1) }, { versionOf: OLD });
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again")).code, 0);
+    mkdirSync(join(found.folder, "final"), { recursive: true });
+    writeFileSync(join(found.folder, "final", "Pricing talk.transcript.txt"), "LATE WORDS");
+    const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([r.code, r.said], [1, [WAITS_FOR(OLD)]]);
+    assert.deepEqual([finalOf(found), reread(found).session.emptyRevision], [[], "owed"]);
+    assert.ok(historyOf(found).some(([name, text]) => name === "Pricing talk.transcript.txt" && text === "LATE WORDS"));
+    t.done();
+  });
+});
+
+describe("fix round 1: a final video stays where it is", () => {
+  it("2. sets aside final/'s hand-off and text files only: its videos and its export bundle stay, listed, neither cloned nor read through", async () => {
+    const t = setup();
+    const kept = { "final/Pricing talk.mp4": "THE FINAL VIDEO", "final/Pricing talk.story-1.mp4": "A STORY PART", "final/Pricing talk.fcpxmld/Info.fcpxml": "<fcpxml/>" };
+    const texts = { "final/Pricing talk.brimm-ops.json": H1(ID, 1), "final/Pricing talk.srt": "captions", "final/Pricing talk.transcript.txt": "words", "final/Pricing talk.words.json": "{}" };
+    const found = handedOffWith(t, { ...kept, ...texts });
+    const asked = [];
+    const deps = { ...t.ctx.deps, isWhole: (path) => !path.endsWith(".mp4") || !path.includes("/final/"), readAll: async (path) => asked.push(path) };
+    const r = await on(deps, "kind", NAME, "raw", "--private", "no", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(historyNames(found), ["Pricing talk.brimm-ops.json", "Pricing talk.srt", "Pricing talk.transcript.txt", "Pricing talk.words.json"]);
+    assert.deepEqual(finalOf(found), ["Pricing talk.fcpxmld/Info.fcpxml", "Pricing talk.mp4", "Pricing talk.story-1.mp4"]);
+    const record = reread(found);
+    for (const rel of Object.keys(kept)) assert.ok(rel in record.files, rel);
+    for (const rel of Object.keys(texts)) assert.ok(!(rel in record.files), rel);
+    assert.deepEqual(asked, []);
+    assert.ok(!t.clones.some(([from]) => from.endsWith(".mp4")), JSON.stringify(t.clones));
+    t.done();
+  });
+});
+
+describe("fix round 1: the empty revision goes only where every hand-off of the video went", () => {
+  const OLD = "e-20261010-a0a0a0";
+  const older = (t) => episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+  const TOO = (id) => `The empty session revision of ${SESSION_NAME} is not written: ${SESSION_NAME} went to the BRIMM Ops page under ${id} too: ask Jason. ${OUT}`;
+  it("3. writes none, and marks it owed, when a hand-off of its own went under another id than its first version's", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    older(t);
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H1(ID, 1), "final/Pricing talk.transcript.txt": "secret" }, { versionOf: OLD });
+    const r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.includes(TOO(ID)), r.text);
+    assert.deepEqual([finalOf(found), reread(found).session.emptyRevision, shownInFinder(t)], [[], "owed", []]);
+    assert.doesNotMatch(r.text, /Pricing|Older/);
+    // Said again, the same: it waits for Jason.
+    const again = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([again.code, again.said], [1, [TOO(ID)]]);
+    t.done();
+  });
+  it("5. writes an owed revision on a Mac whose setting is version 1 when a hand-off of it in history/ is version 2", async () => {
+    const t = setup();
+    const MISSING = "e-20261001-aaaaaa";
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(MISSING, 1) }, { versionOf: MISSING });
+    const first = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.ok(first.said.includes(WAITS_FOR(MISSING)), first.text);
+    episodeAs(t, { id: MISSING, name: "2026-10-01 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([r.code, r.said], [0, [WRITTEN(2)]]);
+    const handoff = JSON.parse(readFileSync(join(found.folder, "final", `${SESSION_NAME}.brimm-ops.json`), "utf8"));
+    assert.deepEqual([handoff.version, handoff.video.id, handoff.revision], [2, MISSING, 2]);
+    t.done();
+  });
+  it("9. refuses --version-of, or none, on a session that owes its revision, and writes nothing", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const MISSING = "e-20261001-aaaaaa";
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(MISSING, 1) }, { versionOf: MISSING });
+    older(t);
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again")).code, 0);
+    const rev = reread(found).rev;
+    for (const named of [OLD, "none"]) {
+      const r = await on(t.ctx.deps, "kind", SESSION_NAME, "session", "--private", "yes", "--again", "--version-of", named);
+      assert.deepEqual([r.code, r.said], [1, [`The empty session revision of ${SESSION_NAME} is still owed: say it again without --version-of.`]], named);
+      assert.deepEqual([reread(found).rev, reread(found).versionOf], [rev, MISSING], named);
+    }
+    t.done();
+  });
+});
+
+describe("fix round 1: --version-of none, and the kept link", () => {
+  it("4. lets --version-of none through for a video handed off that is a version of none: nothing changes", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: answered("raw", { versionOf: null, name: { text: NAME, placeholder: false }, finished: { revision: 1, at: AT, on: "Mac Studio" } }), files: LIGHT_FILES });
+    const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", "none");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([reread(found).kind, reread(found).versionOf], ["finished", null]);
+    t.done();
+  });
+  it("10. keeps the link of a video handed off, corrected to another kind that is not a session, its set checked and found clear", async () => {
+    const t = setup();
+    const OLD = "e-20261010-a0a0a0";
+    episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(OLD, 1) }, { versionOf: OLD });
+    const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([reread(found).kind, reread(found).versionOf, reread(found).finished], ["raw", OLD, null]);
+    t.done();
+  });
+  it("10. numbers a corrected reading on from the earlier reading's suggestions, with no hand-off at all", async () => {
+    const { t, found } = await readOf("finished");
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.map((c) => c.n), [1, 2, 3, 4]);
+    assert.equal((await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again")).code, 0);
+    await readStarted(t);
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.map((c) => c.n), [5, 6, 7, 8]);
+    t.done();
+  });
+});
+
+describe("fix round 1: what stays, and what is said of a session's files", () => {
+  it("6. names what could not be taken out of final/, by what it is, and does not say its files are out of the shared folder", async () => {
+    const t = setup();
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H1(ID, 1), "final/Pricing talk.transcript.txt": "secret" });
+    chmodSync(join(found.folder, "final"), 0o555);
+    let r;
+    try {
+      r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    } finally {
+      chmodSync(join(found.folder, "final"), 0o755);
+    }
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.includes(`${SESSION_NAME}: a hand-off and a transcript stayed in final/: they could not be taken out. Tell Jason.`), r.text);
+    assert.ok(!r.text.includes(OUT), r.text);
+    assert.doesNotMatch(r.text, /Pricing/);
+    t.done();
+  });
+  it("6. sets aside, answered as a session, every file of final/, listed or not, videos and exports too, but for a session's own hand-off", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(ID, 1), "final/Pricing talk.mp4": "THE FINAL VIDEO", "final/Pricing talk.fcpxmld/Info.fcpxml": "<fcpxml/>" });
+    writeFileSync(join(found.folder, "final", "Pricing talk.notes.txt"), "unlisted words");
+    writeFileSync(join(found.folder, "final", "Old session.brimm-ops.json"), H2(ID, 1, { video: { id: ID, kind: "session" } }));
+    const r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(finalOf(found), ["Old session.brimm-ops.json", `${SESSION_NAME}.brimm-ops.json`]);
+    assert.deepEqual(historyNames(found).filter((n) => !["reels.json", "Pricing talk.reel-suggestions.txt"].includes(n)), ["Info.fcpxml", "Pricing talk.brimm-ops.json", "Pricing talk.mp4", "Pricing talk.notes.txt"]);
+    t.done();
+  });
+  it("7. says a fixed sentence, naming no file and no folder, when a session's files cannot be set aside", async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    const found = handedOffWith(t, { "final/Pricing talk.brimm-ops.json": H2(ID, 1), "final/Pricing talk.transcript.txt": "secret" });
+    const deps = { ...t.ctx.deps, sameDisk: (from, folder) => !String(folder).endsWith("history") };
+    const r = await on(deps, "kind", NAME, "session", "--private", "yes", "--again");
+    assert.deepEqual([r.code, r.said], [1, ["Nothing was changed: its earlier files could not be set aside in history/ (an error)."]]);
+    assert.deepEqual([reread(found).kind, finalOf(found)], ["finished", ["Pricing talk.brimm-ops.json", "Pricing talk.transcript.txt"]]);
+    t.done();
+  });
+});
+
+describe("fix round 1: ask refuses before it sets anything aside", () => {
+  it("8. refuses on a Mac whose readings are off, and on one without Claude Code, in ask's words, and sets nothing aside", async () => {
+    for (const [over, why] of [[{ readings: false }, "Readings are off on this Mac: ask Jason."], [null, "Claude Code is not installed on this Mac, so Claude cannot be asked."]]) {
+      const { t, found } = await readOf("finished");
+      if (over) {
+        writeSettings(t.home, over);
+        t.ctx.settings = { ...t.ctx.settings, ...over };
+      } else t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "" };
+      const rev = reread(found).rev;
+      const r = await on(t.ctx.deps, "ask", NAME);
+      assert.deepEqual([r.code, r.said], [1, [why]], why);
+      assert.deepEqual([reread(found).rev, existsSync(join(found.folder, "reels.json")), existsSync(join(found.folder, "history")), t.started], [rev, true, false, []], why);
+      t.done();
+    }
   });
 });

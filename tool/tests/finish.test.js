@@ -75,6 +75,36 @@ describe("finish, the detached part", () => {
     for (const srt of [handoff.main.srt, ...handoff.reels.map((r) => r.srt)]) assert.match(tidyTranscript(srt), /^\[0:00\] /);
     t.done();
   });
+  it("finishes again over the final videos a corrected answer left in final/ (F9b): each is replaced by the rule, and nothing trips on it", async () => {
+    const t = setup();
+    const found = await asked(t);
+    assert.equal((await finishNow(t.ctx, found)).ok, true);
+    // Answered again: final/'s hand-off and text files are set aside, and its videos, Story parts and exports stay, listed.
+    assert.equal(await editMain(["kind", FOLDER, "raw", "--private", "no", "--again"], t.ctx.deps), 0, t.said());
+    const corrected = reread(found);
+    assert.equal(corrected.finished, null);
+    const stays = FINAL.filter((file) => /\.(mp4|mov)$/.test(file) || file.includes(".fcpxmld/"));
+    for (const file of stays) assert.ok(existsSync(join(found.folder, "final", file)) && `final/${file}` in corrected.files, file);
+    assert.deepEqual(t.inFinal(found), stays);
+    // Finished again from new Shares: every part is made again, each kept file replaced, and the hand-off is the next revision. A video
+    // answered as raw is handed off as version 2 (version 1 knows no kind but an episode and a short video).
+    writeSettings(t.home, { handoffVersion: 2 });
+    t.ctx.settings = { ...t.ctx.settings, handoffVersion: 2 };
+    t.shared(`${PROJECT.main}.mp4`, 2000);
+    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
+    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
+    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
+    assert.equal(await finishEpisode(t.ctx, { ...found, record: corrected }, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
+    const again = await finishNow(t.ctx, { ...found, record: reread(found) });
+    assert.equal(again.ok, true, again.failed.join(" "));
+    const made = t.inFinal(found);
+    assert.deepEqual(made.filter((file) => !file.endsWith(".brimm-ops.json")), FINAL.filter((file) => file !== HANDOFF));
+    assert.equal(made.filter((file) => file.endsWith(".brimm-ops.json")).length, 1);
+    for (const file of stays) assert.equal(reread(found).files[`final/${file}`], statSync(join(found.folder, "final", file)).size, file);
+    assert.equal(reread(found).finished.revision, 2);
+    t.done();
+  });
   it("records the finish: its revision, each part's file and what keeps its edit, the Reels finished, the files listed", async () => {
     const t = setup();
     const found = await asked(t);

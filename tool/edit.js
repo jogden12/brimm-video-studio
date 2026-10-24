@@ -48,7 +48,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords } from "./finish.js";
+import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -62,7 +62,7 @@ import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
 import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
-import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
+import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -79,12 +79,12 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         answer is recorded, and Claude reads it, detached, unless it is a session: that is
                                         marked, named by its label, and read only when its teachings are asked for. An
                                         answered video is answered again only with --again, which sets its earlier
-                                        reading's files and every file in final/ aside in history/, and keeps the video it
-                                        is a version of; answered again as a session, it is given at once an empty session
-                                        revision of its hand-off. --version-of names the video this is a new version of, or
-                                        none; --not-a-session says a Zoom download or sound alone is none; --clear-session,
-                                        with --again and what the video really is, clears a session mark: it asks on a
-                                        dialog on this Mac, and only her click clears it
+                                        reading's files and its hand-off aside in history/, and keeps the video it is a
+                                        version of; answered again as a session, every file of final/ goes, and it is given
+                                        at once an empty session revision of its hand-off. --version-of names the video this
+                                        is a new version of, or none; --not-a-session says a Zoom download or sound alone is
+                                        none; --clear-session, with --again and what the video really is, clears a session
+                                        mark: it asks on a dialog on this Mac, and only her click clears it
   node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
   node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
   node edit.js teachings "<session>" [--transcript-only]
@@ -2561,7 +2561,7 @@ function askRefusal(ctx, found, record) {
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
   if (running) return { why: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.` };
-  if (!(ctx.deps.tools || findPrograms()).claude) return { why: "Claude Code is not installed on this Mac, so Claude cannot be asked." };
+  if (!(ctx.deps.tools || findPrograms()).claude) return { why: NO_CLAUDE_CODE };
   return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
 }
 
@@ -2572,6 +2572,8 @@ const keptOrWait = (ctx, found, record) => {
   return kept ? `The one its record lists is kept at ${kept}: ask Jason to put it back.` : "Say this again once Dropbox has it back.";
 };
 
+/** Why Claude cannot be asked on a Mac without Claude Code, as `ask` says it. */
+const NO_CLAUDE_CODE = "Claude Code is not installed on this Mac, so Claude cannot be asked.";
 /** The word `kind` takes for each kind a record keeps, as `ask` answers a video again with it. */
 const ASKED_AS = { finished: "finished", raw: "raw", "short video": "clip" };
 
@@ -2613,7 +2615,13 @@ async function ask(ctx, rest) {
   // A video she has answered the card of is read again as its kind: `kind <its kind> --again`, with its claim, what it sets aside
   // and its reading (spec 2, "ask changes too"). A video not yet answered, and a session, the gate refuses before this (and
   // askBlocked would too); a video from before the switch is asked for Reels as it always was.
-  if (isAnswered(record) && recordKind(record) !== "session") return kindCommand(ctx, [...rest, ASKED_AS[recordKind(record)], "--private", "no", "--again", "--not-a-session"]);
+  // What would stop the reading is said first, as ask always said it, so that nothing of the earlier reading is set aside for a
+  // reading that cannot run.
+  if (isAnswered(record) && recordKind(record) !== "session") {
+    if (ctx.settings.readings === false) return refuse(ctx, READINGS_OFF);
+    if (!(ctx.deps.tools || findPrograms()).claude) return refuse(ctx, NO_CLAUDE_CODE);
+    return kindCommand(ctx, [...rest, ASKED_AS[recordKind(record)], "--private", "no", "--again", "--not-a-session"]);
+  }
   const blocked = askRefusal(ctx, found, record);
   if (blocked.bring) startDetached(ctx, { command: "bring", folder: found.name, args: blocked.bring });
   if (blocked.why) return refuse(ctx, blocked.why);
@@ -3507,6 +3515,8 @@ function answerWhy(ctx, found, record, plan) {
     // A video answered as a session after it was read as another kind owes the BRIMM Ops page its empty session revision until it
     // is written (a gap in its versions, or this Mac handing off version 1, held it back): the same answer again writes it.
     if (!plan.again || !revisionOwed(record)) return `${name} is a client or group session already.`;
+    // The same answer alone writes it: another link now would not be the one it is owed under.
+    if (plan.versionOf || plan.unlink) return owedLinked(name);
     plan.owed = true;
   }
   const answer = record.answer;
@@ -3554,9 +3564,9 @@ function answerWhy(ctx, found, record, plan) {
   const keeps = was !== null && !plan.target && !plan.unlink;
   const after = plan.target ? plan.target.record.id : keeps ? linked : null;
   // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8), so it
-  // is given no other version, and none (--version-of none) is refused it too.
+  // is given no other version, and none (--version-of none) is refused it too, unless it is a version of none already.
   const handed = handedOff(found.folder, record);
-  if (handed && (plan.unlink || (plan.target && plan.target.record.id !== (record.versionOf || null)))) {
+  if (handed && ((plan.unlink && record.versionOf) || (plan.target && plan.target.record.id !== (record.versionOf || null)))) {
     const older = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
     const place = record.versionOf ? `a version of ${older ? shownName(older.record) : `an episode (${String(record.versionOf).slice(-6)})`}` : "a video of its own";
     return `${name} has already gone to the BRIMM Ops page as ${place}: ask Jason.`;
@@ -3587,7 +3597,7 @@ function answerWhy(ctx, found, record, plan) {
   return "";
 }
 
-/** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>] [--not-a-session] [--again] [--clear-session]`:
+/** `kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session] [--again] [--clear-session]`:
     her answer to "what is this video?" (spec 2026-10-22, section 2). Both answers are needed, and they agree: a session with yes,
     anything else with no. It holds the answer lock of the episode for its whole run (takeAnswerLock), reads the record under it,
     and in order (answerWhy says why not):
@@ -3606,9 +3616,19 @@ function answerWhy(ctx, found, record, plan) {
     - the video is claimed as `open` does: the claim is written, Dropbox is given CLAIM_WAIT_MS, and the record is read again,
       so that two Macs cannot answer it at once. It must be the claim this command wrote, no other record on top of it, and
       the checks are made again on it, right before the answer is written;
+    - a video answered before is being corrected (spec 2, "Correcting a wrong answer"): what its earlier reading and its hand-off left
+      in the shared folder (earlierFiles) must be on this Mac and whole first, read through when it is not, before she is asked
+      anything or it is claimed, and again once the claim has waited; a file the record lists that Dropbox has not brought over yet
+      holds it back until it has;
     - the answer is one write: its kind, who answered, where and when, whether it is private, the video it is a version of (and
       that video's spellings, which she confirmed there), and for a session its mark and its name, which is its label, so that
-      nothing made from the name holds a client's. The claim stays on the record, so that the reading runs under it, except a
+      nothing made from the name holds a client's. An answered video keeps the video it is a version of unless --version-of names
+      another, or none (`--version-of none`, which a video handed off is refused unless it is a version of none already); a first
+      answer with no --version-of is a version of none. A correction is the same write (setAsideWritten): the earlier reading's files,
+      a session's teachings files and the hand-off with final/'s text files (every file of final/ for a session, but a session's own
+      hand-off) are set aside into history/ by the rule, the rules' plan of a raw video put back, the reading and the finish let go;
+      answered again as a session, the video is given at once its empty session revision (emptyRevisionOf), or it is owed, and the
+      same answer again writes it (emptyRevisionAgain). The claim stays on the record, so that the reading runs under it, except a
       session's, which is let go in the same write: no reading runs under it, and the other Mac must not be kept from it. A
       mark cleared is the same write: the session mark as it was with `cleared` on it ({ at, on, to, confirmed: "dialog" }),
       and then one line in this Mac's tool log (toolLog);
@@ -3740,7 +3760,11 @@ async function answerKind(ctx, found, plan, began) {
   // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
   // claimed.
   const correcting = recordKind(record) !== null;
-  if (correcting && (await broughtOver(ctx, found, earlierFiles(found.folder, record).rels)).length) return refuse(ctx, asideComing(name));
+  if (correcting) {
+    const earlier = earlierFiles(found.folder, record, { session: stored === "session" }).rels;
+    await broughtOver(ctx, found, earlier.filter((rel) => existsSync(join(found.folder, rel))));
+    if (notReady(ctx, found, earlier).length) return refuse(ctx, asideComing(name));
+  }
   // A session mark is cleared only by her click: asked after the checks and before the claim, so that Cancel writes nothing at all.
   // Her click may come long after the record was read: it is read again and checked again before the claim, or, when this Mac has
   // the claim already, before the write.
@@ -3763,8 +3787,8 @@ async function answerKind(ctx, found, plan, began) {
     }
   }
   // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still.
-  const aside = correcting ? earlierFiles(found.folder, base) : null;
-  if (aside && aside.rels.some((rel) => !ctx.isWhole(join(found.folder, rel)))) {
+  const aside = correcting ? earlierFiles(found.folder, base, { session: stored === "session" }) : null;
+  if (aside && notReady(ctx, found, aside.rels).length) {
     if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
     return refuse(ctx, stop(asideComing(name)));
   }
@@ -3804,13 +3828,15 @@ async function answerKind(ctx, found, plan, began) {
       if (empty.handoff) next.finished = empty.finished;
     }
   }
-  if ((aside ? await setAsideWritten(ctx, found, base, next, aside, empty && empty.handoff) : await save(ctx, { ...found, record: base }, next, "")) !== 0) return 1;
+  // A session's words, and the words of a video becoming one, name no file and no folder even when its files cannot be set aside.
+  const written = aside ? await setAsideWritten(ctx, found, base, next, aside, empty && empty.handoff, { quiet: stored === "session" || gated(base), session: stored === "session" }) : { code: await save(ctx, { ...found, record: base }, next, ""), stayed: [] };
+  if (written.code !== 0) return 1;
   if (stored === "session") {
     // It is a session from now on: nothing the command says after this holds the names it had.
     hideNames(ctx, episodeAt(ctx, found.name));
     if (empty && empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
-    if (empty) say(empty.words);
+    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
     return 0;
   }
   if (plan.clearSession) {
@@ -3818,7 +3844,8 @@ async function answerKind(ctx, found, plan, began) {
     say(`${name}: the session mark is cleared, by your click. It is now ${becomes}.`);
     toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
   }
-  if (aside && aside.rels.some((rel) => rel.startsWith("final/"))) say(handoffAside(name));
+  if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
+  if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
   // Answered as anything else, its names are no longer kept from the chat: it is named by its folder and its files as any episode is.
   if (ctx.hidden) {
     ctx.hidden.names.length = 0;
@@ -3852,20 +3879,28 @@ async function answerKind(ctx, found, plan, began) {
 // --- Correcting a wrong answer (spec 2026-10-22, section 2, "Correcting a wrong answer"; section 1, "Episodes imported before this
 // design") ---
 
-/** What is said while the files a correction sets aside are not whole on this Mac, once they were read through. */
+/** What is said while a file a correction sets aside is not on this Mac, or not whole, once it was read through. */
 const asideComing = (name) => `Dropbox is still bringing ${name}'s earlier files over to this Mac: say your answer again in a minute. Nothing was changed.`;
-/** What is said when a correction set a hand-off aside with every file of final/ (spec 2: "the next one written is the next revision"). */
+/** What is said when a correction set a hand-off aside from final/ (spec 2: "the next one written is the next revision"). */
 const handoffAside = (name) => `${name}'s hand-off is set aside in history/: the next one written is its next revision.`;
+/** What is said, naming no file and no folder, when a session's files could not be set aside: `code`, the error's. */
+const asideFailed = (code) => `Nothing was changed: its earlier files could not be set aside in history/ (${code}).`;
+/** What is said of the files that stayed in final/ after a correction, by what each is (`whats`), never by name. */
+const stayedWords = (name, whats) => `${name}: ${listed(whats)} stayed in final/: ${whats.length === 1 ? "it" : "they"} could not be taken out. Tell Jason.`;
 /** The spec's words to her when a video read as another kind is answered as a session. */
 const WORDS_GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+/** Said after the words of an empty revision not written, when nothing stayed in final/. */
 const OUT_OF_SHARED = "Its files are out of the shared folder.";
 /** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
     for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
-    and on a Mac that hands off version 1. */
+    held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
 const emptyWritten = (label, n) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder. ${WORDS_GONE}`;
-const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason. ${OUT_OF_SHARED}` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason. ${OUT_OF_SHARED}`);
-const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")} ${OUT_OF_SHARED}`;
-const emptyV1 = (label) => `The empty session revision of ${label} is written once this Mac hands off version 2: ask Jason. ${OUT_OF_SHARED}`;
+const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
+const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
+const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
+const emptyV1 = (label) => `The empty session revision of ${label} is written once this Mac hands off version 2: ask Jason.`;
+/** Why `--version-of` is refused on a session that owes its empty revision: the same answer alone writes it. */
+const owedLinked = (label) => `The empty session revision of ${label} is still owed: say it again without --version-of.`;
 
 /** Whether a session still owes the BRIMM Ops page its empty revision: `kind … session --again` marked it "owed" (session.emptyRevision)
     when it could not write it, and no hand-off has been written for it since (record.finished: its own finish writes a session
@@ -3881,53 +3916,98 @@ function topFiles(folder) {
   }
 }
 
+/** Whether a file of final/ (`rel`, a path from the episode's folder) is one a correction to a kind that is not a session sets
+    aside: a hand-off or a text file (.json, .srt, .txt), and not one inside an export bundle. A finished video, a Story part and an
+    export stay where they are, and stay listed (the next finish puts its own in their place, replacing them by the rule). */
+const textInFinal = (rel) => /\.(json|srt|txt)$/i.test(rel) && !rel.split("/").slice(0, -1).some((part) => /\.fcpxmld$/i.test(part));
+
+/** Whether the file of final/ at `rel` is a client or group session's own hand-off, which holds no word of it: a version 2 hand-off
+    of kind session. One that is not here, or cannot be read, is not. */
+function sessionHandoffIn(folder, rel) {
+  if (!rel.endsWith(".brimm-ops.json")) return false;
+  try {
+    const h = JSON.parse(readFileSync(join(folder, rel), "utf8"));
+    return h !== null && typeof h === "object" && h.version === 2 && Boolean(h.video) && h.video.kind === "session";
+  } catch (e) {
+    return false;
+  }
+}
+
+/** What a file of final/ is, as she is told of one that stayed: never its name. */
+function whatInFinal(rel) {
+  if (rel.split("/").slice(1, -1).some((part) => /\.fcpxmld$/i.test(part))) return "an export";
+  if (rel.endsWith(".brimm-ops.json")) return "a hand-off";
+  if (rel.endsWith(".transcript.txt")) return "a transcript";
+  if (rel.endsWith(".srt")) return "captions";
+  if (rel.endsWith(".words.json")) return "word times";
+  if (isMedia(basename(rel))) return "a video";
+  return "a file";
+}
+/** What the files `rels` of final/ are, each said once, in their order. */
+const whatsInFinal = (rels) => [...new Set([...rels].sort().map(whatInFinal))];
+
+/** The files of `rels` (paths from the episode's folder) that are not on this Mac, or not whole on it. */
+const notReady = (ctx, found, rels) => rels.filter((rel) => !existsSync(join(found.folder, rel)) || !ctx.isWhole(join(found.folder, rel)));
+
 /** What `kind … --again` sets aside of the episode in `folder`, whose record is `record`, before a new reading (spec 2, "Correcting a
     wrong answer"): only the text files of the earlier reading, never the video, the import's own files, or a rough cut, upright
-    version or preview, which stay where they are (spec 1, "Episodes imported before this design"), and every file in final/. That
-    is: { rels, restore, reels }:
-    - `rels`, the paths from the folder of each file there to set aside, each once: the Reel suggestions (reels.json, and the copy she
+    version or preview, which stay where they are (spec 1, "Episodes imported before this design"), and the hand-off with what final/
+    holds beside it. A file counts whether it is on this Mac or only the record lists it, as one Dropbox has not brought over yet:
+    such a file is set aside once it is here, and the correction waits for it (notReady). That is { rels, restore, reels }:
+    - `rels`, the paths from the folder of each file to set aside, each once: the Reel suggestions (reels.json, and the copy she
       reads) and Claude's notes; of a raw reading, the rough cut's captions and transcript it wrote, and the timeline version 0 was
-      rendered from (its entry in main.pushed); a session's teachings files (principles .json and .txt, Reel ideas .txt), by any name
-      it had; every file in final/, its hand-offs and the transcripts beside them; and the plan Claude read, with its cut log, when a
-      raw reading kept the rules' plan in history/;
+      rendered from (its entry in main.pushed); a session's teachings files (teachings.js isTeachingsFile), by any name it had; the
+      hand-off record.finished names; and of final/, every file in it or listed in it. Answered as a kind that is not a session,
+      final/'s hand-offs and text files go (textInFinal), and its videos and exports stay; answered as a session (`session`), every
+      file of final/ goes, but for a session's own hand-off. With `finalOnly`, final/ alone, as a session that owes its empty
+      revision sweeps it again; and the plan Claude read, with its cut log, when a raw reading kept the rules' plan in history/;
     - `restore`, [path, from] for each file put back in its place from history/: the rules' plan and its cut log (reading.js
       rulesPlanKept), so that the next reading starts from the plan the import made, as a raw video's does. A plan in place that is
       that plan already is left alone, and set aside again never;
     - `reels`, the numbers of the Reel suggestions in the reels.json set aside, which the record lets go with it.
     This only reads. */
-function earlierFiles(folder, record) {
+function earlierFiles(folder, record, { session = false, finalOnly = false } = {}) {
   const stem = basename(record.video.file, extname(record.video.file));
+  const listedFiles = record.files !== null && typeof record.files === "object" ? record.files : {};
   const there = (rel) => existsSync(join(folder, rel));
   const rels = [];
-  const add = (rel) => {
-    if (there(rel) && !rels.includes(rel)) rels.push(rel);
+  const add = (rel, always = false) => {
+    if ((always || there(rel) || Object.hasOwn(listedFiles, rel)) && !rels.includes(rel)) rels.push(rel);
   };
-  const reading = record.reading !== null && typeof record.reading === "object" ? record.reading : {};
-  for (const rel of [REELS_FILE, `${stem}.reel-suggestions.txt`, `${stem}.edit-notes.txt`]) add(rel);
-  if (reading.kind === "raw") for (const rel of [`${stem}.rough-cut.srt`, `${stem}.rough-cut.transcript.txt`]) add(rel);
-  const v0 = (Array.isArray(record.main.pushed) ? record.main.pushed : []).find((p) => p.v === 0 && p.how === "render");
-  if (v0 && typeof v0.file === "string") add(v0.file);
-  for (const name of topFiles(folder).filter((n) => /\.(principles\.json|principles\.txt|reel-ideas\.txt)$/.test(n)).sort()) add(name);
+  const restore = [];
+  if (!finalOnly) {
+    const reading = record.reading !== null && typeof record.reading === "object" ? record.reading : {};
+    for (const rel of [REELS_FILE, `${stem}.reel-suggestions.txt`, `${stem}.edit-notes.txt`]) add(rel);
+    if (reading.kind === "raw") for (const rel of [`${stem}.rough-cut.srt`, `${stem}.rough-cut.transcript.txt`]) add(rel);
+    const v0 = (Array.isArray(record.main.pushed) ? record.main.pushed : []).find((p) => p.v === 0 && p.how === "render");
+    if (v0 && typeof v0.file === "string") add(v0.file);
+    for (const name of [...new Set([...topFiles(folder), ...Object.keys(listedFiles)])].filter(isTeachingsFile).sort()) add(name);
+  }
   let finals = [];
   try {
-    finals = filesUnder(join(folder, "final"));
+    finals = filesUnder(join(folder, "final")).map((rel) => `final/${rel}`);
   } catch (e) {
     // There is no final/.
   }
-  for (const rel of finals) add(`final/${rel}`);
-  const restore = [];
-  const rules = rulesPlanKept(folder, stem);
-  const planRel = `${stem}.cut-plan.json`;
-  if (rules && there(planRel) && readFileSync(join(folder, planRel), "utf8") !== rules.text) {
-    add(planRel);
-    restore.push([planRel, rules.json]);
-    if (rules.txt) {
-      add(`${stem}.cut-plan.txt`);
-      restore.push([`${stem}.cut-plan.txt`, rules.txt]);
+  const handoff = record.finished && typeof record.finished.handoff === "string" && record.finished.handoff.startsWith("final/") ? [record.finished.handoff] : [];
+  for (const rel of [...new Set([...finals, ...Object.keys(listedFiles).filter((key) => key.startsWith("final/")), ...handoff])].sort()) {
+    if (session ? sessionHandoffIn(folder, rel) : !textInFinal(rel)) continue;
+    add(rel, true);
+  }
+  if (!finalOnly) {
+    const rules = rulesPlanKept(folder, stem);
+    const planRel = `${stem}.cut-plan.json`;
+    if (rules && there(planRel) && readFileSync(join(folder, planRel), "utf8") !== rules.text) {
+      add(planRel);
+      restore.push([planRel, rules.json]);
+      if (rules.txt) {
+        add(`${stem}.cut-plan.txt`);
+        restore.push([`${stem}.cut-plan.txt`, rules.txt]);
+      }
     }
   }
   const reels = new Set();
-  if (rels.includes(REELS_FILE)) {
+  if (rels.includes(REELS_FILE) && there(REELS_FILE)) {
     try {
       const read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
       for (const c of read.reels ? read.reels.candidates : []) reels.add(c.n);
@@ -3956,14 +4036,16 @@ function asideName(folder, stamp, rel, taken) {
     files set aside; and only once it is written are they taken out of the episode. When the record cannot be written, what this put
     in is taken out again and what it replaced is put back, each only while it is still this call's, and nothing is deleted: she is
     told nothing was changed (or, when a file could not be put back, that the episode needs Jason; a copy of it is in history/).
-    Resolves 0 when written, 1 having said why. */
-async function setAsideWritten(ctx, found, base, next, aside, handoff = null) {
+    With `quiet`, for a session, those words name no file and no folder. Afterwards final/ is looked at again: what stayed in it that
+    was to go (`session`: every file but a session's own hand-off and the one put in; otherwise the files set aside) is given back
+    as `stayed`, for her to be told by what it is. Resolves { code: 0, stayed } when written, { code: 1 } having said why. */
+async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { quiet = false, session = false } = {}) {
   const { folder } = found;
   const gone = undone(base, ctx.home);
   if (gone) {
     ctx.say(`${gone} Nothing was changed.`);
     acceptRev(ctx.home, base.id, base.rev);
-    return 1;
+    return { code: 1 };
   }
   const opts = ruleOpts(ctx);
   const stamp = localStamp(new Date(ctx.now())).replace(/:/g, "-");
@@ -4010,9 +4092,11 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null) {
     }
     // The copies in history/ are taken out again, but when a file could not be put back: then they are what is left of it.
     if (!lost) for (const copy of copies) rmSync(copy, { force: true });
-    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : plainWhy(e);
-    ctx.say(lost ? `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.` : `Nothing was changed: ${why}.`);
-    return 1;
+    const changed = e.code === "CHANGED";
+    const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e);
+    if (lost) ctx.say(quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`);
+    else ctx.say(quiet && !changed ? asideFailed(e.code || "an error") : `Nothing was changed: ${why}.`);
+    return { code: 1 };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -4021,30 +4105,51 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null) {
     try {
       rmSync(join(folder, rel), { force: true });
     } catch (e) {
-      // The record lists it no more, and history/ holds it whole.
+      // The record lists it no more, and history/ holds it whole: what stayed in final/ is said below.
     }
   }
-  return 0;
+  let left = [];
+  try {
+    left = filesUnder(join(folder, "final")).map((rel) => `final/${rel}`);
+  } catch (e) {
+    // There is no final/ any more.
+  }
+  const stayed = session ? left.filter((rel) => !placed.has(rel) && !sessionHandoffIn(folder, rel)) : aside.rels.filter((rel) => rel.startsWith("final/") && !placed.has(rel) && left.includes(rel));
+  return { code: 0, stayed };
 }
 
 /** A session's empty revision, for `record`, the session's record as it is to be written (with the last finish it had, for the
     version of the hand-off on file), made at `at`: { revision, handoff: { rel, text }, finished, words } when it is to be written,
     or { words } when it is not. It goes where handoffTarget says, with nothing in it: no principles, no Reels, no transcript (the
-    contract's handoff-v2-session-replacing). It is not written on a Mac that hands off version 1, nor when handoffTarget refuses it
-    (a gap in the video's versions, said in H4's words, or an id it went to the page under that its versions no longer lead to). */
+    contract's handoff-v2-session-replacing). It is version 2 when this Mac's settings say so, when the hand-off on file is (writesV2For),
+    and when any hand-off of the episode's own, in its final/ or set aside in its history/, is. It is not written on a Mac that hands
+    off version 1 otherwise; nor when handoffTarget refuses it (a gap in the video's versions, said in H4's words, or an id it went to
+    the page under that its versions no longer lead to); nor when a hand-off of its own, of either version, went to the page under
+    another id than the one it would go under, since the page would keep that id's words (said by the id alone). */
 function emptyRevisionOf(ctx, found, record, at) {
   const label = shownName(record);
-  const target = handoffTarget(ctx, { folder: found.folder, record });
-  if (!target.v2) return { words: emptyV1(label) };
+  const own = ownHandoffs(found.folder);
+  if (!writesV2For(ctx.settings, found.folder, record) && !own.some((h) => h.version === 2)) return { words: emptyV1(label) };
+  const target = handoffTarget({ root: ctx.root, settings: { ...ctx.settings, handoffVersion: 2 } }, { folder: found.folder, record });
   if (target.refusal) {
     const gap = chainGap(ctx.root, record);
     return { words: gap ? emptyWaits(label, gap) : emptyRefused(label, target.refusal) };
   }
+  const elsewhere = own.map(handoffIdIn).find((id) => id && id !== target.id);
+  if (elsewhere) return { words: emptyElsewhere(label, elsewhere) };
   const made = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit, reels: [], session: {} });
   const fault = handoffFaultV2(made);
   if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
   const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
   return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision) };
+}
+
+/** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
+    its words, and when it was not written, that its files are out of the shared folder, unless some stayed in final/, which are
+    said, by what they are. */
+function sayEmpty(ctx, label, empty, stayed) {
+  ctx.say(empty.handoff || stayed.length ? empty.words : `${empty.words} ${OUT_OF_SHARED}`);
+  if (stayed.length) ctx.say(stayedWords(label, whatsInFinal(stayed)));
 }
 
 /** Show a file in Finder, through this Mac's program runner: a hand-off for her to drop on the BRIMM Ops page. */
@@ -4056,19 +4161,25 @@ async function showInFinder(ctx, path) {
   }
 }
 
-/** The empty session revision a session still owes (revisionOwed), written now that it can be: `kind … session --again` said again.
-    Nothing more is set aside (final/ was emptied when it was marked), nothing else of the record changes, and it is not claimed:
-    the record is written on the one read, as finish writes a session's hand-off. Refused, in the words of why, while it still
-    cannot be. */
+/** The empty session revision a session still owes (revisionOwed), when `kind … session --again` is said again: it is written when
+    it can be now, and final/ is swept again either way, by earlierFiles (every file but a session's own hand-off, listed or not, as a
+    file the other Mac's finish put there that Dropbox brought over since), so that no word of it stays there. Nothing else of the
+    record changes, and it is not claimed: the record is written on the one read, as finish writes a session's hand-off. When it
+    still cannot be written and final/ holds nothing to set aside, it is refused, in the words of why, and nothing is written. */
 async function emptyRevisionAgain(ctx, found, record) {
+  const label = shownName(record);
   const at = localStamp(new Date(ctx.now()));
+  const aside = earlierFiles(found.folder, record, { session: true, finalOnly: true });
   const empty = emptyRevisionOf(ctx, found, record, at);
-  if (!empty.handoff) return refuse(ctx, empty.words);
-  const next = { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished };
-  if ((await setAsideWritten(ctx, found, record, next, { rels: [], restore: [], reels: new Set() }, empty.handoff)) !== 0) return 1;
-  await showInFinder(ctx, join(found.folder, empty.handoff.rel));
-  ctx.say(empty.words);
-  return 0;
+  if (!empty.handoff && !aside.rels.length) return refuse(ctx, `${empty.words} ${OUT_OF_SHARED}`);
+  await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(join(found.folder, rel))));
+  if (notReady(ctx, found, aside.rels).length) return refuse(ctx, asideComing(label));
+  const next = empty.handoff ? { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished } : record;
+  const wrote = await setAsideWritten(ctx, found, record, next, aside, empty.handoff, { quiet: true, session: true });
+  if (wrote.code !== 0) return 1;
+  if (empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
+  sayEmpty(ctx, label, empty, wrote.stayed);
+  return empty.handoff ? 0 : 1;
 }
 
 /** Claim the episode `found`, whose record is `record`, for this Mac, as `open` does: the claim is written, Dropbox is given

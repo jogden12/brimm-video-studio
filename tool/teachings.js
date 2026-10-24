@@ -73,6 +73,9 @@ export function earlierTeachings(record) {
 
 /** Whether `rel` names a teachings file as a reading writes one: `<name>.principles.json`, in the episode's own folder. */
 export const isTeachingsName = (rel) => typeof rel === "string" && rel.length > ".principles.json".length && rel.endsWith(".principles.json") && !/[/\\]/.test(rel) && !rel.startsWith(".");
+/** Whether `rel` names one of the three teachings files a session's reading writes (teachingsFiles): `<name>.principles.json`, or
+    the copies she reads beside it, `<name>.principles.txt` and `<name>.reel-ideas.txt`, in the episode's own folder. */
+export const isTeachingsFile = (rel) => typeof rel === "string" && [".principles.json", ".principles.txt", ".reel-ideas.txt"].some((ending) => rel.endsWith(ending) && isTeachingsName(`${rel.slice(0, -ending.length)}.principles.json`));
 
 /** The reading of a session that counts, as the record holds it: one made as a session, after her answer, which names its
     teachings file (`principles`); or null. */

@@ -559,6 +559,17 @@ const wentElsewhere = (handoffs, first) => handoffs.find((h) => h.version === VE
 /** Why a video that went to the BRIMM Ops page under the id `went` is refused while its versions lead to `first`: by its name. */
 const movedWords = (record, went, first) => `${shownName(record)} went to the BRIMM Ops page under ${went}, but its versions now lead to ${first}: ask Jason. Nothing was written.`;
 
+/** The hand-offs of the episode in `folder` itself, as they are read: in its final/, and set aside into its history/ at any depth
+    (handoffsBeside). One that cannot be read is passed over. This only reads. */
+export const ownHandoffs = (folder) => handoffsBeside(join(folder, "final"));
+
+/** The id a hand-off went to the BRIMM Ops page under: a version 2 one's `video.id`, a version 1 one's `episode.id`; "" when it
+    names none that brimm-video gives. */
+export const handoffIdIn = (h) => {
+  const id = h && h.version === VERSION_2 ? h.video && h.video.id : h && h.episode && h.episode.id;
+  return isId(id) ? id : "";
+};
+
 /** Why the record in the episode `folder` cannot keep the version it is of as it stands, in handoffTarget's words, or "": a version
     2 hand-off in its own final/ or history/ went to the BRIMM Ops page under another id than the one its versions lead to now
     (its earlier version was linked elsewhere since). `kind … --again`, which keeps the link it has, asks this of it again, as the

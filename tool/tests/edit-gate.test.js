@@ -28,12 +28,9 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
 const PENDING = "Dropbox is still bringing this episode's record over: say it again in a moment.";
-const NOT_SHOWN_WAITING = "Its words are not shown in the chat while it waits for its answer.";
-const NOT_SHOWN_LEFT = "Its words are not shown in the chat: you said to leave this video.";
-const NOT_SHOWN_SESSION = "A client or group session's words are not shown in the chat.";
-/** The gate's own refusals, and with them what `show` itself holds back from a record the gate lets it run for. */
+/** The gate's own refusals. `show` holds back no words of its own any more: of a record the gate holds, it opens a copy on this
+    Mac (F9b). */
 const GATE_REFUSALS = [WAITING, LEFT_ALONE, NOT_FOR_SESSION, TEACHINGS_OFF, REEL_NOT_AGREED, PENDING];
-const REFUSALS = [...GATE_REFUSALS, NOT_SHOWN_WAITING, NOT_SHOWN_LEFT, NOT_SHOWN_SESSION];
 
 const ANSWER = { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" };
 const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "yes" };
@@ -127,7 +124,7 @@ describe("the gate walks every command that names an episode", () => {
     episodeFor(t, { record: SESSION_RECORD });
     assert.deepEqual((await on(t.ctx.deps, "finish", FOLDER)).said, [TEACHINGS_OFF]);
     const finish = await on(taught(t), "finish", FOLDER);
-    assert.ok(!REFUSALS.some((why) => finish.text.includes(why)), finish.text);
+    assert.ok(!GATE_REFUSALS.some((why) => finish.text.includes(why)), finish.text);
     t.done();
   });
   it("refuses a session's reel pick and drop, today's reel, with teachings on, as a Reel she has not agreed to", async () => {
@@ -154,7 +151,7 @@ describe("the gate walks every command that names an episode", () => {
       for (const name of SCOPED) {
         const { t } = episode(record);
         const r = await on(t.ctx.deps, name, ...ASKED[name]);
-        assert.ok(!REFUSALS.some((why) => r.text.includes(why)), `${what} ${name}: ${r.text}`);
+        assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${what} ${name}: ${r.text}`);
         t.done();
       }
     }
@@ -163,10 +160,10 @@ describe("the gate walks every command that names an episode", () => {
     const t = setup();
     episodeFor(t, { record: UNANSWERED_RECORD });
     const free = await on(t.ctx.deps, "free", FOLDER, "library");
-    assert.ok(!REFUSALS.some((why) => free.text.includes(why)), free.text);
+    assert.ok(!GATE_REFUSALS.some((why) => free.text.includes(why)), free.text);
     for (const ask of [["episodes"], ["status"], ["status", FOLDER], ["status", "Pricing"], ["behind"]]) {
       const r = await on({ ...t.ctx.deps, run: async () => ({ code: 0, stderr: "", stdout: "0\n" }) }, ...ask);
-      assert.ok(!REFUSALS.some((why) => r.text.includes(why)), `${ask.join(" ")}: ${r.text}`);
+      assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${ask.join(" ")}: ${r.text}`);
     }
     t.done();
   });
@@ -308,7 +305,7 @@ describe("the gate, wherever a command names its episode", () => {
     const t = setup();
     episodeFor(t, { record: SESSION_RECORD });
     const r = await on(taught(t), "finish", "--now", FOLDER);
-    assert.ok(!REFUSALS.some((why) => r.text.includes(why)), r.text);
+    assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), r.text);
     t.done();
   });
   it("is not applied by findEpisode when the ctx has no command, as in tests and the commands' own helpers", () => {
@@ -600,7 +597,7 @@ describe("the gate, a record Dropbox is still bringing over", () => {
     const first = readEpisode(found.folder).record;
     writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2 }));
     const r = await on(light(t), "open", FOLDER);
-    assert.ok(!REFUSALS.some((why) => r.text.includes(why)), r.text);
+    assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), r.text);
     t.done();
   });
   it("changes nothing with today's settings and today's records: a record above the one read that is not whole is passed over as before", async () => {
@@ -609,7 +606,7 @@ describe("the gate, a record Dropbox is still bringing over", () => {
         const { t, found } = episode(record);
         PENDING_FILE(found, 2, "{");
         const r = await on(t.ctx.deps, name, ...ASKED[name]);
-        assert.ok(!REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
+        assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
         t.done();
       }
     }
