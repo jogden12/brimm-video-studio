@@ -512,6 +512,24 @@ describe("a session mark follows the video's other versions: each is held as a s
     assert.deepEqual(finalOf(newer), [`${reread(newer).name.text}.brimm-ops.json`]);
     t.done();
   });
+  it("names a video in the drop folder that a video held as a session holds by its size alone, in episodes and retry, as a gated one's", async () => {
+    const t = setup();
+    twoVersions(t, { bOver: { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: SESSION_NAME, placeholder: false } } });
+    // A's video is still in the drop folder: the file a client's name may be in.
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mp4"), "v");
+    const episodes = await on(t.ctx.deps, "episodes");
+    assert.ok(episodes.said.some((line) => line.startsWith("  A video of 1 bytes, in the Mac Studio's drop folder, for ")), episodes.text);
+    const retry = await on(t.ctx.deps, "retry", "nothing fits this");
+    assert.deepEqual(retry.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 1 bytes.']);
+    const named = await on(t.ctx.deps, "retry", "Talk");
+    assert.equal(named.code, 1, named.text);
+    assert.match(named.text, /a video \(a0a0a0\)/);
+    for (const r of [episodes, retry]) assert.doesNotMatch(r.text, /Talk\.mp4|Jane|Coaching/);
+    assert.doesNotMatch(named.text, /Jane|Coaching/);
+    t.done();
+  });
   it("holds a newer version of a session, and an older one whose newer version is marked; clearing that mark lifts it", async () => {
     const MARKED = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: markOf(null), name: { text: "Session, 2026-10-10", placeholder: false } };
     for (const [what, aOver, bOver, held, said] of [

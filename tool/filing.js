@@ -209,7 +209,7 @@ export function statusReporter(inner, { root, machine, video, bytes, importId = 
     The design says a video matches an episode by its size and its length. The size is enough here: this guard runs before
     ffprobe has read the length, the name must match too, and two recordings of one name and one size to the byte are not
     met in practice. Matching the length as well would mean an ffprobe of every video in the drop folder at every run. */
-export function heldBy({ root, video, bytes, now = Date.now() }) {
+export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
   // A status that failed or found a problem says most, then one that says the video is held, then an episode that holds the
   // video, then an import running. A running import, and a hold, keep only a video of their own size: one dropped again under
   // the same name, as a corrected export, is another recording.
@@ -221,7 +221,7 @@ export function heldBy({ root, video, bytes, now = Date.now() }) {
   if (problem) return `copied in, but the late check found a problem: ${String(problem.problem).replace(/\.$/, "")}.`;
   const left = held.find((status) => importState(status, now) === "held");
   if (left) return String(left.held);
-  const episode = episodeHolding({ root, video, bytes });
+  const episode = episodeHolding({ root, video, bytes, gatedAs });
   if (episode) return episode;
   if (held.length) return `it is being imported on ${held[0].machine}.`;
   return "";
@@ -246,11 +246,13 @@ export function holdingOf({ root, video, bytes }) {
 
 /** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size
     (holdingOf). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
-    label and short id (shownName): its folder holds the file's name, which may be a client's. */
-export function episodeHolding({ root, video, bytes }) {
+    label and short id (shownName): its folder holds the file's name, which may be a client's. `gatedAs` gives the name of a
+    record named so ("" for one named by its folder): edit.js gives one that names a video held as a session so too. */
+export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : "") }) {
   const held = holdingOf({ root, video, bytes });
   if (!held) return "";
-  return `already imported as ${gated(held.record) ? `${shownName(held.record)} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+  const as = gatedAs(held.record);
+  return `already imported as ${as ? `${as} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,

@@ -337,6 +337,11 @@ const heldName = (r) => (typeof r.label === "string" && r.label.trim() ? r.label
     (`held`) and not gated itself. */
 const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
 
+/** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
+    episodeHolding's `gatedAs`), through `links` (finish.js linksOf): as gatedName names a gated record or one held as a session, and
+    "" for any other, which is named by its folder. */
+const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : recordKind(record) !== null && links.sessionsBeside(record).length > 0 ? heldName(record) : "");
+
 /** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
 const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
 
@@ -690,7 +695,7 @@ export async function episodes(ctx) {
     for (const video of names) {
       const found = ctx.stat(join(drops, mac, video));
       if (!found) continue;
-      const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now() });
+      const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
       // and macOS moves its birth time back with them. When this Mac has not seen it, as in the other Mac's drop folder, from
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
@@ -701,7 +706,7 @@ export async function episodes(ctx) {
       // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
       const label = labelIn(statuses, video, mac);
       const holding = holdingOf({ root: ctx.root, video, bytes: found.size });
-      if (!light && !label && !(holding && (gated(holding.record) || (recordKind(holding.record) !== null && links.sessionsBeside(holding.record).length)))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      if (!light && !label && !(holding && gatedAsOf(links)(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
       else {
         const who = label || capital(unlabelled(video, found.size));
         waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
@@ -1446,9 +1451,11 @@ export async function retry(ctx, rest) {
   const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
   // A video a light import has a status of, or that a gated episode holds, is never named by its file, whichever Mac this is;
   // and on a Mac that does the light import, none is.
+  // An episode a version of a session holds is held as a session too (episodeAt's `held`), and named so.
+  const gatedAs = gatedAsOf(linksOf(ctx.root));
   const quiet = (v) => {
     const holding = holdingOf({ root: ctx.root, video: v, bytes: sizeOf(v) });
-    return light || Boolean(labelOf(v)) || Boolean(holding && gated(holding.record));
+    return light || Boolean(labelOf(v)) || Boolean(holding && gatedAs(holding.record));
   };
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {
@@ -1461,7 +1468,7 @@ export async function retry(ctx, rest) {
   const hush = quiet(video);
   const who = label || (hush ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
   const plain = (text) => (hush ? withoutNames(text, namesOf(video), [label]) : text);
-  const held = episodeHolding({ root: ctx.root, video, bytes });
+  const held = episodeHolding({ root: ctx.root, video, bytes, gatedAs });
   if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.
@@ -4307,14 +4314,15 @@ async function answerKind(ctx, found, plan, began) {
     const becomes = KIND_SAID[stored];
     say(`${name}: the session mark is cleared, by your click. It is now ${becomes}.`);
     toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
-    // Another of its versions still marked holds it as a session: its names stay out of the chat, and Claude reads nothing of it.
-    if (linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
-      say(STILL_HELD);
-      return 0;
-    }
   }
   if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
   if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
+  // A mark cleared while another of its versions is still marked: it is held as a session, its names stay out of the chat, and
+  // Claude reads nothing of it.
+  if (plan.clearSession && linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
+    say(STILL_HELD);
+    return 0;
+  }
   // Answered as anything else, its names are no longer kept from the chat: it is named by its folder and its files as any episode is.
   if (ctx.hidden) {
     ctx.hidden.names.length = 0;
