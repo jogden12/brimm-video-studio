@@ -68,7 +68,7 @@ import { studioFiles, studioFolder } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 
-const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
+export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
@@ -142,7 +142,8 @@ const HELP = `The command line for episodes on this Mac. Claude runs it for the 
                                         notes or its cut plan, whole. Of a video not yet answered, or a session, nothing
                                         is printed: a read-only copy of it opens in TextEdit on this Mac
   node edit.js behind                   whether Jason has a newer brimm-video than this Mac's; and the copies show
-                                        opened are cleared
+                                        opened are cleared. It refuses, and says to ask Jason, when her folder's lock is
+                                        changed on this Mac: a settings.local.json in it, or hooks turned off
   node edit.js resolve "<episode>" [--keep A|B]
                                         show the two sides of a conflicted copy Dropbox kept, and keep the one picked:
                                         the other is set aside in the episode's history/
@@ -2089,13 +2090,66 @@ function clearShown(ctx) {
 /** How long `behind` gives git, each time: well inside the two minutes the Code tab gives a command. */
 const BEHIND_MS = 20000;
 
+/** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
+    for these words (tests/studio.test.js). */
+export const LOCK_CHANGED = "This folder's lock is changed on this Mac: ask Jason before going on.";
+
+/** `behind`: whether the lock on her folder for Claude has been loosened on this Mac (spec 2026-10-22, section 7), as the lines
+    `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The
+    lock rests on a guard hook (studio.js), which a settings file in her folder or her user settings can turn off, so two files
+    are looked at, and no other, and nothing is written:
+    - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
+      anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
+    - this Mac's ~/.claude/settings.json, whether or not she has a folder: it turns hooks off when disableAllHooks is there and is
+      not false, and when it is there but cannot be read as a JSON object it is not known that it does not, so that is said too.
+    A file that is not there, or whose disableAllHooks is false or not there, loosens nothing. */
+function lockLoosened(ctx) {
+  const why = [];
+  let folder = null;
+  try {
+    folder = realpathSync.native(studioFolder(ctx.home));
+  } catch (e) {
+    // She has no folder for Claude on this Mac, so nothing in it can be there.
+  }
+  if (folder) {
+    try {
+      if (lstatSync(join(folder, ".claude", "settings.local.json"), { throwIfNoEntry: false })) why.push("(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)");
+    } catch (e) {
+      if (e.code !== "ENOTDIR") why.push("(Jason: her folder's .claude/settings.local.json could not be looked for, so it is not known that there is none.)");
+    }
+  }
+  // No settings file loosens nothing. One that is there and cannot be read as a JSON object leaves it unknown.
+  let text = null;
+  try {
+    text = readFileSync(join(ctx.home, ".claude", "settings.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return why;
+  }
+  let settings = null;
+  try {
+    if (text !== null) settings = JSON.parse(text);
+  } catch (e) {
+    // It stays null, as for a file that could not be read.
+  }
+  if (settings === null || typeof settings !== "object" || Array.isArray(settings)) why.push("(Jason: this Mac's ~/.claude/settings.json could not be read, so it is not known that hooks are on. Its contents are not shown here.)");
+  else if (Object.hasOwn(settings, "disableAllHooks") && settings.disableAllHooks !== false) why.push("(Jason: this Mac's ~/.claude/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)");
+  return why;
+}
+
 /** `behind`: whether this Mac's checkout of brimm-video is behind main on GitHub, by git, in this Mac's checkout: it fetches
-    main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown). On her
-    laptop git reaches GitHub with the deploy key. It changes nothing in the checkout, and always ends with 0: a check that could
-    not be made is said. */
+    main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown). Then it
+    looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and ends with 1
+    without asking git, since she is not to go on. On her laptop git reaches GitHub with the deploy key. It changes nothing in the
+    checkout, and otherwise always ends with 0: a check that could not be made is said. */
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
+  const loosened = lockLoosened(ctx);
+  if (loosened.length) {
+    ctx.say(LOCK_CHANGED);
+    for (const line of loosened) ctx.say(line);
+    return 1;
+  }
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer brimm-video. Is this Mac offline?";

@@ -6,8 +6,9 @@
 // folder's mode is "default", not dontAsk: dontAsk denies AskUserQuestion, the card she answers what a video is on (spec
 // 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
 // settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
-// off; a .claude/settings.local.json in her folder, or her user settings, that turn hooks off are for behind to find
-// (edit.js), not for this file. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
+// off. A .claude/settings.local.json in her folder, or her user settings (~/.claude/settings.json) that turn hooks off, are
+// not for this file but for `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to
+// ask Jason, when either is so. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
 // edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.

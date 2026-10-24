@@ -1,8 +1,9 @@
 // `show` and `behind` (phase 1b): her session reads an episode's transcript, Claude's notes and the cut plan only through
-// edit.js, and asks whether this Mac has the newest brimm-video. git is a stand-in here: no test runs it.
+// edit.js, and asks whether this Mac has the newest brimm-video. And `behind` notices when the lock on her folder has been
+// loosened on this Mac (spec 2026-10-22, section 7). git is a stand-in here: no test runs it, and each test has a home of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { writeStudio } from "../studio.js";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
@@ -213,6 +214,168 @@ describe("behind", () => {
     const offline = await on({ ...t.ctx.deps, run: git({ code: 128, stderr: "fatal: Could not read from remote repository." }).run }, "behind");
     assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer brimm-video. Is this Mac offline?\n${stale}`]);
     t.done();
+  });
+  describe("her folder's lock (spec 2026-10-22, section 7)", () => {
+    const LOCK = "This folder's lock is changed on this Mac: ask Jason before going on.";
+    const NODE = "/opt/homebrew/bin/node";
+    /** Words that must never be said: what the two files hold. */
+    const SECRET = "SECRET-WORDS-OF-A-FILE";
+    /** A Mac with her folder written as the installer writes it. */
+    function mac() {
+      const t = setup();
+      return { t, folder: writeStudio(t.home, { checkout: "/checkout", node: NODE }) };
+    }
+    /** This Mac's user settings for Claude, ~/.claude/settings.json: the text given, or an object as JSON. */
+    function userSettings(t, text) {
+      mkdirSync(join(t.home, ".claude"), { recursive: true });
+      writeFileSync(join(t.home, ".claude", "settings.json"), typeof text === "string" ? text : JSON.stringify(text));
+    }
+    /** `behind` on that Mac with git finding it up to date, and the git stand-in, to see whether git was asked at all. */
+    async function behindOn(t) {
+      const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" });
+      return { ...(await on({ ...t.ctx.deps, run: g.run }, "behind")), g };
+    }
+    /** Every file under `dir` by its path, with what it holds ("<link to …>" for a link, "<folder>" for a folder). */
+    function treeOf(dir, found = new Map(), at = dir) {
+      for (const name of readdirSync(at).sort()) {
+        const path = join(at, name);
+        const kind = lstatSync(path);
+        found.set(path.slice(dir.length), kind.isSymbolicLink() ? `<link to ${readlinkSync(path)}>` : kind.isDirectory() ? "<folder>" : readFileSync(path, "utf8"));
+        if (kind.isDirectory()) treeOf(dir, found, path);
+      }
+      return found;
+    }
+    const LOCAL_WHY = "(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)";
+    const HOOKS_WHY = "(Jason: this Mac's ~/.claude/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)";
+    const UNREAD_WHY = "(Jason: this Mac's ~/.claude/settings.json could not be read, so it is not known that hooks are on. Its contents are not shown here.)";
+
+    it("goes on as it always did when her folder is as the installer writes it and this Mac's settings leave hooks on", async () => {
+      for (const settings of [undefined, {}, { disableAllHooks: false }, { disableAllHooks: false, env: { A: "b" }, hooks: { Stop: [] }, permissions: { allow: ["Bash(ls)"] } }, { permissions: { disableBypassPermissionsMode: "disable" } }]) {
+        const { t } = mac();
+        if (settings) userSettings(t, settings);
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest brimm-video.", 2], JSON.stringify(settings));
+        t.done();
+      }
+    });
+    it("goes on when a settings.local.json is anywhere but in her folder's .claude", async () => {
+      const { t, folder } = mac();
+      userSettings(t, {});
+      for (const dir of [join(t.home, ".claude"), join(t.home, "Other"), join(t.home, "Other", ".claude"), folder, join(folder, "Pictures")]) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "settings.local.json"), `{"x":"${SECRET}"}`);
+      }
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+      t.done();
+    });
+    it("refuses, saying her folder has a settings.local.json and nothing of what it holds, when it has one; git is not asked", async () => {
+      const { t, folder } = mac();
+      writeFileSync(join(folder, ".claude", "settings.local.json"), JSON.stringify({ permissions: { allow: [`Bash(rm -rf ${SECRET})`] }, disableAllHooks: true }));
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${LOCAL_WHY}`, 0]);
+      assert.ok(!r.text.includes(SECRET) && !/rm -rf/.test(r.text), r.text);
+      t.done();
+    });
+    it("refuses, saying this Mac's settings turn hooks off and nothing of what they hold, when disableAllHooks is true there", async () => {
+      const { t } = mac();
+      userSettings(t, { env: { TOKEN: SECRET }, disableAllHooks: true });
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${HOOKS_WHY}`, 0]);
+      assert.ok(!r.text.includes(SECRET), r.text);
+      t.done();
+    });
+    it("says both when both are so, her folder's first", async () => {
+      const { t, folder } = mac();
+      writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
+      userSettings(t, { disableAllHooks: true });
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${LOCAL_WHY}\n${HOOKS_WHY}`]);
+      t.done();
+    });
+    it("takes whatever is called settings.local.json in her folder's .claude for one: an empty file, a folder, a link to nowhere", async () => {
+      for (const make of [(file) => writeFileSync(file, ""), (file) => mkdirSync(file), (file) => symlinkSync(join(file, "..", "nowhere"), file)]) {
+        const { t, folder } = mac();
+        make(join(folder, ".claude", "settings.local.json"));
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${LOCAL_WHY}`], make.toString());
+        t.done();
+      }
+    });
+    it("finds her folder when ~/BRIMM Video Studio is a link to it", async () => {
+      const t = setup();
+      mkdirSync(join(t.home, "elsewhere"), { recursive: true });
+      symlinkSync(join(t.home, "elsewhere"), join(t.home, "BRIMM Video Studio"));
+      const folder = writeStudio(t.home, { checkout: "/checkout", node: NODE });
+      assert.equal(folder, realpathSync(join(t.home, "elsewhere")));
+      assert.equal((await behindOn(t)).code, 0);
+      writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
+      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [1, `${LOCK}\n${LOCAL_WHY}`]);
+      t.done();
+    });
+    it("cannot tell, and so refuses, when this Mac's settings cannot be read as the JSON object they should be, or disableAllHooks is anything but false", async () => {
+      for (const text of ["{ not json", "", "[]", '"hooks"', "null", '{"disableAllHooks": "true"}', '{"disableAllHooks": 1}', '{"disableAllHooks": null}', '{"disableAllHooks": "false"}']) {
+        const { t } = mac();
+        userSettings(t, text);
+        const r = await behindOn(t);
+        assert.equal(r.code, 1, JSON.stringify(text));
+        assert.equal(r.text.split("\n")[0], LOCK, JSON.stringify(text));
+        assert.ok([HOOKS_WHY, UNREAD_WHY].includes(r.text.split("\n")[1]) && r.text.split("\n").length === 2, `${JSON.stringify(text)}: ${r.text}`);
+        assert.equal(r.g.calls.length, 0);
+        t.done();
+      }
+      // A settings file that is not a file cannot be read either.
+      const { t } = mac();
+      mkdirSync(join(t.home, ".claude", "settings.json"), { recursive: true });
+      const r = await behindOn(t);
+      assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${UNREAD_WHY}`]);
+      t.done();
+    });
+    it("cannot tell, and so refuses, when it is not allowed to look for a settings.local.json in her folder", async (c) => {
+      if (process.getuid && process.getuid() === 0) return c.skip("root can look anywhere");
+      const { t, folder } = mac();
+      const dir = join(folder, ".claude");
+      chmodSync(dir, 0o000);
+      try {
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text.split("\n")[0], r.text.split("\n")[1]], [1, LOCK, "(Jason: her folder's .claude/settings.local.json could not be looked for, so it is not known that there is none.)"]);
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+      t.done();
+    });
+    it("looks at this Mac's settings when it has no folder for Claude, which hooks off would defeat the lock of too; and goes on when they are not", async () => {
+      const t = setup();
+      userSettings(t, { disableAllHooks: true });
+      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [1, `${LOCK}\n${HOOKS_WHY}`]);
+      userSettings(t, { disableAllHooks: false });
+      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [0, "This Mac has the newest brimm-video."]);
+      t.done();
+    });
+    it("writes nothing when it refuses, and still clears the copies show made", async () => {
+      const { t, folder } = mac();
+      writeFileSync(join(folder, ".claude", "settings.local.json"), `{"x":"${SECRET}"}`);
+      userSettings(t, { disableAllHooks: true });
+      const shown = join(workFolder(t.home), FOLDER, "shown");
+      mkdirSync(shown, { recursive: true });
+      writeFileSync(join(shown, "a copy.txt"), "words");
+      const before = [treeOf(folder), treeOf(join(t.home, ".claude"))];
+      const r = await behindOn(t);
+      assert.equal(r.code, 1);
+      assert.deepEqual([treeOf(folder), treeOf(join(t.home, ".claude"))], before);
+      assert.ok(!existsSync(shown));
+      t.done();
+    });
+    it("refuses at every session start while the lock is loosened, and no more once it is put right", async () => {
+      const { t, folder } = mac();
+      const local = join(folder, ".claude", "settings.local.json");
+      writeFileSync(local, "{}");
+      assert.equal((await behindOn(t)).code, 1);
+      assert.equal((await behindOn(t)).code, 1);
+      rmSync(local);
+      assert.deepEqual([(await behindOn(t)).code, (await behindOn(t)).text], [0, "This Mac has the newest brimm-video."]);
+      t.done();
+    });
   });
   it("says it could not check when git cannot fetch, runs out of time, or answers something else, and still ends with 0", async () => {
     const t = setup();

@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio.js";
-import { COMMAND_NAMES } from "../edit.js";
+import { COMMAND_NAMES, HELP, LOCK_CHANGED } from "../edit.js";
 import { EDITS } from "../sessions.js";
 
 const CHECKOUT = "/Users/sallie/Claude Code/BRIMM video";
@@ -164,8 +164,9 @@ describe("her folder's settings", () => {
     const given = commandsIn(skill);
     assert.ok(given.length >= 10, given.join(" "));
     for (const span of given) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `the skill runs "${span}", which edit.js does not have`);
-    // A session's commands are among them: its teachings, its principles and its Reel ideas.
-    for (const command of ["teachings", "principles", "ideas"]) assert.ok(given.some((span) => span.split(" ")[0] === command), `the skill does not run ${command}`);
+    // A session's commands are among them: its teachings, its principles and its Reel ideas. Each is run with the label in quotes
+    // after it; the bare word in a span, as `principles` in a sentence of prose, does not count as running it.
+    for (const command of ["teachings", "principles", "ideas"]) assert.ok(given.some((span) => span.startsWith(`${command} "`)), `the skill does not run ${command}`);
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
     assert.ok(skill.split("\n").length < 160, "the skill is short");
   });
@@ -317,6 +318,54 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.match(start.slice(start.indexOf("`episodes`")), /card/);
     assert.match(skill, /^\| "What's waiting\?" \| `episodes`, then the card/m);
   });
+  it("stops when behind says the folder's lock is changed: tells her to ask Jason, and runs nothing else (spec 2026-10-22, section 7)", () => {
+    const start = sectionOf(skill, "## At the start of each session");
+    // The skill names what behind says by its first words, which edit.js says word for word.
+    const trigger = /If it says "([^"]+)"/.exec(start);
+    assert.ok(trigger, start);
+    assert.ok(LOCK_CHANGED.startsWith(trigger[1]), `the skill listens for "${trigger[1]}", and edit.js says "${LOCK_CHANGED}"`);
+    for (const words of [`tell her: "Something in this Claude folder's setup has changed; ask Jason before going on."`, "Then stop: run nothing else, not even `episodes`"]) assert.ok(start.includes(words), words);
+    // It comes before the card, which is shown only when the lock holds, and never shows her what the lock was changed to.
+    assert.ok(start.indexOf(trigger[0]) < start.indexOf("Then run `episodes`"), start);
+    assert.doesNotMatch(start, /settings\.local|disableAllHooks/);
+  });
+  it("uses only the flags edit.js's help gives each command, so that a flag renamed there fails here", () => {
+    // HELP's entries by command: an entry starts at "  node edit.js <command>" and runs to the next such line. A command may have
+    // several (title, push, reel, cut, text), which are read as one. "--<what>" stands for the fields she may change (EDITS).
+    const entries = new Map();
+    let at = null;
+    for (const line of HELP.split("\n")) {
+      const starts = /^  node edit\.js (\S+)/.exec(line);
+      if (starts) at = starts[1];
+      if (at) entries.set(at, `${entries.get(at) || ""}${line}\n`);
+    }
+    const flagsIn = (text) => [...text.matchAll(/(?<![\w-])--[a-z][a-z_-]*/g)].map((m) => m[0]);
+    const editable = Object.values(EDITS).flat().map((field) => `--${field}`);
+    const seen = new Set();
+    for (const span of commands) {
+      const command = span.split(" ")[0];
+      assert.ok(entries.has(command), `edit.js's help has no entry for ${command}, which the skill runs`);
+      const given = new Set([...flagsIn(entries.get(command)), ...(entries.get(command).includes("--<what>") ? editable : [])]);
+      for (const flag of flagsIn(span)) {
+        assert.ok(given.has(flag), `the skill runs ${command} with ${flag}, which edit.js's help does not give it: ${span}`);
+        seen.add(`${command} ${flag}`);
+      }
+    }
+    // The flags of the fork are among those checked, so that this cannot go blind.
+    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
+      assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
+    }
+    // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).
+    const anywhere = new Set([...flagsIn(HELP), ...editable]);
+    const alone = [...new Set([...skill.matchAll(/`(--[a-z][a-z_-]*)[^`]*`/g)].map((m) => m[1]))];
+    assert.ok(alone.length >= 15, alone.join(" "));
+    for (const flag of alone) assert.ok(anywhere.has(flag), `the skill names ${flag}, which edit.js's help does not give`);
+  });
+  it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
+    const head = source("studio.js").split("\n").filter((line) => line.startsWith("//")).join("\n");
+    for (const words of ["`behind`", "lockLoosened", ".claude/settings.local.json", "turn hooks off"]) assert.ok(head.includes(words), words);
+    assert.match(source("edit.js"), /\nfunction lockLoosened\(ctx\) \{/);
+  });
   it("tells her never to rate, report or share a chat about a session, in the skill and in her CLAUDE.md", () => {
     for (const text of [skill, files["CLAUDE.md"]]) assert.match(text, /Never rate, report or share a chat about a session/);
   });
@@ -381,13 +430,15 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const edits = rowOf('"Keep 1 and 3" / "Drop 2" / "Change 3"');
     for (const [list, fields] of Object.entries(EDITS)) for (const field of fields) assert.ok(edits.includes(`--${field}`), `${list}: --${field}`);
   });
-  it("tells her a teachings refusal plainly, never which account, and once a video is a session calls it by its label alone (Ruling 26c, d)", () => {
+  it("tells her a teachings refusal plainly, never which account, and once a video is a session calls it by its label, or the name she gave it (Ruling 26c, d)", () => {
     assert.ok(rowOf('"Its teachings" / "Get the teachings of <label>"').includes("never say which account"));
     const sessions = sectionOf(skill, "## A client or group session");
-    assert.ok(sessions.includes("call it only by its label, and never repeat anything the chat holds of it (its file's name, its suggestions, its spellings)"), sessions);
+    assert.ok(sessions.includes("call it only by its label, or the name she gave it, and never repeat anything the chat holds of it (its file's name, its suggestions, its spellings)"), sessions);
     // Each "Once …" paragraph is one of its own.
     assert.ok(sessions.includes("\n\nOnce a video is a session"), sessions);
-    assert.ok(rowOf('"It was a session after all"').includes("From then on call it only by its label"));
+    assert.ok(rowOf('"It was a session after all"').includes("From then on call it only by its label, or the name she gave it, and never repeat anything the chat holds of it."));
+    // Her given name is shown as the session's name (episode.js shownName), so the skill has no other word for it than these two.
+    assert.doesNotMatch(skill, /only by its label(?!, or the name she gave it)/);
   });
   it("keeps out of the chat a session's and an unanswered video's words, and who agreed to a Reel", () => {
     for (const words of ["Never read, quote or ask her to paste such a file", "Never ask who agreed in the chat", "Claude cannot press it"]) assert.ok(skill.includes(words), words);
