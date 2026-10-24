@@ -1672,6 +1672,23 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     });
     const READABLE = "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again.";
     const HEAD_UNREAD = "Not written: the drop folder would change from Unedited Video to Drop, and the old one could not be looked at:";
+    it("refuses when the late checks this Mac owes cannot be read, and says no imported video is one to delete then: which still wait for one is not known", async () => {
+      // An unread folder of late checks would read as none owed, and every imported video would be said to be one to delete.
+      const t = mac();
+      const old = t.folder();
+      put(old, "Budget.mov", "123456");
+      t.episode("2026-10-20 Budget (Mac Studio)", "Budget.mov", 6);
+      owe(t, "2026-10-20 Budget (Mac Studio)", "Budget.mov", 6, old);
+      chmodSync(pendingFolder(t.home), 0o000);
+      try {
+        const said = await refused(t, "--drop", "Drop");
+        assert.deepEqual(said, [HEAD_UNREAD, `  The late checks this Mac still owes, in ${pendingFolder(t.home)}, could not be read (EACCES), so which videos still wait for one is not known.`, READABLE]);
+        assert.ok(!said.some((line) => /Delete|take the video out/.test(line)), said.join("\n"));
+      } finally {
+        chmodSync(pendingFolder(t.home), 0o755);
+      }
+      t.done();
+    });
     it("refuses when the old folder cannot be read, and says so with the code and the folder's own path: only a folder that is not there is empty", async () => {
       const t = mac({ import: "light" });
       const old = t.folder();
