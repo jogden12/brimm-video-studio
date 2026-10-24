@@ -36,8 +36,8 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared } from "./gate.js";
-import { isSeenLine, isZoomName, namesOf, sessionLabel, spokenMac, withoutNames } from "./kinds.js";
+import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -45,7 +45,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding, holdingOf, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { heldBy, commitOf, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
@@ -329,21 +329,8 @@ const isGated = (e) => e.records.filter(recordShaped).some(gated) || e.held;
     force. */
 const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held ? e.inForce : undefined);
 
-/** Whether a record has a label of the import's to be named by. */
-const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
-
-/** How a video held as a session is named, wherever a gated one is named by its label (shownName): by its label, or with none (a
-    video from before the switch), as "a video (<short id>)", never by its name, which may be its file's. */
-const heldName = (r) => (isLabelled(r) ? r.label : `a video (${String(r.id).slice(-6)})`);
-
-/** How the record `r` of a gated episode is named: as shownName names a gated record, and by heldName when it is held as a session
-    (`held`) and not gated itself. */
-const gatedName = (r, held) => (held && !gated(r) ? heldName(r) : shownName(r));
-
-/** How the record of an episode that holds a video in a drop folder is named where a gated one is named by its label (filing.js
-    episodeHolding's `gatedAs`, which says its short id after it), through `links` (finish.js linksOf): as shownName names a gated
-    record, one held as a session by its label or as "a video", and "" for any other, which is named by its folder. */
-const gatedAsOf = (links) => (record) => (gated(record) ? shownName(record) : recordKind(record) !== null && links.sessionsBeside(record).length > 0 ? (isLabelled(record) ? record.label : "a video") : "");
+// isLabelled, heldName, gatedName and gatedAsOf, how a gated record or one held as a session is named, are gate.js's: the
+// installer's check of the old drop folder (switch.js) names a video by them too.
 
 /** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
 const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
@@ -368,9 +355,8 @@ function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
     const r = gatedRecord(e);
-    // A video held as a session with no label is named by its short id already: it is said once.
-    if (e.held && !gated(r) && !isLabelled(r)) return heldName(r);
-    return `${gatedName(r, e.held)} (${String(r.id).slice(-6)})`;
+    // A gated video, or one held as a session, with no label is named by its short id already: it is said once.
+    return withShortId(gatedName(r, e.held), r);
   }
   if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
   return e.name;
@@ -485,17 +471,8 @@ export function findEpisode(ctx, said) {
   return { why: all.length ? `No episode fits ${asked}. The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
-/** A size in bytes as a person reads it: "3.0 MB", "300 GB". */
-export function sizeText(bytes) {
-  const units = ["bytes", "KB", "MB", "GB", "TB"];
-  let n = bytes;
-  let u = 0;
-  while (n >= 1024 && u < units.length - 1) {
-    n /= 1024;
-    u += 1;
-  }
-  return u === 0 ? `${n} bytes` : `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[u]}`;
-}
+/** A size in bytes as a person reads it (kinds.js sizeText). */
+export { sizeText };
 
 /** A stretch of time as a person reads it: "25 minutes", "2 hours", "3 days". */
 export function ageText(ms) {
@@ -550,15 +527,29 @@ function importLines(ctx, fits = () => true) {
   });
 }
 
+/** The drop folders of the Macs, each as { mac, folder }, this Mac's first and the others by name. This Mac's is the one its own
+    settings name (Unedited Video, or Drop once the installer has switched it), and no other. Another Mac's settings are on that
+    Mac, so which of its folders it watches is not known here, and both are listed, Drop/<Mac> and Unedited Video/<Mac>, whichever
+    there are: a video is never hidden, though one left in a folder that Mac no longer watches shows as waiting. (A marker in
+    Drop/<Mac> is no sign that it watches it: it stays after a switch back, and after a run that was refused once it was made.)
+    The Macs are the folders in either parent. */
+function dropFolders(ctx) {
+  const inRoot = (parent) => {
+    try {
+      return readdirSync(join(ctx.root, parent)).filter((n) => !n.startsWith("."));
+    } catch (e) {
+      return [];
+    }
+  };
+  const macs = [...new Set([...inRoot("Unedited Video"), ...inRoot("Drop")])].sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
+  return macs.flatMap((mac) => (mac === ctx.machine ? [dropFolder(ctx.root, mac, ctx.settings.drop)] : ["Drop", "Unedited Video"].map((parent) => dropFolder(ctx.root, mac, parent))).map((folder) => ({ mac, folder })));
+}
+
 /** The label a status of the Mac `machine` gives the video `video` in its drop folder, of a light import (Part L), or "". */
 function labelIn(statuses, video, machine) {
   const labelled = statuses.find(({ status }) => status && status.video === video && status.machine === machine && status.label);
   return labelled ? labelled.status.label : "";
 }
-
-/** A video in a drop folder that has no label, as it is named on a Mac that does the light import: by what it is and its size,
-    as "a video of 1.2 GB" or "a Zoom download of 300 MB", and never by its file, which may be named for a client. */
-const unlabelled = (video, bytes) => `${isZoomName(video) ? "a Zoom download" : "a video"} of ${sizeText(bytes)}`;
 
 /** How a video came, in the words of her card (answer.came, as episode.js CAMES has them). */
 const CAME_WORDS = { camera: "from a camera", phone: "from an iPhone", zoom: "as a Zoom download", sound: "as sound alone" };
@@ -680,25 +671,18 @@ export async function episodes(ctx) {
     for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
   // The videos in each Mac's drop folder.
-  const drops = join(ctx.root, "Unedited Video");
   const light = lightImport(ctx.settings);
   const statuses = readStatuses(ctx.root, ctx.now());
   const waiting = [];
-  let macs = [];
-  try {
-    macs = readdirSync(drops).filter((n) => !n.startsWith(".")).sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
-  } catch (e) {
-    // There are no drop folders yet.
-  }
-  for (const mac of macs) {
+  for (const { mac, folder } of dropFolders(ctx)) {
     let names = [];
     try {
-      names = readdirSync(join(drops, mac)).filter(isMedia).sort();
+      names = readdirSync(folder).filter(isMedia).sort();
     } catch (e) {
       continue;
     }
     for (const video of names) {
-      const found = ctx.stat(join(drops, mac, video));
+      const found = ctx.stat(join(folder, video));
       if (!found) continue;
       const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
@@ -710,8 +694,8 @@ export async function episodes(ctx) {
       // holds, is named by its label, which retry takes, or by what it is and its size, whichever Mac this is; and so is every
       // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
       const label = labelIn(statuses, video, mac);
-      const holding = holdingOf({ root: ctx.root, video, bytes: found.size });
-      if (!light && !label && !(holding && gatedAsOf(links)(holding.record))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
+      const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
+      if (!light && !label && !(holding && (holding.unknown || gatedAsOf(links)(holding.record)))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
       else {
         const who = label || capital(unlabelled(video, found.size));
         waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
@@ -1443,7 +1427,7 @@ export async function retry(ctx, rest) {
     say(HELP);
     return 2;
   }
-  const drop = dropFolder(ctx.root, ctx.machine);
+  const drop = dropFolder(ctx.root, ctx.machine, ctx.settings.drop);
   let videos = [];
   try {
     videos = readdirSync(drop).filter(isMedia).sort();
@@ -1459,8 +1443,8 @@ export async function retry(ctx, rest) {
   // An episode a version of a session holds is held as a session too (episodeAt's `held`), and named so.
   const gatedAs = gatedAsOf(linksOf(ctx.root));
   const quiet = (v) => {
-    const holding = holdingOf({ root: ctx.root, video: v, bytes: sizeOf(v) });
-    return light || Boolean(labelOf(v)) || Boolean(holding && gatedAs(holding.record));
+    const holding = holdingEpisode({ root: ctx.root, video: v, bytes: sizeOf(v) });
+    return light || Boolean(labelOf(v)) || Boolean(holding && (holding.unknown || gatedAs(holding.record)));
   };
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {

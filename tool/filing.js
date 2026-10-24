@@ -12,21 +12,22 @@ import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
-import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, writeEpisode, shownName } from "./episode.js";
+import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
 import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
-import { gated } from "./gate.js";
+import { gated, withShortId } from "./gate.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
 
 /** Whether the import of the watched folder `dir` makes episodes: when this Mac has `settings` and `dir` is its own drop
-    folder. Otherwise the import does what it did before episodes, filing each video into a folder for the day. */
-export const episodeMode = (dir, settings) => Boolean(settings) && resolve(dir) === resolve(dropFolder(settings.root, settings.machine));
+    folder, the one its `drop` setting names (Unedited Video when it names none). Otherwise the import does what it did before
+    episodes, filing each video into a folder for the day. */
+export const episodeMode = (dir, settings) => Boolean(settings) && resolve(dir) === resolve(dropFolder(settings.root, settings.machine, settings.drop));
 
 /** What kind of episode a video makes, by its facts: a short video when its picture is upright or square, or it is shorter
     than 90 seconds, and an episode otherwise. A short video gets no upright version and no Reels. A recording of sound alone
@@ -36,12 +37,15 @@ export function episodeKind(facts) {
   return facts.width <= facts.height || facts.duration < SHORT_UNDER ? "short video" : "episode";
 }
 
-/** The folders in Episodes that this Mac would have named for a video: any day, the video's name, this Mac's, and a number
-    or none. */
+/** The folders in Episodes that the Mac `machine` would have named for a video: any day, the video's name, that Mac's, and a
+    number or none. With no `machine`, the folders either Mac would have named for it, any Mac's name in its brackets. */
 function namedFor(name, stem, machine) {
-  const tail = ` ${fileSafe(stem)} (${machine})`;
+  const tail = ` ${fileSafe(stem)} (`;
   const i = name.indexOf(tail);
-  return /^\d{4}-\d{2}-\d{2}$/.test(name.slice(0, i)) && /^(-\d+)?$/.test(name.slice(i + tail.length));
+  if (i < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(name.slice(0, i))) return false;
+  const rest = name.slice(i + tail.length);
+  if (machine === undefined) return /^.+\)(-\d+)?$/.test(rest);
+  return rest.startsWith(`${machine})`) && /^(-\d+)?$/.test(rest.slice(machine.length + 1));
 }
 
 /** The size of a file, or -1 when it is not there. */
@@ -227,32 +231,65 @@ export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
   return "";
 }
 
-/** The episode whose whole record names the video `video`, of `bytes` bytes: { name, record }, by its folder's name, or null
-    when none does. */
-export function holdingOf({ root, video, bytes }) {
+/** The episode that holds the video `video`, of `bytes` bytes, as { name, record }: the first, by its folder's name, one of whose
+    records names the video at that size, its record in force or a conflicted copy Dropbox keeps of one, read past the copies as
+    edit.js reads an episode the gate holds by any of its records. `record` is the one to name it by: the first of them that the
+    gate holds (gate.js gated), else the record in force. null when none does; { unknown: true } when none does, but Episodes
+    could not be read, or an episode that could be its, one in a folder either Mac would have named for this video (namedFor),
+    could not be read (its folder or its records), or has a record that is not whole yet: what holds the video cannot then be
+    told, and it is not to be named by its file, since it may be a session's. An episode named for another video that cannot be
+    read changes nothing for this one. */
+export function holdingEpisode({ root, video, bytes }) {
   const episodes = episodesFolder(root);
   let names = [];
   try {
     names = readdirSync(episodes).filter((n) => !n.startsWith("."));
   } catch (e) {
-    return null;
+    return e.code === "ENOENT" ? null : { unknown: true };
   }
+  const holds = (r) => r && typeof r === "object" && r.video && r.video.file === video && r.video.bytes === bytes;
+  const shaped = (r) => r !== null && typeof r === "object" && typeof r.id === "string" && Number.isInteger(r.version);
+  const stem = basename(video, extname(video));
+  let unknown = false;
   for (const name of names.sort()) {
-    const { record } = readEpisode(join(episodes, name));
-    if (record && record.video && record.video.file === video && record.video.bytes === bytes) return { name, record };
+    const folder = join(episodes, name);
+    const read = readEpisode(folder);
+    const past = read.code === "CONFLICTED" ? readEpisode(folder, { pastCopies: true }) : null;
+    const inForce = read.record || (past && past.record) || null;
+    const records = [inForce, ...(past ? recordCopies(folder) : [])].filter(shaped);
+    if (records.some(holds)) return { name, record: records.find(gated) || inForce || records.find(holds) };
+    if (!inForce && namedFor(name, stem) && cannotTell(folder, past || read)) unknown = true;
   }
-  return null;
+  return unknown ? { unknown: true } : null;
+}
+
+/** Whether the episode folder `folder`, of which `read` (readEpisode's) gave no whole record, may hold a record this Mac cannot
+    read yet: the folder, or its record folder, cannot be read, or a record file is there that is not whole. A name in Episodes
+    that is not a folder, and a folder with no record folder or no record in it, holds none. */
+function cannotTell(folder, read) {
+  if (read.code === "UNREADABLE") {
+    try {
+      return statSync(folder).isDirectory();
+    } catch (e) {
+      return e.code !== "ENOENT";
+    }
+  }
+  try {
+    return readdirSync(join(folder, RECORD_DIR)).some((n) => /^\d{4}\.json$/.test(n));
+  } catch (e) {
+    return !["ENOENT", "ENOTDIR"].includes(e.code);
+  }
 }
 
 /** Why an episode holds the video `video`, of `bytes` bytes, in plain words: its whole record names the video at that size
-    (holdingOf). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
+    (holdingEpisode). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
     label and short id (shownName): its folder holds the file's name, which may be a client's. `gatedAs` gives the name of a
     record named so ("" for one named by its folder): edit.js gives one that names a video held as a session so too. */
 export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : "") }) {
-  const held = holdingOf({ root, video, bytes });
-  if (!held) return "";
+  const held = holdingEpisode({ root, video, bytes });
+  if (!held || held.unknown) return "";
   const as = gatedAs(held.record);
-  return `already imported as ${as ? `${as} (${held.record.id.slice(-6)})` : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+  return `already imported as ${as ? withShortId(as, held.record) : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,
@@ -330,7 +367,7 @@ export const importIdOf = (id) => (id ? Number(id.ino).toString(36) : "");
 export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
 
 /** A time of day as a person reads it, "10:15". */
-const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
+export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 /** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
 const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });

@@ -7,7 +7,7 @@
 // Nothing here runs a real program or touches Dropbox: each test has a root and a home of its own, and the programs are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs, { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -872,6 +872,114 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     clientEpisode(t);
     const { lines } = await cardOf(t);
     assert.deepEqual(lines, ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
+    t.done();
+  });
+});
+
+describe("a gated record with no label, named by its short id once", () => {
+  // shownName names a gated record that has no label by its short id ("a client or group session (0c0c0c)"): a list, or the line of
+  // a video an episode holds, that says the short id after the name says it once.
+  const UNLABELLED_SESSION = { kind: "session", answer: ANSWERED, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } };
+  it("is listed once by its short id among the episodes a command names", () => {
+    const t = setup();
+    clientEpisode(t, { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", label: "", over: UNLABELLED_SESSION });
+    clientEpisode(t, { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED } });
+    const why = findEpisode(ctxOf(t), "nothing fits this").why;
+    assert.equal(why, 'No episode fits "nothing fits this". The episodes are: a client or group session (0c0c0c) and 2026-10-18 Pricing talk (Mac Studio).');
+    t.done();
+  });
+  it("is said once by its short id as what holds a video waiting in the drop folder", async () => {
+    const t = setup();
+    writeSettings(t.home, { import: "light" });
+    clientEpisode(t, { label: "", over: UNLABELLED_SESSION });
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, VIDEO), "video");
+    const said = (await on(depsOf(t), "episodes")).said;
+    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete."), said.join("\n"));
+    assert.doesNotMatch(said.join("\n"), SECRET);
+    t.done();
+  });
+});
+
+describe("a video in the drop folder whose episode has a conflicted copy, or cannot be read, on a Mac whose import is not the light one", () => {
+  // What holds a video is found past the conflicted copies Dropbox keeps of an episode's records, as edit.js finds the episode the
+  // gate holds by any of them; and a video whose holder cannot be told, since Episodes or an episode's records cannot be read, is
+  // never named by its file: it may be a session's.
+  const UNLABELLED_SESSION = { kind: "session", answer: ANSWERED, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } };
+  const HELD = "a client or group session (a1b2c3)";
+  /** A session with no label, whose mark is not cleared, holds the client's video, which waits in this Mac's drop folder. */
+  const sessionHolding = (t) => {
+    const e = clientEpisode(t, { label: "", over: UNLABELLED_SESSION });
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, VIDEO), "video");
+    return e;
+  };
+  /** The lines `episodes` says of the drop folders, from their heading to the next heading. */
+  const waitingIn = (said) => {
+    const at = said.indexOf("Waiting in the drop folders:");
+    const end = said.findIndex((line, i) => i > at && !line.startsWith("  "));
+    return at < 0 ? [] : said.slice(at, end < 0 ? undefined : end);
+  };
+  it("episodes and retry name it as the session's video, read past a conflicted copy of its record", async () => {
+    const t = setup();
+    conflictedRecord(sessionHolding(t).folder);
+    const said = (await on(depsOf(t), "episodes")).said;
+    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", `  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]);
+    assert.doesNotMatch(said.join("\n"), SECRET);
+    const none = await on(depsOf(t), "retry", "nothing fits this");
+    assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.']);
+    const named = await on(depsOf(t), "retry", VIDEO);
+    assert.deepEqual([named.code, named.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]]);
+    t.done();
+  });
+  it("episodes and retry name it by what it is and its size when the episode's records, or Episodes, cannot be read", async () => {
+    for (const which of ["record", "Episodes"]) {
+      const t = setup();
+      const e = sessionHolding(t);
+      const shut = which === "record" ? join(e.folder, "record") : join(t.root, "Episodes");
+      chmodSync(shut, 0o000);
+      try {
+        const said = (await on(depsOf(t), "episodes")).said;
+        assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"], which);
+        const none = await on(depsOf(t), "retry", "nothing fits this");
+        assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.'], which);
+        assert.doesNotMatch([...waitingIn(said), ...none.said].join("\n"), SECRET);
+      } finally {
+        chmodSync(shut, 0o755);
+      }
+      t.done();
+    }
+  });
+  it("names it by its file as today when an episode that cannot be read is not named for it: only one that could be its makes it untold", async () => {
+    const t = setup();
+    const e = clientEpisode(t, { folder: "2026-10-19 Budget (Mac Studio)", video: "Budget.mov", id: "e-20261019-0c0c0c", over: { kind: "finished", answer: ANSWERED } });
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    const shut = join(e.folder, "record");
+    chmodSync(shut, 0o000);
+    try {
+      assert.deepEqual(waitingIn((await on(depsOf(t), "episodes")).said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
+      assert.deepEqual((await on(depsOf(t), "retry", "nothing fits this")).said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: Talk.mov.']);
+    } finally {
+      chmodSync(shut, 0o755);
+    }
+    t.done();
+  });
+  it("names it by its file as today when an episode that can be read holds it and is answered, or nothing holds it", async () => {
+    const t = setup();
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    const said = (await on(depsOf(t), "episodes")).said;
+    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
+    // Held by an answered episode, with a conflicted copy of its record: by its file, and the episode by its folder, as today.
+    const e = clientEpisode(t, { folder: "2026-10-18 Talk (Mac Studio)", video: "Talk.mov", id: "e-20261018-0d0d0d", label: "", over: { kind: "finished", answer: ANSWERED } });
+    conflictedRecord(e.folder);
+    const held = (await on(depsOf(t), "episodes")).said;
+    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]);
     t.done();
   });
 });

@@ -2039,10 +2039,13 @@ export async function uneditedFolder(dir, deps) {
   // A drop folder for episodes is never worked the old way, which renames the video into a folder for the day in Dropbox:
   // when this Mac's settings cannot be used for it, nothing is done there, and the log says why.
   const marker = join(dir, ".brimm-watched-by");
-  const dropFolderOf = existsSync(marker) || (basename(dirname(resolve(dir))) === "Unedited Video" && basename(dirname(dirname(resolve(dir)))) === "BRIMM Video");
-  if (!episodic && dropFolderOf) {
+  // A folder directly in BRIMM Video/Unedited Video/, or in BRIMM Video/Drop/ once the switch names Drop, is a drop folder: the
+  // log names the one it is in.
+  const parent = basename(dirname(resolve(dir)));
+  const inBrimmVideo = ["Unedited Video", "Drop"].includes(parent) && basename(dirname(dirname(resolve(dir)))) === "BRIMM Video";
+  if (!episodic && (existsSync(marker) || inBrimmVideo)) {
     const owner = existsSync(marker) ? readFileSync(marker, "utf8").split("\n")[0] : "";
-    log(`This is a drop folder for episodes (${owner ? `${marker} names ${owner}` : "it is in BRIMM Video/Unedited Video"}), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`);
+    log(`This is a drop folder for episodes (${owner ? `${marker} names ${owner}` : `it is in BRIMM Video/${parent}`}), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`);
     return [];
   }
   // The lock of this Mac's drop folder is kept in BRIMM Video Work, so that a run started by hand and the launch agent's,

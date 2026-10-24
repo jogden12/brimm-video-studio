@@ -1083,3 +1083,90 @@ describe("an episode a newer brimm-video wrote, named by its short id alone (Par
     t.done();
   });
 });
+
+describe("the drop folders the settings name (the switch to Drop)", () => {
+  /** A Mac whose settings name `drop` for its drop folder, with its own folder made there. Another Mac's folders are made by
+      `other(parent, mac, marked)`: in BRIMM Video/<parent>/<mac>, with a marker naming the Mac when `marked`, as the installer
+      writes it. Videos are put into a folder by `put(folder, name)`. */
+  function dropping(drop) {
+    const t = setup();
+    if (drop) writeSettings(t.home, { drop });
+    const place = (parent, mac) => join(t.root, parent, mac);
+    const own = place(drop || "Unedited Video", "Mac Studio");
+    mkdirSync(own, { recursive: true });
+    const other = (parent, mac, marked) => {
+      mkdirSync(place(parent, mac), { recursive: true });
+      if (marked) writeFileSync(join(place(parent, mac), ".brimm-watched-by"), `${mac}\n`);
+      return place(parent, mac);
+    };
+    const put = (folder, name) => writeFileSync(join(folder, name), "x".repeat(5));
+    return { ...t, own, other, put, place };
+  }
+  const WAITING = (r) => r.said.slice(r.said.indexOf("Waiting in the drop folders:") + 1).filter((line) => /^ {2}\S.*, in .*'s, for /.test(line)).map((line) => line.replace(/, for .*$/, ""));
+  it("episodes lists this Mac's videos in Drop/<this Mac> and the other Mac's in Drop/<other Mac>, this Mac's first, with no marker read", async () => {
+    const t = dropping("Drop");
+    t.put(t.own, "Talk.mov");
+    // The other Mac's folder is listed, marked or not: another Mac's settings are on that Mac, and no marker is looked for.
+    t.put(t.other("Drop", "Sallie's laptop", false), "Budget.mov");
+    const r = await t.run("episodes");
+    assert.ok(r.said.includes("Waiting in the drop folders:"), r.text);
+    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    t.done();
+  });
+  it("episodes lists a video in either of the other Mac's folders, Drop/<other Mac> and Unedited Video/<other Mac>: none is ever hidden", async () => {
+    const t = dropping("Drop");
+    t.put(t.other("Drop", "Sallie's laptop", true), "Budget.mov");
+    t.put(t.other("Unedited Video", "Sallie's laptop", true), "Stray.mov");
+    const r = await t.run("episodes");
+    assert.deepEqual(WAITING(r), ["  Budget.mov, in Sallie's laptop's", "  Stray.mov, in Sallie's laptop's"]);
+    t.done();
+  });
+  it("episodes lists the other Mac's videos in its old folder after it was switched back, though its marker is still in Drop/<other Mac>", async () => {
+    // A marker outlives a switch back (--drop "Unedited Video"), and a run refused after it made the marker leaves one too.
+    const t = dropping("Drop");
+    t.other("Drop", "Sallie's laptop", true);
+    t.put(t.other("Unedited Video", "Sallie's laptop", true), "Budget.mov");
+    const r = await t.run("episodes");
+    assert.deepEqual(WAITING(r), ["  Budget.mov, in Sallie's laptop's"]);
+    t.done();
+  });
+  it("episodes lists a video in the other Mac's Drop folder whatever marker it holds, even another Mac's", async () => {
+    const t = dropping("Drop");
+    t.put(t.other("Drop", "Third Mac", false), "Third.mov");
+    writeFileSync(join(t.place("Drop", "Third Mac"), ".brimm-watched-by"), "Sallie's laptop\n");
+    const r = await t.run("episodes");
+    assert.deepEqual(WAITING(r), ["  Third.mov, in Third Mac's"]);
+    t.done();
+  });
+  it("episodes does not list this Mac's old Unedited Video folder, which is no longer watched, once its settings say Drop", async () => {
+    const t = dropping("Drop");
+    t.put(t.own, "Talk.mov");
+    t.put(t.place("Unedited Video", "Mac Studio"), "Old.mov");
+    const r = await t.run("episodes");
+    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's"]);
+    t.done();
+  });
+  it("episodes lists as it did when the settings name no drop folder: this Mac's Unedited Video folder first and the other Mac's after it", async () => {
+    const t = dropping(undefined);
+    t.put(t.own, "Talk.mov");
+    t.put(t.other("Unedited Video", "Sallie's laptop", true), "Budget.mov");
+    const r = await t.run("episodes");
+    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    // This Mac's own Drop folder, which its settings do not name, is not watched by it, and its videos are not listed as waiting.
+    t.put(t.other("Drop", "Mac Studio", false), "Stray.mov");
+    assert.deepEqual(WAITING(await t.run("episodes")), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    t.done();
+  });
+  it("retry finds a video in Drop/<this Mac> when the settings say Drop, and not one left in the old folder", async () => {
+    const t = dropping("Drop");
+    t.put(t.own, "Talk.mov");
+    t.put(t.place("Unedited Video", "Mac Studio"), "Old.mov");
+    const kicked = [];
+    t.deps.kickstart = () => kicked.push("com.thebrimm.unedited");
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said, kicked], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"]]);
+    const old = await t.run("retry", "old");
+    assert.deepEqual([old.code, old.said], [1, ['No video in this Mac\'s drop folder fits "old". It holds: Talk.mov.']]);
+    t.done();
+  });
+});

@@ -27,6 +27,21 @@ describe("whether a watched folder is this Mac's drop folder", () => {
     assert.equal(episodeMode("/Users/jasonogden/Dropbox/BRIMM VIDEO Transfer/Unedited Video Transfer", SETTINGS), false);
     assert.equal(episodeMode(`${ROOT}/Unedited Video/Sallie's laptop`, SETTINGS), false);
   });
+  // A Mac whose settings say Drop watches Drop/<Mac>. If the import still took the old folder for the drop folder, it would file
+  // each video the old way, renaming it into a folder for the day inside Dropbox, which the rule for Dropbox forbids.
+  it("is, when this Mac's settings name Drop, for Drop/<this Mac>, and no longer for Unedited Video/<this Mac>", () => {
+    const drop = { ...SETTINGS, drop: "Drop" };
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, drop), true);
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio/`, drop), true);
+    assert.equal(episodeMode(`${ROOT}/Unedited Video/Mac Studio`, drop), false);
+    assert.equal(episodeMode(`${ROOT}/Drop/Sallie's laptop`, drop), false);
+  });
+  it("is as it was when the settings name Unedited Video or no drop folder: Drop/<this Mac> is then no drop folder of this Mac's", () => {
+    for (const settings of [SETTINGS, { ...SETTINGS, drop: "Unedited Video" }]) {
+      assert.equal(episodeMode(`${ROOT}/Unedited Video/Mac Studio`, settings), true);
+      assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, settings), false);
+    }
+  });
 });
 
 describe("the kind of episode a video makes", () => {
@@ -278,5 +293,25 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, video: ZOOM[1], bytes: 7, seconds: null, step: "Held", at: "2026-10-23T10:00:00-04:00", held: HELD }, (to, text) => writeFileSync(to, text));
     assert.equal(heldBy({ root: t.root, video: ZOOM[1], bytes: 7 }), HELD);
     t.done();
+  });
+});
+
+describe("heldBy, for a video whose episode has a conflicted copy of its record", () => {
+  it("finds the episode past the copy, so the import holds the video, and names a session with no label by its short id once", () => {
+    // Before, readEpisode stopped at the copy, nothing held the video, and the import would have imported it again.
+    const root = join(mkdtempSync(join(tmpdir(), "brimm-held-")), "BRIMM Video");
+    const folder = join(root, "Episodes", "2026-10-22 Coaching call Jane Doe (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const at = "2026-10-22T10:00:00-04:00";
+    const record = {
+      ...newEpisode({ id: "e-20261022-3fa9c1", machine: "Mac Studio", at, video: { file: "Coaching call Jane Doe.mp4", bytes: 5, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" } }),
+      rev: 1, version: 3, kind: "session",
+      answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at, private: "yes" },
+      session: { marked: at, on: "Mac Studio", teachings: null, cleared: null }
+    };
+    writeFileSync(recordFile(folder, 1), recordText(record));
+    writeFileSync(join(folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), recordText(record));
+    assert.equal(heldBy({ root, video: "Coaching call Jane Doe.mp4", bytes: 5 }), "already imported as a client or group session (3fa9c1). It stays in the drop folder until its late check passes, or for a person to delete.");
+    rmSync(dirname(root), { recursive: true, force: true });
   });
 });
