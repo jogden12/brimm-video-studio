@@ -232,6 +232,41 @@ describe("read, a finished video", () => {
 });
 
 describe("read, an iPhone clip", () => {
+  const SAYS = `Claude says it is: A clip about knowing your costs. Say "what did Claude find?"`;
+  it("says its line on what the clip is with what it found: in the reading's result, in status, and in kind's own wait (final fix 11)", async () => {
+    const { t } = reading("short video");
+    assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+    assert.equal(readResult(t.home, FOLDER, "read").next, SAYS);
+    const status = await on(t.ctx.deps, "status");
+    assert.ok(status.said.includes(`${FOLDER}: read ended 0 minutes ago. Made: a line on what the clip is, 1 spelling to check. ${SAYS}`), status.text);
+    t.done();
+    // Answered on the card, its reading started by kind and waited for in the foreground, as the Mac would run it.
+    const u = reading("short video", { over: { kind: null, answer: { state: "needs your answer", guess: "clip", seen: "upright, 0:23", came: "phone", match: null }, editing: null } });
+    let run = null;
+    u.t.ctx.deps.start = (cmd, args) => {
+      run = on(u.t.ctx.deps, ...args.slice(1));
+    };
+    const wait = u.t.ctx.deps.wait;
+    u.t.ctx.deps.wait = async (ms) => {
+      if (ms === READ_POLL_MS && run) await run;
+      await wait(ms);
+    };
+    const kind = await on(u.t.ctx.deps, "kind", LABEL, "clip", "--private", "no");
+    assert.deepEqual([kind.code, kind.said], [0, [`${LABEL}: read ended 0 minutes ago. Made: a line on what the clip is, 1 spelling to check. ${SAYS}`]]);
+    u.t.done();
+  });
+  it("takes the names of the clip's file out of its line", async () => {
+    const { t } = reading("short video", { reply: { ...CLIP_REPLY, about: "Pricing talk, a clip about costs." } });
+    assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+    assert.equal(readResult(t.home, FOLDER, "read").next, `Claude says it is: the video, a clip about costs. Say "what did Claude find?"`);
+    t.done();
+  });
+  it("says only what it found when Claude gave no line on what the clip is", async () => {
+    const { t } = reading("short video", { reply: { ...CLIP_REPLY, about: "" } });
+    assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+    assert.equal(readResult(t.home, FOLDER, "read").next, 'Say "what did Claude find?"');
+    t.done();
+  });
   it("writes the spellings as offers and its line on what the clip is, and no suggestions", async () => {
     const { t, found, asks, notices } = reading("short video");
     const r = await on(t.ctx.deps, ...readArgs("short video"));
@@ -450,8 +485,11 @@ describe("read never quotes Claude's reply or the transcript in its log or its r
       const { t } = reading(kind, { reply: { ...odd(REPLIES[kind]), decisions: [{ id: "p99", keep: false, why: "Zebra" }], clips: [...(REPLIES[kind].clips || []), { from: "Quokka", to: "p5", hook: "Zebra", why: "Zebra" }] } });
       const r = await on(t.ctx.deps, ...readArgs(kind));
       assert.equal(r.code, 0, r.text);
+      // An iPhone clip's one line on what it is, which is for her, is the only words of the reply its result holds (final fix 11).
+      const about = kind === "short video" ? `Claude says it is: ${odd(REPLIES[kind]).about.replace(/\.$/, "")}. ` : "";
       const result = readFileSync(resultFile(t.home, FOLDER, "read"), "utf8");
-      for (const what of [r.text, result]) {
+      if (about) assert.ok(result.includes(about), result);
+      for (const what of [r.text, result.replace(about, "")]) {
         assert.doesNotMatch(what, SECRET, `${kind}: ${what}`);
         assert.doesNotMatch(what, TRANSCRIPT, `${kind}: ${what}`);
       }

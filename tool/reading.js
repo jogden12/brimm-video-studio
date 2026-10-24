@@ -39,6 +39,7 @@ import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { lastLine } from "./run.js";
 import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
+import { namesOf, withoutNames } from "./kinds.js";
 import { TEACHINGS_FORMAT, accountWhy, teachingsWhy, teachingsFiles, earlierTeachings, sessionSeen, seenFrom, planOf, teachingsText, ideasText } from "./teachings.js";
 
 /** How often a raw reading looks again while the import's late check holds its video, and how long it waits in all before it
@@ -482,6 +483,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   }
   if (planLast) text(`${stem}.cut-plan.json`, planLast);
   if (kind === "short video") made.push("a line on what the clip is");
+  // An iPhone clip's one line on what it is is for her: said with what was found, in the result's `next`, which `kind`'s wait and
+  // `status` say, once the name filter has taken out of it the names of its file (kinds.js withoutNames), as a line about a video
+  // named by its label is. It is the only words of Claude's reply a result holds. With no line, what to say next alone.
+  const about = kind === "short video" && typeof read.about === "string" ? withoutNames(read.about, namesOf(record.video.file), [], { paths: false }).trim().replace(/[\s.]+$/, "") : "";
+  const saidNext = about ? `Claude says it is: ${about}. ${FOUND}` : FOUND;
   const offered = (r) => offersFor(read.spellings, r);
   const spellingCount = offered(record).length;
   if (spellingCount) made.push(`${counted(spellingCount, "spelling")} to check`);
@@ -511,7 +517,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     } catch (e) {
       // A notice is a courtesy: the result says the same.
     }
-    if (deps.early) deps.early({ ok: okNow(), made, failed: [...failed], next: FOUND });
+    if (deps.early) deps.early({ ok: okNow(), made, failed: [...failed], next: saidNext });
   };
   const file = record.video.file;
   // An iPhone clip's reading changes the record alone: it is written by the rule, as a command that writes only the record writes
@@ -531,7 +537,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
       // A notice is a courtesy: the result says the same.
     }
     log(`${named}: read.`);
-    return { ok: true, made, failed, next: FOUND };
+    return { ok: true, made, failed, next: saidNext };
   }
   // The rule's own lines name the video's file first: the reading names the episode by its name and id.
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
@@ -543,7 +549,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     return { ok: false, made: [], failed: [...failed, ...problems, ...kept], next: AGAIN };
   }
   log(`${named}: read.`);
-  return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: FOUND };
+  return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: saidNext };
 }
 
 /** What a session's reading writes of what Claude read (`read`), by the rule, and the result it ends with (see readEpisodeNow):
