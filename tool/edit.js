@@ -5314,18 +5314,81 @@ function guideFacts(ctx, e, links) {
   };
 }
 
-/** The videos the guide speaks of, from Episodes: { items, old }. Each item (guide.js Item) is an answered video, with what was
-    read of it and its one next step, from her notes on this Mac (guide-note.js) and the time now. An episode with no record that
-    can be read, one a newer brimm-video wrote, an archived one and one she left alone are passed over; one from before the
-    switch, which has no answer, is counted in `old`, and not guided. Of the versions of a video handed off under one id, the
-    BRIMM Ops page's step is said once, for the one with the newest hand-off: the highest revision, and of two at one revision the
-    later written. Another is passed over when its own next step is that page's, or it has none; one whose step is brimm-video's or
-    hers (held as a session, conflicted, shown in Final Cut again since its finish) stays. Her notes and the versions of every
-    video are read once. */
+/** The runs this Mac's progress panel shows now (progress.js): each run's file in the panel's folder, whose process is alive. One
+    being written, or that cannot be read, is passed over, as `status` passes it over. */
+function panelRuns(ctx) {
+  let names = [];
+  try {
+    names = readdirSync(progressFolder(ctx.home)).filter((n) => /^\d+\.json$/.test(n)).sort();
+  } catch (e) {
+    return [];
+  }
+  return names.flatMap((name) => {
+    try {
+      const run = JSON.parse(readFileSync(join(progressFolder(ctx.home), name), "utf8"));
+      return run !== null && typeof run === "object" && ctx.alive(run.pid) ? [run] : [];
+    } catch (e) {
+      return [];
+    }
+  });
+}
+
+/** The videos in the drop folders of the Macs (dropFolders), as the guide reads them: guide.js VideoFacts, with `drop`, `id` ""
+    and `kind` null. How far a video has got is read from the statuses of its Mac's imports of it, a running import and a hold
+    only at the video's size, as heldBy takes them: one dropped again under the same name is another recording. Its import did
+    not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
+    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
+    imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
+    label, else by what it is and its size, never by its file's name, which may be a client's. It came when this Mac's import
+    first saw it (seen.json), as `episodes` says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's
+    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. */
+function guideDrops(ctx) {
+  const now = ctx.now();
+  const statuses = readStatuses(ctx.root, now);
+  const seen = readSeen(ctx.home);
+  const runs = panelRuns(ctx);
+  const videos = [];
+  for (const { mac, folder } of dropFolders(ctx)) {
+    let names = [];
+    try {
+      names = readdirSync(folder).filter(isMedia).sort();
+    } catch (e) {
+      continue;
+    }
+    for (const video of names) {
+      const found = ctx.stat(join(folder, video));
+      if (!found) continue;
+      const mine = statuses.filter(({ status }) => status && status.video === video && status.machine === mac && (!["running", "held"].includes(importState(status, now)) || status.bytes === found.size));
+      const states = mine.map(({ status }) => importState(status, now));
+      const running = mine.find(({ status }) => importState(status, now) === "running");
+      const state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      if (state !== "retry") {
+        const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
+        if (holding && !holding.unknown) continue;
+      }
+      const here = mac === ctx.machine;
+      const label = labelIn(mine, video, mac);
+      const run = here && label ? runs.find((r) => r.video === label) : undefined;
+      const noted = here ? seen[seenKey(video, found)] : undefined;
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null };
+      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
+    }
+  }
+  return videos;
+}
+
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
+    video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
+    (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
+    and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
+    Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
+    hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
+    is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
+    again since its finish) stays. Her notes and the versions of every video are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
-  const items = [];
+  const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
     const e = episodeAt(ctx, name, links);

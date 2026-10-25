@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { writeGuideNotes } from "../guide-note.js";
 import { NOT_SET_UP } from "../guide.js";
+import { writeStatus } from "../importing.js";
+import { progressFolder } from "../progress.js";
 import { setup, episodeAs, otherMac } from "./episodes.js";
 
 async function on(deps, ...argv) {
@@ -162,6 +164,85 @@ describe("guide, from the records", () => {
       'Session, 2026-10-20 (dddddd): On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.',
       "Then: Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.",
       "Step: withdrawn"
+    ]);
+    t.done();
+  });
+});
+
+const writeText = (to, text) => writeFileSync(to, text);
+const dropIn = (t, mac, name, text = "video") => {
+  const dir = join(t.root, "Drop", mac);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, name), text);
+};
+const statusOf = (t, over) => writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:58:00-05:00", ...over }, writeText);
+
+describe("guide, from the drop folders", () => {
+  it("names each video waiting there by its label or what it is, says its step, and leaves out one an episode holds", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    dropIn(t, "Mac Studio", "Second.mov");
+    statusOf(t, { import: "a1", video: "Second.mov", step: "Writing the transcript", label: "Video of 20 Oct, 14:58 (Mac Studio)", pid: 4242 });
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: 0 }));
+    dropIn(t, "Mac Studio", "Third.mov");
+    statusOf(t, { import: "a2", video: "Third.mov", label: "Video of 20 Oct, 14:00 (Mac Studio)", at: "2026-10-20T14:00:00-05:00", failed: "the sound could not be read" });
+    dropIn(t, "Mac Studio", "GMT20261020-140000_Recording.mp4");
+    statusOf(t, { import: "a3", video: "GMT20261020-140000_Recording.mp4", label: "GMT20261020-140000_Recording", step: "Held", held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." });
+    dropIn(t, "Sallie's laptop", "Other.mov", "other video");
+    dropIn(t, "Mac Studio", "Filed.mov");
+    statusOf(t, { import: "a4", video: "Filed.mov", step: "Waiting for its late check" });
+    episodeAs(t, { ...VIDEOS.waiting, record: { ...VIDEOS.waiting.record, video: { file: "Filed.mov", bytes: 5, seconds: 120, recorded: "2026-10-20", recordedFrom: "import" } } });
+    const r = await on(light(t, { alive: (pid) => pid === 4242 }), "guide");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said.slice(0, 3), [DROP_LINE, "Under way:", '  Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa): It is waiting for your answer. Say "what\'s waiting?" to see its card.']);
+    assert.deepEqual(r.said.slice(3).sort(), [
+      '  A video of 11 bytes: It is in the drop folder of Sallie\'s laptop. Wait for the "Ready" notice on that Mac.',
+      '  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.',
+      "  GMT20261020-140000_Recording: It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder.",
+      '  Video of 20 Oct, 14:00 (Mac Studio): Its import did not finish. Say "try it again".',
+      '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at Writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'
+    ]);
+    assert.doesNotMatch(r.said.join("\n"), /Jane|Client|Second|Third|Other|Filed|\.mov|\.mp4/);
+    t.done();
+  });
+  it("says a video being imported, or whose import did not finish, on the other Mac is on that Mac, with no time left from this Mac's panel", async () => {
+    const t = setup();
+    dropIn(t, "Sallie's laptop", "Other.mov", "other video");
+    statusOf(t, { import: "c1", machine: "Sallie's laptop", video: "Other.mov", bytes: 11, step: "Writing the transcript", label: "Video of 20 Oct, 14:50 (Sallie's laptop)", pid: 4343 });
+    // A run in this Mac's panel under the same label, alive: its time is this Mac's, never the other Mac's video's.
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    writeFileSync(join(progressFolder(t.home), "4343.json"), JSON.stringify({ version: 1, pid: 4343, video: "Video of 20 Oct, 14:50 (Sallie's laptop)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: 0 }));
+    dropIn(t, "Sallie's laptop", "Another.mov", "other video");
+    statusOf(t, { import: "c2", machine: "Sallie's laptop", video: "Another.mov", bytes: 11, label: "Video of 20 Oct, 14:40 (Sallie's laptop)", at: "2026-10-20T14:40:00-05:00", failed: "the sound could not be read" });
+    const r = await on(light(t, { alive: (pid) => pid === 4343 }), "guide");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said.slice(2).sort(), [
+      "  Video of 20 Oct, 14:40 (Sallie's laptop): Its import did not finish on Sallie's laptop. Say \"try it again\" on that Mac.",
+      "  Video of 20 Oct, 14:50 (Sallie's laptop): It is being imported on Sallie's laptop, at Writing the transcript. Wait for the \"Ready\" notice on that Mac."
+    ]);
+    assert.doesNotMatch(r.said.join("\n"), /Other|Another|\.mov|minute/);
+    t.done();
+  });
+  // Not in the plan's tests: the other ways an import does not finish, and the size a running import or a hold is taken at.
+  it("says an import that stopped, or whose late check found a problem, did not finish, and takes a running import or a hold of another size for another recording", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Stopped.mov");
+    statusOf(t, { import: "b1", video: "Stopped.mov", label: "Video of 20 Oct, 13:00 (Mac Studio)", at: "2026-10-20T13:00:00-05:00" });
+    dropIn(t, "Mac Studio", "Checked.mov");
+    statusOf(t, { import: "b2", video: "Checked.mov", label: "Video of 20 Oct, 12:00 (Mac Studio)", step: "Waiting for its late check", problem: "a copy did not match" });
+    // Dropped again under the same name, longer: the import and the hold were of the first, and give it no label.
+    dropIn(t, "Mac Studio", "Again.mov", "a longer video");
+    statusOf(t, { import: "b3", video: "Again.mov", label: "Video of 20 Oct, 14:30 (Mac Studio)", step: "Writing the transcript" });
+    dropIn(t, "Mac Studio", "GMT20261020-150000_Recording.mp4", "a longer video");
+    statusOf(t, { import: "b4", video: "GMT20261020-150000_Recording.mp4", label: "GMT20261020-150000_Recording", step: "Held", held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." });
+    const r = await on(light(t), "guide");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said.slice(2).sort(), [
+      '  A Zoom download of 14 bytes: It is coming into your drop folder. Wait for the "Ready" notice.',
+      '  A video of 14 bytes: It is coming into your drop folder. Wait for the "Ready" notice.',
+      '  Video of 20 Oct, 12:00 (Mac Studio): Its import did not finish. Say "try it again".',
+      '  Video of 20 Oct, 13:00 (Mac Studio): Its import did not finish. Say "try it again".'
     ]);
     t.done();
   });
