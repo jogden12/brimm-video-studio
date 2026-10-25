@@ -30,7 +30,7 @@
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
@@ -2233,6 +2233,25 @@ export const LOCK_CHANGED = "This folder's lock is changed on this Mac: ask Jaso
     read in the order of their names). A test gives another, as `managedDir` in its deps. */
 const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 
+/** Where Claude Code reads this Mac's managed preferences, as its 2.1.308 binary says: the user's, <user>/com.anthropic.claudecode.plist,
+    then the Mac's, com.anthropic.claudecode.plist, each made JSON by plutil. A test gives another folder, as `managedPrefs` in its deps. */
+const MANAGED_PREFS = "/Library/Managed Preferences";
+const PREFS_FILE = "com.anthropic.claudecode.plist";
+
+/** A managed preferences file as the object Claude Code reads from it, or null: it is not there, or plutil cannot make it a JSON
+    object (it is not a property list, holds a date or data, or is not a dictionary). Claude Code takes none of such a file. */
+function prefsObject(file) {
+  if (!lstatSync(file, { throwIfNoEntry: false })) return null;
+  const made = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", file], { encoding: "utf8", timeout: 5000 });
+  if (made.status !== 0) return null;
+  try {
+    const settings = JSON.parse(made.stdout);
+    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** A settings file as the object Claude Code reads from it, or null: it is not there, cannot be read, is not JSON (a byte-order mark,
     a comment and a comma at the end are not JSON) or is not an object. Claude Code leaves such a file out. */
 function settingsObject(file) {
@@ -2246,9 +2265,15 @@ function settingsObject(file) {
 
 /** `behind`: whether the lock on her folder for Claude has been loosened on this Mac (spec 2026-10-22, section 7), as the lines
     `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The lock
-    rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and nothing is written.
-    `home` and `deps` are the command's (deps.env and deps.managedDir are a test's own), and `checkout` is the one the guard is run
-    from. In this order:
+    rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and the folder the
+    session runs in, where Claude Code reads the guard from; nothing is written.
+    `home` and `deps` are the command's (deps.env, deps.managedDir, deps.managedPrefs, deps.user and deps.cwd are a test's own), and
+    `checkout` is the one the guard is run from. In this order:
+    - the folder the session runs in, which her skill runs `behind` in, as Claude Code runs every command, and which a locked session
+      cannot change, since the guard lets only edit.js run: when this Mac has her folder, it must be that folder itself, by its real
+      path. Claude Code reads .claude/settings.json only from the session's own folder, but her CLAUDE.md and her skill from the
+      folders above it too, so a session in Pictures, or in a folder above hers, looks like hers and has no lock. Which folder it is
+      is not said: its name may be a client's;
     - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
       anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
     - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it says
@@ -2258,8 +2283,10 @@ function settingsObject(file) {
       is a JSON object with disableAllHooks true, whether or not she has a folder, since hooks off would defeat the lock of one made
       later. A file that is not that is left out by Claude Code, so it turns nothing off;
     - this Mac's managed settings (MANAGED_DIR): managed-settings.json, then the files of managed-settings.d that end in .json and do
-      not begin with a dot (a file or a link), in the order of their names, each when it sets disableAllHooks true, or
-      allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. */
+      not begin with a dot (a file or a link), in the order of their names; then its managed preferences (MANAGED_PREFS), the user's,
+      then the Mac's; then the server-managed settings Claude Code keeps beside the user settings, remote-settings.json. Each when it
+      sets disableAllHooks true, or allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. Claude
+      Code takes its managed settings from one of these only, but which one is not looked into: any of them is said. */
 function lockLoosened({ home, checkout, deps = {} }) {
   const why = [];
   let folder = null;
@@ -2269,6 +2296,16 @@ function lockLoosened({ home, checkout, deps = {} }) {
     // She has no folder for Claude on this Mac, so nothing in it can be there.
   }
   if (folder) {
+    let cwd = null;
+    try {
+      cwd = realpathSync.native(deps.cwd || process.cwd());
+    } catch (e) {
+      // A folder not there any more is not hers.
+    }
+    if (cwd !== folder) {
+      const where = cwd && cwd.startsWith(folder + "/") ? "a folder inside her folder for Claude, not in the folder itself," : "a folder other than her folder for Claude,";
+      why.push(`(Jason: this session runs in ${where} and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)`);
+    }
     try {
       if (lstatSync(join(folder, ".claude", "settings.local.json"), { throwIfNoEntry: false })) why.push("(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)");
     } catch (e) {
@@ -2295,8 +2332,14 @@ function lockLoosened({ home, checkout, deps = {} }) {
   } catch (e) {
     // No drop-ins.
   }
-  for (const file of ["managed-settings.json", ...dropIns]) {
-    const set = settingsObject(join(managed, file));
+  const prefs = deps.managedPrefs || MANAGED_PREFS;
+  const account = deps.user || userInfo().username;
+  const sources = [
+    ...["managed-settings.json", ...dropIns].map((file) => [file, settingsObject(join(managed, file))]),
+    ...[join(account, PREFS_FILE), PREFS_FILE].map((file) => [`Managed Preferences/${file}`, prefsObject(join(prefs, file))]),
+    [`the server-managed ones Claude Code keeps in ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/remote-settings.json`, settingsObject(config ? join(config, "remote-settings.json") : join(home, ".claude", "remote-settings.json"))]
+  ];
+  for (const [file, set] of sources) {
     if (!set) continue;
     if (set.disableAllHooks === true) why.push(`(Jason: this Mac's managed settings, ${file}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     if (set.allowManagedHooksOnly === true) why.push(`(Jason: this Mac's managed settings, ${file}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`);
