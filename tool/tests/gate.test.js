@@ -20,7 +20,7 @@ const OFF = { teachingsOn: false };
 
 describe("the gate's lists", () => {
   it("are the commands the design names, each list holding the one before it", () => {
-    assert.deepEqual(UNSCOPED, ["episodes", "status", "behind", "retry"]);
+    assert.deepEqual(UNSCOPED, ["episodes", "status", "behind", "retry", "guide"]);
     assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "release", "resolve"]);
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);

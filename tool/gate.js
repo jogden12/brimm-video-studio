@@ -11,7 +11,7 @@
 import { kindOf, shownName } from "./episode.js";
 
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
-export const UNSCOPED = ["episodes", "status", "behind", "retry"];
+export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
 /** The commands that run for a video not yet answered: `kind` answers it, `leave` leaves it, `which` says which it is, `show`
     opens a copy of it on this Mac, `release` hands it over to the other Mac, and `resolve` sorts out its conflicted copies. */
 export const UNANSWERED = ["kind", "leave", "which", "show", "release", "resolve"];

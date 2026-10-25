@@ -54,7 +54,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
-import { buildHandoffV2, handoffFaultV2 } from "./handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
@@ -67,11 +67,25 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
+import { NOT_SET_UP, dropWords, nextFor, ordered, findIn, overviewLines, videoLines } from "./guide.js";
+import { readGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
+  node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
+                                        answer first, then the newest; this Mac's drop folder in Finder's words; and how
+                                        many videos from before the switch are not guided. With a video, its next step,
+                                        and for a step on the BRIMM Ops page the step after it. Only on a Mac that does
+                                        the light import: on any other, every form says to ask Jason
+  node edit.js guide drop [zoom] | page | wait
+                                        open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
+                                        BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
+                                        what the guide says
+  node edit.js guide "<video>" done <step> | finished | show
+                                        note on this Mac that she did its step on the BRIMM Ops page (only the step that
+                                        comes next), that she is done with the video, or show in Finder what its step needs
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -5211,9 +5225,160 @@ async function finishSessionCommand(ctx, found) {
   return 0;
 }
 
+// The guide (spec 2026-10-25): the one next step for each video under way, in her words. guide.js says the steps, from what is
+// read here of each video, as `episodes` and `status` read it.
+
+/** A file's JSON, or null when it is missing or cannot be read. */
+function jsonIn(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
+/** A video's newest hand-off, as the guide reads it (guide.js, as opsNext takes it): { id, revision, kind, emptyAt, at, file }, or
+    null while none is written. It is read from the file its finish wrote (`finished.handoff`), and only when that is whole on this
+    Mac (`ctx.isWhole`), since Dropbox would otherwise have to bring it. One that is not, cannot be read, or names no id, revision
+    or kind that brimm-video gives is read from the record: under the id its versions lead to when it is handed off as version 2
+    (`v2`, finish.js linksOf firstOf), its own otherwise, at the revision and of the kind the record says. A version 1 hand-off
+    says "episode" of a raw one. `emptyAt` is the empty revision of a video that was a session after all, for a session's hand-off: it stays on the
+    record when the session's own hand-off, a later revision, is written, since finish.js does not change it. */
+function guideHandoff(ctx, e, r, links, v2) {
+  const done = r.finished;
+  if (done === null || typeof done !== "object") return null;
+  const file = typeof done.handoff === "string" && done.handoff !== "" ? join(e.folder, done.handoff) : "";
+  const h = file && ctx.isWhole(file) ? jsonIn(file) : null;
+  const id = handoffIdIn(h);
+  const kind = !id ? null : h.version === VERSION_2 ? h.video.kind : h.episode.kind === "episode" ? "raw" : h.episode.kind;
+  const read = ["finished", "raw", "short video", "session"].includes(kind) && Number.isInteger(h.revision)
+    ? { id, revision: h.revision, kind, file: h.main && typeof h.main.file === "string" ? h.main.file : "" }
+    : { id: v2 ? links.firstOf(r, e.folder) : r.id, revision: done.revision, kind: recordKind(r), file: "" };
+  const empty = r.session !== null && typeof r.session === "object" ? r.session.emptyRevision : undefined;
+  return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
+}
+
+/** Where Claude's reading of a video has got, for the guide: { reading, readsAt }. "done" once the reading that counts is in the
+    record (currentReading; a session's, sessionReading); "running" while this Mac's detached reading is at work on it (`running`,
+    the command runningCommand says); "failed" when the reading this Mac last ran of it since her answer (a session's, since its
+    teachings were asked for) did not end well; "later" for a raw video whose reading waits for the import's late check, at the
+    time it is due on this Mac's clock (`readsAt`); and "none" otherwise. A result's `started` is in milliseconds and the record's
+    times are text: each is read as a time before they are compared. */
+function guideReading(ctx, e, r, kind, running) {
+  if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
+  if (running === "read") return { reading: "running" };
+  const result = readResult(ctx.home, e.name, "read");
+  const since = Date.parse(kind === "session" ? r.session && r.session.asked : r.answer.at);
+  if (result && result.ok === false && result.started >= since) return { reading: "failed" };
+  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  return due === null ? { reading: "none" } : { reading: "later", readsAt: clockAt(due) };
+}
+
+/** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
+    read teachings now, how many of its items she has still to keep, drop or change, and whether its empty revision is still owed
+    (revisionOwed). Its items are counted from its teachings file, read only when it is whole on this Mac: one that is not, or that
+    cannot be read, counts as one undecided, so that the guide never says every item is decided of what it could not see. */
+function guideSession(ctx, e, r) {
+  const mark = r.session !== null && typeof r.session === "object" ? r.session : {};
+  const got = readTeachings(e.folder, r, ctx.isWhole);
+  const items = itemsOf(got.teachings, r.session);
+  const undecided = got.coming !== undefined || got.why !== undefined ? 1 : ITEM_LISTS.reduce((n, [key]) => n + items[key].filter((item) => typeof item.approved !== "boolean").length, 0);
+  return { choice: mark.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided, emptyOwed: revisionOwed(r) };
+}
+
+/** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
+    what this Mac holds of it. A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
+    given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
+function guideFacts(ctx, e, links) {
+  const r = e.inForce;
+  const kind = recordKind(r);
+  const hidden = isGated(e);
+  const away = heldElsewhere(r, ctx.machine);
+  const v2 = writesV2For(ctx.settings, e.folder, r);
+  const running = runningCommand(ctx.home, e.name, ctx.alive);
+  const pushed = r.main.pushed;
+  return {
+    name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
+    id: r.id,
+    aliases: [typeof r.label === "string" ? r.label : "", r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [r.name.text, e.name])].filter(Boolean),
+    at: Date.parse(r.imported.at),
+    mac: away ? away.by : "",
+    drop: null,
+    conflicted: e.read.code === "CONFLICTED",
+    kind,
+    waiting: kind === null && r.answer.state === "needs your answer",
+    heldAsSession: e.held && !gated(r),
+    elsewhere: Boolean(away),
+    readingsOff: ctx.settings.readings === false,
+    ...guideReading(ctx, e, r, kind, running),
+    offersAnswered: answerOf(r) !== null,
+    v2,
+    placeholder: r.name.placeholder === true,
+    shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
+    finishRunning: running === "finish",
+    shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    session: kind === "session" ? guideSession(ctx, e, r) : null,
+    handoff: guideHandoff(ctx, e, r, links, v2)
+  };
+}
+
+/** The videos the guide speaks of, from Episodes: { items, old }. Each item (guide.js Item) is an answered video, with what was
+    read of it and its one next step, from her notes on this Mac (guide-note.js) and the time now. An episode with no record that
+    can be read, one a newer brimm-video wrote, an archived one and one she left alone are passed over; one from before the
+    switch, which has no answer, is counted in `old`, and not guided. Of the versions of a video handed off under one id, only the
+    one with the newest hand-off is kept: the highest revision, and of two at one revision the later written. Her notes and the
+    versions of every video are read once. */
+function guideItems(ctx) {
+  const notes = readGuideNotes(ctx.home);
+  const links = linksOf(ctx.root);
+  const items = [];
+  let old = 0;
+  for (const name of folders(ctx)) {
+    const e = episodeAt(ctx, name, links);
+    const r = e.inForce;
+    if (!r || e.newer || r.archived || leftAlone(r)) continue;
+    if (r.answer === null || typeof r.answer !== "object") {
+      old += 1;
+      continue;
+    }
+    const facts = guideFacts(ctx, e, links);
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
+  }
+  const newest = new Map();
+  for (const item of items) {
+    const h = item.facts.handoff;
+    const best = h ? newest.get(h.id) : undefined;
+    if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
+  }
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item), old };
+}
+
+/** `guide ["<video>"]`: the guide, on a Mac that does the light import. On any other, every form says only to ask Jason
+    (NOT_SET_UP), since there Claude reads every video as it lands. With no words, the overview: this Mac's drop folder in Finder's
+    words, each video under way with its one next step, and how many videos from before the switch it does not guide. With a
+    video, by its name, its label or its id, its next step, and for a step on the BRIMM Ops page the one after it. Words that fit
+    no video, or more than one, are refused, and never said again: they may hold a client's name. */
+export async function guideCommand(ctx, rest) {
+  if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
+  if (rest.length > 1) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const { items, old } = guideItems(ctx);
+  if (!rest.length) {
+    for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
+    return 0;
+  }
+  const found = findIn(items, rest[0]);
+  if (found.why) return refuse(ctx, found.why);
+  for (const line of videoLines(found.item)) ctx.say(line);
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and is in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 
