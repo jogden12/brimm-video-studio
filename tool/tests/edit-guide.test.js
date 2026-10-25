@@ -43,6 +43,7 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
 const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
   it("says only to ask Jason, for every form, ends with 1, and opens, runs and waits for nothing", async () => {
@@ -85,7 +86,6 @@ describe("guide, from the records", () => {
     assert.equal((await on(light(t), "guide", "Pricing talk")).said[0], 'Pricing talk (bbbbbb): Claude has read it. Say "what did Claude find?", then answer the spellings card.');
     assert.equal((await on(light(t), "guide", "cccccc")).said[0].split(":")[0], "Morning talk (cccccc)");
     assert.deepEqual(await on(light(t), "guide", "Session, 2026-10-19"), { code: 0, said: ["Session, 2026-10-19 (0c0c0c) is done: nothing is left to do for it."] });
-    const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
     for (const said of ["Coaching call Jane Doe", "2026-10-20 Coaching call Jane Doe (Mac Studio)", "eeeeee"]) assert.deepEqual(await on(light(t), "guide", said), { code: 1, said: [NO_FIT] }, said);
     t.done();
   });
@@ -106,6 +106,33 @@ describe("guide, from the records", () => {
     handedOff(t, { id: "e-20261021-a2a2a2", name: "2026-10-21 Launch talk again (Mac Studio)", text: "Launch talk again", revision: 2, under: first.record.id, at: "2026-10-21T13:00:00-05:00", over: { versionOf: first.record.id } });
     writeGuideNotes(t.home, { version: 1, handoffs: { [first.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
     assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): On the BRIMM Ops page: Drag the new hand-off onto the same episode, then press "Take the hand-off".']);
+    t.done();
+  });
+  it("still lists an older version held as a session when the newer one's hand-off goes out under its id, by its label, and finds it only by its label or id", async () => {
+    const t = setup();
+    const label = "Video of 20 Oct, 12:30 (Mac Studio)";
+    const older = handedOff(t, { over: { label } });
+    // Its newer version, a session after all: the empty revision goes out under the older one's id, which is held as a session.
+    const rel = "final/Session, 2026-10-20.brimm-ops.json";
+    const newer = episodeAs(t, { id: "e-20261020-a2a2a2", name: "2026-10-20 Launch talk again (Mac Studio)", record: { ...VIDEOS.session.record, versionOf: older.record.id, session: { ...MARK, emptyRevision: 2 }, finished: { revision: 2, at: "2026-10-20T14:00:00-05:00", on: "Mac Studio", handoff: rel, parts: {} }, ...imported("13:30") } });
+    mkdirSync(join(newer.folder, "final"), { recursive: true });
+    writeFileSync(join(newer.folder, rel), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 2, video: { id: older.record.id, kind: "session", name: "Session, 2026-10-20" } }));
+    const held = `${label} (a1a1a1): One of its other versions is a client or group session. Say "it was a session after all" for this one too.`;
+    assert.deepEqual(await on(light(t), "guide"), { code: 0, said: [
+      DROP_LINE, "Under way:",
+      '  Session, 2026-10-20 (a2a2a2): On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.',
+      `  ${held}`
+    ] });
+    for (const said of [label, "a1a1a1"]) assert.deepEqual(await on(light(t), "guide", said), { code: 0, said: [held] }, said);
+    // Never by its name or its folder's, which may be its file's.
+    for (const said of ["Launch talk", older.name]) assert.deepEqual(await on(light(t), "guide", said), { code: 1, said: [NO_FIT] }, said);
+    t.done();
+  });
+  it("reads a hand-off of a kind brimm-video never writes from the record, and does not stop at it", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    writeFileSync(join(h.folder, "final/Launch talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: h.record.id, kind: "film", name: "Launch talk" } }));
+    assert.deepEqual(await on(light(t), "guide"), { code: 0, said: [DROP_LINE, "Under way:", TAKE] });
     t.done();
   });
   it("says a video open, or being answered, on the other Mac is on that Mac; and her note on this Mac does not follow a video there", async () => {

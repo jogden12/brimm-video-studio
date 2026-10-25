@@ -2454,7 +2454,7 @@ function recordDifferences(a, b) {
   return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
-/** A record file read as it is, or null when it is not there or cannot be read. */
+/** A record file, or any other JSON file (a hand-off), read as it is, or null when it is not there or cannot be read. */
 function recordAt(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -2529,14 +2529,14 @@ async function resolveIn(ctx, found, keep) {
     }
   })();
   const copies = conflictedCopies(found.folder);
-  const ordered = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
-  if (!ordered.length) {
+  const inOrder = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
+  if (!inOrder.length) {
     rmSync(shownFile, { force: true });
     if (keep && pin) return refuse(ctx, `The version shown was sorted out meanwhile, on this Mac or the other, so nothing was kept here. There is no conflict in ${name} now: say "open ${name}" to see it as it is.`);
     ctx.say(`There is no conflict in ${name}.`);
     return 0;
   }
-  const copy = ordered[0];
+  const copy = inOrder[0];
   const at = (rel) => join(found.folder, rel);
   const isRecord = copy.startsWith("record/");
   let of = conflictedOf(copy);
@@ -2588,7 +2588,7 @@ async function resolveIn(ctx, found, keep) {
     }
     if (blocked) ctx.say(blocked);
     else {
-      const more = ordered.length - 1;
+      const more = inOrder.length - 1;
       ctx.say(`Say which to keep: A or B.${more ? ` ${more} more conflicted cop${more === 1 ? "y" : "ies"} after this one.` : ""}`);
     }
     // What was shown is noted only when a side can be kept from it.
@@ -5228,15 +5228,6 @@ async function finishSessionCommand(ctx, found) {
 // The guide (spec 2026-10-25): the one next step for each video under way, in her words. guide.js says the steps, from what is
 // read here of each video, as `episodes` and `status` read it.
 
-/** A file's JSON, or null when it is missing or cannot be read. */
-function jsonIn(file) {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    return null;
-  }
-}
-
 /** A video's newest hand-off, as the guide reads it (guide.js, as opsNext takes it): { id, revision, kind, emptyAt, at, file }, or
     null while none is written. It is read from the file its finish wrote (`finished.handoff`), and only when that is whole on this
     Mac (`ctx.isWhole`), since Dropbox would otherwise have to bring it. One that is not, cannot be read, or names no id, revision
@@ -5248,7 +5239,7 @@ function guideHandoff(ctx, e, r, links, v2) {
   const done = r.finished;
   if (done === null || typeof done !== "object") return null;
   const file = typeof done.handoff === "string" && done.handoff !== "" ? join(e.folder, done.handoff) : "";
-  const h = file && ctx.isWhole(file) ? jsonIn(file) : null;
+  const h = file && ctx.isWhole(file) ? recordAt(file) : null;
   const id = handoffIdIn(h);
   const kind = !id ? null : h.version === VERSION_2 ? h.video.kind : h.episode.kind === "episode" ? "raw" : h.episode.kind;
   const read = ["finished", "raw", "short video", "session"].includes(kind) && Number.isInteger(h.revision)
@@ -5326,9 +5317,11 @@ function guideFacts(ctx, e, links) {
 /** The videos the guide speaks of, from Episodes: { items, old }. Each item (guide.js Item) is an answered video, with what was
     read of it and its one next step, from her notes on this Mac (guide-note.js) and the time now. An episode with no record that
     can be read, one a newer brimm-video wrote, an archived one and one she left alone are passed over; one from before the
-    switch, which has no answer, is counted in `old`, and not guided. Of the versions of a video handed off under one id, only the
-    one with the newest hand-off is kept: the highest revision, and of two at one revision the later written. Her notes and the
-    versions of every video are read once. */
+    switch, which has no answer, is counted in `old`, and not guided. Of the versions of a video handed off under one id, the
+    BRIMM Ops page's step is said once, for the one with the newest hand-off: the highest revision, and of two at one revision the
+    later written. Another is passed over when its own next step is that page's, or it has none; one whose step is brimm-video's or
+    hers (held as a session, conflicted, shown in Final Cut again since its finish) stays. Her notes and the versions of every
+    video are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
@@ -5351,7 +5344,8 @@ function guideItems(ctx) {
     const best = h ? newest.get(h.id) : undefined;
     if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
   }
-  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item), old };
+  const own = (item) => !item.next.done && item.next.stage !== "ops";
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old };
 }
 
 /** `guide ["<video>"]`: the guide, on a Mac that does the light import. On any other, every form says only to ask Jason
