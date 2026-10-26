@@ -360,12 +360,12 @@ export function environmentWhy(env, list = ENVIRONMENT) {
 }
 
 /** What `lsof` prints of whatever listens on this Mac's TCP `port`: "" when nothing does (lsof then ends with 1 and prints nothing),
-    or null when it cannot be run, is refused, or ends otherwise. */
-function listeners(port) {
+    or null when it cannot be run, is refused, is stopped at its timeout, or ends otherwise. `spawn` is a test's stand-in. */
+export function listeners(port, spawn = spawnSync) {
   try {
-    const ran = spawnSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
-    if (ran.error) return null;
-    if (ran.status === 0) return ran.stdout;
+    const ran = spawn("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
+    if (!ran || ran.error) return null;
+    if (ran.status === 0) return typeof ran.stdout === "string" ? ran.stdout : null;
     return ran.status === 1 && !ran.stdout && !ran.stderr ? "" : null;
   } catch (e) {
     return null;

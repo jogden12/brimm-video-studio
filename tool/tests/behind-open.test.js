@@ -572,6 +572,16 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     goesOn(await behindOn(w, { env: { CLAUDE_CODE_SESSION_ID: SESSION }, ps: () => psText([[1, 0, "/sbin/launchd"], [300, 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], [320, 300, "-zsh"], [900, 320, `${NODE} ${w.checkout}/tool/edit.js behind`]]) }), "Jason's run, with no claude above");
     w.done();
   });
+  it("under Claude Code with no chat's id, refuses for the transcript it cannot find, and judges the session's folder by where it runs", async () => {
+    const UNREAD = "(Jason: this chat's transcript could not be read, so whether a folder was added to it is not known.)";
+    const w = openWorld();
+    // Her chat's transcript is there, but with no CLAUDE_CODE_SESSION_ID nothing says it is this chat's.
+    const r = await behindOn(w, { env: { CLAUDECODE: "1" } });
+    assert.deepEqual([r.code, r.text.split("\n")], [1, [LOCK_CHANGED, UNREAD]]);
+    const inside = await behindOn(w, { env: { CLAUDECODE: "1" }, cwd: join(w.folder, "Pictures") });
+    assert.deepEqual([inside.code, inside.text.split("\n")], [1, [LOCK_CHANGED, INSIDE_WHY, UNREAD]]);
+    w.done();
+  });
   it("refuses when the chat's transcript cannot be read, under Claude Code", async () => {
     const w = openWorld();
     rmSync(join(w.home, ".claude", "projects"), { recursive: true });
