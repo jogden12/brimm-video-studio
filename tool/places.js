@@ -41,11 +41,11 @@ export function realOf(path) {
 }
 
 /** A path as it is, and as macOS also lets it be spelled, under /System/Volumes/Data. */
-export const bothSpellings = (path) => [path, `/System/Volumes/Data${path}`];
+export const bothSpellings = (path) => [path, path === "/" ? "/System/Volumes/Data" : `/System/Volumes/Data${path}`];
 
 /** Whether a path names a .env file, or one of its kin (.env.local): such a file is held wherever it is (R20). */
 export function isEnvFile(path) {
-  const name = basename(String(path));
+  const name = basename(String(path)).toLowerCase();
   return name === ".env" || name.startsWith(".env.");
 }
 
@@ -102,20 +102,22 @@ export function gatedPlaces({ home, root, uid, tmp = "/private/tmp", zoomFolder 
 
 /** What the sandbox lets Bash read inside the gated places (its allowRead), and nothing else: BRIMM Video's Assets, and the three
     places Bash itself needs (C36): her folder's own subfolder of Claude Code's temp folder, its shell snapshots and Claude Code's
-    own program in the app's data. */
+    own program in the app's data. Each is the gated place's real path with the rest after it, never the real path of the whole:
+    an open folder that is a link (Assets to Episodes, her temp folder to ~/.claude) would open where it leads. */
 export function readAllowed({ home, root, uid, tmp = "/private/tmp", folder }) {
   return [
     join(realOf(root), "Assets"),
-    realOf(join(tmp, `claude-${uid}`, claudeDirName(folder))),
-    realOf(join(home, ".claude", "shell-snapshots")),
-    realOf(join(home, "Library", "Application Support", "Claude", "claude-code")),
+    join(realOf(join(tmp, `claude-${uid}`)), claudeDirName(folder)),
+    join(realOf(join(home, ".claude")), "shell-snapshots"),
+    join(realOf(join(home, "Library", "Application Support", "Claude")), "claude-code"),
   ];
 }
 
-/** A file's or folder's identity, its device and inode, with links followed; null when it is not there. */
-function identity(path) {
+/** A file's or folder's identity, its device and inode, with links followed (or, given lstatSync, the link's own); null when it
+    is not there. */
+function identity(path, look = statSync) {
   try {
-    const st = statSync(path);
+    const st = look(path);
     return `${st.dev}:${st.ino}`;
   } catch {
     return null;
@@ -132,6 +134,10 @@ function upward(path) {
 }
 
 const fold = (path) => path.toLowerCase();
+
+/** A path under one of macOS's dot-root folders, /.vol (a file by its device and inode), /.nofollow or /.resolve, which name a
+    file by a way no folder along it shows: such a path is held, whatever it names. */
+const DOT_ROOT = /^\/\.[^/]/;
 
 /** The real paths a path may come to, each walked by gatedIndex: its real path (links followed, `..` as text, as Claude Code's
     own tools take it); where it lies, with its last part not followed (a link in a gated place is held wherever it leads); its
@@ -158,18 +164,20 @@ function comings(path) {
 }
 
 /** The gated places, ready to judge paths by what they are. `open` are the folders inside them that are let through: the
-    sandbox's allowRead (Assets, and the three Bash needs), or the carve-outs one call is given. Every identity of the places and
-    of the open folders is taken once, here.
-    - `at(path)`: the gated place `path` comes to, or null. Each folder along each of its real paths (comings) is walked from the
-      path upwards: the first that is an open folder lets it through, the first that is a place holds it, by identity, or by
-      text, both spellings and letter case folded, for one not there. Any walk that is held holds the path, the stricter. A
-      path whose name is a .env file's is a gated place of its own, wherever it is (R20).
-    - `holds(dir)`: whether some gated place lies inside `dir`, or is `dir`: a search of it would reach one. */
+    sandbox's allowRead (Assets, and the three Bash needs), or the carve-outs one call is given, each given as a gated place's
+    real path with the rest after it. One that is a link, or lies through one, is not opened: it would open where it leads. Every
+    identity of the places and of the open folders is taken once, here.
+    - `at(path, more = [])`: the gated place `path` comes to, or null; `more` are carve-outs opened for this look alone, given as
+      the open folders are. Each folder along each of its real paths (comings) is walked from the
+      path upwards, each by its own identity (a link's own, not where it leads): the first that is an open folder lets it
+      through, the first that is a place holds it, by identity, or by text, both spellings and letter case folded, for one not
+      there. Any walk that is held holds the path, the stricter. A path whose name is a .env file's is a gated place of its own,
+      wherever it is (R20), and so is one under a dot-root folder (DOT_ROOT).
+    - `holds(dir)`: whether some gated place lies inside `dir`, or is `dir`: a search of it would reach one. A dot-root folder
+      holds one. */
 export function gatedIndex(places, open = []) {
   const byIdentity = new Map();
   const byText = new Map();
-  const openIdentities = new Set();
-  const openTexts = new Set();
   const insideIdentities = new Set();
   const insideTexts = new Set();
   for (const place of places) {
@@ -179,45 +187,69 @@ export function gatedIndex(places, open = []) {
     for (const above of upward(place.path)) {
       const aboveId = identity(above);
       if (aboveId) insideIdentities.add(aboveId);
-      for (const spelling of bothSpellings(above)) insideTexts.add(fold(spelling));
     }
+    for (const spelling of bothSpellings(place.path)) for (const above of upward(spelling)) insideTexts.add(fold(above));
   }
-  for (const dir of open) {
-    const real = realOf(dir);
-    const id = identity(real);
-    if (id) openIdentities.add(id);
-    for (const spelling of bothSpellings(real)) openTexts.add(fold(spelling));
-  }
-  const walk = (real) => {
+  /** The open folders `dirs`, by identity and by text: each only when it is no link and lies through none. */
+  const opened = (dirs) => {
+    const ids = new Set();
+    const texts = new Set();
+    for (const dir of dirs) {
+      const real = realOf(dir);
+      if (fold(real) !== fold(resolve(dir))) continue;
+      const id = identity(real);
+      if (id) ids.add(id);
+      for (const spelling of bothSpellings(real)) texts.add(fold(spelling));
+    }
+    return { ids, texts };
+  };
+  const always = opened(open);
+  const walk = (real, more) => {
     for (const at of upward(real)) {
-      const id = identity(at);
-      if ((id && openIdentities.has(id)) || openTexts.has(fold(at))) return null;
+      const id = identity(at, lstatSync);
+      if ([always, more].some((o) => (id && o.ids.has(id)) || o.texts.has(fold(at)))) return null;
       const place = (id && byIdentity.get(id)) || byText.get(fold(at));
       if (place) return place;
     }
     return null;
   };
   return {
-    at(path) {
+    at(path, more = []) {
+      const given = resolve(String(path));
+      if (DOT_ROOT.test(given)) return { path: given, readRules: [], kind: "folder", dotRoot: true };
       const ways = comings(path);
+      const dotted = ways.find((way) => DOT_ROOT.test(way));
+      if (dotted) return { path: dotted, readRules: [], kind: "folder", dotRoot: true };
+      const carved = opened(more);
       for (const real of ways) {
-        const place = walk(real);
+        const place = walk(real, carved);
         if (place) return place;
       }
       const env = [String(path), ...ways].find(isEnvFile);
       return env ? { path: resolve(env), readRules: [], kind: "file", env: true } : null;
     },
     holds(dir) {
+      if (DOT_ROOT.test(resolve(dir))) return true;
       const real = realOf(resolve(dir));
+      if (DOT_ROOT.test(real)) return true;
       const id = identity(real);
       return Boolean(id && insideIdentities.has(id)) || insideTexts.has(fold(real));
     },
   };
 }
 
+/** The longest path macOS takes, in bytes (PATH_MAX, its ending included). */
+const PATH_MAX = 1024;
+
 /** One string of a tool's input as a path, resolved, or null when it is not one: absolute, starting with `~` (`~/` from the home
-    folder, `~name` from the folder that holds the home folders), holding `..`, or naming something there from `cwd`. */
+    folder, `~name` from the folder that holds the home folders), holding `..`, or naming something there from `cwd`; and, so
+    that a long text (a file's contents) is not walked folder by folder, shorter than any path macOS takes. */
 function pathOf(text, cwd, home) {
+  const path = resolvedOf(text, cwd, home);
+  return path !== null && Buffer.byteLength(path) < PATH_MAX ? path : null;
+}
+
+function resolvedOf(text, cwd, home) {
   if (text === "") return null;
   if (text === "~" || text.startsWith("~/")) return resolve(home, text.slice(2));
   if (text.startsWith("~")) return resolve(dirname(home), text.slice(1));

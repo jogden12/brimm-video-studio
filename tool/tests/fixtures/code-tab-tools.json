@@ -1,5 +1,5 @@
 {
-  "recorded": "2026-10-26, Mac Studio, the Claude app's Claude Code (Code tab)",
+  "recorded": "2026-10-26, Mac Studio, the Claude app's Claude Code (Code tab): a subagent's list, with the main chat's tools added (SubagentHandback is a subagent's); by-hand item 9 replaces it with her laptop's",
   "tools": [
     "Agent",
     "Artifact",

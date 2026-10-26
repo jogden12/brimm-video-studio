@@ -1,7 +1,7 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio (studio.js): its CLAUDE.md, its settings, its skill and Pictures/, and the
 // guard hook that lets her session run brimm-video's edit.js and nothing else. Each test writes into a home folder of its own.
 // The hook is run here as Claude Code runs it, by /bin/sh and node, on made-up tool calls: nothing it allows is run.
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -13,17 +13,19 @@ import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain } from "../edit.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
+import { CHECKOUT, NODE, EDIT, ALLOWED } from "./guard-cases.js";
 
-const CHECKOUT = "/Users/sallie/Claude Code/BRIMM video";
 const FOLDER = "/Users/sallie/BRIMM Video Studio";
-const NODE = "/opt/homebrew/bin/node";
-const EDIT = `${NODE} "${CHECKOUT}/tool/edit.js"`;
 const bash = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout: CHECKOUT, node: NODE }).decision;
 const tool = (tool_name) => guardDecision({ tool_name, tool_input: {} }, { checkout: CHECKOUT, node: NODE }).decision;
 /** The guard as Claude Code runs it, in exec form: /bin/sh, the guard's own script in this checkout, and a node. */
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), "..", "studio", "guard.sh");
 const THIS_CHECKOUT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const hook = (input, node = process.execPath, folder = "/Users/sallie/BRIMM Video Studio") => spawnSync("/bin/sh", [GUARD, node, folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
+/** A made-up home with no settings, so that the hook, which takes the home from the folder above hers, keeps today's lock: on her
+    laptop /Users/sallie may be her real home, with the open lock, and the hook would then read her settings and run ps and lsof. */
+const HOOK_HOME = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-home-")));
+after(() => rmSync(HOOK_HOME, { recursive: true, force: true }));
+const hook = (input, node = process.execPath, folder = join(HOOK_HOME, "BRIMM Video Studio")) => spawnSync("/bin/sh", [GUARD, node, folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
 
 /** zsh and bash, either of which may run her session's commands, each without this Mac's own start-up files. */
 const SHELLS = [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]];
@@ -95,20 +97,6 @@ const randomCommand = (next) => {
   for (let words = 1 + Math.floor(next() * 4); words > 0; words--) command += (next() < 0.9 ? " " : pick(["", ";", "|", "&", "#", "\n"])) + word();
   return command;
 };
-/** Commands the guard lets through, each with the words edit.js must be given, in zsh and in bash. */
-const ALLOWED = [
-  [`${EDIT} episodes`, ["episodes"]],
-  [`${EDIT} open "Pricing talk"`, ["open", "Pricing talk"]],
-  [`node "${CHECKOUT}/tool/edit.js" open "Talk (Sallie's laptop)"`, ["open", "Talk (Sallie's laptop)"]],
-  [`${EDIT} title "Pricing talk" --words "Price it right" --approve`, ["title", "Pricing talk", "--words", "Price it right", "--approve"]],
-  [`${EDIT} finish "Pricing talk" --take "main=this Mac"`, ["finish", "Pricing talk", "--take", "main=this Mac"]],
-  // Every letter a plain word may hold.
-  [`${EDIT} open a_b.c,d:e+f=g@h%i/j-k9`, ["open", "a_b.c,d:e+f=g@h%i/j-k9"]],
-  // Words in single quotes, with what would run something outside them: inside, each is only a letter.
-  [`${EDIT} title "Pricing talk" --words 'Charge $99 \`now\` \\ok'`, ["title", "Pricing talk", "--words", "Charge $99 `now` \\ok"]],
-  [`${EDIT} name "Pricing talk" '"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}'`, ["name", "Pricing talk", `"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}`]],
-  [`${EDIT} name "Pricing talk" ''`, ["name", "Pricing talk", ""]]
-];
 
 /** The command lines a skill's text runs: every backticked span that starts with a lowercase word. Flags start with - and are
     not among them. */

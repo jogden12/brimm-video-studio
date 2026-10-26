@@ -7,7 +7,15 @@
 // (held/scan-<id>.json), written whole under another name and then renamed; a scan file that cannot be read, or is not JSON, is taken
 // as none. The scan starts again from 0 when the transcript is smaller than the offset kept, or is another file (its inode).
 // A chat's id is put into the scan file's name only when it is one (SESSION_ID).
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+//
+// The held check also asks whether the transcript holds a message `uuid` of a chat that is held (a fork keeps every message uuid of
+// the chat it was forked from, C32): each held chat's uuids are in held/<id>.uuids.json (held.js writes them). The scan file keeps
+// which of those files it has read the transcript against (`checked`, by name, size and time); when one appears that it has not, or
+// one has changed, it reads the transcript again from 0, so a fork looked at before the chat it was forked from was held is found at
+// its next look. Found once, a fork stays found. While a uuids file cannot be read, a look is unread and keeps nothing, so the chat
+// is held for that look alone. The scan also counts the times the transcript was compacted (a `compact_boundary` line), so that
+// held.js keeps a held chat's uuids again after each: a fork made after carries only the lines from there on.
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -28,6 +36,105 @@ function scanFile(home, sessionId) {
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
   const file = join(heldFolder(home), `scan-${sessionId}.json`);
   return dirname(file) === heldFolder(home) ? file : null;
+}
+
+/** The file of a held chat's message uuids, `{ uuids: string[] }`, or null when the id is not a chat's. */
+export function uuidsFile(home, sessionId) {
+  if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
+  const file = join(heldFolder(home), `${sessionId}.uuids.json`);
+  return dirname(file) === heldFolder(home) ? file : null;
+}
+
+const UUIDS = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.uuids\.json$/;
+
+/** The held chats' uuids files in `home`, each { name, size, mtimeMs }, by name; [] when there is no held folder; null when it
+    cannot be read. */
+function heldUuidsFiles(home) {
+  let names;
+  try {
+    names = readdirSync(heldFolder(home));
+  } catch (e) {
+    return e.code === "ENOENT" ? [] : null;
+  }
+  const files = [];
+  for (const name of names.filter((n) => UUIDS.test(n)).sort()) {
+    try {
+      const st = statSync(join(heldFolder(home), name));
+      files.push({ name, size: st.size, mtimeMs: st.mtimeMs });
+    } catch (e) {
+      return null;
+    }
+  }
+  return files;
+}
+
+/** Every uuid in the held chats' uuids `files`, or null when one cannot be read or is not what held.js writes. */
+function heldUuids(home, files) {
+  const all = new Set();
+  for (const { name } of files) {
+    try {
+      const got = JSON.parse(readFileSync(join(heldFolder(home), name), "utf8"));
+      if (!isObject(got) || !Array.isArray(got.uuids)) return null;
+      for (const uuid of got.uuids) if (typeof uuid === "string") all.add(uuid);
+    } catch (e) {
+      return null;
+    }
+  }
+  return all;
+}
+
+/** Whether every one of `files` is among those a scan has read against (`checked`), with the same size and time. */
+const allChecked = (checked, files) => Array.isArray(checked) && files.every((f) => checked.some((c) => isObject(c) && c.name === f.name && c.size === f.size && c.mtimeMs === f.mtimeMs));
+
+/** Each complete line of the file open as `fd`, from `from` to `size`, parsed, given to `each`; gives where the last complete line
+    ends. A line that does not parse, or is not an object, is skipped; one still being written, with no newline yet, is not read. */
+function eachLine(fd, from, size, each) {
+  let at = from;
+  let carry = Buffer.alloc(0);
+  while (at < size) {
+    const chunk = Buffer.alloc(Math.min(CHUNK, size - at));
+    const read = readSync(fd, chunk, 0, chunk.length, at);
+    if (read <= 0) break;
+    at += read;
+    const text = Buffer.concat([carry, chunk.subarray(0, read)]);
+    const end = text.lastIndexOf(10);
+    if (end < 0) {
+      carry = text;
+      continue;
+    }
+    carry = text.subarray(end + 1);
+    for (const line of text.subarray(0, end).toString("utf8").split("\n")) {
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch (e) {
+        continue;
+      }
+      if (isObject(entry)) each(entry);
+    }
+  }
+  return at - carry.length;
+}
+
+/** Every message uuid of the transcript `transcriptPath`, in order, each once; null when it cannot be read. */
+export function uuidsOf(transcriptPath) {
+  let fd;
+  try {
+    fd = openSync(transcriptPath, "r");
+  } catch (e) {
+    return null;
+  }
+  try {
+    const found = new Set();
+    eachLine(fd, 0, fstatSync(fd).size, (entry) => {
+      if (typeof entry.uuid === "string") found.add(entry.uuid);
+    });
+    return [...found];
+  } catch (e) {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** What the scan file `file` keeps, or null: it is not there, cannot be read, or is not what a scan writes. */
@@ -56,12 +163,13 @@ function keep(file, state) {
 /** The earlier of two timestamps, either of which may be null. */
 const earlier = (a, b) => (a === null ? b : b === null ? a : Date.parse(b) < Date.parse(a) ? b : a);
 
-/** What a look at the transcript `transcriptPath` of the chat `sessionId` finds, in `home`: { start, added, unread }. `start` is the
-    least timestamp of any complete line so far, or null while none has one; `added` is the additionalWorkingDirectories of the latest
-    line whose attachment is an environment snapshot, or null while there is none; `unread` is true when the transcript cannot be read,
-    or the id is not a chat's id (and then nothing is read or written). */
+/** What a look at the transcript `transcriptPath` of the chat `sessionId` finds, in `home`: { start, added, unread, forked }. `start`
+    is the least timestamp of any complete line so far, or null while none has one; `added` is the additionalWorkingDirectories of the
+    latest line whose attachment is an environment snapshot, or null while there is none; `forked` is whether a line holds a message
+    uuid of a held chat; `compactions` how many lines mark the transcript compacted; `unread` is true when the transcript, or the held folder, cannot be read, or the id is not a chat's id (and
+    then nothing is read or written). */
 export function scanTranscript({ home, sessionId, transcriptPath }) {
-  const none = { start: null, added: null, unread: true };
+  const none = { start: null, added: null, unread: true, forked: false, compactions: 0 };
   const file = scanFile(home, sessionId);
   if (!file || typeof transcriptPath !== "string" || !transcriptPath) return none;
   let fd;
@@ -72,42 +180,32 @@ export function scanTranscript({ home, sessionId, transcriptPath }) {
   }
   try {
     const { ino, size } = fstatSync(fd);
+    const files = heldUuidsFiles(home);
+    if (!files) return none;
     const was = kept(file);
-    const state = was && was.ino === ino && was.offset <= size ? { ...was } : { ino, offset: 0, start: null, added: null };
-    let at = state.offset;
-    let carry = Buffer.alloc(0);
-    while (at < size) {
-      const chunk = Buffer.alloc(Math.min(CHUNK, size - at));
-      const read = readSync(fd, chunk, 0, chunk.length, at);
-      if (read <= 0) break;
-      at += read;
-      const text = Buffer.concat([carry, chunk.subarray(0, read)]);
-      const end = text.lastIndexOf(10);
-      if (end < 0) {
-        carry = text;
-        continue;
+    const same = was && was.ino === ino && was.offset <= size && allChecked(was.checked, files);
+    const state = same ? { ...was, forked: Boolean(was.forked) } : { ino, offset: 0, start: null, added: null, forked: Boolean(was && was.forked), compactions: 0 };
+    state.compactions = Number.isSafeInteger(state.compactions) ? state.compactions : 0;
+    let uuids;
+    const isHeld = (uuid) => {
+      if (uuids === undefined) uuids = heldUuids(home, files);
+      if (uuids === null) throw new Error("a held chat's uuids cannot be read");
+      return uuids.has(uuid);
+    };
+    state.offset = eachLine(fd, state.offset, size, (entry) => {
+      if (typeof entry.timestamp === "string" && !Number.isNaN(Date.parse(entry.timestamp))) state.start = earlier(state.start, entry.timestamp);
+      if (isObject(entry.attachment) && entry.attachment.type === "environment") {
+        const dirs = isObject(entry.attachment.snapshot) ? entry.attachment.snapshot.additionalWorkingDirectories : undefined;
+        // Folders it cannot read as a list are taken as one folder added, which is not the app's own.
+        state.added = Array.isArray(dirs) ? dirs.map((dir) => (typeof dir === "string" ? dir : "")) : dirs === undefined ? [] : [""];
       }
-      carry = text.subarray(end + 1);
-      for (const line of text.subarray(0, end).toString("utf8").split("\n")) {
-        let entry;
-        try {
-          entry = JSON.parse(line);
-        } catch (e) {
-          continue;
-        }
-        if (!isObject(entry)) continue;
-        if (typeof entry.timestamp === "string" && !Number.isNaN(Date.parse(entry.timestamp))) state.start = earlier(state.start, entry.timestamp);
-        if (isObject(entry.attachment) && entry.attachment.type === "environment") {
-          const dirs = isObject(entry.attachment.snapshot) ? entry.attachment.snapshot.additionalWorkingDirectories : undefined;
-          // Folders it cannot read as a list are taken as one folder added, which is not the app's own.
-          state.added = Array.isArray(dirs) ? dirs.map((dir) => (typeof dir === "string" ? dir : "")) : dirs === undefined ? [] : [""];
-        }
-      }
-    }
-    state.offset = at - carry.length;
+      if (entry.type === "system" && entry.subtype === "compact_boundary") state.compactions += 1;
+      if (!state.forked && files.length && typeof entry.uuid === "string" && isHeld(entry.uuid)) state.forked = true;
+    });
     state.size = size;
+    state.checked = files;
     keep(file, state);
-    return { start: state.start, added: state.added, unread: false };
+    return { start: state.start, added: state.added, unread: false, forked: state.forked, compactions: state.compactions };
   } catch (e) {
     return none;
   } finally {
