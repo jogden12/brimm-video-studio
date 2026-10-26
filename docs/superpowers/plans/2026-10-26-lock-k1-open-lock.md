@@ -785,9 +785,9 @@ it("says the entries this Mac adds to her folder's allowlist, and says nothing o
 - Create: `tool/fetchable.js`, `tool/tests/fetchable.test.js`
 
 **Interfaces:**
-- Produces: `LOCAL_ADDRESS = "That address is on this Mac or its network, which this folder never fetches."`; `UNCHECKED_ADDRESS = "That address could not be checked, so it is not fetched."`; `isGlobalUnicast(address: string): boolean`; `async fetchWhy(url: string, resolve: (host: string) => Promise<string[]>): Promise<string>` ("" when it may be fetched).
+- Produces: `LOCAL_ADDRESS = "That address is on this Mac or its network, which this folder never fetches."`; `NUMERIC_ADDRESS = "That address is a number, not a site's name, which this folder never fetches. Use the site's name."`; `UNCHECKED_ADDRESS = "That address could not be checked, so it is not fetched."`; `isGlobalUnicast(address: string): boolean`; `async fetchWhy(url: string, resolve: (host: string) => Promise<string[]>): Promise<string>` ("" when it may be fetched).
 
-Rules: the host is `new URL(url).hostname` (WHATWG parsing turns `2130706433`, `0x7f.1` and `017700000001` into `127.0.0.1`); a URL that does not parse is `UNCHECKED_ADDRESS`. Refused with `LOCAL_ADDRESS`: **every IP literal, public ones too** (confirmed by Jason, 2026-10-26: the design's wording covers all, where this plan said only those that are not global unicast); `localhost`; a name with no dot; a name under `.local`, `.localhost`, `.internal` or `.home.arpa`; a name whose look-up, or its `www.` form's (added or taken away), gives any address that is not global unicast. A look-up that fails is `UNCHECKED_ADDRESS`. Not global unicast: IPv4 `0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.0.2/24`, `192.168/16`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, `224/4`, `240/4`; IPv6 `::`, `::1`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `2001:db8::/32`, and anything outside `2000::/3`; an IPv4-mapped `::ffff:a.b.c.d` and a NAT64 `64:ff9b::/96` answer are unwrapped first.
+Rules: the host is `new URL(url).hostname` (WHATWG parsing turns `2130706433`, `0x7f.1` and `017700000001` into `127.0.0.1`); a URL that does not parse is `UNCHECKED_ADDRESS`. **Every IP literal is refused, public ones too** (confirmed by Jason, 2026-10-26: the design's wording covers all, where this plan said only those that are not global unicast): one that `isGlobalUnicast` says is public (the host's brackets taken off; a whole-number, hex or octal spelling of a public address counts, the URL parser having made it dotted) with `NUMERIC_ADDRESS`, since `LOCAL_ADDRESS` would be false of it; any other (private, loopback, link-local, unspecified, multicast, and the rest) with `LOCAL_ADDRESS`. Also refused with `LOCAL_ADDRESS`: `localhost`; a name with no dot; a name under `.local`, `.localhost`, `.internal` or `.home.arpa`; a name whose look-up, or its `www.` form's (added or taken away), gives any address that is not global unicast. A look-up that fails is `UNCHECKED_ADDRESS`. Not global unicast: IPv4 `0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.0.2/24`, `192.168/16`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, `224/4`, `240/4`; IPv6 `::`, `::1`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `2001:db8::/32`, and anything outside `2000::/3`; an IPv4-mapped `::ffff:a.b.c.d` and a NAT64 `64:ff9b::/96` answer are unwrapped first.
 
 - [ ] **Step 1: Write the failing tests** (design section 10's values):
 
@@ -802,8 +802,11 @@ it("refuses a name whose www. form answers privately, and the same the other way
   assert.equal(await fetchWhy("https://example.com/", resolver({ "example.com": ["93.184.215.14"], "www.example.com": ["10.0.0.5"] })), LOCAL_ADDRESS);
   assert.equal(await fetchWhy("https://www.example.com/", resolver({ "www.example.com": ["93.184.215.14"], "example.com": ["10.0.0.5"] })), LOCAL_ADDRESS);
 });
-it("refuses a public IP address too", async () => {
-  for (const url of ["http://93.184.215.14/", "https://[2606:2800:220:1:248:1893:25c8:1946]/"]) assert.notEqual(await fetchWhy(url, never), "", url);
+it("refuses a public IP address with a refusal of its own, in every spelling", async () => {
+  for (const url of ["http://93.184.215.14/", "http://1572394766/", "http://0x5db8d70e/", "https://[2606:2800:220:1:248:1893:25c8:1946]/", "http://[::ffff:8.8.8.8]/"]) assert.equal(await fetchWhy(url, never), NUMERIC_ADDRESS, url);
+});
+it("refuses an IP address that is not public with the local refusal", async () => {
+  for (const url of ["http://0.0.0.0/", "http://10.1.2.3/", "http://224.0.0.1/", "http://[fe80::1]/", "http://[::]/", "http://[::ffff:10.0.0.1]/"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
 });
 it("allows a public name", async () => { assert.equal(await fetchWhy("https://example.com/a", resolver({ "example.com": ["93.184.215.14"], "www.example.com": ["93.184.215.14"] })), ""); });
 it("refuses what cannot be parsed or looked up", async () => {});
@@ -908,7 +911,7 @@ it("allows a connector's tool only when this Mac names it exactly, and never a l
 });
 it("allows the subagent tool as Agent and as Task with no isolation, no cwd and a built-in agent, and refuses it otherwise", async () => {});
 it("refuses WebFetch and WebSearch while the web tools are held", async () => {});
-it("allows WebSearch and a public WebFetch once the web tools are opened, and refuses a numeric or local one", async () => {});
+it("allows WebSearch and a public WebFetch once the web tools are opened, and refuses a numeric or local one, a public number in words of its own", async () => {});
 it("allows the drawing tools and PushNotification by the default allowlist, the drawing tools though they are MCP tools no mcp-tool entry names", async () => {
   for (const name of DRAWING) assert.deepEqual((await decide(name, {})).decision, "allow", name);
 });

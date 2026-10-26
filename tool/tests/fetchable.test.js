@@ -1,9 +1,10 @@
 // WebFetch's addresses (fetchable.js): a WebFetch never reaches a numeric address, a local name, or a name that answers with an
-// address that is not global unicast, with or without its `www.` (design 2026-10-26, section 1, "Network", and section 10). The
-// look-up is always a stand-in here: no test asks this Mac's resolver.
+// address that is not global unicast, with or without its `www.` (design 2026-10-26, section 1, "Network", and section 10). A
+// numeric address that is public is told so (NUMERIC_ADDRESS), every other is told it is local. The look-up is always a stand-in
+// here: no test asks this Mac's resolver.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LOCAL_ADDRESS, UNCHECKED_ADDRESS, isGlobalUnicast, fetchWhy } from "../fetchable.js";
+import { LOCAL_ADDRESS, NUMERIC_ADDRESS, UNCHECKED_ADDRESS, isGlobalUnicast, fetchWhy } from "../fetchable.js";
 
 /** A look-up that must not be asked: it fails, which would be UNCHECKED_ADDRESS, not the LOCAL_ADDRESS a test wants. */
 const never = async (host) => {
@@ -63,8 +64,19 @@ describe("WebFetch's addresses", () => {
   it("refuses a name with one address among many that is not global unicast", async () => {
     assert.equal(await fetchWhy("https://example.com/", resolver({ "example.com": ["93.184.215.14", "fd00::1"] })), LOCAL_ADDRESS);
   });
-  it("refuses any numeric address, a public one too, and the local names with a trailing dot or in capitals", async () => {
-    for (const url of ["http://93.184.215.14/", "http://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/", "http://LOCALHOST./", "http://Printer.Local./", "http://router./", "http://localhost../", "http://router../", "http://printer.local../", "http://box.internal/", "http://nas.home.arpa/", "http://x.localhost/", "file:///etc/hosts"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
+  it("refuses a public IP address with a refusal of its own, a number not being a site's name, in every spelling", async () => {
+    assert.equal(NUMERIC_ADDRESS, "That address is a number, not a site's name, which this folder never fetches. Use the site's name.");
+    // The URL parser turns a whole number, hex, octal and short forms of a public address into its dotted one first.
+    for (const url of ["http://93.184.215.14/", "http://1.1.1.1/", "http://8.8.0.8:8080/a?b=1", "http://1572394766/", "http://0x5db8d70e/", "http://0135.0270.0327.016/", "http://93.184.55054/", "http://0x5d.0xb8.0xd7.0x0e/", "http://134744072/", "http://8.8.8/"]) assert.equal(await fetchWhy(url, never), NUMERIC_ADDRESS, url);
+    // An IPv6 address, and one with a public IPv4 inside it, is judged as a look-up's answer is.
+    for (const url of ["http://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/", "https://[2a00:1450:4009:81f::200e]:8443/", "http://[::ffff:8.8.8.8]/", "http://[64:ff9b::8.8.8.8]/", "http://[2002:808:808::]/", "http://[2001:0:4136:e378:8000:63bf:f7f7:f7f7]/"]) assert.equal(await fetchWhy(url, never), NUMERIC_ADDRESS, url);
+  });
+  it("refuses an IP address that is not public, on this Mac or its network or no site's at all, with the local refusal, in every spelling", async () => {
+    for (const url of ["http://0.0.0.0/", "http://0/", "http://127.1/", "http://0177.0.0.1/", "http://10.1.2.3/", "http://172.16.0.1/", "http://192.0.0.8/", "http://198.18.0.1/", "http://224.0.0.1/", "http://240.0.0.1/", "http://255.255.255.255/"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
+    for (const url of ["http://[::]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[ff02::1]/", "http://[2001:db8::1]/", "http://[4000::1]/", "http://[::ffff:10.0.0.1]/", "http://[::ffff:7f00:1]/", "http://[64:ff9b::a00:1]/", "http://[2002:7f00:1::]/", "http://[2001:0:4136:e378:8000:63bf:80ff:fffe]/"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
+  });
+  it("refuses the local names with a trailing dot or in capitals, and a file address", async () => {
+    for (const url of ["http://LOCALHOST./", "http://Printer.Local./", "http://router./", "http://localhost../", "http://router../", "http://printer.local../", "http://box.internal/", "http://nas.home.arpa/", "http://x.localhost/", "file:///etc/hosts"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
   });
   it("knows a global unicast address from every other kind", () => {
     for (const a of ["93.184.215.14", "8.8.8.8", "1.1.1.1", "2606:2800:21f:cb07:6820:80da:af6b:8b2c", "2a00:1450:4009:81f::200e", "::ffff:8.8.8.8", "64:ff9b::808:808"]) assert.equal(isGlobalUnicast(a), true, a);

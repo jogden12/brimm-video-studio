@@ -2,15 +2,18 @@
 // the sandbox and its deniedDomains, and reaches the Mac and the home network by number. So under the open lock the guard lets a
 // WebFetch through only to a name that answers with global unicast addresses alone, with and without its `www.` (WebFetch follows
 // a redirect between the two without asking again). Any numeric host is refused, in any spelling: the URL parser turns
-// `2130706433`, `0x7f.1` and `017700000001` into 127.0.0.1 first. So is a local name: `localhost`, a name with no dot, and one
-// under .local, .localhost, .internal or .home.arpa. An answer that is IPv4 inside IPv6 (`::ffff:…`, NAT64's `64:ff9b::…`) is
-// judged by the IPv4 inside it, as are 6to4's (`2002::…`) and Teredo's (`2001:0::…`). A redirect to another host comes back to the guard as a new address; a name whose answer changes
-// between the look-up and the fetch is let through (section 11).
+// `2130706433`, `0x7f.1` and `017700000001` into 127.0.0.1 first. A public one is told it is a number, not a site's name
+// (NUMERIC_ADDRESS); any other is told it is on this Mac or its network (LOCAL_ADDRESS). A local name is refused too: `localhost`,
+// a name with no dot, and one under .local, .localhost, .internal or .home.arpa. An address that is IPv4 inside IPv6 (`::ffff:…`,
+// NAT64's `64:ff9b::…`) is judged by the IPv4 inside it, as are 6to4's (`2002::…`) and Teredo's (`2001:0::…`), whether it is a
+// look-up's answer or the URL's own host. A redirect to another host comes back to the guard as a new address; a name whose answer
+// changes between the look-up and the fetch is let through (section 11).
 //
 // The look-up is given (`resolve`, a host to its addresses), so that a test gives a stand-in and never asks this Mac's resolver.
 import { isIP } from "node:net";
 
 export const LOCAL_ADDRESS = "That address is on this Mac or its network, which this folder never fetches.";
+export const NUMERIC_ADDRESS = "That address is a number, not a site's name, which this folder never fetches. Use the site's name.";
 export const UNCHECKED_ADDRESS = "That address could not be checked, so it is not fetched.";
 
 /** The IPv4 blocks that are not global unicast, each as its first address and its length. */
@@ -87,8 +90,9 @@ async function answers(host, resolve) {
 }
 
 /** Why a WebFetch of `url` is refused, or "" when it may be fetched. `resolve` looks a host up, giving its addresses. A URL that
-    does not parse, or whose host cannot be looked up, is UNCHECKED_ADDRESS; a numeric host, a local name, or a name that, with or
-    without its `www.`, answers with any address that is not global unicast, is LOCAL_ADDRESS. The `www.` form is asked too: when
+    does not parse, or whose host cannot be looked up, is UNCHECKED_ADDRESS; a numeric host that is global unicast is
+    NUMERIC_ADDRESS (a public number is no site's name); any other numeric host, a local name, or a name that, with or without its
+    `www.`, answers with any address that is not global unicast, is LOCAL_ADDRESS. The `www.` form is asked too: when
     there is no such name it gives no answer, which is no refusal; when its look-up fails for any other reason (a time-out, a
     server's failure, which whoever answers for the name can cause), the address is not checked. */
 export async function fetchWhy(url, resolve) {
@@ -98,7 +102,7 @@ export async function fetchWhy(url, resolve) {
   } catch {
     return UNCHECKED_ADDRESS;
   }
-  if (host.startsWith("[") || isIP(host)) return LOCAL_ADDRESS;
+  if (host.startsWith("[") || isIP(host)) return isGlobalUnicast(host.replace(/^\[|\]$/g, "")) ? NUMERIC_ADDRESS : LOCAL_ADDRESS;
   const name = host.replace(/\.+$/, "");
   if (!name.includes(".") || LOCAL_ENDINGS.some((end) => name === end || name.endsWith(`.${end}`))) return LOCAL_ADDRESS;
   const own = await answers(name, resolve);

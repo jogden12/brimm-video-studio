@@ -13,7 +13,7 @@ import { processTable } from "../chain.js";
 import { settingsFile, settingsMain, writeSettings } from "../settings.js";
 import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
-import { LOCAL_ADDRESS } from "../fetchable.js";
+import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { APP_ARGS, MINIMUM, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
 import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
@@ -82,11 +82,12 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
     assert.deepEqual(await decide("WebFetch", { url: "https://example.com/", prompt: "x" }), { decision: "deny", reason: WEB_HELD });
     assert.deepEqual(await decide("WebSearch", { query: "x" }), { decision: "deny", reason: WEB_HELD });
   });
-  it("allows WebSearch and a public WebFetch once the web tools are opened, and refuses a numeric or local one", async () => {
+  it("allows WebSearch and a public WebFetch once the web tools are opened, and refuses a numeric or local one, a public number in words of its own", async () => {
     const open = { web: "open" };
     assert.equal((await decide("WebSearch", { query: "x" }, open)).decision, "allow");
     assert.equal((await decide("WebFetch", { url: "https://example.com/a", prompt: "x" }, open)).decision, "allow");
     for (const url of ["http://127.0.0.1:47321/", "http://192.168.1.1/", "http://localhost/", "http://router/", "https://private.example.com/"]) assert.deepEqual(await decide("WebFetch", { url, prompt: "x" }, open), { decision: "deny", reason: LOCAL_ADDRESS }, url);
+    for (const url of ["http://93.184.215.14/", "http://1572394766/", "https://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/"]) assert.deepEqual(await decide("WebFetch", { url, prompt: "x" }, open), { decision: "deny", reason: NUMERIC_ADDRESS }, url);
     assert.equal((await decide("WebFetch", { url: "https://unknown.example.org/", prompt: "x" }, open)).decision, "deny");
     assert.equal((await decide("WebFetch", { prompt: "x" }, open)).decision, "deny");
   });
