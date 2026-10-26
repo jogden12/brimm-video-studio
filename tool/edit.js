@@ -359,8 +359,9 @@ function episodeAt(ctx, name, links = null) {
 /** Note each of `records` that is a session after all (its `session.emptyRevision` is set: it was read as another kind, and answered
     a session since) the first time this Mac reads it at that revision, with the time it is read (held.js noteAfterAll; design
     2026-10-26, R9): every chat begun before then may hold its words, and is held. episodeAt reads every record so, for `episodes`,
-    `status`, `guide`, `behind`'s lists and findEpisode alike, so the other Mac notes it at the start of her next chat. A note that
-    cannot be written now is tried again at the next read, which notes a later time and so holds more chats, not fewer. */
+    `status`, `guide` and findEpisode alike (`behind` reads no record, so it notes none), so the other Mac notes it at the start of
+    her next chat. A note that cannot be written now is tried again at the next read, which notes a later time and so holds more
+    chats, not fewer. */
 function noteSessionsAfterAll(ctx, records) {
   for (const r of records) {
     const revision = r.session !== null && typeof r.session === "object" && !Array.isArray(r.session) ? r.session.emptyRevision : undefined;
