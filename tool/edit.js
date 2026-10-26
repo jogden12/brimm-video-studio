@@ -66,6 +66,7 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
+import { sandboxedWhy } from "./sandboxed.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
@@ -5716,8 +5717,15 @@ export async function editMain(argv, deps = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  editMain(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
-  });
+  // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js).
+  const sandboxed = sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync });
+  if (sandboxed) {
+    process.stdout.write(`${sandboxed}\n`);
+    process.exitCode = 1;
+  } else {
+    editMain(process.argv.slice(2)).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }
 
