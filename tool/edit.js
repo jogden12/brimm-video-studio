@@ -67,6 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
+import { cardOf, notSessionCardOf } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
@@ -581,7 +582,8 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
 /** The lines of her card for the video not yet answered whose record is `named` (spec 2026-10-22, section 2, "The card"), below
     its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen),
     how it came, the tool's guess, and the episode whose words it found in the video, as "Maybe a new version of: <its name> (id
-    <short id>), <its kind>". Each line is left out when its fact is not given: no sight of it, or one not in the shape seenLine
+    <short id>), <its kind>"; and last the card itself, called `label`, as JSON (cardLinesFor, R10). Each of the first four lines
+    is left out when its fact is not given: no sight of it, or one not in the shape seenLine
     makes on one line (isSeenLine: a record may hold any text there, and a line break would forge the card's lines), no way it
     came, no guess, or a match that is none.
     The match (answer.match, an id) is looked for among `others`, the episodes `episodes` lists, by their records alone (episodeAt's
@@ -596,7 +598,7 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
     copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). A match that is itself a session not
     cleared, or one of whose versions is (matchedSession), gives the line "Maybe a new version of a client or group session." in its
     place, naming none: her skill then offers "Client or group session" first, and `kind` takes no other answer for it. */
-function cardLines(named, others, links) {
+function cardLines(named, label, others, links) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
   const lines = [];
@@ -605,16 +607,38 @@ function cardLines(named, others, links) {
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
   // A match that is a session not cleared, or a version of one, is offered as such, naming none (edit.js answerWhy then takes only
   // a session for it).
-  if (matchedSession(links, named)) {
-    lines.push("    Maybe a new version of a client or group session.");
-    return lines;
-  }
+  const maybe = maybeOf(named, others, links);
+  if (maybe && maybe.session) lines.push("    Maybe a new version of a client or group session.");
+  else if (maybe) lines.push(`    Maybe a new version of: ${shownName(maybe.record)} (id ${maybe.record.id.slice(-6)}), ${KIND_SAID[recordKind(maybe.record)]}`);
+  return [...lines, ...cardLinesFor(named, label, others, links)];
+}
+
+/** The video the Maybe line of the card of `named` names, as cardLines says it: { session: true } for a match that is a session not
+    cleared or a version of one, { record } for a match `kind --version-of` would take (its record in force), or null. */
+function maybeOf(named, others, links) {
+  const answer = named.answer;
+  if (answer === null || typeof answer !== "object") return null;
+  if (matchedSession(links, named)) return { session: true };
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
   if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
     && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
     && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
-    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
+    return { record: match.inForce };
   }
+  return null;
+}
+
+/** The card's own lines for the video with no kind whose record is `named`, called `label` (R10): "    Card: <JSON>", the card her
+    skill asks with AskUserQuestion as it is (receipts.js cardOf, by its Guess line and the Maybe line cardLines says), and, when it
+    came as a Zoom download or as sound alone, "    Card if not a session: <JSON>" (notSessionCardOf). A video she left alone has
+    them too: `kind` prints them when it asks for her click first. `others` and `links` are as cardLines has them. */
+export function cardLinesFor(named, label, others, links) {
+  const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
+  const found = maybeOf(named, others, links);
+  const maybe = !found ? null : found.session ? { session: true } : { name: shownName(found.record), kind: recordKind(found.record) };
+  const guess = Object.hasOwn(GUESS_WORDS, answer.guess) ? answer.guess : null;
+  const lines = [`    Card: ${JSON.stringify(cardOf({ label, guess, maybe }))}`];
+  if (answer.came === "zoom" || answer.came === "sound") lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came: answer.came }))}`);
   return lines;
 }
 
@@ -639,7 +663,7 @@ function episodeLines(ctx, e, left, all, links) {
     const held = e.held && !gated(named);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
     lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
-    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all, links));
+    if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
@@ -3888,6 +3912,16 @@ const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes"
 const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
+/** Refuse `kind` for `why`, of the video called `name` whose record is `record`: when it says to ask first whether the video is a
+    session, the card that asks it follows, by the video's label and how it came when the record says (R10). */
+function refuseAnswer(ctx, name, record, why) {
+  ctx.say(why);
+  if (why === ASK_IF_SESSION) {
+    const came = record.answer && typeof record.answer === "object" ? record.answer.came : null;
+    ctx.say(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: name, came: came === "zoom" || came === "sound" ? came : null }))}`);
+  }
+  return 1;
+}
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
 /** What `--clear-session` is refused in when the answer given is a session: a mark is cleared by saying what the video really is. */
@@ -4287,7 +4321,7 @@ async function answerKind(ctx, found, plan, began) {
   const { record } = read;
   const name = namedAs(found, record);
   const why = answerWhy(ctx, found, record, plan);
-  if (why) return refuse(ctx, why);
+  if (why) return refuseAnswer(ctx, name, record, why);
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
@@ -4322,7 +4356,7 @@ async function answerKind(ctx, found, plan, began) {
     const late = answerWhy(ctx, found, base, plan);
     if (late) {
       if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
-      return refuse(ctx, stop(late));
+      return refuseAnswer(ctx, name, base, stop(late));
     }
   }
   // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still. To a session,
