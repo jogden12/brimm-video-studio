@@ -181,3 +181,18 @@ describe("Claude's notes of a raw video she has answered", () => {
     }
   });
 });
+
+// --- Task 4 ---
+
+describe("her skill, on ideas for graphics", () => {
+  const skill = studioFiles({ checkout: "/c", node: "/n" })[".claude/skills/brimm-edit/SKILL.md"];
+  const rowOf = (start) => skill.split("\n").find((line) => line.startsWith(`| ${start} |`)) || "";
+  it("lists a raw video's ideas at what Claude found, shows them as printed, and puts one up by its number, in its lines as they are", () => {
+    const found = rowOf('"What did Claude find?"');
+    assert.ok(found.slice(0, found.indexOf("a session,")).includes('`graphic "<video>" ideas` (its ideas for graphics, each shown exactly as printed, with its number and times)'), found);
+    const graphics = rowOf('"Show the pricing chart when I say three numbers"');
+    for (const words of ['"Any ideas for graphics?": `graphic "<episode>" ideas`: show each idea exactly as printed, with its number and times, never restated without them.', '"Put idea 2 up with pricing.png": `graphic "<episode>" add "<picture>" --idea 2`']) assert.ok(graphics.includes(words), words);
+    assert.ok(skill.includes("Ideas for graphics are shown as printed too, with their numbers and times."));
+    assert.ok(skill.includes("To keep a cut found there, pass its words. To put up an idea for a graphic, pass its number (`--idea`)."));
+  });
+});
