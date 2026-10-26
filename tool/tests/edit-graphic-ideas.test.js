@@ -100,3 +100,61 @@ describe("graphic ideas", () => {
     }
   });
 });
+
+// --- Task 2 ---
+
+describe("graphic add --idea", () => {
+  it("puts a picture at an idea's words, for as long as they take, in the place the idea says, and says where on her timeline", async () => {
+    const { t, found } = raw();
+    picture(t, "chart.png", 1600, 900);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "1"), { code: 0, text: 'Graphic g1, chart.png, lower, idea 1, on main v0 at 0:00, for 1 second. Say "show it in Final Cut" to see it.' });
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "2"), { code: 0, text: 'Graphic g2, chart.png, full, idea 2, on main v0 at 0:04, for 2.7 seconds. Say "show it in Final Cut" to see it.' });
+    // What she says wins over what the idea says.
+    assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "1", "--place", "full", "--for", "6")).code, 0);
+    assert.deepEqual(reread(found).main.graphics, [
+      { id: "g1", picture: "media/chart.png", at: 6.07, for: 1, place: "lower" },
+      { id: "g2", picture: "media/chart.png", at: 13.583, for: 2.747, place: "full" },
+      { id: "g3", picture: "media/chart.png", at: 6.07, for: 6, place: "full" }
+    ]);
+    t.done();
+  });
+  it("puts up an idea whose words were kept again since the version she watched, and says it is not on that version", async () => {
+    const { t, found } = raw();
+    picture(t, "chart.png", 1600, 900);
+    assert.equal((await on(t.ctx.deps, "cut", "Pricing", "keep", "--words", "very important")).code, 0);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "3"), { code: 0, text: 'Graphic g1, chart.png, corner, idea 3, not on main v0 (kept again since), for 1.8 seconds. Say "show it in Final Cut" to see it.' });
+    assert.deepEqual(reread(found).main.graphics, [{ id: "g1", picture: "media/chart.png", at: 17.246, for: 1.776, place: "corner" }]);
+    t.done();
+  });
+  it("asks no guard on a timeline shown in Final Cut: nothing is read off her timeline", async () => {
+    const { t, found } = episode();
+    picture(t, "chart.png", 1600, 900);
+    assert.equal((await on(t.ctx.deps, "push", "Pricing")).code, 0);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "1"), { code: 0, text: 'Graphic g1, chart.png, full, idea 1, on main v1 at 0:04, for 2.7 seconds. Say "show it in Final Cut" to see it.' });
+    assert.deepEqual(reread(found).main.graphics, [{ id: "g1", picture: "media/chart.png", at: 13.583, for: 2.747, place: "full" }]);
+    t.done();
+  });
+  it("refuses an idea cut now, one there is not, one outside a Reel's stretch, a number that is not one, and an idea with a time, and writes nothing", async () => {
+    const { t, found } = episode({}, {}, withIdeas(IDEAS));
+    picture(t, "chart.png", 1600, 900);
+    for (const [argv, said] of [
+      [["--idea", "3"], 'Idea 3 is on words cut from the main video now: "It is very, very important." Keep them first, or pick another idea.'],
+      [["--idea", "4"], 'There is no idea 4 for graphics. Say "any ideas for graphics?" to see them.'],
+      [["reel", "2", "--idea", "1"], "Idea 1 is outside Reel 2's stretch of the recording."],
+      [["--idea", "two"], "Say which idea by its number (--idea 2)."],
+      [["--idea", "0"], "Say which idea by its number (--idea 2)."],
+      [["--idea", "2", "--at", "0:04"], "Say when by the idea (--idea 2), or by a time or words (--at, --at-words), not both."]
+    ]) assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", ...argv), { code: 1, text: said }, argv.join(" "));
+    assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+  it("puts none up on a finished video or an iPhone clip, and writes nothing", async () => {
+    for (const [kind, what] of KINDS) {
+      const { t, found } = light(kind);
+      picture(t, "chart.png", 1600, 900);
+      assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing talk", "add", "chart.png", "--idea", "1"), { code: 1, text: `Pricing talk has no ideas for graphics: Claude gives none for ${what}.` }, kind);
+      assert.equal(reread(found).rev, 1, kind);
+      t.done();
+    }
+  });
+});

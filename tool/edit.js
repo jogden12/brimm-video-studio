@@ -168,10 +168,12 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                      --line "<name>" [--line "<role>"] [--no-hand-edits]
                                         a name over a role, at a time on the timeline or the words said there; "drop
                                         <id>" takes one off, and with neither, the list
-  node edit.js graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>")
+  node edit.js graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>)
                      [--for <seconds>] [--place full|corner|lower] [--no-hand-edits]
                                         a picture from the Pictures folder over the timeline; "drop <id>" takes one off,
-                                        "ideas" lists Claude's, and with neither, the list
+                                        "ideas" lists Claude's, numbered, with their times on the timeline, and with
+                                        neither, the list. --idea <n> puts it at idea n's words, for as long as they take,
+                                        in the corner or the lower third when the idea says so
   node edit.js preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]
                                         the timeline's job, caption style and look; with none, what it has and what
                                         there is
@@ -3662,17 +3664,21 @@ function graphicIdeas(read) {
 const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
+/** The place an idea says, when it says one: "corner" for the word corner, "lower" for a lower third; null otherwise. A "lower
+    price" is no place. */
+const ideaPlace = (idea) => (/\bcorner\b/i.test(idea) ? "corner" : /\blower[- ]third\b/i.test(idea) ? "lower" : null);
 /** What is said of a finished video's or an iPhone clip's ideas for graphics: Claude gives none (Jason, 22 Oct: "Reel suggestions
     and spellings, nothing more"). */
 const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"}.`;
 /** What the list of ideas says last, when one of them can be put up. */
 const IDEAS_ASK = 'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".';
 
-/** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>]
+/** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>) [--for <seconds>]
     [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
-    [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). */
+    [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). Claude's
+    ideas are listed as she reads them (graphicIdeas), and `--idea` puts the picture at one's words (Sallie's note 8). */
 async function graphic(ctx, rest) {
-  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place"]);
+  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place", "idea"]);
   const [said, verb, nameOrId, ...more] = words;
   const takes = verb === "add" || verb === "drop";
   const start = layerStart(ctx, [said, ...(takes ? more : [verb === "ideas" ? undefined : verb, nameOrId, ...more].filter((w) => w !== undefined))], { writes: takes });
@@ -3704,10 +3710,30 @@ async function graphic(ctx, rest) {
     if (!graphics.some((g) => g.id === nameOrId)) return refuse(ctx, `There is no graphic ${nameOrId} on ${partLabel(part)}.`);
     return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, graphics: graphics.filter((g) => g.id !== nameOrId) })), `Graphic ${nameOrId} is taken off ${partLabel(part)}. ${SHOW_IT}`);
   }
-  const place = flags.place ? flags.place[flags.place.length - 1] : "full";
-  if (!["full", "corner", "lower"].includes(place)) return refuse(ctx, `"${place}" is not a place. Say full, corner or lower.`);
-  const moment = momentFrom(ctx, found, part, flags);
-  if (moment.code !== undefined) return moment.code;
+  const named = flags.place ? flags.place[flags.place.length - 1] : null;
+  if (named !== null && !["full", "corner", "lower"].includes(named)) return refuse(ctx, `"${named}" is not a place. Say full, corner or lower.`);
+  // By an idea's number, the moment is its words', from the plan: nothing is read off her timeline, so the guard is not asked.
+  const asked = flags.idea ? flags.idea[flags.idea.length - 1] : undefined;
+  let chosen = null;
+  let moment;
+  if (asked !== undefined) {
+    if (!hasFinalCut(found.record)) return refuse(ctx, noIdeas(found.record));
+    if (flags.at || flags["at-words"]) return refuse(ctx, "Say when by the idea (--idea 2), or by a time or words (--at, --at-words), not both.");
+    const n = /^[1-9]\d*$/.test(asked) ? Number(asked) : null;
+    if (n === null) return refuse(ctx, "Say which idea by its number (--idea 2).");
+    const read = clockFor(found, part, ctx);
+    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    chosen = graphicIdeas(read).find((i) => i.n === n);
+    if (!chosen) return refuse(ctx, `There is no idea ${n} for graphics. Say "any ideas for graphics?" to see them.`);
+    if (chosen.outside) return refuse(ctx, `Idea ${n} is outside Reel ${part.reel}'s stretch of the recording.`);
+    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.phrase.text)}" Keep them first, or pick another idea.`);
+    sayElsewhere(ctx, read);
+    moment = { at: chosen.at, for: chosen.for, on: read.on, clock: read.clock, read };
+  } else {
+    moment = momentFrom(ctx, found, part, flags);
+    if (moment.code !== undefined) return moment.code;
+  }
+  const place = named || (chosen && ideaPlace(chosen.idea)) || "full";
   const length = lengthFrom(ctx, flags, moment, 4);
   if (length.code !== undefined) return length.code;
   const got = pictureFrom(ctx, found, nameOrId);
@@ -3719,7 +3745,8 @@ async function graphic(ctx, rest) {
   const shown = Math.min(got.size.width / got.size.height / (frame.width / frame.height), (frame.width / frame.height) / (got.size.width / got.size.height));
   const cropped = place === "full" && shown < 0.67 ? ` The picture is another shape than the frame, so only about ${Math.round(shown * 100)}% of it shows: say --place lower to show it whole.` : "";
   const record = { ...found.record, files: { ...found.record.files, [got.picture]: got.bytes } };
-  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, graphics: [...graphics, layer] })), `Graphic ${id}, ${nameOrId}, ${place}, on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}.${cropped} ${SHOW_IT}`, got);
+  const where = !chosen ? `on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}` : `idea ${chosen.n}, ${chosen.start === null ? `not on ${moment.on} (kept again since)` : `on ${moment.on} at ${clockText(chosen.start)}`}`;
+  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, graphics: [...graphics, layer] })), `Graphic ${id}, ${nameOrId}, ${place}, ${where}, for ${lengthText(length.seconds)}.${cropped} ${SHOW_IT}`, got);
 }
 
 /** `preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]`: the timeline's job,
