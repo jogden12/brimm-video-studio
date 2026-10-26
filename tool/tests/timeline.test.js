@@ -658,7 +658,9 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
       "   Closes with: so much, Sallie.",
       "   Why: It makes one point and stands alone.",
       "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
-      ""
+      "",
+      // brimm-video makes no Reel from a suggestion yet (phase V): where she makes them for now (Sallie's walkthrough, 25 Oct).
+      'brimm-video cannot make Reels from this video yet: for now, cut them in OpusClip. BRIMM Ops writes their post text: on the episode\'s Reels card, press "New short video from a clip".'
     ].join("\n"));
     t.done();
   });

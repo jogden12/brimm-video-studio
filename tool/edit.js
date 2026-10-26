@@ -1658,9 +1658,11 @@ async function markReels(ctx, found, ns, status) {
     for (const n of ns) {
       const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
       if (candidate && !candidate.ranges.length) return refuse(ctx, `Reel ${n} has nothing to show: ${String(candidate.failed || "it has no stretch").replace(/\.$/, "")}.`);
-      // A candidate a reading suggested has no crops until it is made (reels.json version 2): its project cannot be written yet.
-      if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
     }
+    // A candidate a reading suggested has no crops until it is made (reels.json version 2), and nothing makes one yet: none is
+    // picked, and each such is named, with where she makes them for now.
+    const unmade = listing.reels ? [...new Set(ns)].filter((n) => listing.reels.candidates.some((c) => c.n === n && uncropped(c))) : [];
+    if (unmade.length) return refuse(ctx, notMadeWords(unmade));
     // A change Dropbox took away is said before anything is written, as save says it.
     const gone = undone(found.record, ctx.home);
     if (gone) {
@@ -1700,21 +1702,26 @@ async function markReels(ctx, found, ns, status) {
 export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked");
 export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
 
+/** Whether Reel `n` of the episode `found` is one a reading suggested and nobody has made (reels.json version 2): its candidate
+    has no crops, and no project of its own is listed. There is nothing upright to show or change, whatever the record says of
+    it, and nothing makes one yet (phase V). */
+function notMade(found, n) {
+  const { record } = found;
+  if ((record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) || !existsSync(join(found.folder, REELS_FILE))) return false;
+  const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
+  const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
+  return Boolean(candidate && uncropped(candidate));
+}
+
 /** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
     episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. A Reel a
-    reading suggested and nobody has made yet (its candidate has no crops) is refused first: "make" it first. */
+    reading suggested and nobody has made yet (notMade) is refused first, with where she makes it for now (notMadeWords). */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
-  // A Reel whose candidate has no crops yet, as a reading suggests it (reels.json version 2), is not made: there is nothing
-  // upright to show, whatever the record says of it.
-  if (!(record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) && existsSync(join(found.folder, REELS_FILE))) {
-    const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
-    const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
-    if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
-  }
+  if (notMade(found, n)) return refuse(ctx, notMadeWords(n));
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
   const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
@@ -2965,6 +2972,9 @@ async function reels(ctx, rest) {
     }
     const clock = now && now.clock && now.clock.length ? now : null;
     ctx.say(reelsText(read.reels, record, "", clock));
+    // Nothing makes a Reel from a suggestion yet (phase V): she is told where she makes them for now, so that no command sends her
+    // round in a circle (Sallie's walkthrough, 25 Oct). The gate refuses a session before this, and it is never said of one.
+    if (!gated(record) && read.reels.candidates.some(uncropped)) ctx.say(notMadeWords());
     if (clock) sayElsewhere(ctx, clock);
     return 0;
   }
@@ -3131,6 +3141,8 @@ function layerStart(ctx, words, { writes = true } = {}) {
   if (left.length) return { code: refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`) };
   const target = part === "main" ? got.record.main : (got.record.reels || []).find((r) => r.n === part.reel);
   if (!target) return { code: refuse(ctx, `There is no Reel ${part.reel}.`) };
+  // A Reel a reading suggested cannot be picked, so she is not sent to pick it: she is told where she makes it for now.
+  if (part !== "main" && notMade(found, part.reel)) return { code: refuse(ctx, notMadeWords(part.reel)) };
   if (part !== "main" && target.status !== "picked" && target.status !== "finished") return { code: refuse(ctx, `Reel ${part.reel} is not picked. Pick it first.`) };
   if (!writes) return { found, part, target, words: left };
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
