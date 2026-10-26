@@ -199,7 +199,7 @@ function keepUuids(home, sessionId, transcriptPath, compactions = 0) {
 
 /** Where the guard notes that her folder kept the open lock's shape while the lock in effect was strict (studio.js guardDecision
     then answers, and edit.js prints a session's words into command output, which chats with the open lock may read). */
-const strictSeenFile = (home) => join(heldFolder(home), "strict-seen.json");
+export const strictSeenFile = (home) => join(heldFolder(home), "strict-seen.json");
 
 /** Note, once, that her folder kept the open shape under the strict lock, at `now`. One that cannot be written is left: the next
     call tries again. */

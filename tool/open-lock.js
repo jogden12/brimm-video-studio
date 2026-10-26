@@ -44,8 +44,8 @@ import { isConnector, neverCaught } from "./never.js";
 import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
-import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeen, wordsFolder } from "./held.js";
-import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
+import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeenFile, wordsFolder } from "./held.js";
+import { LOCK_CHANGED, addedWhy, beyondWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
 import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
@@ -375,6 +375,9 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     // The agent definitions Claude Code would load (loosened.js agentsWhy), each folder and file inside the agents folders by itself.
     ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...treeOf(dir)]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
+    // The note of a time her folder kept the open shape under the strict lock (held.js strictSeen). Not its folder, which the scans
+    // of the chats' transcripts change at every call.
+    strictSeenFile(home),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
     prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),
     ...appPaths,
@@ -431,6 +434,9 @@ function lockLines({ home, checkout, folder, node, input, deps, env, settings, f
     minimum: deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE, flags: deps.appFlags || null,
     // The names, and what the check says of them: a value it reads (whether memory is turned on) is never kept, only its line.
     env: [Object.keys(env).sort(), environmentWhy(env)],
+    // What the check says beyond them (loosened.js beyondWhy): whether CLAUDE_CONFIG_DIR is the very folder ~/.claude is, by device
+    // and inode, and whether the strict-lock note is there. Its lines hold no value.
+    beyond: beyondWhy({ env, home }),
     shape: studioNodeOf(settings) ? openSettingsOf({ checkout, node: studioNodeOf(settings), folder, facts }) : null,
     files: watched({ home, folder, checkout, env, deps, settings, claude }).map(stamp),
   });
@@ -450,33 +456,6 @@ function openShaped(folder) {
   } catch (e) {
     return false;
   }
-}
-
-/** Whether `config`, CLAUDE_CONFIG_DIR, is the very folder ~/.claude is: an absolute path, both there, and one by their identity
-    (device and inode). Names are never compared: one that folds to .claude (fold) may be a folder macOS keeps apart. */
-function homeClaude(config, home) {
-  if (!isAbsolute(config)) return false;
-  try {
-    const given = statSync(config, { bigint: true });
-    const own = statSync(join(home, ".claude"), { bigint: true });
-    return given.dev === own.dev && given.ino === own.ino;
-  } catch (e) {
-    return false;
-  }
-}
-
-/** What loosens the open lock beyond the shared lock check, as lines for Jason: Claude Code keeping its settings and chats somewhere
-    other than ~/.claude (CLAUDE_CONFIG_DIR), which no gated place holds, a folder that is not there, or ~/.claude itself not there,
-    among them; and a time her folder kept the open shape under the strict lock (noteStrictSeen), whose chats may have left a
-    session's words in command output, until settings.js studio writes it again. */
-function beyondWhy(env, home) {
-  const why = [];
-  const config = env.CLAUDE_CONFIG_DIR;
-  if (config && !homeClaude(config, home)) {
-    why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
-  }
-  if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");
-  return why;
 }
 
 /** Look a name up as WebFetch would, every address it has, within five seconds. */
@@ -526,7 +505,7 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const env = { ...(deps.env || process.env), CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: input.session_id };
   const check = { ...deps, settings, env, ps: () => text, cwd: hers ? folder : input.cwd, transcript: hers ? input.transcript_path : null };
   const now = deps.now ? Number(deps.now()) : Date.now();
-  const lines = [...lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now }), ...beyondWhy(env, home)];
+  const lines = lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now });
   const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : "unknown" });
   return openDecision(input, { ...ctx, loosened: lines.length > 0, held });
 }

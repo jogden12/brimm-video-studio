@@ -9,8 +9,9 @@ import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { readSettings, settingsFile, settingsMain, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
-import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders } from "../loosened.js";
+import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders, trustWhy } from "../loosened.js";
 import { claudeDirName } from "../places.js";
+import { clearStrictSeen, noteStrictSeen } from "../held.js";
 import { openWorld, openDeps, psText, chatChain, appCopy, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, CHAT_ENV, transcript } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
@@ -69,6 +70,9 @@ function changeOwn(w, change) {
 /** The chat's transcript where Claude Code keeps it for a chat started in her folder, ~/.claude/projects/<her folder's name>/, written
     from `lines`. Gives its path. */
 const chatTranscript = (w, lines, id = SESSION) => transcript(join(w.home, ".claude", "projects", claudeDirName(w.folder)), lines, id);
+
+/** What `behind` says while Claude Code keeps its settings and chats outside ~/.claude (CLAUDE_CONFIG_DIR). */
+const CONFIG_LINE = "(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)";
 
 const ownLine = (parts) => `(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${parts}. Its contents are not shown here.)`;
 
@@ -276,6 +280,51 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     assert.deepEqual(asked, [w.port]);
     refusedFor(await behindOn(w, { lsof: () => null }), `(Jason: whether anything listens on her folder's proxy port, ${w.port}, could not be checked.)`, "not checked");
     assert.deepEqual(Object.values(await behindOn(w, { lsof: () => "\n" })).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
+  it("refuses while Claude Code keeps its settings and chats outside ~/.claude (CLAUDE_CONFIG_DIR), there or not, and goes on for the very folder ~/.claude is", async () => {
+    const line = CONFIG_LINE;
+    const there = (w) => ({ transcript: join(w.home, ".claude", "projects", claudeDirName(w.folder), `${SESSION}.jsonl`) });
+    // Another folder, there or not, a relative path, and look-alike names that fold to .claude but that macOS keeps apart (a script small
+    // l, U+2113, and a fullwidth c, U+FF43).
+    for (const [what, config, make] of [
+      ["not there", (w) => join(w.home, "Claude config"), () => {}],
+      ["there", (w) => join(w.home, "Claude config"), (w, at) => mkdirSync(join(at, "projects"), { recursive: true })],
+      ["not absolute", () => ".claude", () => {}],
+      ["a look-alike, not there", (w) => join(w.home, ".c\u2113aude"), () => {}],
+      ["a look-alike, there", (w) => join(w.home, ".\uFF43laude"), (w, at) => mkdirSync(join(at, "projects"), { recursive: true })],
+    ]) {
+      const w = openWorld();
+      make(w, config(w));
+      const r = await behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CONFIG_DIR: config(w) }, ...there(w) });
+      refusedFor(r, line, what);
+      if (config(w).startsWith("/")) assert.ok(!r.text.includes(config(w)), `${what}: the value is not said`);
+      w.done();
+    }
+    // The very folder ~/.claude is, as the path of it, through a link to it, and none given (unset or empty).
+    for (const [what, config] of [["~/.claude itself", (w) => join(w.home, ".claude")], ["a link to it", (w) => join(w.home, "claude link")], ["empty", () => ""]]) {
+      const w = openWorld();
+      if (what === "a link to it") symlinkSync(join(w.home, ".claude"), config(w));
+      // Claude Code keeps its trust in $CLAUDE_CONFIG_DIR/.claude.json when that is set.
+      writeFileSync(join(w.home, ".claude", ".claude.json"), JSON.stringify({ projects: { [w.folder]: { hasTrustDialogAccepted: true } } }));
+      const r = await behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CONFIG_DIR: config(w) }, ...there(w) });
+      assert.deepEqual([r.code, r.text], [0, NEWEST], what);
+      w.done();
+    }
+  });
+  it("refuses after a time her folder kept the open lock's settings under the strict lock, until settings.js studio writes it again", async () => {
+    const line = "(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)";
+    const w = openWorld();
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    noteStrictSeen(w.home, Date.parse("2026-10-26T10:30:00.000Z"));
+    refusedFor(await behindOn(w), line, "noted");
+    clearStrictSeen(w.home);
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    // On a strict Mac the note is not looked at: PR #40's check, and nothing more.
+    noteStrictSeen(w.home, Date.parse("2026-10-26T10:30:00.000Z"));
+    const strict = await behindOn(w, { minimum: null });
+    assert.equal(strict.code, 0);
+    assert.ok(!strict.text.includes("kept the open lock's settings"), strict.text);
     w.done();
   });
   it("refuses for a .claude, CLAUDE.md, CLAUDE.local.md or .mcp.json anywhere in the workshop, in any letter case", async () => {
@@ -867,7 +916,9 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     const config = join(w.dir, "config");
     transcript(join(config, "projects", claudeDirName(w.folder)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
     writeFileSync(join(config, ".claude.json"), readFileSync(join(w.home, ".claude.json")));
-    goesOn(await behindOn(w, { cwd: pictures, env: { ...UNDER, CLAUDE_CONFIG_DIR: config } }), "CLAUDE_CONFIG_DIR");
+    // The session is hers there (no line of the folder it runs in); the folder that holds Claude Code's settings is what is said.
+    const elsewhere = await behindOn(w, { cwd: pictures, env: { ...UNDER, CLAUDE_CONFIG_DIR: config } });
+    assert.deepEqual([elsewhere.code, elsewhere.text], [1, `${LOCK_CHANGED}\n${CONFIG_LINE}`], "CLAUDE_CONFIG_DIR");
     // Jason's own run, not under Claude Code, keeps PR #40's look at the folder it runs in.
     refusedFor(await behindOn(w, { cwd: pictures }), INSIDE_WHY, "Jason's run in Pictures");
     w.done();
@@ -906,7 +957,10 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     // With $CLAUDE_CONFIG_DIR, Claude Code keeps its trust there, beside the chat's transcript.
     const config = join(w.dir, "config");
     transcript(join(config, "projects", claudeDirName(w.folder)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
-    assert.ok((await behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CONFIG_DIR: config } })).text.split("\n").includes(UNTRUSTED));
+    // (`behind` itself now refuses for a CLAUDE_CONFIG_DIR that is not ~/.claude, so the trust is asked of trustWhy.)
+    assert.equal(trustWhy({ home: w.home, folder: w.folder, env: { CLAUDE_CONFIG_DIR: config } }), UNTRUSTED);
+    writeFileSync(join(config, ".claude.json"), JSON.stringify({ projects: { [w.folder]: { hasTrustDialogAccepted: true } } }));
+    assert.equal(trustWhy({ home: w.home, folder: w.folder, env: { CLAUDE_CONFIG_DIR: config } }), "");
     w.done();
   });
   it("says the entries this Mac adds to her folder's allowlist, and says nothing of the default ones", async () => {
