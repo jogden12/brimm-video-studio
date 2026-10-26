@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
-import { cardOf, notSessionCardOf } from "./receipts.js";
+import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
@@ -630,15 +630,17 @@ function maybeOf(named, others, links) {
 
 /** The card's own lines for the video with no kind whose record is `named`, called `label` (R10): "    Card: <JSON>", the card her
     skill asks with AskUserQuestion as it is (receipts.js cardOf, by its Guess line and the Maybe line cardLines says), and, when it
-    came as a Zoom download or as sound alone, "    Card if not a session: <JSON>" (notSessionCardOf). A video she left alone has
-    them too: `kind` prints them when it asks for her click first. `others` and `links` are as cardLines has them. */
-export function cardLinesFor(named, label, others, links) {
+    came as a Zoom download or as sound alone, or `notASession` asks for it, "    Card if not a session: <JSON>" (notSessionCardOf,
+    worded for how it came when the record says). A video she left alone has them too: `kind` prints them when it asks for her click
+    first. `others` and `links` are as cardLines has them. */
+export function cardLinesFor(named, label, others, links, { notASession = false } = {}) {
   const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
   const found = maybeOf(named, others, links);
   const maybe = !found ? null : found.session ? { session: true } : { name: shownName(found.record), kind: recordKind(found.record) };
   const guess = Object.hasOwn(GUESS_WORDS, answer.guess) ? answer.guess : null;
   const lines = [`    Card: ${JSON.stringify(cardOf({ label, guess, maybe }))}`];
-  if (answer.came === "zoom" || answer.came === "sound") lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came: answer.came }))}`);
+  const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
+  if (came || notASession) lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came }))}`);
   return lines;
 }
 
@@ -688,6 +690,9 @@ function shownLine(pushed) {
   return `Shown: v${top.v} (${top.how === "render" ? "rendered" : "in Final Cut"}), on ${top.on}`;
 }
 
+/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one. */
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
 
@@ -703,7 +708,7 @@ export async function episodes(ctx) {
   const { say } = ctx;
   // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
   const links = linksOf(ctx.root);
-  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  const all = listedEpisodes(ctx, links);
   const shown = all.filter((e) => !isLeft(e));
   const left = all.filter(isLeft);
   if (!shown.length && !left.length) say("No episodes yet.");
@@ -3912,6 +3917,27 @@ const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes"
 const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
+/** Whether `kind` may answer the video called `name`, whose record is `record`, as `plan` says (R10, R11; design 2026-10-26, section
+    5, "The card's receipt"): under Claude Code, on a Mac whose lock in effect is open, a video with no kind yet, waiting for her
+    answer or left alone, is answered only when a receipt of the last hour holds her answers on the card (receipts.js), and with
+    --not-a-session her answer on the not-a-session card too; a session, on her answer to either card. When it may not, it says
+    NO_RECEIPT and the video's card, which her skill then asks, and nothing is written. In Terminal, on a strict Mac, and for a
+    video answered already, no receipt is asked for. */
+function receiptHeld(ctx, record, plan, name) {
+  if ((ctx.deps.env || process.env).CLAUDECODE !== "1" || lockFor(ctx.settings, ctx.deps) !== "open" || recordKind(record) !== null) return true;
+  const answer = record.answer !== null && typeof record.answer === "object" ? record.answer : {};
+  const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
+  const target = plan.target ? plan.target.record : null;
+  const expected = expectedAnswers({ label: name, stored: plan.stored, maybeName: target ? shownName(target) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came });
+  const now = ctx.now();
+  if (receiptWhy({ home: ctx.home, expected, now }) === "") return true;
+  if (plan.stored === "session" && receiptWhy({ home: ctx.home, expected: sessionByFollowUp({ label: name, came }), now }) === "") return true;
+  ctx.say(NO_RECEIPT);
+  const links = linksOf(ctx.root);
+  for (const line of cardLinesFor(record, name, listedEpisodes(ctx, links), links, { notASession: plan.notASession })) ctx.say(line);
+  return false;
+}
+
 /** Refuse `kind` for `why`, of the video called `name` whose record is `record`: when it says to ask first whether the video is a
     session, the card that asks it follows, by the video's label and how it came when the record says (R10). */
 function refuseAnswer(ctx, name, record, why) {
@@ -4322,6 +4348,7 @@ async function answerKind(ctx, found, plan, began) {
   const name = namedAs(found, record);
   const why = answerWhy(ctx, found, record, plan);
   if (why) return refuseAnswer(ctx, name, record, why);
+  if (!receiptHeld(ctx, record, plan, name)) return 1;
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that

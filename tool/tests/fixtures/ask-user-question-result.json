@@ -1,0 +1,37 @@
+{
+  "written": "From Claude Code 2.1.308's output schema for AskUserQuestion, not from a card answered in the Code tab: by-hand item 10 replaces it with one recorded there.",
+  "questions": [
+    {
+      "question": "What is Video of 20 Oct, 15:00 (Mac Studio)?",
+      "options": [
+        {
+          "label": "Raw with retakes"
+        },
+        {
+          "label": "Finished by your editor"
+        },
+        {
+          "label": "iPhone clip"
+        },
+        {
+          "label": "Client or group session"
+        }
+      ]
+    },
+    {
+      "question": "Is it a private session with a client or a group?",
+      "options": [
+        {
+          "label": "Yes"
+        },
+        {
+          "label": "No"
+        }
+      ]
+    }
+  ],
+  "answers": {
+    "What is Video of 20 Oct, 15:00 (Mac Studio)?": "Raw with retakes",
+    "Is it a private session with a client or a group?": "No"
+  }
+}

@@ -3,6 +3,15 @@
 // name put in, as is the follow-up for a Zoom download or sound alone. `episodes` prints the exact card for each video waiting for
 // her answer, and her skill asks it as printed: a card Claude words itself is in none of these forms, and earns no receipt.
 // These words are a proposal, for Jason and Sallie to settle.
+//
+// The receipt (R11): a PostToolUse hook on AskUserQuestion (studio/receipt.sh, receipt.mjs) writes one into this Mac's Application
+// Support, which neither the sandbox nor Claude's Write tool reaches, only for a card in one of these forms that she answered: her
+// answers are taken from the tool's result, never from what Claude asked with, and a card that resolved itself while she was idle
+// (afkTimeoutMs), or that she followed up in words (followUp), earns none. `kind`, under Claude Code on a Mac whose lock in effect
+// is open, answers a video with no kind only when a receipt of the last hour holds its label and her very answers (edit.js).
+import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 /** The card's first question, of the video called `label`. */
 export const WHAT_Q = (label) => `What is ${label}?`;
@@ -103,4 +112,116 @@ export function formOf(questions) {
     }
   }
   return null;
+}
+
+/** What `kind` says when it would answer a video with no kind without her answer on the card. */
+export const NO_RECEIPT = "Ask her on the card first: only her answer on it answers a video that has no answer yet.";
+/** How long a receipt answers for. */
+const RECEIPT_MS = 60 * 60 * 1000;
+
+/** Where this Mac keeps the card's receipts: in Application Support, on its own disk. */
+export const receiptsFolder = (home) => join(home, "Library", "Application Support", "BRIMM Video", "receipts");
+/** A receipt's file name, as writeReceipt makes it. */
+const RECEIPT_NAME = /^receipt-\d+-[0-9a-f]{6}\.json$/;
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** The receipt of the card answered in the hook's input `input` (PostToolUse on AskUserQuestion), at `now` (ms): { at, label, form,
+    answers }, `answers` her answer to each question by its text; or null. None for any other event or tool, for a result that holds
+    afkTimeoutMs or followUp, for a card in no fixed form (formOf), and for a question with no answer in the result or one that is not
+    one of its options (her own words, in Other). Only the result, `tool_response`, is read: never what Claude asked with. */
+export function receiptFrom(input, now) {
+  if (!isObject(input) || input.hook_event_name !== "PostToolUse" || input.tool_name !== "AskUserQuestion") return null;
+  const result = input.tool_response;
+  if (!isObject(result) || Object.hasOwn(result, "afkTimeoutMs") || Object.hasOwn(result, "followUp") || !isObject(result.answers)) return null;
+  const form = formOf(result.questions);
+  if (!form) return null;
+  const answers = {};
+  for (const q of result.questions) {
+    const answer = Object.hasOwn(result.answers, q.question) ? result.answers[q.question] : undefined;
+    if (typeof answer !== "string" || !q.options.some((o) => o.label === answer)) return null;
+    answers[q.question] = answer;
+  }
+  return { at: now, label: form.label, form: form.form, answers };
+}
+
+/** Write `receipt` into this Mac's receipts folder (receiptsFolder), as a file of its own named by its time and six random hex
+    letters, never by its label, and never over a file there (`wx`): its path, or null when it could not be written, the folder being
+    a link, or each name tried being taken. `hex` is a test's stand-in for the random letters. */
+export function writeReceipt(home, receipt, { hex = () => randomBytes(3).toString("hex") } = {}) {
+  const folder = receiptsFolder(home);
+  try {
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    if (!lstatSync(folder).isDirectory()) return null;
+  } catch (e) {
+    return null;
+  }
+  for (let i = 0; i < 3; i++) {
+    const file = join(folder, `receipt-${receipt.at}-${hex()}.json`);
+    try {
+      writeFileSync(file, JSON.stringify(receipt), { flag: "wx", mode: 0o600 });
+      return file;
+    } catch (e) {
+      if (e.code !== "EEXIST") return null;
+    }
+  }
+  return null;
+}
+
+/** The first answer to "What is <label>?" that `kind` answering `stored` (finished, raw, short video, session) stands for: with
+    `maybeName`, the name of the video `--version-of` names, and `maybeKind` its kind, as the card's Maybe line offered it (the
+    table of her skill); null when no card offers it. */
+function whatAnswer({ stored, maybeName, maybeKind }) {
+  if (stored === "session") return SESSION;
+  if (typeof maybeName !== "string") return { finished: FINISHED, raw: RAW, "short video": CLIP }[stored] || null;
+  if (maybeKind === "raw") return stored === "finished" ? versionOf({ name: maybeName, kind: "raw" }) : stored === "raw" ? RAW : null;
+  return stored === "finished" || stored === "short video" ? versionOf({ name: maybeName, kind: maybeKind }) : null;
+}
+
+/** The answers `kind` needs a receipt of, for the video called `label` answered as `stored`: her card's, and with `notASession` the
+    not-a-session card's too, worded for how it came (`came`, zoom, sound, or null when the record does not say), each as { form,
+    answers }. A kind no card offers is expected as an answer no card has, which no receipt holds. */
+export function expectedAnswers({ label, stored, maybeName = null, maybeKind = null, notASession = false, came = null }) {
+  const first = whatAnswer({ stored, maybeName, maybeKind });
+  const expected = [{ form: "what", answers: { [WHAT_Q(label)]: first === null ? "" : first, [PRIVATE_Q]: stored === "session" ? "Yes" : "No" } }];
+  if (notASession) expected.push({ form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: NOT_SESSION } });
+  return expected;
+}
+
+/** Her answer "It is a client or group session" on the not-a-session card of the video called `label`, which answers it as a
+    session as surely as her first card's "Client or group session" and "Yes" do. */
+export const sessionByFollowUp = ({ label, came = null }) => [{ form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: IS_SESSION } }];
+
+/** Whether the receipt `r` is of the card it says: the question it answers is the one its form asks of its label. */
+function ownLabel(r) {
+  const [asked] = Object.keys(r.answers);
+  if (typeof r.label !== "string") return false;
+  if (r.form === "what") return asked === WHAT_Q(r.label);
+  return r.form === "not-a-session" && ["zoom", "sound", null].some((came) => asked === notSessionCardOf({ label: r.label, came }).questions[0].question);
+}
+
+/** Whether two sets of answers are the same answers to the same questions. */
+const sameAnswers = (a, b) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((q) => Object.hasOwn(b, q) && a[q] === b[q]);
+
+/** "" when, for each of `expected` (expectedAnswers), a receipt on this Mac of the last hour before `now` (ms) holds that form and
+    those very answers, to questions that name its label; else NO_RECEIPT. A file in the folder that is not a receipt is passed
+    over. */
+export function receiptWhy({ home, expected, now }) {
+  let names = [];
+  try {
+    names = readdirSync(receiptsFolder(home)).filter((name) => RECEIPT_NAME.test(name));
+  } catch (e) {
+    return NO_RECEIPT;
+  }
+  const receipts = [];
+  for (const name of names) {
+    try {
+      const r = JSON.parse(readFileSync(join(receiptsFolder(home), name), "utf8"));
+      if (isObject(r) && typeof r.at === "number" && r.at <= now && now - r.at < RECEIPT_MS && isObject(r.answers) && ownLabel(r)) receipts.push(r);
+    } catch (e) {
+      // A file not whole, or not JSON, is no receipt.
+    }
+  }
+  const holds = (one) => receipts.some((r) => r.form === one.form && sameAnswers(r.answers, one.answers));
+  return expected.length > 0 && expected.every(holds) ? "" : NO_RECEIPT;
 }
