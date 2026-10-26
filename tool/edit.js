@@ -67,8 +67,8 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
-import { readGuideNotes } from "./guide-note.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
+import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -5450,6 +5450,46 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   return 0;
 }
 
+/** Her notes on this Mac (guide-note.js), with `change` made to them, written whole: 0, or 1 when they could not be written, which
+    is said by the error's code alone. */
+function noteGuide(ctx, change) {
+  try {
+    writeGuideNotes(ctx.home, change(readGuideNotes(ctx.home)));
+  } catch (e) {
+    return refuse(ctx, `Not noted: this Mac's note could not be written (${(e && e.code) || "an error"}). Ask Jason.`);
+  }
+  return 0;
+}
+
+/** `guide "<video>" done <step>`: her word that she did the video's next step on the BRIMM Ops page, noted on this Mac by its
+    hand-off's id (noteAfter). Only the step that comes next is taken: a video that is done, one whose next step is brimm-video's
+    or hers, or another step is refused with the step that comes next, and her word is never said again. Once it is noted, the
+    video is read again, and its next step said. */
+function noteDone(ctx, { facts, next }, step) {
+  if (next.done) return refuse(ctx, `Not noted: ${facts.name} is done: nothing is left to do for it.`);
+  if (next.stage !== "ops") return refuse(ctx, `Not noted: ${facts.name} has no step on the BRIMM Ops page now. ${next.text}`);
+  if (step !== next.step) return refuse(ctx, `Not noted: the next step for ${facts.name} is ${next.step}. ${next.text}`);
+  const handoff = facts.handoff;
+  const at = localStamp(new Date(ctx.now()));
+  if (noteGuide(ctx, (notes) => ({ ...notes, handoffs: { ...notes.handoffs, [handoff.id]: noteAfter(handoff, notes.handoffs[handoff.id], step, at) } })) !== 0) return 1;
+  ctx.say(`Noted: ${facts.name}, ${step}.`);
+  // The version she noted has the newest hand-off under its id, and is read again; only a newer one come in since would take its
+  // place, and then nothing more is said.
+  const again = guideItems(ctx).items.find((item) => item.facts.id === facts.id);
+  for (const line of again ? videoLines(again) : []) ctx.say(line);
+  return 0;
+}
+
+/** `guide "<video>" finished`: her word that she is done with an answered video, noted on this Mac by its record's id, so that it
+    is no longer under way. A video still in a drop folder has no record to note it by. */
+function noteFinished(ctx, { facts }) {
+  if (facts.id === "") return refuse(ctx, `${facts.name} is not imported yet: there is nothing to set aside.`);
+  const at = localStamp(new Date(ctx.now()));
+  if (noteGuide(ctx, (notes) => ({ ...notes, finished: { ...notes.finished, [facts.id]: at } })) !== 0) return 1;
+  ctx.say(`${facts.name} is no longer under way.`);
+  return 0;
+}
+
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
 function sayOverview(ctx, { items, old }) {
@@ -5474,14 +5514,15 @@ async function waitForChange(ctx) {
   return sayOverview(ctx, read);
 }
 
-/** `guide ["<video>" [show]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac that does the light
-    import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every video as it lands. With
-    no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one next step, and how many
-    videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and `drop zoom` Zoom Video
-    Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a change in what the guide
-    says, then says the overview. With a video, by its name, its label or its id, its next step, and for a step on the BRIMM Ops
-    page the one after it; with `show`, what that step needs, in Finder. Words that fit no video, or more than one, are refused,
-    and never said again: they may hold a client's name. */
+/** `guide ["<video>" [show | finished | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+    that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
+    video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
+    next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
+    `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
+    change in what the guide says, then says the overview. With a video, by its name, its label or its id, its next step, and for
+    a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
+    she did that step, the one that comes next; with `finished`, her note that she is done with it. Words that fit no video, or
+    more than one, are refused, and never said again: they may hold a client's name. */
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
@@ -5489,7 +5530,9 @@ export async function guideCommand(ctx, rest) {
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
   if (is("page")) return openPage(ctx);
   if (is("wait")) return waitForChange(ctx);
-  if (rest.length > 2 || (rest.length === 2 && rest[1] !== "show")) {
+  // The form, after a video: "" for its next step, "show", "finished", or "done" with the step.
+  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
+  if (form === null) {
     ctx.say(HELP);
     return 2;
   }
@@ -5497,7 +5540,9 @@ export async function guideCommand(ctx, rest) {
   if (!rest.length) return sayOverview(ctx, { items, old });
   const found = findIn(items, rest[0]);
   if (found.why) return refuse(ctx, found.why);
-  if (rest.length === 2) return showForStep(ctx, found.item);
+  if (form === "show") return showForStep(ctx, found.item);
+  if (form === "done") return noteDone(ctx, found.item, rest[2]);
+  if (form === "finished") return noteFinished(ctx, found.item);
   for (const line of videoLines(found.item)) ctx.say(line);
   return 0;
 }

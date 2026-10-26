@@ -2,11 +2,12 @@
 // openApp and run are stand-ins, and nothing opens.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { editMain } from "../edit.js";
-import { writeGuideNotes } from "../guide-note.js";
+import { editMain, HELP } from "../edit.js";
+import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
 import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
+import { localStamp } from "../episode.js";
 import { writeStatus } from "../importing.js";
 import { progressFolder } from "../progress.js";
 import { setup, episodeAs, otherMac } from "./episodes.js";
@@ -333,6 +334,64 @@ describe("guide wait", () => {
     assert.equal(r.said[0], "Nothing has changed in 90 seconds.");
     assert.deepEqual(r.said.slice(1, 3), [DROP_LINE, "Under way:"]);
     assert.deepEqual(t.waits, Array(18).fill(5000));
+    t.done();
+  });
+});
+
+const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+describe("guide notes her word", () => {
+  it("notes only the step that comes next, then says the next one", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    assert.deepEqual(await on(light(t), "guide", "Launch talk", "done", "posted"), { code: 1, said: [`Not noted: the next step for Launch talk (a1a1a1) is taken. ${TAKE_TEXT}`] });
+    assert.ok(!existsSync(guideFile(t.home)));
+    const r = await on(light(t), "guide", "Launch talk", "done", "taken");
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.said.slice(0, 2), ["Noted: Launch talk (a1a1a1), taken.", 'Launch talk (a1a1a1): On the BRIMM Ops page: Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.']);
+    assert.equal(r.said.at(-1), "Step: kit");
+    assert.deepEqual(readGuideNotes(t.home).handoffs, { [h.record.id]: { kind: "episode", step: "taken", revision: 1, at: localStamp(new Date(t.now())) } });
+    // Said again, it is not noted twice.
+    assert.equal((await on(light(t), "guide", "Launch talk", "done", "taken")).said[0].startsWith("Not noted: the next step for Launch talk (a1a1a1) is kit."), true);
+    t.done();
+  });
+  it("says a video with the last step noted is done, and the overview leaves it out", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    writeGuideNotes(t.home, { version: 1, handoffs: { [h.record.id]: { kind: "episode", step: "live", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+    assert.deepEqual(await on(light(t), "guide", "Launch talk", "done", "cascade"), { code: 0, said: ["Noted: Launch talk (a1a1a1), cascade.", "Launch talk (a1a1a1) is done: nothing is left to do for it."] });
+    assert.equal((await on(light(t), "guide")).said[1], "Nothing is under way. To start, put the video in your drop folder.");
+    t.done();
+  });
+  it("refuses a step for a video whose next step is brimm-video's, and a note that cannot be written", async () => {
+    const t = setup();
+    episodeAs(t, VIDEOS.read);
+    assert.deepEqual(await on(light(t), "guide", "Pricing talk", "done", "taken"), { code: 1, said: ['Not noted: Pricing talk (bbbbbb) has no step on the BRIMM Ops page now. Claude has read it. Say "what did Claude find?", then answer the spellings card.'] });
+    handedOff(t);
+    mkdirSync(guideFile(t.home), { recursive: true });
+    writeFileSync(join(guideFile(t.home), "x"), "");
+    const r = await on(light(t), "guide", "Launch talk", "done", "taken");
+    assert.equal(r.code, 1);
+    assert.match(r.said.join("\n"), /^Not noted: this Mac's note could not be written \([A-Z]+\)\. Ask Jason\.$/);
+    t.done();
+  });
+  it("takes her word that she is done with a video: it is no longer under way", async () => {
+    const t = setup();
+    const found = episodeAs(t, VIDEOS.read);
+    assert.deepEqual(await on(light(t), "guide", "Pricing talk", "finished"), { code: 0, said: ["Pricing talk (bbbbbb) is no longer under way."] });
+    assert.deepEqual(readGuideNotes(t.home).finished, { [found.record.id]: localStamp(new Date(t.now())) });
+    assert.deepEqual((await on(light(t), "guide", "Pricing talk")).said, ["Pricing talk (bbbbbb) is done: nothing is left to do for it."]);
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    assert.deepEqual(await on(light(t), "guide", "A video of 5 bytes", "finished"), { code: 1, said: ["A video of 5 bytes is not imported yet: there is nothing to set aside."] });
+    t.done();
+  });
+  // Not in the plan's tests: a step is needed after "done", and nothing more after it or after "finished".
+  it("gives the help, and notes nothing, for done with no step, or more words than a form has", async () => {
+    const t = setup();
+    handedOff(t);
+    for (const words of [["done"], ["done", "taken", "kit"], ["finished", "now"], ["taken"]]) {
+      assert.deepEqual(await on(light(t), "guide", "Launch talk", ...words), { code: 2, said: [HELP] }, words.join(" "));
+    }
+    assert.ok(!existsSync(guideFile(t.home)));
     t.done();
   });
 });
