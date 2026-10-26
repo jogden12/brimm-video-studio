@@ -198,12 +198,23 @@ describe("the open guard, II: paths and writes", () => {
     for (const path of [p.notes, p.logo, p.code, join(w.folder, "CLAUDE.md"), "~/Documents/notes.txt"]) assert.equal((await read(path)).decision, "allow", path);
     assert.equal((await send(p.logo)).decision, "allow");
   });
-  it("allows Read of the chat's own tool-results, tasks and words folders and the named skills' folders, and refuses another chat's", async () => {
-    for (const path of [p.ownResults, p.ownTasks, p.ownWords, p.allowedSkill]) assert.equal((await read(path)).decision, "allow", path);
+  it("allows Read of the chat's own tool-results and words folders and the named skills' folders, and refuses another chat's", async () => {
+    for (const path of [p.ownResults, p.ownWords, p.allowedSkill]) assert.equal((await read(path)).decision, "allow", path);
     for (const path of [p.otherResults, p.otherTasks, p.otherWords, p.otherSkill, p.transcript]) assert.deepEqual(await read(path), GATED, path);
     for (const path of [p.ownResults, p.ownTasks, p.ownWords]) assert.deepEqual(await send(path), GATED, `SendUserFile ${path}`);
     assert.deepEqual(await read(p.ownWords, { session_id: "../x" }), GATED);
     assert.deepEqual(await read(p.ownResults, { session_id: undefined }), GATED);
+  });
+  it("refuses Read of the chat's own command-output folder too: a sandboxed command can write the temp folder and swap a file there for a link (open item, design C11)", async () => {
+    // The tasks folder lies in Claude Code's temp folder, where the sandbox may write (C11), so it is no carve-out, as the workshop is
+    // none. A sandboxed command reads the file with cat or head instead: the sandbox's allowRead keeps her temp subfolder (C36).
+    const tasks = dirname(p.ownTasks);
+    for (const path of [p.ownTasks, tasks, join(tasks, "sub", "b.output"), join(tasks, "..", SESSION, "tasks", "a.output")]) {
+      assert.deepEqual(await read(path), GATED, path);
+      assert.deepEqual(await send(path), GATED, `SendUserFile ${path}`);
+    }
+    // The carve-outs that lie where a sandboxed command cannot write still open what is theirs.
+    for (const path of [p.ownResults, p.ownWords, p.allowedSkill]) assert.equal((await read(path)).decision, "allow", path);
   });
   it("refuses a link in the workshop to a gated file for Read and SendUserFile as a gated place, not as the workshop", async () => {
     for (const name of ["t", "o"]) {

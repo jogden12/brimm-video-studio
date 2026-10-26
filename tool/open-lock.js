@@ -28,12 +28,15 @@
 // the workshop, ~/BRIMM Video Workshop, with a command, which runs in the sandbox (the one folder it may write). Then it takes
 // every path-like string of the tool's input, at any depth (places.js pathsIn), and judges each by what it is (gatedIndex), a link
 // to a file by its real path too: first against the gated places, then against the workshop. A Read may reach this call's own
-// carve-outs: the chat's tool-results and tasks folders, its words folder, and the folders of the skills this folder allows; each
-// is given as a gated place's real path with the rest after it, so that a link on the way opens nothing. The workshop has no
-// carve-out: a command running in the sandbox, left going in the background, can swap a folder in it for a link, or back, between
-// the guard's look at a path and Claude Code's own Read, SendUserFile, Glob or Grep acting on it, and the guard cannot close that gap.
-// So none of them acts on a path in the workshop, or searches a folder that is in it or holds it; Claude reads a file there with
-// a command. The same holds for a held chat's Read of its own words, when the path is in the workshop.
+// carve-outs: the chat's tool-results folder, its words folder, and the folders of the skills this folder allows, all in places a
+// sandboxed command cannot write (~/.claude, the app's data); each is given as a gated place's real path with the rest after it, so
+// that a link on the way opens nothing. The workshop has no carve-out: a command running in the sandbox, left going in the
+// background, can swap a folder in it for a link, or back, between the guard's look at a path and Claude Code's own Read,
+// SendUserFile, Glob or Grep acting on it, and the guard cannot close that gap. So none of them acts on a path in the workshop, or
+// searches a folder that is in it or holds it; Claude reads a file there with a command. The same holds for a held chat's Read of
+// its own words, when the path is in the workshop. And it holds for the chat's own command-output folder (`tasks`), in Claude
+// Code's temp folder, which the sandbox may write too: that is no carve-out either (Jason, 2026-10-26), and a command's saved
+// output is read with `cat` or `head`, which the sandbox's allowRead for her temp subfolder lets through (places.js readAllowed).
 //
 // Step 5 lets edit.js through in one spelling only, the one the sandbox's excluded command takes: this Mac's node, the checkout's
 // edit.js in double quotes, and one or more words (studio.js WORD), with nothing before it and nothing after; and not in the
@@ -91,17 +94,17 @@ function under(place, path) {
   return rest.startsWith("..") || isAbsolute(rest) ? resolve(path) : join(realOf(place), rest);
 }
 
-/** This call's carve-outs for Read: the chat's own tool-results and tasks folders (beside its transcript, and in Claude Code's temp
-    folder under its transcript's folder's name), its own words folder, and the folders of the skills this folder allows. None for
-    a chat whose id is not one. */
+/** This call's carve-outs for Read: the chat's own tool-results folder (beside its transcript), its own words folder, and the
+    folders of the skills this folder allows. None for a chat whose id is not one. The chat's own command-output folder (`tasks`,
+    in Claude Code's temp folder) is none: the sandbox may write the temp folder (C11), so a command left going could swap a file
+    there for a link between the guard's look and Claude Code's own Read, as it could in the workshop. */
 function carveOuts(input, ctx) {
   const id = input.session_id;
   if (typeof id !== "string" || !SESSION_ID.test(id)) return [];
   const claude = join(ctx.home, ".claude");
   const carves = [join(realOf(wordsFolder(ctx.home)), id)];
   if (typeof input.transcript_path === "string" && isAbsolute(input.transcript_path)) {
-    const projects = dirname(input.transcript_path);
-    carves.push(under(claude, join(projects, id, "tool-results")), join(realOf(join(ctx.tmp, `claude-${ctx.uid}`)), basename(projects), id, "tasks"));
+    carves.push(under(claude, join(dirname(input.transcript_path), id, "tool-results")));
   }
   const skills = (Array.isArray(ctx.allow) ? ctx.allow : []).filter((entry) => isObject(entry) && entry.type === "skill");
   for (const { name } of skills) for (const dir of skillFolders({ home: ctx.home, folder: ctx.folder, name })) carves.push(under(claude, dir));
