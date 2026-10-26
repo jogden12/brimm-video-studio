@@ -24,13 +24,14 @@
 //   node settings.js marker "<drop folder>" "<this Mac>"
 //   node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]
 //                           [--allow skill|mcp-tool|tool <name>]… [--print]
+//   node settings.js user-deny
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
-import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, studioFiles, studioFolder, writeStudio } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, realOf } from "./places.js";
 import { untiedMark } from "./held.js";
@@ -114,8 +115,9 @@ function allowedEntry(entry) {
 const isSet = (value) => value !== undefined && value !== null;
 
 /** What is wrong with this Mac's settings, in plain words: "" when nothing is. The settings of the switch (import, readings,
-    handoffVersion, drop and sessionTeachings) and of her folder's lock (lock, web, zoomFolder, proxyPort, studioNode and
-    studioAllow) need not be there, and are checked when they are; one of the lock's that is null is not set. */
+    handoffVersion, drop and sessionTeachings) and of her folder's lock (lock, web, zoomFolder, proxyPort, studioNode, studioAllow
+    and userDeny, the note that `user-deny` added her user settings' deny rules) need not be there, and are checked when they are;
+    one of the lock's that is null is not set. */
 export function settingsFault(s) {
   if (!s || typeof s !== "object" || Array.isArray(s) || s.version !== 1) return "they are not version 1 of brimm-video's settings";
   const fault = machineFault(s.machine);
@@ -139,6 +141,7 @@ export function settingsFault(s) {
   if (isSet(s.studioAllow) && !(Array.isArray(s.studioAllow) && s.studioAllow.every(allowedEntry))) {
     return "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
   }
+  if (isSet(s.userDeny) && typeof s.userDeny !== "boolean") return "the note of her user settings' deny rules must be true or false";
   return "";
 }
 
@@ -317,7 +320,12 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                --web open. The open lock is refused, and nothing is written, until the Claude Code it was
                                checked on by hand is named in brimm-video, and until then a Mac whose settings say open is
                                written the strict lock. --print says the settings her folder would get, as JSON, and
-                               writes nothing`;
+                               writes nothing
+  node settings.js user-deny   add the Read deny rules of the places only brimm-video reads (her folder's open lock keeps
+                               them from Claude) to her user settings, ~/.claude/settings.json, once each, keeping all else
+                               there, so that every Claude Code session on this Mac takes them: they hold Claude's file
+                               tools, not a script. It notes that it did in this Mac's settings, and the lock check then
+                               looks for them. User settings that are not a JSON object are refused, and nothing is added`;
 
 /** The options `write` and `plan` are told the settings every Mac has by, and the setting each one names. They are told the
     settings of the switch as `set` is, by SETTABLE's options. */
@@ -794,6 +802,70 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
   return write(port);
 }
 
+/** What `user-deny` says, and does, when her user settings are there but are not a JSON object whose deny rules can be added to. */
+const USER_UNREAD = "Her user settings could not be read as JSON, so nothing was added: Jason puts them right by hand.";
+
+/** `user-deny` (question 5, R24): add to her user settings, ~/.claude/settings.json in `home`, the `Read()` deny rules of the places only
+    brimm-video reads on this Mac (studio.js gatedReadRules, for its settings' facts; `tmp` and `uid` a test's own), each once, after
+    the deny rules there, keeping every other key and rule. A file that is not there is made with them alone; one that is there but
+    is not a JSON object, or whose `permissions` is not an object or whose `permissions.deny` is not a list of rules, is refused
+    (USER_UNREAD) and nothing is changed. First this Mac's settings note `userDeny: true`, so that the lock check looks for the rules
+    from then on (loosened.js), then the file is written under another name beside it, then renamed: through a link to it, the file
+    it leads to, the link left as it is. Gives the number it ends with. */
+function userDeny(home, rest, say, { tmp, uid }) {
+  if (rest.length) {
+    say(HELP);
+    return 2;
+  }
+  const got = usable(home);
+  if (got.why) {
+    say(`${got.why} ${got.mend}`);
+    return 2;
+  }
+  const file = join(home, ".claude", "settings.json");
+  let held = {};
+  try {
+    held = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      say(USER_UNREAD);
+      return 1;
+    }
+  }
+  const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const permissions = object(held) ? held.permissions ?? {} : null;
+  const deny = object(permissions) ? permissions.deny ?? [] : null;
+  if (!Array.isArray(deny) || !deny.every((rule) => typeof rule === "string")) {
+    say(USER_UNREAD);
+    return 1;
+  }
+  const rules = gatedReadRules(factsOf(home, got.settings, { tmp, uid }));
+  const written = { ...held, permissions: { ...permissions, deny: [...deny, ...rules.filter((rule, i) => !deny.includes(rule) && rules.indexOf(rule) === i)] } };
+  try {
+    writeSettings(home, { userDeny: true });
+  } catch (e) {
+    say(`This Mac's settings could not be written (${e.code || e.message}).`);
+    return 1;
+  }
+  let target = file;
+  try {
+    target = realpathSync(file);
+  } catch (e) {
+    mkdirSync(dirname(file), { recursive: true });
+  }
+  const writing = `${target}.brimm-writing`;
+  try {
+    writeFileSync(writing, JSON.stringify(written, null, 2) + "\n");
+    renameSync(writing, target);
+  } catch (e) {
+    rmSync(writing, { force: true });
+    say(`Her user settings could not be written (${e.code || "an error"}), so the deny rules were not added.`);
+    return 1;
+  }
+  say(`Written: ~/.claude/settings.json (${new Set(rules).size} deny rules for the places only brimm-video reads)`);
+  return 0;
+}
+
 /** The name of the marker in a drop folder, which holds the name of the Mac that watches it. */
 export const MARKER = ".brimm-watched-by";
 
@@ -846,6 +918,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone);
   if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
+  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid });
   say(HELP);
   return 2;
 }

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
-import { settingsFile, writeSettings } from "../settings.js";
+import { readSettings, settingsFile, settingsMain, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders } from "../loosened.js";
 import { claudeDirName } from "../places.js";
@@ -29,6 +29,9 @@ async function behindOn(w, more = {}) {
   const code = await editMain(["behind"], { ...openDeps(w, more), run, say: (line) => said.push(line) });
   return { code, text: said.join("\n"), g: { calls } };
 }
+
+/** This Mac's settings in the world `w`. */
+const readSettingsOf = (w) => readSettings(w.home).settings;
 
 /** A settings object holding `value` at the dotted `path`. */
 const at = (path, value) => path.split(".").reduceRight((inner, key) => ({ [key]: inner }), value);
@@ -189,6 +192,40 @@ describe("behind, with the open lock", () => {
     assert.equal(stale.code, 0);
     assert.ok(stale.text.split("\n")[1].startsWith(STALE), stale.text);
     open.done();
+    w.done();
+  });
+  it("refuses when her user settings lose a Read deny rule brimm-video added, and says nothing of them on a Mac where none were added", async () => {
+    const LINE = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
+    const w = openWorld();
+    const user = join(w.home, ".claude", "settings.json");
+    const addRules = async () => assert.equal(await settingsMain(["user-deny"], { home: w.home, say: () => {}, tmp: w.tmp, uid: w.uid }), 0);
+    // None added on this Mac: her user settings are not looked at for them, though they hold none.
+    put(w, "user", { model: SECRET });
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    // Added, as install.sh --user-deny does: it goes on.
+    await addRules();
+    assert.equal(readSettingsOf(w).userDeny, true);
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    // One taken away, in either spelling, or the .env rule: refused, naming none.
+    const rules = JSON.parse(readFileSync(user, "utf8")).permissions.deny;
+    for (const lost of [rules.find((rule) => rule.includes("/System/Volumes/Data")), rules.find((rule) => rule.endsWith("/.ssh/**)") && !rule.includes("/System/")), "Read(**/.env)"]) {
+      assert.ok(lost, "a rule to take away");
+      writeFileSync(user, JSON.stringify({ model: SECRET, permissions: { deny: rules.filter((rule) => rule !== lost) } }));
+      refusedFor(await behindOn(w), LINE, lost);
+    }
+    // Her user settings gone, or not JSON: refused too.
+    rmSync(user);
+    refusedFor(await behindOn(w), LINE, "no user settings");
+    writeFileSync(user, `not JSON ${SECRET}`);
+    refusedFor(await behindOn(w), LINE, "user settings that are not JSON");
+    // Added again, they hold every rule once more.
+    rmSync(user);
+    await addRules();
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    // On a strict Mac nothing of them is said (R18).
+    writeFileSync(user, "{}");
+    writeStudio(w.home, { checkout: w.checkout, node: NODE });
+    assert.deepEqual(Object.values(await behindOn(w, { minimum: null })).slice(0, 2), [0, NEWEST]);
     w.done();
   });
 });

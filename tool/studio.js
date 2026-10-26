@@ -74,6 +74,15 @@ function settingsOf({ checkout, node, folder }) {
   };
 }
 
+/** The `Read()` deny rules of the gated places on the Mac `facts` describes (places.js), by their real paths in both spellings, each
+    spelt with `//` as Claude Code takes an absolute path, and the rules for a .env file (R20): what her folder's open settings deny
+    Claude's Read, and what `settings.js user-deny` adds to her user settings, so that every Claude Code session on this Mac takes
+    them (question 5, R24). */
+export function gatedReadRules(facts) {
+  const read = (path, kind) => bothSpellings(path).map((p) => (kind === "file" ? `Read(/${p})` : `Read(/${p}/**)`));
+  return [...gatedPlaces(facts).flatMap((place) => place.readRules.flatMap((rule) => read(rule, place.kind))), "Read(**/.env)", "Read(**/.env.*)"];
+}
+
 /** The folder's settings for Claude Code under the open lock, for the Mac `facts` describes (settings.js factsOf: its home,
     BRIMM Video, its uid, Claude Code's temp folder, Zoom's folder, the proxy port, the web tools and what it allows). Each path a
     rule names is a real path, in both spellings (places.js); `Read()` and `Edit()` rules spell an absolute path with `//`, the
@@ -93,7 +102,6 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   const W = realOf(workshopFolder(home));
   const places = gatedPlaces(facts);
   const both = (path) => bothSpellings(realOf(path));
-  const read = (path, kind) => bothSpellings(path).map((p) => (kind === "file" ? `Read(/${p})` : `Read(/${p}/**)`));
   const edit = (path) => both(path).map((p) => `Edit(/${p}/**)`);
   const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(AS, "Claude"), join(home, "Library", "LaunchAgents"), join(home, ".claude"), join(home, ".ssh")];
   return {
@@ -102,9 +110,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
       allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, `Edit(/${W}/**)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
       deny: [
         ...neverDenyRules(facts.allow),
-        ...places.flatMap((place) => place.readRules.flatMap((rule) => read(rule, place.kind))),
-        "Read(**/.env)",
-        "Read(**/.env.*)",
+        ...gatedReadRules(facts),
         ...onlyBrimmVideo.flatMap(edit),
         ...bothSpellings(W).flatMap((w) => [".claude/**", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json"].map((inner) => `Edit(/${w}/**/${inner})`))
       ],

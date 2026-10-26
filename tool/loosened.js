@@ -10,6 +10,7 @@
 // - in every settings source beside them (the user's, the managed ones, and the Claude app's --settings for this chat): any sandbox
 //   key but the few that only narrow, an Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, folders added to every
 //   session, and a SessionStart hook, which can change the chat's id that the marks of a session's words rest on (C24);
+// - her user settings' Read deny rules for the gated places, where this Mac's settings note that `settings.js user-deny` added them;
 // - the Claude app's own flags on the chat (C30), read from the Claude Code above this check, found by walking up its own processes
 //   with `ps` (chain.js), and the folders added to the chat while it ran, read from its transcript a little at a time (scan.js);
 // - the chat's environment, by its names alone; anything listening on her folder's proxy port; a .claude, CLAUDE.md, CLAUDE.local.md
@@ -20,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
+import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, gatedReadRules, lockBroken, studioFolder, workshopFolder } from "./studio.js";
 import { effectiveLock, factsOf, proxyPortOf, readSettings, studioAllowOf, studioNodeOf } from "./settings.js";
 import { appVersionOf, argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { claudeDirName, realOf } from "./places.js";
@@ -91,6 +92,7 @@ export function settingsObject(file) {
     With the open lock in effect on this Mac (lockFor: this Mac's settings, deps.settings or else read, and deps.minimum, else
     OPEN_LOCK_CLAUDE), her folder's own settings are compared whole (lockBroken, for this Mac's facts and the node its settings
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
+    and, where this Mac's settings note that `settings.js user-deny` added them (userDeny), the user settings' Read deny rules;
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
     the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); the skills her folder allows
@@ -163,6 +165,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   // The open lock: what else could loosen it, after PR #40's lines.
   if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
+  if (settings && settings.userDeny === true && !userDenyHeld(user, factsFor(home, settings, deps))) why.push(USER_DENY_LOST);
   let app = deps.appSettings !== undefined ? deps.appSettings : null;
   if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
   else {
@@ -186,6 +189,17 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   }
   why.push(...workshopWhy(workshopFolder(home), deps.workshopLimit || WORKSHOP_LIMIT));
   return why;
+}
+
+/** What `behind` says when her user settings no longer hold the Read deny rules `settings.js user-deny` added to them (question 5). */
+const USER_DENY_LOST = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
+
+/** Whether her user settings, `user` (the object Claude Code reads, or null), still deny Claude's Read every gated place on the Mac
+    `facts` describes, as `settings.js user-deny` added them (studio.js gatedReadRules). Looked at only where this Mac's settings note
+    that they were added (userDeny), on an open-lock Mac. */
+function userDenyHeld(user, facts) {
+  const deny = isObject(user) && isObject(user.permissions) && Array.isArray(user.permissions.deny) ? user.permissions.deny : [];
+  return gatedReadRules(facts).every((rule) => deny.includes(rule));
 }
 
 /** Where Claude Code keeps the transcript of the chat `sessionId` started in her folder, `folder` (R30): in its projects folder
