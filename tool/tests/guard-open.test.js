@@ -3,13 +3,18 @@
 // test asks this Mac's resolver, reads its settings or runs `ps`.
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, openDecision } from "../open-lock.js";
+import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
+import { LOCK_CHANGED } from "../loosened.js";
+import { HELD_NARROWED, HELD_REFUSED, markChat, untiedMark } from "../held.js";
+import { processTable } from "../chain.js";
+import { settingsFile, writeSettings } from "../settings.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
-import { SESSION, openWorld } from "./open-world.js";
+import { APP_ARGS, SESSION, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
 import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
@@ -267,5 +272,191 @@ describe("the open guard, III: Bash", () => {
   });
   it("allows any other command, which runs in the sandbox", async () => {
     for (const c of ["date", "ls ~/Documents", "python3 -c 'print(1)'", "rg TODO ~/Documents", `cat "${join(w.root, "Assets", "logo.png")}"`, "cd Pictures"]) assert.equal((await bash(c)).decision, "allow", c);
+  });
+});
+
+describe("the open guard, IV: falling back to today's, and the hook", () => {
+  const REFUSED = "In this folder Claude runs only brimm-video's own commands. Ask Jason for anything else.";
+  const OTHER = "22222222-3333-4444-8555-666666666666";
+  const AT = "2026-10-26T10:00:00.000Z";
+  /** A made-up open-lock Mac with a chat in her folder: its transcript in her folder's projects folder. */
+  function chat() {
+    const w = openWorld();
+    w.projects = join(w.home, ".claude", "projects", claudeDirName(w.folder));
+    w.transcript = transcript(w.projects, [{ type: "user", uuid: "u-1", timestamp: AT }]);
+    w.edit = `${w.node} "${w.checkout}/tool/edit.js"`;
+    w.words = join(w.home, "Library", "Application Support", "BRIMM Video Words");
+    return w;
+  }
+  /** What the guard answers in the chat of `w` to `name` with `input`; `call` changes the hook's input, `more` the guard's deps. */
+  const guard = (w, name, input, { call = {}, more = {} } = {}) => guardAnswer({ session_id: SESSION, transcript_path: w.transcript, cwd: w.folder, hook_event_name: "PreToolUse", tool_name: name, tool_input: input, ...call }, { checkout: w.checkout, node: w.node, folder: w.folder, deps: openDeps(w, { resolve: PUBLIC, ...more }) });
+  const date = (w, options) => guard(w, "Bash", { command: "date" }, options);
+  const CHANGED = { decision: "deny", reason: LOCK_CHANGED };
+
+  it("goes on with the open lock when nothing loosens it", async () => {
+    const w = chat();
+    assert.equal((await date(w)).decision, "allow");
+    assert.equal((await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" })).decision, "allow");
+    w.done();
+  });
+  it("answers as today's guard does, saying the lock is changed, while anything loosens the lock", async () => {
+    const loosen = [
+      ["her folder's settings.local.json", (w) => writeFileSync(join(w.folder, ".claude", "settings.local.json"), "{}"), {}],
+      ["a user sandbox key", (w) => writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ sandbox: { enabled: false } })), {}],
+      ["an unlisted secret name", () => {}, { env: { SOME_SERVICE_TOKEN: "x" } }],
+      ["a plugin with hooks", (w) => {
+        writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "hooky@market": true } }));
+        mkdirSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks"), { recursive: true });
+        writeFileSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks", "hooks.json"), "{}");
+      }, {}],
+      ["no claude above", () => {}, { ps: () => psText([[1, 0, "/sbin/launchd"], [800, 1, "/bin/sh"], [900, 800, "node guard.mjs"]]) }],
+    ];
+    for (const [what, make, more] of loosen) {
+      const w = chat();
+      mkdirSync(join(w.home, ".claude"), { recursive: true });
+      make(w);
+      assert.deepEqual(await date(w, { more }), CHANGED, what);
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` }, { more })).decision, "allow", what);
+      assert.deepEqual(await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" }, { more }), CHANGED, what);
+      w.done();
+    }
+  });
+  it("answers as today's guard does in a chat that holds a session's words, allowing it to read its own words with no card", async () => {
+    const w = chat();
+    for (const id of [SESSION, OTHER]) {
+      mkdirSync(join(w.words, id), { recursive: true });
+      writeFileSync(join(w.words, id, "x.txt"), "words");
+    }
+    symlinkSync(join(w.words, SESSION, "x.txt"), join(w.workshop, "mine.txt"));
+    markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: processTable(chatChain({ args: APP_ARGS(w.folder, w.home) })), pid: 900, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    assert.equal((await guard(w, "Read", { file_path: join(w.words, SESSION, "x.txt") })).decision, "allow");
+    assert.equal((await guard(w, "Read", { file_path: join(w.workshop, "mine.txt") })).decision, "allow", "by its real path");
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.words, OTHER, "x.txt") }), { decision: "deny", reason: HELD_REFUSED });
+    assert.deepEqual(await date(w), { decision: "deny", reason: HELD_REFUSED });
+    for (const [name, input] of [["WebSearch", { query: "x" }], ["SendUserFile", { files: [join(w.folder, "CLAUDE.md")] }], ["PushNotification", { message: "x" }], ["mcp__visualize__show_widget", {}], ["Write", { file_path: join(w.workshop, "a.txt"), content: "x" }]]) {
+      assert.deepEqual(await guard(w, name, input), { decision: "deny", reason: HELD_REFUSED }, name);
+    }
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.folder, "CLAUDE.md") }), { decision: "pass", reason: "" });
+    assert.deepEqual(await guard(w, "AskUserQuestion", { questions: [] }), { decision: "pass", reason: "" });
+    w.done();
+  });
+  it("lets a chat that holds a session's words run only the commands a session runs", async () => {
+    const w = chat();
+    untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    for (const words of ["episodes", 'guide "Talk" tell', 'principles "Pricing talk" keep 1', 'finish "Pricing talk"', 'teachings "Pricing talk"', "behind", 'kind "Pricing talk" session', 'reel "Pricing talk" 1']) {
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} ${words}` })).decision, "allow", words);
+    }
+    assert.equal((await guard(w, "Bash", { command: `${w.edit} guide "Talk" tell`, run_in_background: true })).decision, "allow");
+    for (const words of ['name "Pricing talk" "x"', 'title "Pricing talk" --words "x"', 'text "Pricing talk" --line "x"', 'spell "Pricing talk" add "x"', 'cut "Pricing talk" --words "x"', 'picture make "x"', 'read "Pricing talk"', '"name" "Pricing talk" "x"']) {
+      assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} ${words}` }), { decision: "deny", reason: HELD_NARROWED }, words);
+    }
+    assert.deepEqual(await guard(w, "Bash", { command: w.edit }), { decision: "deny", reason: HELD_NARROWED });
+    w.done();
+  });
+  it("keeps the open lock for a chat that ran cd Pictures", async () => {
+    const w = chat();
+    const pictures = join(w.folder, "Pictures");
+    assert.equal((await date(w, { call: { cwd: pictures } })).decision, "allow");
+    assert.equal((await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" }, { call: { cwd: pictures } })).decision, "allow");
+    const there = transcript(join(w.home, ".claude", "projects", claudeDirName(pictures)), [{ type: "user", uuid: "p-1", timestamp: AT }], OTHER);
+    assert.deepEqual(await date(w, { call: { cwd: pictures, session_id: OTHER, transcript_path: there } }), CHANGED);
+    w.done();
+  });
+  it("decides a subagent's call, with its chat's session id and an agent_id, as its chat's own", async () => {
+    const w = chat();
+    const call = { agent_id: "a-1", agent_type: "Explore" };
+    assert.equal((await date(w, { call })).decision, "allow");
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.root, "Episodes", "x.txt") }, { call }), { decision: "deny", reason: GATED_REFUSED });
+    untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    assert.deepEqual(await date(w, { call }), { decision: "deny", reason: HELD_REFUSED });
+    w.done();
+  });
+  it("keeps to today's guard on a strict Mac, on a Mac whose settings cannot be read, and on one whose settings say open while no Claude Code is named for it", async () => {
+    const asked = () => {
+      throw new Error("asked");
+    };
+    const w = chat();
+    const strict = { ps: asked, lsof: asked };
+    assert.deepEqual(await date(w, { more: { minimum: null, ...strict } }), { decision: "deny", reason: REFUSED });
+    assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` }, { more: { minimum: null, ...strict } })).decision, "allow");
+    writeSettings(w.home, { lock: "strict" });
+    assert.deepEqual(await date(w, { more: strict }), { decision: "deny", reason: REFUSED });
+    writeFileSync(settingsFile(w.home), "{not json");
+    assert.deepEqual(await date(w, { more: strict }), { decision: "deny", reason: REFUSED });
+    rmSync(settingsFile(w.home));
+    assert.deepEqual(await date(w, { more: strict }), { decision: "deny", reason: REFUSED });
+    w.done();
+  });
+  it("takes the home folder from her folder, never from HOME", async () => {
+    const w = chat();
+    assert.equal((await date(w, { more: { env: { HOME: join(w.dir, "elsewhere") } } })).decision, "allow");
+    const bare = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-bare-")));
+    const folder = join(bare, "BRIMM Video Studio");
+    assert.deepEqual(await guardAnswer({ session_id: SESSION, transcript_path: w.transcript, cwd: folder, tool_name: "Bash", tool_input: { command: "date" } }, { checkout: w.checkout, node: w.node, folder, deps: openDeps(w, { env: { HOME: w.home } }) }), { decision: "deny", reason: REFUSED });
+    rmSync(bare, { recursive: true, force: true });
+    w.done();
+  });
+  it("falls back to today's guard for a call with no session id, transcript or folder, a session id that is not a chat's, or a tool_input that is not an object", async () => {
+    const w = chat();
+    for (const call of [{ session_id: undefined }, { transcript_path: undefined }, { cwd: undefined }, { session_id: "../x" }, { session_id: SESSION.toUpperCase().replace("1", "A") }]) {
+      assert.deepEqual(await date(w, { call }), CHANGED, JSON.stringify(call));
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` }, { call })).decision, "allow", JSON.stringify(call));
+    }
+    assert.deepEqual(await guard(w, "Bash", "date"), CHANGED);
+    assert.deepEqual(await guard(w, "Bash", ["date"]), CHANGED);
+    w.done();
+  });
+  it("reuses the lock check while nothing it looked at has changed, and looks again when a file changes or appears", async () => {
+    const w = chat();
+    let looks = 0;
+    const more = { lsof: () => {
+      looks += 1;
+      return "";
+    } };
+    const ask = () => date(w, { more });
+    assert.equal((await ask()).decision, "allow");
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, 1, "the second call reuses the check");
+    writeFileSync(join(w.folder, ".claude", "settings.local.json"), "{}");
+    assert.deepEqual(await ask(), CHANGED);
+    rmSync(join(w.folder, ".claude", "settings.local.json"));
+    assert.equal((await ask()).decision, "allow");
+    mkdirSync(join(w.dir, "managed"), { recursive: true });
+    writeFileSync(join(w.dir, "managed", "managed-settings.json"), JSON.stringify({ sandbox: { enabled: false } }));
+    assert.deepEqual(await ask(), CHANGED);
+    rmSync(join(w.dir, "managed", "managed-settings.json"));
+    assert.equal((await ask()).decision, "allow");
+    mkdirSync(join(w.home, ".claude"), { recursive: true });
+    writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "hooky@market": true } }));
+    assert.equal((await ask()).decision, "allow");
+    mkdirSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks"), { recursive: true });
+    writeFileSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks", "hooks.json"), "{}");
+    assert.deepEqual(await ask(), CHANGED);
+    rmSync(join(w.home, ".claude", "plugins"), { recursive: true });
+    assert.equal((await ask()).decision, "allow");
+    const before = looks;
+    appendFileSync(w.transcript, `${JSON.stringify({ type: "user", uuid: "u-2", timestamp: AT })}\n`);
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, before, "a transcript that grew does not miss the cache");
+    appendFileSync(w.transcript, `${JSON.stringify({ type: "attachment", attachment: { type: "environment", snapshot: { additionalWorkingDirectories: [join(w.home, "Documents")] } } })}\n`);
+    assert.deepEqual(await ask(), CHANGED, "a folder added in that line is still seen");
+    assert.equal(looks, before);
+    w.done();
+  });
+  it("ignores a cache another call is writing, or one that is not JSON", async () => {
+    const w = chat();
+    const cache = join(w.home, "Library", "Application Support", "BRIMM Video", "lock-cache.json");
+    assert.equal((await date(w)).decision, "allow");
+    for (const text of ["{not json", '{"signature":', "[]", JSON.stringify({ signature: 1, lines: "x", at: "y" })]) {
+      writeFileSync(cache, text);
+      assert.equal((await date(w)).decision, "allow", text);
+      JSON.parse(readFileSync(cache, "utf8"));
+    }
+    writeFileSync(`${cache}.4242.abcdef.tmp`, '{"half');
+    assert.equal((await date(w)).decision, "allow");
+    writeFileSync(join(w.folder, ".claude", "settings.local.json"), "{}");
+    writeFileSync(cache, "{not json");
+    assert.deepEqual(await date(w), CHANGED);
+    w.done();
   });
 });

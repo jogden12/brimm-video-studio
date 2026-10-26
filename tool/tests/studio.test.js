@@ -1,7 +1,7 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio (studio.js): its CLAUDE.md, its settings, its skill and Pictures/, and the
 // guard hook that lets her session run brimm-video's edit.js and nothing else. Each test writes into a home folder of its own.
 // The hook is run here as Claude Code runs it, by /bin/sh and node, on made-up tool calls: nothing it allows is run.
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -21,7 +21,11 @@ const tool = (tool_name) => guardDecision({ tool_name, tool_input: {} }, { check
 /** The guard as Claude Code runs it, in exec form: /bin/sh, the guard's own script in this checkout, and a node. */
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), "..", "studio", "guard.sh");
 const THIS_CHECKOUT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const hook = (input, node = process.execPath, folder = "/Users/sallie/BRIMM Video Studio") => spawnSync("/bin/sh", [GUARD, node, folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
+/** A made-up home with no settings, so that the hook, which takes the home from the folder above hers, keeps today's lock: on her
+    laptop /Users/sallie may be her real home, with the open lock, and the hook would then read her settings and run ps and lsof. */
+const HOOK_HOME = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-home-")));
+after(() => rmSync(HOOK_HOME, { recursive: true, force: true }));
+const hook = (input, node = process.execPath, folder = join(HOOK_HOME, "BRIMM Video Studio")) => spawnSync("/bin/sh", [GUARD, node, folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
 
 /** zsh and bash, either of which may run her session's commands, each without this Mac's own start-up files. */
 const SHELLS = [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]];
