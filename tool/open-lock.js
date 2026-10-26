@@ -435,13 +435,27 @@ function openShaped(folder) {
   }
 }
 
+/** Whether `config`, CLAUDE_CONFIG_DIR, is the very folder ~/.claude is: an absolute path, both there, and one by their identity
+    (device and inode). Names are never compared: one that folds to .claude (fold) may be a folder macOS keeps apart. */
+function homeClaude(config, home) {
+  if (!isAbsolute(config)) return false;
+  try {
+    const given = statSync(config, { bigint: true });
+    const own = statSync(join(home, ".claude"), { bigint: true });
+    return given.dev === own.dev && given.ino === own.ino;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** What loosens the open lock beyond the shared lock check, as lines for Jason: Claude Code keeping its settings and chats somewhere
-    other than ~/.claude (CLAUDE_CONFIG_DIR), which no gated place holds; and a time her folder kept the open shape under the strict
-    lock (noteStrictSeen), whose chats may have left a session's words in command output, until settings.js studio writes it again. */
+    other than ~/.claude (CLAUDE_CONFIG_DIR), which no gated place holds, a folder that is not there, or ~/.claude itself not there,
+    among them; and a time her folder kept the open shape under the strict lock (noteStrictSeen), whose chats may have left a
+    session's words in command output, until settings.js studio writes it again. */
 function beyondWhy(env, home) {
   const why = [];
   const config = env.CLAUDE_CONFIG_DIR;
-  if (config && (!isAbsolute(config) || fold(realOf(resolve(config))) !== fold(realOf(join(home, ".claude"))))) {
+  if (config && !homeClaude(config, home)) {
     why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
   }
   if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");

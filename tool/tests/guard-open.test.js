@@ -395,9 +395,22 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
   });
   it("says the lock is changed while Claude Code keeps its chats somewhere other than ~/.claude, which is not gated", async () => {
     const w = chat();
+    mkdirSync(join(w.home, ".claude"), { recursive: true });
     assert.deepEqual(await date(w, { more: { env: { CLAUDE_CONFIG_DIR: join(w.home, "Claude config") } } }), CHANGED);
     assert.equal((await date(w, { more: { env: { CLAUDE_CONFIG_DIR: join(w.home, ".claude") } } })).decision, "allow");
     assert.equal((await date(w, { more: { env: { CLAUDE_CONFIG_DIR: "" } } })).decision, "allow");
+    assert.deepEqual(await date(w, { more: { env: { CLAUDE_CONFIG_DIR: ".claude" } } }), CHANGED, "not absolute");
+    w.done();
+  });
+  it("says the lock is changed while Claude Code keeps its chats in a folder whose name only looks like .claude, there or not", async () => {
+    const w = chat();
+    // A script small l (U+2113) and a fullwidth c (U+FF43): each folds to .claude, but macOS keeps it a folder of its own.
+    for (const name of [".cℓaude", ".ｃlaude"]) {
+      const config = join(w.home, name);
+      assert.deepEqual(await date(w, { more: { env: { CLAUDE_CONFIG_DIR: config } } }), CHANGED, `${name}, not there`);
+      mkdirSync(join(config, "projects"), { recursive: true });
+      assert.deepEqual(await date(w, { more: { env: { CLAUDE_CONFIG_DIR: config } } }), CHANGED, `${name}, there`);
+    }
     w.done();
   });
   it("keeps a chat to a session's commands when the claude above cannot be found while a mark names a claude", async () => {
