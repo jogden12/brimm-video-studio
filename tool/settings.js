@@ -22,14 +22,17 @@
 //   node settings.js sessions --teachings off
 //   node settings.js show
 //   node settings.js marker "<drop folder>" "<this Mac>"
-//   node settings.js studio --node "<path to node>"
+//   node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]
+//                           [--allow skill|mcp-tool|tool <name>]… [--print]
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
-import { writeStudio } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
+import { realOf } from "./places.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -132,7 +135,7 @@ export function settingsFault(s) {
 
 /** The lock her folder for Claude has, as this Mac's settings say: "open" only when they say so, "strict" for anything else and
     for no settings at all. It is what the settings say, not the lock in effect, which is open only once OPEN_LOCK_CLAUDE is set
-    too (studio.js effectiveLock). */
+    too (effectiveLock, below). */
 export const lockOf = (s) => (s?.lock === "open" ? "open" : "strict");
 /** Whether the web tools are open in her folder: "open" only when this Mac's settings say so, "held" otherwise. */
 export const webOf = (s) => (s?.web === "open" ? "open" : "held");
@@ -144,6 +147,19 @@ export const studioAllowOf = (s) => (Array.isArray(s?.studioAllow) ? s.studioAll
 export const proxyPortOf = (s) => (Number.isInteger(s?.proxyPort) ? s.proxyPort : null);
 /** The node settings.js studio last wrote her folder with (R17), or null when this Mac's settings name none. */
 export const studioNodeOf = (s) => (typeof s?.studioNode === "string" && isAbsolute(s.studioNode) ? s.studioNode : null);
+
+/** The lock in effect on this Mac (R2): "open" only when its settings say open and `minimum`, the Claude Code version the open lock
+    was checked on by hand (studio.js OPEN_LOCK_CLAUDE), is named; "strict" otherwise. Every part asks this, never lockOf, for the
+    lock in effect: settings written open by hand, or left open after OPEN_LOCK_CLAUDE is set back to null, keep the strict lock. */
+export const effectiveLock = (s, minimum = OPEN_LOCK_CLAUDE) => (lockOf(s) === "open" && Boolean(minimum) ? "open" : "strict");
+
+/** What her folder's open settings are written for on this Mac (studio.js openSettingsOf), from its settings `s`: the home, BRIMM
+    Video, this Mac user's id, Claude Code's temp folder (CLAUDE_CODE_TMPDIR, else /tmp, by its real path), where Zoom keeps its
+    recordings, the proxy port, the web tools, and what her folder allows (studio/allow.json, then this Mac's own entries). A test
+    gives a temp folder and a uid of its own, so that this Mac's own temp folder is never looked at. */
+export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() } = {}) {
+  return { home, root: s.root, uid, tmp: realOf(tmp), zoomFolder: zoomFolderOf(s, home), port: proxyPortOf(s), web: webOf(s), allow: [...ALLOW_DEFAULT, ...studioAllowOf(s)] };
+}
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
     "light" in the import setting, and no setting, is today's import. */
@@ -281,10 +297,18 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js marker "<drop folder>" "<this Mac>"
                                mark this Mac's drop folder as its own, as install.sh --machine does, by the rule for
                                writing into Dropbox. A folder another Mac has marked is refused
-  node settings.js studio --node "<path to node>"
+  node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]
+                               [--allow skill|mcp-tool|tool <name>]… [--print]
                                write the folder for Claude, ~/BRIMM Video Studio, as install.sh --machine does: its
-                               CLAUDE.md, its settings that let Claude run only edit.js, run with that node, its skill and
-                               Pictures/`;
+                               CLAUDE.md, its settings, run with that node, its skill and Pictures/. The options told are
+                               written into this Mac's settings first: her folder's lock, the web tools, where Zoom keeps
+                               its recordings, and an entry her folder also allows, by its type and exact name. The strict
+                               lock lets Claude run only edit.js. The open lock lets it do more, inside Claude Code's
+                               sandbox, and makes the workshop, ~/BRIMM Video Workshop; the web tools stay held until told
+                               --web open. The open lock is refused, and nothing is written, until the Claude Code it was
+                               checked on by hand is named in brimm-video, and until then a Mac whose settings say open is
+                               written the strict lock. --print says the settings her folder would get, as JSON, and
+                               writes nothing`;
 
 /** The options `write` and `plan` are told the settings every Mac has by, and the setting each one names. They are told the
     settings of the switch as `set` is, by SETTABLE's options. */
@@ -603,25 +627,116 @@ function show(home, say, now) {
   return 0;
 }
 
+/** What `studio` says, and does, when told --lock open while no Claude Code is named for the open lock (OPEN_LOCK_CLAUDE). */
+const NOT_YET = 'Not changed: the open lock waits for the checks by hand in the Code tab (the design\'s "By hand before K1 ships"). Her folder keeps the strict lock.';
+
+/** The options of `studio` that each name one setting. */
+const STUDIO_FIELDS = { "--lock": "lock", "--web": "web", "--zoom": "zoomFolder" };
+
+/** What `studio` is told: { node, lock?, web?, zoomFolder?, allow: {type, name}[], print }, or null when it is asked wrongly:
+    --node and a whole path first, then the rest in any order, each with its value (--allow with a type and a name, as often as
+    it is given), and --print alone. A value that will not do is not looked at here, but by settingsFault. */
+function studioToldBy(rest) {
+  if (rest[0] !== "--node" || typeof rest[1] !== "string" || !isAbsolute(rest[1])) return null;
+  const told = { node: rest[1], allow: [], print: false };
+  for (let i = 2; i < rest.length; ) {
+    const option = rest[i];
+    if (option === "--print") {
+      told.print = true;
+      i += 1;
+    } else if (Object.hasOwn(STUDIO_FIELDS, option) && i + 1 < rest.length) {
+      told[STUDIO_FIELDS[option]] = rest[i + 1];
+      i += 2;
+    } else if (option === "--allow" && i + 2 < rest.length) {
+      told.allow.push({ type: rest[i + 1], name: rest[i + 2] });
+      i += 3;
+    } else {
+      return null;
+    }
+  }
+  return told;
+}
+
+/** A local port nothing listens on now: one listened on at 127.0.0.1, port 0, read, and closed. */
+function freeLocalPort() {
+  return new Promise((done, fail) => {
+    const server = createServer();
+    server.once("error", fail);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => done(port));
+    });
+  });
+}
+
 /** `studio`: write the folder for Claude from this Mac's settings, with the node the installer found. That node is named,
-    and is not the one running this: with Homebrew that is a versioned path that the next upgrade of node takes away. */
-function studio(home, rest, say) {
-  if (rest.length !== 2 || rest[0] !== "--node" || !isAbsolute(rest[1])) {
+    and is not the one running this: with Homebrew that is a versioned path that the next upgrade of node takes away. The options
+    it is told are written into this Mac's settings first, by writeSettings, so a value that will not do writes nothing; an entry
+    --allow names is added to those her folder allows once. The folder is then written with the lock in effect (effectiveLock):
+    open only when the settings say so and `openMinimum` (OPEN_LOCK_CLAUDE) is named, never from what the settings say alone. With
+    the open lock in effect it also records the node (studioNode: the lock check compares her folder with what this checkout
+    writes for it, R17) and, the first time, a proxy port `freePort` picks. --lock open is refused, with nothing written, while
+    `openMinimum` is null. --print says the settings her folder would get, as JSON, and writes nothing at all: for the lock the
+    settings would say, whatever `openMinimum` is, so that the open shape can be tried by hand before it is named. Gives the number
+    it ends with, or a promise of it while a port is picked. */
+function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
+  const told = studioToldBy(rest);
+  if (!told) {
     say(HELP);
     return 2;
+  }
+  if (told.lock === "open" && !openMinimum && !told.print) {
+    say(NOT_YET);
+    return 1;
   }
   const got = usable(home);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
   }
-  try {
-    say(`Written: ${writeStudio(home, { checkout: got.settings.checkout, node: rest[1] })}`);
-    return 0;
-  } catch (e) {
-    say(`The folder for Claude could not be written (${e.code || e.message}).`);
+  const given = Object.fromEntries(Object.values(STUDIO_FIELDS).filter((field) => told[field] !== undefined).map((field) => [field, told[field]]));
+  const same = (a, b) => a.type === b.type && a.name === b.name;
+  const allowed = studioAllowOf(got.settings);
+  const added = told.allow.filter((entry, i) => !allowed.some((a) => same(a, entry)) && told.allow.findIndex((e) => same(e, entry)) === i);
+  if (added.length) given.studioAllow = [...allowed, ...added];
+  const would = { ...got.settings, ...given };
+  const fault = settingsFault(would);
+  if (fault) {
+    say(`Not written: ${fault}.`);
     return 1;
   }
+  const lock = told.print ? lockOf(would) : effectiveLock(would, openMinimum);
+  const open = lock === "open";
+  const write = (port) => {
+    const changes = open ? { ...given, studioNode: told.node, proxyPort: port } : given;
+    const facts = open ? factsOf(home, { ...would, ...changes }, { tmp, uid }) : undefined;
+    if (told.print) {
+      say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts })[".claude/settings.json"].trimEnd());
+      return 0;
+    }
+    try {
+      if (Object.keys(changes).length) writeSettings(home, changes);
+    } catch (e) {
+      say(`This Mac's settings could not be written (${e.code || e.message}).`);
+      return 1;
+    }
+    try {
+      const folder = writeStudio(home, { checkout: would.checkout, node: told.node, lock, facts });
+      say(open ? `Written: ${folder} (the open lock)` : `Written: ${folder}`);
+      return 0;
+    } catch (e) {
+      say(`The folder for Claude could not be written (${e.code || e.message}).`);
+      return 1;
+    }
+  };
+  const port = open ? proxyPortOf(would) ?? freePort() : null;
+  if (port && typeof port.then === "function") {
+    return port.then(write, (e) => {
+      say(`The folder for Claude could not be written (no free port was found: ${(e && e.code) || "an error"}).`);
+      return 1;
+    });
+  }
+  return write(port);
 }
 
 /** The name of the marker in a drop folder, which holds the name of the Mac that watches it. */
@@ -659,9 +774,11 @@ function mark(rest, say, clone) {
 
 /** What `node settings.js` does. Ends with 0 when it did what it was asked, 1 when it refused or could not, and 2 when it
     was asked wrongly or this Mac has no settings to show; or gives a promise of that number, for `write` and `plan` when they
-    change the drop folder, which makes them look at the old folder (switch.js). The home folder is the one HOME names, as for the
+    change the drop folder, which makes them look at the old folder (switch.js), and for `studio` while it picks a proxy port.
+    `openMinimum` is the Claude Code version the open lock was checked on (OPEN_LOCK_CLAUDE), `freePort` what picks that port, and
+    `tmp` and `uid` Claude Code's temp folder and this Mac user's id, which a test gives as its own. The home folder is the one HOME names, as for the
     launch agent and in a shell, and the Mac's own word for it when HOME names none. */
-export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date() } = {}) {
+export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
@@ -673,7 +790,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   if (command === "sessions") return sessions(home, rest, say, now);
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone);
-  if (command === "studio") return studio(home, rest, say);
+  if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid });
   say(HELP);
   return 2;
 }
