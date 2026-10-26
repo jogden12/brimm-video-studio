@@ -1481,7 +1481,7 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
     const lines = [
       "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings, its skill, and Pictures/)",
       OPEN,
-      "  The workshop, where Claude writes:  ~/BRIMM Video Workshop",
+      "  The workshop, where Claude's commands write:  ~/BRIMM Video Workshop",
       "  Kept from Claude in her folder:  BRIMM Video (all but Assets), BRIMM VIDEO Transfer, Zoom's recordings (~/Documents/Zoom), Final Cut's backups, BRIMM Video Work, brimm-video's own settings, Claude's and the Claude app's own files, Dropbox's own files, brimm-video's logs, and the folders that hold secrets",
       "  The web tools:  held (until node tool/settings.js studio --web open, on Jason's yes)",
       "  Her folder's proxy port:  picked when her folder is written",

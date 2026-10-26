@@ -590,7 +590,7 @@ if [[ -n "$machine" ]]; then
   if [[ -n "$open_lock" ]]; then
     say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings, its skill, and Pictures/)"
     say "  Her folder's lock:  open: Claude may help with anything but the never list, and its commands run in Claude Code's sandbox with no network"
-    say "  The workshop, where Claude writes:  ~/BRIMM Video Workshop"
+    say "  The workshop, where Claude's commands write:  ~/BRIMM Video Workshop"
     say "  Kept from Claude in her folder:  BRIMM Video (all but Assets), BRIMM VIDEO Transfer, Zoom's recordings ($zoom_shown), Final Cut's backups, BRIMM Video Work, brimm-video's own settings, Claude's and the Claude app's own files, Dropbox's own files, brimm-video's logs, and the folders that hold secrets"
     if [[ "$web_tools" == open ]]; then
       say "  The web tools:  open"
