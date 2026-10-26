@@ -100,8 +100,8 @@ export const TOOLS_WITH_RULES = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"
 /** Whether `entry` is one her folder may allow besides the default (design 2026-10-26, section 2, "The allowlist is data"):
     typed, and exact. A skill by its name; a claude.ai connector's tool by its exact name, never a local extension's, never a
     family (`*`), and never one the never list's words catch; or a tool by its bare name (no rule such as `Read(~/.ssh/id)`), not an
-    MCP tool, that the never list does not hold and that has no rule of its own in the open guard (the Cron tools and Workflow may be
-    named, R16). */
+    MCP tool, that the never list does not hold and that has no rule of its own in the open guard (the Cron tools may be named, R16;
+    Workflow may not, the never list holds it). */
 function allowedEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.name !== "string") return false;
   const { type, name } = entry;

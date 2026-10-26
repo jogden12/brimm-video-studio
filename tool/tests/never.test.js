@@ -13,7 +13,13 @@ describe("the never list", () => {
     assert.deepEqual(DRAWING, ["mcp__visualize__show_widget", "mcp__visualize__read_me"]);
   });
   it("refuses by name every tool the design puts on the never list", () => {
-    for (const name of ["Artifact","ArtifactComments","ArtifactData","RemoteTrigger","EnterWorktree","ExitWorktree","SearchPlugins","SuggestPluginInstall","SuggestSkills","SendMessage","DesignSync","NotebookEdit","Monitor"]) assert.equal(neverCaught(name), true, name);
+    for (const name of ["Artifact","ArtifactComments","ArtifactData","RemoteTrigger","EnterWorktree","ExitWorktree","SearchPlugins","SuggestPluginInstall","SuggestSkills","SendMessage","DesignSync","NotebookEdit","Monitor","Workflow"]) assert.equal(neverCaught(name), true, name);
+  });
+  it("refuses Workflow by name, whatever it is given, and always denies it in the settings, even where a Mac names it", () => {
+    for (const input of [undefined, {}, { script: "agent({ isolation: 'worktree' })" }, { agentType: "code-review:reviewer", isolation: "remote" }]) assert.equal(neverCaught("Workflow", input), true, JSON.stringify(input));
+    assert.ok(neverDenyRules().includes("Workflow"));
+    assert.ok(neverDenyRules([{ type: "tool", name: "Workflow" }, { type: "tool", name: "CronCreate" }]).includes("Workflow"));
+    assert.equal(neverDenyRules().filter((rule) => rule === "Workflow").length, 1);
   });
   it("refuses the tools that read an MCP server's resources, which reach a local extension's whatever server they name", () => {
     for (const name of ["ReadMcpResourceTool", "ReadMcpResourceDirTool", "ListMcpResourcesTool", "ReadMcpResource", "ReadMcpResourceDir", "ListMcpResources"]) {
@@ -62,6 +68,8 @@ describe("the never list", () => {
     for (const server of new Set(tools.filter(isLocalExtension).map((n) => n.split("__")[1]))) assert.ok(rules.includes(`mcp__${server}__*`), server);
     assert.ok(!rules.some((r) => r.startsWith("mcp__visualize__")) && !rules.includes("mcp__*"));
     assert.ok(rules.includes("CronCreate") && !neverDenyRules([{ type: "tool", name: "CronCreate" }]).includes("CronCreate"));
+    for (const cron of ["CronCreate", "CronDelete", "CronList"]) assert.ok(rules.includes(cron) && !neverDenyRules([{ type: "tool", name: cron }]).includes(cron), cron);
+    assert.ok(rules.includes("Workflow") && neverDenyRules([{ type: "tool", name: "Workflow" }]).includes("Workflow"));
   });
   it("denies in the settings, by its exact name, every connector tool of the fixture that the never list's words catch, and no other connector tool", () => {
     const { tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));

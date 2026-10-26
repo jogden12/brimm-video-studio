@@ -53,9 +53,10 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
   it("lets a subagent hand its report back", async () => {
     assert.equal((await decide("SubagentHandback", { report: "done" })).decision, "allow");
   });
-  it("refuses Monitor and a tool it does not know", async () => {
+  it("refuses Monitor and Workflow as never done, and a tool it does not know", async () => {
     assert.deepEqual(await decide("Monitor", { command: "tail -f x" }), { decision: "deny", reason: NEVER_REFUSED });
-    for (const name of ["SomeToolAddedLater", "CronCreate", "Workflow", "NotebookRead", undefined]) assert.equal((await decide(name, {})).decision, "deny", String(name));
+    assert.deepEqual(await decide("Workflow", {}), { decision: "deny", reason: NEVER_REFUSED });
+    for (const name of ["SomeToolAddedLater", "CronCreate", "NotebookRead", undefined]) assert.equal((await decide(name, {})).decision, "deny", String(name));
     assert.deepEqual(await decide("SomeToolAddedLater", {}), { decision: "deny", reason: NOT_NAMED });
   });
   it("allows a named skill and refuses another", async () => {
@@ -101,10 +102,11 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
     assert.deepEqual(await decide("AskUserQuestion", { questions: [] }, { allow }), { decision: "pass", reason: "" });
     assert.deepEqual(await decide("Agent", { prompt: "x", isolation: "remote" }, { allow }), { decision: "deny", reason: NEVER_REFUSED });
   });
-  it("allows the Cron tools and Workflow only when this Mac names them", async () => {
-    const allow = [...ctx.allow, { type: "tool", name: "CronCreate" }];
+  it("allows the Cron tools only when this Mac names them, and Workflow never, even where a Mac names it", async () => {
+    const allow = [...ctx.allow, { type: "tool", name: "CronCreate" }, { type: "tool", name: "Workflow" }];
     assert.equal((await decide("CronCreate", {}, { allow })).decision, "allow");
     assert.deepEqual(await decide("CronDelete", {}, { allow }), { decision: "deny", reason: NOT_NAMED });
+    assert.deepEqual(await decide("Workflow", { script: "x" }, { allow }), { decision: "deny", reason: NEVER_REFUSED });
   });
 });
 

@@ -138,10 +138,10 @@ describe("her folder's settings under the open lock", () => {
     assert.ok(!deny.some((r) => r.startsWith("mcp__visualize__") || r === "mcp__*"));
     assert.ok(deny.includes("Monitor") && deny.includes("NotebookEdit"));
   });
-  it("denies the Cron tools and Workflow unless this Mac allows them", () => {
+  it("denies the Cron tools unless this Mac allows them, and Workflow always", () => {
     for (const tool of ["CronCreate", "CronDelete", "CronList", "Workflow"]) assert.ok(open().permissions.deny.includes(tool), tool);
     const allowed = openWith({ allow: [...ALLOW_DEFAULT, { type: "tool", name: "CronCreate" }, { type: "tool", name: "Workflow" }] }).permissions.deny;
-    assert.deepEqual(["CronCreate", "CronDelete", "CronList", "Workflow"].map((t) => allowed.includes(t)), [false, true, true, false]);
+    assert.deepEqual(["CronCreate", "CronDelete", "CronList", "Workflow"].map((t) => allowed.includes(t)), [false, true, true, true]);
   });
   it("runs the guard before every call and the receipt hook after every card, each given her folder", () => {
     assert.deepEqual(open().hooks, {

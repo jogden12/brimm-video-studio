@@ -1,11 +1,13 @@
 // The never list (design 2026-10-26, section 1, "The never list"): the tools her chat may never use under the open lock, whatever
 // a setting or a per-Mac entry says. It is in code, not in her folder's settings, so that nothing written there changes it.
 //
-// A tool is on it by name (studio/never.json's `tools`, the tools that read an MCP server's resources among them, since the server
-// they name may be a local extension's), by kind (every local extension's MCP tool, which runs outside the
-// sandbox, and every tool of the app's own, `mcp__ccd_*`), or by word: any MCP tool whose own name (after `mcp__<server>__`)
-// holds one of NEVER_WORDS, so that a connector added later is caught too. The subagent tool, under either of its names, is on it
-// when sent elsewhere or given an agent other than Claude Code's built-in ones, and Bash when it asks to run outside the sandbox.
+// A tool is on it by name (studio/never.json's `tools`: the tools that read an MCP server's resources, since the server they name
+// may be a local extension's, and Workflow, which runs scripts whose agents' options, their kind and where they run, the guard
+// cannot see, so that it gets around the limits put on the subagent tool), by kind (every local extension's MCP tool, which runs
+// outside the sandbox, and every tool of the app's own, `mcp__ccd_*`), or by word: any MCP tool whose own name (after
+// `mcp__<server>__`) holds one of NEVER_WORDS, so that a connector added later is caught too. The subagent tool, under either of
+// its names, is on it when sent elsewhere or given an agent other than Claude Code's built-in ones, and Bash when it asks to run
+// outside the sandbox.
 //
 // studio/never.json also holds what the settings deny for it (neverDenyRules): each local MCP server of the Code tab's tool list
 // whole, and each connector tool the words catch by its exact name, since a connector's family cannot be denied whole (a deny
@@ -23,8 +25,9 @@ export const NEVER_WORDS = ["send", "post", "publish", "share", "schedule", "upl
 export const BUILT_IN_AGENTS = ["general-purpose", "Explore", "Plan"];
 /** The drawing tools, the app's own MCP tools that are not on the never list. */
 export const DRAWING = ["mcp__visualize__show_widget", "mcp__visualize__read_me"];
-/** The tools the settings deny unless this Mac's settings name them as a `tool` entry (R16). */
-const DENIED_UNLESS_NAMED = ["CronCreate", "CronDelete", "CronList", "Workflow"];
+/** The tools the settings deny unless this Mac's settings name them as a `tool` entry (R16): the Cron tools. Nothing on the never
+    list is among them. */
+const DENIED_UNLESS_NAMED = ["CronCreate", "CronDelete", "CronList"];
 
 const CONNECTOR = /^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__/;
 const MCP = /^mcp__(.+?)__(.+)$/;
@@ -62,7 +65,7 @@ export function neverCaught(name, input = {}) {
 }
 
 /** The settings' deny entries for the never list: its tools by name, each local MCP server of the Code tab's tool list whole, each
-    connector tool its words catch by its exact name, and the Cron tools and Workflow unless `allowed` names them as a `tool`. */
+    connector tool its words catch by its exact name, and the Cron tools unless `allowed` names them as a `tool`. */
 export function neverDenyRules(allowed = []) {
   const named = (tool) => Array.isArray(allowed) && allowed.some((a) => isObject(a) && a.type === "tool" && a.name === tool);
   return [
