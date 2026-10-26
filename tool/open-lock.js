@@ -300,10 +300,12 @@ function stamp(path) {
   }
 }
 
-/** The folders in `dir`, by their paths; none when it cannot be listed. */
+/** The folders in `dir` and the links in it to folders, by their paths, since the lock check reads skills through a link to a
+    plugin's folder (loosened.js skillsWhy); none when it cannot be listed. */
 function foldersOf(dir) {
   try {
-    return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join(dir, entry.name));
+    const folder = (entry) => entry.isDirectory() || (entry.isSymbolicLink() && Boolean(statSync(join(dir, entry.name), { throwIfNoEntry: false })?.isDirectory()));
+    return readdirSync(dir, { withFileTypes: true }).filter(folder).map((entry) => join(dir, entry.name));
   } catch (e) {
     return [];
   }
@@ -390,6 +392,8 @@ function lockLines({ home, checkout, folder, node, input, deps, env, settings, f
     checkout, node, folder, session: sessionId, transcript: deps.transcript, cwd: deps.cwd, real: realOf(String(deps.cwd)),
     there: Boolean(deps.transcript && lstatSync(deps.transcript, { throwIfNoEntry: false })?.isFile()),
     claude: claude ? [claude.pid, claude.start, claude.args] : null,
+    // Where its executable really is: its version is read only from the app's own copy reached by no link (loosened.js appWhy).
+    app: claude ? realOf(argsOf(claude.args).exe) : null,
     minimum: deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE, flags: deps.appFlags || null,
     // The names, and what the check says of them: a value it reads (whether memory is turned on) is never kept, only its line.
     env: [Object.keys(env).sort(), environmentWhy(env)],

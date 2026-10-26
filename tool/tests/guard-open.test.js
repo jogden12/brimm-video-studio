@@ -14,7 +14,7 @@ import { settingsFile, writeSettings } from "../settings.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
-import { APP_ARGS, SESSION, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
+import { APP_ARGS, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
 import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
@@ -475,6 +475,30 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     mkdirSync(join(w.dir, "elsewhere"));
     symlinkSync(join(w.dir, "elsewhere"), notes);
     assert.deepEqual(await date(w), CHANGED);
+    w.done();
+  });
+  it("looks again when a skill changes in place in a plugin's version kept through a link, or the app's copy of Claude Code comes to be reached through a link", async () => {
+    const w = chat();
+    const real = join(w.dir, "linked plugin");
+    const skill = join(real, "skills", "theme-factory", "SKILL.md");
+    mkdirSync(dirname(skill), { recursive: true });
+    writeFileSync(skill, "---\nname: theme-factory\n---\n");
+    mkdirSync(join(w.home, ".claude", "plugins", "cache", "market", "linky"), { recursive: true });
+    symlinkSync(real, join(w.home, ".claude", "plugins", "cache", "market", "linky", "1.0.0"));
+    assert.equal((await date(w)).decision, "allow");
+    writeFileSync(skill, "---\nname: theme-factory\nhooks:\n  PreToolUse: []\n---\n");
+    assert.deepEqual(await date(w), CHANGED, "a SKILL.md through a linked version, changed in place");
+    writeFileSync(skill, "---\nname: theme-factory\n---\n");
+    assert.equal((await date(w)).decision, "allow");
+    // The app's copy, reached through a link to a folder elsewhere with its version's name.
+    const elsewhere = join(w.dir, "elsewhere app", "2.1.308");
+    const exe = appCopy(w.home);
+    const below = exe.slice(join(w.home, "Library", "Application Support", "Claude", "claude-code", "2.1.308").length + 1);
+    mkdirSync(dirname(join(elsewhere, below)), { recursive: true });
+    writeFileSync(join(elsewhere, below), "");
+    mkdirSync(join(w.home, "Library", "Application Support", "Claude", "claude-code"), { recursive: true });
+    symlinkSync(elsewhere, join(w.home, "Library", "Application Support", "Claude", "claude-code", "2.1.308"));
+    assert.deepEqual(await date(w), CHANGED, "the app's copy through a link");
     w.done();
   });
   it("ignores a cache another call is writing, or one that is not JSON", async () => {
