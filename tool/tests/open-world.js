@@ -1,6 +1,6 @@
 // A made-up Mac with the open lock, for the open lock's tests: a home with a space and an apostrophe, BRIMM Video in a made-up
 // Dropbox, a checkout, a temp folder of its own (<dir>/tmp, never Claude Code's real one), this Mac's settings saying open with the
-// node her folder was written with, and her folder written open. With it, stand-ins for what the lock check and the guard would
+// node her folder was written with, and her folder written open and trusted. With it, stand-ins for what the lock check and the guard would
 // ask of this Mac: the process table `ps` gives (psText, chatChain), the arguments the Claude app starts a chat's `claude` with
 // (APP_ARGS), the record of those flags (RECORD), a transcript, and the `deps` every open-lock test gives (openDeps), so that no
 // real `ps`, `lsof` or `plutil` runs, this Mac's managed settings and temp folder are never read, and the runner's own environment
@@ -32,6 +32,8 @@ export function openWorld() {
   writeSettings(home, { machine: "Sallie's laptop", root, checkout, lock: "open", proxyPort: port, studioNode: NODE });
   const facts = { home, root, uid, tmp, zoomFolder: join(home, "Documents", "Zoom"), port, web: "held", allow: [...ALLOW_DEFAULT] };
   const folder = writeStudio(home, { checkout, node: NODE, lock: "open", facts });
+  // Her folder trusted, as step 9 of the setup guide has her do once.
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [folder]: { hasTrustDialogAccepted: true } } }));
   return { dir, home, root, checkout, node: NODE, folder, workshop: workshopFolder(home), uid, tmp, port, facts, cwd: folder, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

@@ -4,13 +4,14 @@
 // SECRET in every value, which no line may hold.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { settingsFile, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
-import { SECRET_WORDS, environmentWhy, skillFolders } from "../loosened.js";
-import { openWorld, openDeps, NODE, SESSION } from "./open-world.js";
+import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders } from "../loosened.js";
+import { claudeDirName } from "../places.js";
+import { openWorld, openDeps, psText, chatChain, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, transcript } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
 const SECRET = "SECRET-WORDS-OF-A-FILE";
@@ -61,6 +62,10 @@ function changeOwn(w, change) {
   change(settings);
   writeFileSync(file, JSON.stringify(settings, null, 2));
 }
+
+/** The chat's transcript where Claude Code keeps it for a chat started in her folder, ~/.claude/projects/<her folder's name>/, written
+    from `lines`. Gives its path. */
+const chatTranscript = (w, lines, id = SESSION) => transcript(join(w.home, ".claude", "projects", claudeDirName(w.folder)), lines, id);
 
 const ownLine = (parts) => `(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${parts}. Its contents are not shown here.)`;
 
@@ -203,6 +208,7 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     const w = openWorld();
     const env = { PATH: "/usr/bin", HOME: w.home, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700", CLAUDE_CODE_MESSAGING_TOKEN: SECRET, SSH_AUTH_SOCK: SECRET };
     assert.deepEqual(environmentWhy(env), []);
+    chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
     const r = await behindOn(w, { env });
     assert.deepEqual([r.code, r.text], [0, NEWEST]);
     // A name the by-hand round finds harmless is let be; one on neither list is not.
@@ -379,5 +385,201 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
       refusedFor(await behindOn(w), ownLine("a hook beside the guard and the receipt"), what);
       w.done();
     }
+  });
+});
+
+describe("behind, with the open lock: the app's flags, folders added mid-chat, the version, the session's folder and trust", () => {
+  /** The app's notes folder of the world's chat, which the Code tab adds to every session. */
+  const notesRoot = (w) => join(w.home, "Library", "Application Support", "Claude", "side-session-notes");
+  const notes = (w) => join(notesRoot(w), "local_00000000-0000-4000-8000-000000000000");
+  /** The deps for a chat whose claude was started with `args`. */
+  const started = (args, more = {}) => ({ ps: () => chatChain({ args }), ...more });
+  /** The app's arguments for the world's chat, with `from` put as `to`. */
+  const argsWith = (w, from, to) => {
+    const args = APP_ARGS(w.folder, w.home);
+    assert.ok(args.includes(from), from);
+    return args.replace(from, to);
+  };
+  /** Under Claude Code, as her chat's commands run: its environment, with the chat's id. */
+  const UNDER = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION };
+  const INSIDE_WHY = "(Jason: this session runs in a folder inside her folder for Claude, not in the folder itself, and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)";
+  const ADDED_WHY = "(Jason: this chat has a folder added to it by the Claude app (--add-dir), which its commands could write and whose skills it would load.)";
+  const MID_CHAT_WHY = "(Jason: a folder was added to this chat while it ran (/add-dir, or \"add this folder\" on a card), which its commands could write and whose skills it would load.)";
+  const goesOn = (r, what) => assert.deepEqual([r.code, r.text], [0, NEWEST], what);
+
+  it("goes on for a chat whose flags are all in the record and whose one added folder is the app's own notes folder", async () => {
+    const w = openWorld();
+    mkdirSync(notes(w), { recursive: true });
+    goesOn(await behindOn(w), "Jason's run");
+    chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    goesOn(await behindOn(w, { env: UNDER }), "under Claude Code");
+    w.done();
+  });
+  it("refuses for a flag outside the record, another project-config root, other setting sources, and an allowedTools rule that is not a connector's", async () => {
+    const w = openWorld();
+    const flag = (name) => `(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`;
+    refusedFor(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --plugin-dir /x/${SECRET}`)), flag("--plugin-dir"), "plugin-dir");
+    refusedFor(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --mcp-config={"a":"${SECRET}"}`)), flag("--mcp-config"), "mcp-config");
+    refusedFor(await behindOn(w, { appFlags: { flags: RECORD.flags.filter((f) => f !== "--verbose") } }), flag("--verbose"), "a flag the record leaves out");
+    // The record as the checkout holds it until the by-hand round: every flag is outside it (R3).
+    const unrecorded = await behindOn(w, { appFlags: undefined });
+    for (const name of ["--output-format", "--settings", "--add-dir", "--setting-sources"]) refusedFor(unrecorded, flag(name), name);
+    refusedFor(await behindOn(w, started(argsWith(w, `--project-config-root ${w.folder}`, `--project-config-root ${w.home}`))), "(Jason: the Claude app reads this chat's project settings from another folder (--project-config-root).)", "project-config-root");
+    refusedFor(await behindOn(w, started(argsWith(w, "--setting-sources=user,project,local", "--setting-sources=user,local"))), "(Jason: the Claude app starts this chat with other setting sources (--setting-sources).)", "setting-sources");
+    refusedFor(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --allowedTools mcp__a__b,Bash(${SECRET})`)), "(Jason: the Claude app allows this chat a rule that is not a connector's tool (--allowedTools).)", "allowedTools");
+    goesOn(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --allowedTools mcp__a__b mcp__c__d,mcp__e__f`)), "connectors' tools");
+    w.done();
+  });
+  it("reads the app's --settings, as JSON or as a file, for every loosening key, allowUnsandboxedCommands false among them", async () => {
+    const w = openWorld();
+    const loose = { sandbox: { allowUnsandboxedCommands: false }, permissions: { allow: [`Edit(/${SECRET}/**)`] }, hooks: { SessionStart: [{ hooks: [{ type: "command", command: SECRET }] }] }, disableAllHooks: true, env: { A: SECRET } };
+    const lines = [
+      `(Jason: ${LABEL.app} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`,
+      `(Jason: ${LABEL.app}: sandbox.allowUnsandboxedCommands, which can open her folder's lock. Its contents are not shown here.)`,
+      `(Jason: ${LABEL.app}: an Edit( allow rule, which lets sandboxed commands write there. Its contents are not shown here.)`,
+      `(Jason: ${LABEL.app}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`,
+    ];
+    const file = join(w.dir, "app settings.json");
+    writeFileSync(file, JSON.stringify(loose));
+    for (const value of [JSON.stringify(loose), file]) {
+      const r = await behindOn(w, started(argsWith(w, "--settings {}", `--settings ${value}`)));
+      for (const line of lines) refusedFor(r, line, `${value.slice(0, 1)}: ${line}`);
+    }
+    for (const value of ['{"sandbox":', join(w.dir, "not there.json"), "relative.json", "[]"]) {
+      refusedFor(await behindOn(w, started(argsWith(w, "--settings {}", `--settings ${value}`))), "(Jason: the Claude app's --settings for this chat could not be read.)", value);
+    }
+    w.done();
+  });
+  it("refuses for any --add-dir but the app's notes folder, and for that folder through a link", async () => {
+    const w = openWorld();
+    mkdirSync(notes(w), { recursive: true });
+    const add = (dir) => started(argsWith(w, `--add-dir=${notes(w)}`, `--add-dir=${dir}`));
+    for (const dir of [join(w.home, "Documents"), join(notes(w), "deeper"), notesRoot(w), w.folder, `${notes(w)} ${w.home}`]) refusedFor(await behindOn(w, add(dir)), ADDED_WHY, dir);
+    refusedFor(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --add-dir ${w.workshop}`)), ADDED_WHY, "a second --add-dir");
+    // The notes folder through a link: one in its place, and one on the way to it.
+    mkdirSync(join(w.dir, "elsewhere"), { recursive: true });
+    symlinkSync(join(w.dir, "elsewhere"), join(notesRoot(w), "local_link"));
+    refusedFor(await behindOn(w, add(join(notesRoot(w), "local_link"))), ADDED_WHY, "a link in its place");
+    symlinkSync(notesRoot(w), join(w.dir, "notes link"));
+    refusedFor(await behindOn(w, add(join(w.dir, "notes link", "local_x"))), ADDED_WHY, "a link to the notes folder");
+    w.done();
+    const v = openWorld();
+    const claude = join(v.home, "Library", "Application Support", "Claude");
+    mkdirSync(join(v.dir, "the app's data", "side-session-notes", "local_x"), { recursive: true });
+    symlinkSync(join(v.dir, "the app's data"), claude);
+    refusedFor(await behindOn(v, started(argsWith(v, `--add-dir=${notes(v)}`, `--add-dir=${join(claude, "side-session-notes", "local_x")}`))), ADDED_WHY, "a link on the way");
+    v.done();
+  });
+  it("reads a folder added mid-chat from the transcript's latest environment snapshot", async () => {
+    // a line copied from K0's shape: {"type":"attachment","attachment":{"type":"environment","snapshot":{"additionalWorkingDirectories":["/x"]}}} → refused;
+    // a later snapshot with [] → goes on
+    const w = openWorld();
+    const path = chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }, '{"type":"attachment","attachment":{"type":"environment","snapshot":{"additionalWorkingDirectories":["/x"]}}}']);
+    refusedFor(await behindOn(w, { env: UNDER }), MID_CHAT_WHY, "added");
+    writeFileSync(path, readFileSync(path, "utf8") + '{"type":"attachment","attachment":{"type":"environment","snapshot":{"additionalWorkingDirectories":[]}}}\n');
+    goesOn(await behindOn(w, { env: UNDER }), "taken away");
+    writeFileSync(path, readFileSync(path, "utf8") + JSON.stringify({ type: "attachment", attachment: { type: "environment", snapshot: { additionalWorkingDirectories: [notes(w)] } } }) + "\n");
+    goesOn(await behindOn(w, { env: UNDER }), "the notes folder");
+    w.done();
+  });
+  it("refuses when the chat's transcript cannot be read, under Claude Code", async () => {
+    const w = openWorld();
+    const r = await behindOn(w, { env: UNDER });
+    refusedFor(r, "(Jason: this chat's transcript could not be read, so whether a folder was added to it is not known.)", "no transcript");
+    // And with no chat's id that is one, the transcript cannot be found at all.
+    refusedFor(await behindOn(w, { env: { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "../x" } }), "(Jason: this chat's transcript could not be read, so whether a folder was added to it is not known.)", "no id");
+    w.done();
+  });
+  it("refuses for a Claude Code older than the one the open lock was checked on, and for one whose version cannot be read while one is named", async () => {
+    const w = openWorld();
+    const copy = (version) => join(w.home, "Library", "Application Support", "Claude", "claude-code", version, "claude");
+    const app = join(w.home, "Library", "Application Support", "Claude", "claude-code", MINIMUM, "claude");
+    for (const version of ["2.1.300", "2.1.30", "2.0.999", "1.9.400"]) {
+      refusedFor(await behindOn(w, started(argsWith(w, app, copy(version)))), `(Jason: this chat runs Claude Code ${version}, older than the ${MINIMUM} her folder's open lock was checked on.)`, version);
+    }
+    for (const version of ["2.1.308", "2.1.310", "2.2.0", "3.0.0"]) goesOn(await behindOn(w, started(argsWith(w, app, copy(version)))), version);
+    for (const exe of ["/opt/homebrew/bin/claude", join(w.home, ".local", "bin", "claude")]) {
+      refusedFor(await behindOn(w, started(argsWith(w, app, exe))), `(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${MINIMUM} her folder's open lock was checked on.)`, exe);
+    }
+    w.done();
+  });
+  it("says nothing of the app's flags for Jason's own run, with no claude above it and not under Claude Code", async () => {
+    const w = openWorld();
+    const terminal = () => psText([[1, 0, "/sbin/launchd"], [300, 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], [320, 300, "-zsh"], [900, 320, `${NODE} ${w.checkout}/tool/edit.js behind`]]);
+    goesOn(await behindOn(w, { ps: terminal }), "Terminal");
+    w.done();
+  });
+  it("refuses under Claude Code when no claude is found above, as for a Claude Code run as node …/cli.js", async () => {
+    // env { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: <uuid> }; ps: node 900 ← zsh 800 ← "node /x/cli.js" 700 ← launchd 1
+    const w = openWorld();
+    chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    const cli = () => psText([[1, 0, "/sbin/launchd"], [700, 1, "node /x/cli.js --output-format stream-json"], [800, 700, "/bin/zsh -c x"], [900, 800, `${NODE} /x/tool/edit.js behind`]]);
+    refusedFor(await behindOn(w, { ps: cli, env: UNDER }), "(Jason: the Claude Code above this check could not be found, so its flags and version are not known.)", "cli.js");
+    w.done();
+  });
+  it("refuses when the processes cannot be read", async () => {
+    const w = openWorld();
+    refusedFor(await behindOn(w, { ps: () => null }), "(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)", "no ps");
+    w.done();
+  });
+  it("goes on for a chat whose commands run in a folder inside hers, judged by its transcript's folder", async () => {
+    // openDeps(w, { cwd: join(w.folder, "Pictures"), env: { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: id } }) with the transcript at
+    // <home>/.claude/projects/<claudeDirName(folder)>/<id>.jsonl → code 0; with it at …/<claudeDirName(folder + "/Pictures")>/<id>.jsonl → PR #40's line
+    const w = openWorld();
+    const pictures = join(w.folder, "Pictures");
+    const path = chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    goesOn(await behindOn(w, { cwd: pictures, env: UNDER }), "her chat, in Pictures");
+    rmSync(path);
+    transcript(join(w.home, ".claude", "projects", claudeDirName(pictures)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    refusedFor(await behindOn(w, { cwd: pictures, env: UNDER }), INSIDE_WHY, "a chat started in Pictures");
+    // With $CLAUDE_CONFIG_DIR, the projects folder is there.
+    const config = join(w.dir, "config");
+    transcript(join(config, "projects", claudeDirName(w.folder)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    writeFileSync(join(config, ".claude.json"), readFileSync(join(w.home, ".claude.json")));
+    goesOn(await behindOn(w, { cwd: pictures, env: { ...UNDER, CLAUDE_CONFIG_DIR: config } }), "CLAUDE_CONFIG_DIR");
+    // Jason's own run, not under Claude Code, keeps PR #40's look at the folder it runs in.
+    refusedFor(await behindOn(w, { cwd: pictures }), INSIDE_WHY, "Jason's run in Pictures");
+    w.done();
+  });
+  it("says the folder is not trusted yet, from ~/.claude.json, and still goes on; a parent folder's trust counts", async () => {
+    // r.code 0; r.text includes UNTRUSTED once, not LOCK_CHANGED
+    assert.equal(UNTRUSTED, "Claude Code has not trusted this folder yet: open it once and choose to trust it.");
+    for (const [what, text] of [["no trust", (w) => ({ projects: { [w.folder]: { hasTrustDialogAccepted: false } } })], ["another folder's", (w) => ({ projects: { [w.workshop]: { hasTrustDialogAccepted: true } } })], ["none at all", () => ({})], ["not JSON", () => "{half"]]) {
+      const w = openWorld();
+      const json = text(w);
+      writeFileSync(join(w.home, ".claude.json"), typeof json === "string" ? json : JSON.stringify(json));
+      const r = await behindOn(w);
+      assert.equal(r.code, 0, what);
+      assert.equal(r.text.split("\n").filter((line) => line === UNTRUSTED).length, 1, what);
+      assert.ok(!r.text.includes(LOCK_CHANGED), what);
+      assert.equal(r.g.calls.length, 2, what);
+      w.done();
+    }
+    const w = openWorld();
+    writeFileSync(join(w.home, ".claude.json"), JSON.stringify({ projects: { [w.home]: { hasTrustDialogAccepted: true } } }));
+    goesOn(await behindOn(w), "the home folder trusted");
+    // With $CLAUDE_CONFIG_DIR, Claude Code keeps its trust there.
+    const config = join(w.dir, "config");
+    mkdirSync(config);
+    assert.ok((await behindOn(w, { env: { CLAUDE_CONFIG_DIR: config } })).text.split("\n").includes(UNTRUSTED));
+    w.done();
+  });
+  it("says the entries this Mac adds to her folder's allowlist, and says nothing of the default ones", async () => {
+    const w = openWorld();
+    goesOn(await behindOn(w), "the default ones");
+    const tool = "mcp__4e8268a7-b354-4c23-ab7d-2076f0dc3000__opusclip_list_clips";
+    writeSettings(w.home, { studioAllow: [{ type: "skill", name: "her-own" }, { type: "mcp-tool", name: tool }] });
+    const r = await behindOn(w);
+    assert.deepEqual([r.code, r.text], [0, `${NEWEST}\n(Jason: her folder also allows, on this Mac: skill her-own, mcp-tool ${tool}.)`]);
+    w.done();
+  });
+  it("asks nothing of the processes, trust or the allowlist on a strict Mac", async () => {
+    const w = openWorld();
+    writeSettings(w.home, { lock: "strict", studioAllow: [{ type: "skill", name: "her-own" }] });
+    writeStudio(w.home, { checkout: w.checkout, node: NODE });
+    writeFileSync(join(w.home, ".claude.json"), "{}");
+    const r = await behindOn(w, { ps: () => { throw new Error("ps was run"); }, env: UNDER });
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    w.done();
   });
 });

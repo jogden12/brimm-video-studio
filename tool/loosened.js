@@ -5,20 +5,26 @@
 //
 // On a Mac whose lock in effect is strict it is PR #40's check, and nothing more (R18). On one whose lock in effect is open
 // (settings.js effectiveLock: this Mac's settings say open and OPEN_LOCK_CLAUDE is named), it also says, after PR #40's lines, what
-// else could loosen the open lock (design section 1, "Modes, and the settings that could loosen it"): her folder's own settings
-// compared whole with what this checkout writes for this Mac (studio.js lockBroken, R17), and in every settings source beside them
-// (the user's, the managed ones, and the Claude app's --settings for this chat) any sandbox key but the few that only narrow, an
-// Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, and folders added to every session; the chat's environment, by
-// its names alone; anything listening on her folder's proxy port; and a .claude, CLAUDE.md, CLAUDE.local.md or .mcp.json in the
-// workshop, which a session started there would take as its own; an enabled plugin that carries hooks or a mod, and a skill her
-// folder allows whose SKILL.md registers hooks, since those run outside the sandbox (C16, C22); and a SessionStart hook in any
-// settings source, which can change the chat's id that the marks of a session's words rest on (C24).
+// else could loosen the open lock (design section 1, "Modes, and the settings that could loosen it"):
+// - her folder's own settings, compared whole with what this checkout writes for this Mac (studio.js lockBroken, R17);
+// - in every settings source beside them (the user's, the managed ones, and the Claude app's --settings for this chat): any sandbox
+//   key but the few that only narrow, an Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, folders added to every
+//   session, and a SessionStart hook, which can change the chat's id that the marks of a session's words rest on (C24);
+// - the Claude app's own flags on the chat (C30), read from the Claude Code above this check, found by walking up its own processes
+//   with `ps` (chain.js), and the folders added to the chat while it ran, read from its transcript a little at a time (scan.js);
+// - the chat's environment, by its names alone; anything listening on her folder's proxy port; a .claude, CLAUDE.md, CLAUDE.local.md
+//   or .mcp.json in the workshop; and an enabled plugin carrying hooks or a mod, or a skill her folder allows whose SKILL.md registers
+//   hooks, since those run outside the sandbox (C16, C22).
+// Under Claude Code the session's folder is then judged by where its transcript is kept, not by the folder its commands run in (R30).
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { userInfo } from "node:os";
-import { basename, join } from "node:path";
-import { ALLOW_DEFAULT, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
 import { effectiveLock, factsOf, proxyPortOf, readSettings, studioAllowOf, studioNodeOf } from "./settings.js";
+import { appVersionOf, argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
+import { claudeDirName, realOf } from "./places.js";
+import { SESSION_ID, scanTranscript } from "./scan.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -87,11 +93,18 @@ export function settingsObject(file) {
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
-    the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); and the skills her folder allows
-    (skillsWhy). */
+    the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); the skills her folder allows
+    (skillsWhy); the Claude app's flags on this chat (appWhy, from deps.ps, else `ps` itself, walked up from deps.pid, else this
+    process, against deps.appFlags, else APP_FLAGS), its --settings among them, which deps.appSettings stands in for when given; and,
+    under Claude Code (CLAUDECODE=1), the folders added to the chat while it ran (addedWhy, from deps.transcript, else the transcript
+    of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's id, the session runs
+    in her folder when that transcript is there (R30); otherwise, and on a strict Mac, when the folder it runs in is hers. */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
+  const env = deps.env || process.env;
+  const underClaude = env.CLAUDECODE === "1";
+  const sessionId = env.CLAUDE_CODE_SESSION_ID;
   const why = [];
   let changed = [];
   let folder = null;
@@ -100,6 +113,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   } catch (e) {
     // She has no folder for Claude on this Mac, so nothing in it can be there.
   }
+  const transcript = deps.transcript !== undefined ? deps.transcript : transcriptOf({ home, env, folder, sessionId });
   if (folder) {
     let cwd = null;
     try {
@@ -107,7 +121,10 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     } catch (e) {
       // A folder not there any more is not hers.
     }
-    if (cwd !== folder) {
+    // Under Claude Code on an open-lock Mac, a sandboxed `cd` may have moved the folder its commands run in (R30): the session is hers
+    // when its transcript is kept in her folder's own projects folder.
+    const hers = open && underClaude && sessionId !== undefined ? isFile(transcript) : cwd === folder;
+    if (!hers) {
       const where = cwd && cwd.startsWith(folder + "/") ? "a folder inside her folder for Claude, not in the folder itself," : "a folder other than her folder for Claude,";
       why.push(`(Jason: this session runs in ${where} and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)`);
     }
@@ -138,11 +155,20 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   // The open lock: what else could loosen it, after PR #40's lines.
   if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
-  const app = deps.appSettings || null;
+  let app = deps.appSettings !== undefined ? deps.appSettings : null;
+  const table = (deps.ps || readProcesses)();
+  if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
+  else {
+    const claude = claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
+    const found = appWhy({ claude, underClaude, folder, home, record: deps.appFlags || APP_FLAGS, minimum: minimumOf(deps) });
+    why.push(...found.lines);
+    if (deps.appSettings === undefined) app = found.settings;
+  }
   if (app) {
     if (app.disableAllHooks === true) why.push(`(Jason: ${APP_LABEL} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     why.push(...sourceWhy(APP_LABEL, app));
   }
+  if (underClaude) why.push(...addedWhy({ home, sessionId, transcriptPath: transcript }));
   why.push(...pluginsWhy({ home, settingsList: [user, ...managed.map(([, set]) => set), app] }));
   if (folder) why.push(...skillsWhy({ home, folder, allow: [...ALLOW_DEFAULT, ...studioAllowOf(settings)] }));
   why.push(...environmentWhy(deps.env || process.env));
@@ -154,6 +180,128 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   }
   why.push(...workshopWhy(workshopFolder(home), deps.workshopLimit || WORKSHOP_LIMIT));
   return why;
+}
+
+/** Where Claude Code keeps the transcript of the chat `sessionId` started in her folder, `folder` (R30): in its projects folder
+    ($CLAUDE_CONFIG_DIR/projects when that is set, else ~/.claude/projects), in her folder's own subfolder of it. null when she has no
+    folder, or the id is not a chat's id, which is never put into a path. */
+function transcriptOf({ home, env, folder, sessionId }) {
+  if (!folder || typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
+  const projects = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, "projects") : join(home, ".claude", "projects");
+  const file = join(projects, claudeDirName(folder), `${sessionId}.jsonl`);
+  return dirname(dirname(file)) === projects ? file : null;
+}
+
+/** Whether `path` is a file that is there. */
+const isFile = (path) => typeof path === "string" && Boolean(lstatSync(path, { throwIfNoEntry: false })?.isFile());
+
+/** The app's notes folders' folder, in which the Code tab makes one folder for each session and adds it to the session (C30). */
+const notesRoot = (home) => join(home, "Library", "Application Support", "Claude", "side-session-notes");
+
+/** Whether `dir` is one of the app's notes folders: one folder directly in notesRoot, spelled by its real path, and not a link. */
+function isNotes(dir, home) {
+  if (typeof dir !== "string" || !isAbsolute(dir) || dirname(dir) !== notesRoot(home) || !plainName(basename(dir))) return false;
+  if (lstatSync(dir, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
+  return realOf(dir) === dir;
+}
+
+/** The flags as they are named: two dashes, then letters, digits and dashes. Anything else after a " --" is said without its words. */
+const FLAG = /^--[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+/** Whether the Claude Code version `version` is older than `minimum`, part by part. */
+function older(version, minimum) {
+  const a = version.split(".").map(Number);
+  const b = minimum.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0);
+  }
+  return false;
+}
+
+/** The app's --settings, `value`, as the object it holds, or null when it cannot be read as one: JSON when it starts with {, otherwise
+    a whole path to a file of it. */
+function appSettingsOf(value) {
+  if (typeof value !== "string") return null;
+  if (value.trim().startsWith("{")) {
+    try {
+      const settings = JSON.parse(value);
+      return isObject(settings) ? settings : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  return isAbsolute(value) ? settingsObject(value) : null;
+}
+
+/** What the Claude app's own flags on this chat could loosen (C30), from `claude`, the Claude Code above the check (chain.js), or null
+    when none was found: { lines, settings }, the lines for Jason, none holding a flag's value, and the app's --settings for this chat
+    as the object it holds (for sourceWhy), or null. With no claude above, a check run by hand in Terminal (`underClaude` false) has
+    no flags to read; under Claude Code (the guard, or `behind` with CLAUDECODE=1) one not found is loosened, as a renamed binary or
+    Claude Code run as node …/cli.js would be, since its flags and version are not known (R26). Otherwise: a flag not in `record`
+    (studio/app-flags.json, which the by-hand round makes); --project-config-root other than her folder, `folder`, by its real path;
+    --setting-sources other than user,project,local; an --allowedTools rule that is not a connector's tool; a --settings that cannot
+    be read; any --add-dir but the app's notes folder (isNotes); and, while `minimum` is named, a version older than it, or none that
+    can be read from the executable's path. */
+export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
+  if (!claude) return { lines: underClaude ? ["(Jason: the Claude Code above this check could not be found, so its flags and version are not known.)"] : [], settings: null };
+  const { exe, flags } = argsOf(claude.args);
+  const lines = [];
+  const recorded = new Set(isObject(record) && Array.isArray(record.flags) ? record.flags : []);
+  const unrecorded = [...new Set(flags.map((flag) => flag.name).filter((name) => !recorded.has(name)))];
+  for (const name of unrecorded.filter((name) => FLAG.test(name))) lines.push(`(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`);
+  if (unrecorded.some((name) => !FLAG.test(name))) lines.push("(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)");
+  const values = (name) => flags.filter((flag) => flag.name === name).map((flag) => flag.value);
+  if (values("--project-config-root").some((value) => !folder || value !== folder)) lines.push("(Jason: the Claude app reads this chat's project settings from another folder (--project-config-root).)");
+  if (values("--setting-sources").some((value) => value !== "user,project,local")) lines.push("(Jason: the Claude app starts this chat with other setting sources (--setting-sources).)");
+  if (values("--allowedTools").some((value) => String(value ?? "").split(/[,\s]+/).filter(Boolean).some((rule) => !rule.startsWith("mcp__")))) lines.push("(Jason: the Claude app allows this chat a rule that is not a connector's tool (--allowedTools).)");
+  let settings = null;
+  const given = values("--settings");
+  if (given.length) {
+    // More than one is not what the app passes, and which of them Claude Code takes is not known.
+    settings = given.length === 1 ? appSettingsOf(given[0]) : null;
+    if (settings === null) lines.push("(Jason: the Claude app's --settings for this chat could not be read.)");
+  }
+  if (values("--add-dir").some((dir) => !isNotes(dir, home))) lines.push("(Jason: this chat has a folder added to it by the Claude app (--add-dir), which its commands could write and whose skills it would load.)");
+  if (minimum) {
+    const version = appVersionOf(exe);
+    if (version === null) lines.push(`(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${minimum} her folder's open lock was checked on.)`);
+    else if (older(version, minimum)) lines.push(`(Jason: this chat runs Claude Code ${version}, older than the ${minimum} her folder's open lock was checked on.)`);
+  }
+  return { lines, settings };
+}
+
+/** What a folder added to the chat while it ran could loosen (C30), as the lines for Jason: the latest environment snapshot of its
+    transcript, `transcriptPath`, read a little at a time (scan.js), listing any folder but the app's notes folder; or the transcript
+    that cannot be read, or a chat's id that is not one, since then it is not known. It never throws. */
+export function addedWhy({ home, sessionId, transcriptPath }) {
+  const unread = "(Jason: this chat's transcript could not be read, so whether a folder was added to it is not known.)";
+  try {
+    const scan = scanTranscript({ home, sessionId, transcriptPath });
+    if (scan.unread) return [unread];
+    return (scan.added || []).some((dir) => !isNotes(dir, home)) ? ["(Jason: a folder was added to this chat while it ran (/add-dir, or \"add this folder\" on a card), which its commands could write and whose skills it would load.)"] : [];
+  } catch (e) {
+    return [unread];
+  }
+}
+
+/** What `behind` says, and goes on, when Claude Code has not trusted her folder yet: an untrusted folder drops its allow rules, so
+    edit.js and the workshop ask cards (C31). */
+export const UNTRUSTED = "Claude Code has not trusted this folder yet: open it once and choose to trust it.";
+
+/** UNTRUSTED when Claude Code has not trusted her folder, `folder` (its real path), else "": as Claude Code reads it, from
+    ~/.claude.json ($CLAUDE_CONFIG_DIR/.claude.json when `env` sets that), its `projects` entry for her folder or any folder above it
+    having hasTrustDialogAccepted true. A file that cannot be read trusts nothing. No folder, nothing to say. */
+export function trustWhy({ home, folder, env = {} }) {
+  if (!folder) return "";
+  const config = settingsObject(env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"));
+  const projects = config && isObject(config.projects) ? config.projects : {};
+  const above = (path) => {
+    const all = [path];
+    while (dirname(all[all.length - 1]) !== all[all.length - 1]) all.push(dirname(all[all.length - 1]));
+    return all;
+  };
+  const trusted = [...above(folder), ...above(studioFolder(home))].some((path) => Object.hasOwn(projects, path) && isObject(projects[path]) && projects[path].hasTrustDialogAccepted === true);
+  return trusted ? "" : UNTRUSTED;
 }
 
 /** The words that mark a name in the chat's environment as a secret's. */
