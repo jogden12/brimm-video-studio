@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="stylesheet" href="./brand.css" />
+    <style>
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--navy);
+        color: var(--mist);
+        font-family: "Varela", sans-serif;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 160px;
+        box-sizing: border-box;
+      }
+      h1 {
+        margin: 0;
+        font-size: 96px;
+        font-weight: 400;
+      }
+      p {
+        margin: 24px 0 0;
+        font-size: 40px;
+        color: var(--sand);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- HyperFrames looks for an index.html in every project. This one only names the test: each graphic is its own file,
+         rendered with -c (docs/phase-h0/checklist.md). -->
+    <div
+      id="root"
+      data-composition-id="h0"
+      data-start="0"
+      data-duration="2"
+      data-width="1920"
+      data-height="1080"
+      data-no-timeline
+    >
+      <h1>H0 render test</h1>
+      <p>Each graphic is its own file. See docs/phase-h0/checklist.md.</p>
+    </div>
+  </body>
+</html>

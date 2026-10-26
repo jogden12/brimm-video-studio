@@ -1,0 +1,81 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"title","type":"string","label":"Title","description":"The words of the card, in a few words.","default":"Three pricing mistakes"},
+    {"id":"kicker","type":"string","label":"Kicker","description":"A short line above the title.","default":"Part one"},
+    {"id":"family","type":"string","label":"Typeface","description":"The font family of the words.","default":"Sweet Sans Pro"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="stylesheet" href="../brand.css" />
+    <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+    <style>
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--navy);
+      }
+      #words {
+        position: absolute;
+        left: 160px;
+        right: 160px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      #kicker {
+        font-weight: 400;
+        font-size: 34px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--sand);
+      }
+      #rule {
+        width: 160px;
+        height: 6px;
+        margin: 28px 0 30px;
+        background: var(--sand);
+        transform-origin: left center;
+      }
+      #title {
+        font-weight: 500;
+        font-size: 104px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--mist);
+        line-height: 1.1;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="title-card"
+      data-start="0"
+      data-duration="4"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div class="test-mark"></div>
+      <div id="words" class="brand-text">
+        <div id="kicker" data-var-text="kicker">Part one</div>
+        <div id="rule"></div>
+        <div id="title" data-var-text="title">Three pricing mistakes</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const timeline = gsap.timeline({ paused: true });
+      timeline.fromTo("#kicker", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 0.2);
+      timeline.fromTo("#rule", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power3.out" }, 0.35);
+      timeline.fromTo("#title", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 0.45);
+      timeline.to("#words", { opacity: 0, duration: 0.4, ease: "power2.in" }, 3.5);
+      window.__timelines["title-card"] = timeline;
+    </script>
+  </body>
+</html>

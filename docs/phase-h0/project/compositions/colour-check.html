@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="stylesheet" href="../brand.css" />
+    <style>
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        display: flex;
+      }
+      .block {
+        flex: 1;
+      }
+      #navy {
+        background: var(--navy);
+      }
+      #sand {
+        background: var(--sand);
+      }
+      #mist {
+        background: var(--mist);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Three flat blocks of the brand's main colours, 640 px wide each, so the checklist can read one pixel of each in the
+         finished video and compare it with the guide. -->
+    <div
+      id="root"
+      data-composition-id="colour-check"
+      data-start="0"
+      data-duration="2"
+      data-width="1920"
+      data-height="1080"
+      data-no-timeline
+    >
+      <div id="navy" class="block"></div>
+      <div id="sand" class="block"></div>
+      <div id="mist" class="block"></div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"name","type":"string","label":"Name","description":"The name of the person speaking, as it is spelled on screen.","default":"Sallie Ogden"},
+    {"id":"role","type":"string","label":"Role","description":"What the person speaking does, on the line under the name.","default":"Founder, The BRIMM"},
+    {"id":"family","type":"string","label":"Typeface","description":"The font family of the words.","default":"Sweet Sans Pro"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="stylesheet" href="../brand.css" />
+    <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+    <style>
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      #panel {
+        position: absolute;
+        left: 96px;
+        bottom: 120px;
+        padding: 26px 44px 28px 40px;
+        background: var(--navy);
+        border-left: 8px solid var(--sand);
+      }
+      #name {
+        font-weight: 500;
+        font-size: 46px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--mist);
+        line-height: 1.15;
+      }
+      #role {
+        margin-top: 8px;
+        font-weight: 400;
+        font-size: 30px;
+        color: var(--sand);
+        line-height: 1.2;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="lower-third"
+      data-start="0"
+      data-duration="6"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div class="test-mark"></div>
+      <div id="panel" class="brand-text">
+        <div id="name" data-var-text="name">Sallie Ogden</div>
+        <div id="role" data-var-text="role">Founder, The BRIMM</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const timeline = gsap.timeline({ paused: true });
+      timeline.fromTo("#panel", { x: -40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 0.3);
+      timeline.to("#panel", { x: -24, opacity: 0, duration: 0.4, ease: "power2.in" }, 5.4);
+      window.__timelines["lower-third"] = timeline;
+    </script>
+  </body>
+</html>
