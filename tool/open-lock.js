@@ -318,7 +318,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
   const managed = deps.managedDir || MANAGED_DIR;
   const prefs = deps.managedPrefs || MANAGED_PREFS;
   const plugins = join(home, ".claude", "plugins");
-  const pluginDirs = [...foldersOf(join(plugins, "cache")).flatMap(foldersOf).flatMap(foldersOf).flatMap(foldersOf), ...foldersOf(join(plugins, "synced")).flatMap(foldersOf)];
+  // Each plugin's folder: cache/<marketplace>/<plugin>/<version>, and synced/<account>/<plugin>.
+  const pluginDirs = [...foldersOf(join(plugins, "cache")).flatMap(foldersOf).flatMap(foldersOf), ...foldersOf(join(plugins, "synced")).flatMap(foldersOf)];
   const skillRoots = [join(folder, ".claude", "skills"), join(home, ".claude", "skills"), ...pluginDirs.map((dir) => join(dir, "skills"))];
   const skills = [...ALLOW_DEFAULT, ...studioAllowOf(settings)].filter((e) => isObject(e) && e.type === "skill" && typeof e.name === "string");
   let dropIns = [];

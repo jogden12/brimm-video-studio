@@ -439,13 +439,21 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.deepEqual(await ask(), CHANGED);
     rmSync(join(w.dir, "managed", "managed-settings.json"));
     assert.equal((await ask()).decision, "allow");
-    mkdirSync(join(w.home, ".claude"), { recursive: true });
+    // An enabled plugin with no hooks, then a hooks file appearing deep in its folder.
+    const plugin = join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0");
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "hooky" }));
     writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "hooky@market": true } }));
     assert.equal((await ask()).decision, "allow");
-    mkdirSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks"), { recursive: true });
-    writeFileSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks", "hooks.json"), "{}");
+    mkdirSync(join(plugin, "hooks"));
+    writeFileSync(join(plugin, "hooks", "hooks.json"), "{}");
     assert.deepEqual(await ask(), CHANGED);
+    rmSync(join(plugin, "hooks"), { recursive: true });
+    assert.equal((await ask()).decision, "allow");
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "hooky", hooks: "./hooks.json" }));
+    assert.deepEqual(await ask(), CHANGED, "a plugin.json changed in place");
     rmSync(join(w.home, ".claude", "plugins"), { recursive: true });
+    rmSync(join(w.home, ".claude", "settings.json"));
     assert.equal((await ask()).decision, "allow");
     const before = looks;
     appendFileSync(w.transcript, `${JSON.stringify({ type: "user", uuid: "u-2", timestamp: AT })}\n`);
