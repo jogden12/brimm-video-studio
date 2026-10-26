@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -282,6 +282,48 @@ describe("the switch's settings", () => {
     assert.equal(dropFolder("/r", "Mac Studio"), "/r/Unedited Video/Mac Studio");
     assert.equal(dropFolder("/r", "Mac Studio", "Drop"), "/r/Drop/Mac Studio");
     assert.equal(dropFolder("/r", "Mac Studio", undefined), "/r/Unedited Video/Mac Studio");
+  });
+});
+
+describe("this Mac's lock settings (the open lock, K1)", () => {
+  const good = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT };
+  it("keeps the lock strict, the web tools held and Zoom's folder in Documents when the settings say nothing", () => {
+    assert.deepEqual([lockOf({}), lockOf({ lock: "open" }), lockOf(undefined), webOf({}), webOf({ web: "open" })], ["strict", "open", "strict", "held", "open"]);
+    assert.equal(zoomFolderOf({}, "/Users/sallie"), "/Users/sallie/Documents/Zoom");
+    assert.equal(zoomFolderOf({ zoomFolder: "/Users/sallie/Zoom recordings" }, "/Users/sallie"), "/Users/sallie/Zoom recordings");
+    assert.deepEqual([studioAllowOf({}), proxyPortOf({}), studioNodeOf({}), studioNodeOf(undefined)], [[], null, null, null]);
+    assert.deepEqual([proxyPortOf({ proxyPort: 47123 }), studioNodeOf({ studioNode: "/opt/homebrew/bin/node" })], [47123, "/opt/homebrew/bin/node"]);
+    assert.equal(settingsFault({ ...good, lock: "strict", web: "held", zoomFolder: "/Users/sallie/Documents/Zoom", proxyPort: 47123, studioNode: "/opt/homebrew/bin/node", studioAllow: [] }), "");
+  });
+  it("refuses a lock, a web setting, a Zoom folder, a proxy port or a node that will not do", () => {
+    for (const [more, why] of [[{ lock: "loose" }, 'the lock must be "strict" or "open"'], [{ web: "on" }, 'the web tools must be "held" or "open"'], [{ zoomFolder: "Zoom" }, "the Zoom folder is not a whole path"], [{ proxyPort: 80 }, "the proxy port must be a whole number from 1024 to 65535"], [{ proxyPort: 47123.5 }, "the proxy port must be a whole number from 1024 to 65535"], [{ studioNode: "node" }, "the node her folder was written with is not a whole path"]])
+      assert.equal(settingsFault({ ...good, ...more }), why);
+  });
+  it("keeps an entry her folder allows only when it is typed and exact, and never one on the never list", () => {
+    const WHY = "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
+    const id = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
+    for (const ok of [{ type: "skill", name: "theme-factory" }, { type: "mcp-tool", name: id + "list_designs" }, { type: "tool", name: "CronCreate" }]) assert.equal(settingsFault({ ...good, studioAllow: [ok] }), "");
+    for (const bad of [{ type: "skill", name: "../x" }, { type: "mcp-tool", name: "mcp__PDF_Tools__fill_pdf" }, { type: "mcp-tool", name: id + "*" }, { type: "mcp-tool", name: id + "send_invoice" }, { type: "tool", name: "Monitor" }, { type: "tool", name: "NotebookEdit" }, { type: "tool", name: "Artifact" }, { type: "plugin", name: "x" }, "brimm-edit"])
+      assert.equal(settingsFault({ ...good, studioAllow: [bad] }), WHY, JSON.stringify(bad));
+    assert.equal(settingsFault({ ...good, studioAllow: { type: "skill", name: "theme-factory" } }), WHY);
+  });
+  it("shows the lock, the web tools, Zoom's folder, the entries allowed and the proxy port, each only when it is set", () => {
+    const t = setup();
+    writeSettings(t.home, t.given);
+    assert.equal(t.asked("show"), 0);
+    const today = [...t.said];
+    t.said.length = 0;
+    writeSettings(t.home, { lock: "open", web: "held", zoomFolder: join(t.home, "Zoom recordings"), proxyPort: 47123, studioAllow: [{ type: "skill", name: "theme-factory" }], studioNode: "/opt/homebrew/bin/node" });
+    assert.equal(t.asked("show"), 0);
+    assert.deepEqual(t.said, [
+      ...today,
+      "  Her folder's lock:  open",
+      "  The web tools:  held",
+      `  Zoom's recordings:  ${t.home}/Zoom recordings`,
+      "  Also allowed in her folder:  skill theme-factory",
+      "  Her folder's proxy port:  47123"
+    ]);
+    t.done();
   });
 });
 

@@ -29,6 +29,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
 import { writeStudio } from "./studio.js";
+import { isConnector, neverCaught } from "./never.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -87,8 +88,22 @@ function teachingsWhole(t) {
   );
 }
 
+/** Whether `entry` is one her folder may allow besides the default (design 2026-10-26, section 2, "The allowlist is data"):
+    typed, and exact. A skill by its name; a claude.ai connector's tool by its exact name, never a local extension's, never a
+    family (`*`), and never one the never list's words catch; or a tool that is not an MCP tool and that the never list does not
+    hold (the Cron tools and Workflow may be named, R16). */
+function allowedEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.name !== "string") return false;
+  const { type, name } = entry;
+  if (type === "skill") return /^[a-z0-9][a-z0-9-]*$/.test(name);
+  if (type === "mcp-tool") return isConnector(name) && !name.includes("*") && !neverCaught(name);
+  if (type === "tool") return name !== "" && !name.startsWith("mcp__") && !name.includes("*") && !neverCaught(name);
+  return false;
+}
+
 /** What is wrong with this Mac's settings, in plain words: "" when nothing is. The settings of the switch (import, readings,
-    handoffVersion, drop and sessionTeachings) need not be there, and are checked when they are. */
+    handoffVersion, drop and sessionTeachings) and of her folder's lock (lock, web, zoomFolder, proxyPort, studioNode and
+    studioAllow) need not be there, and are checked when they are. */
 export function settingsFault(s) {
   if (!s || typeof s !== "object" || Array.isArray(s) || s.version !== 1) return "they are not version 1 of brimm-video's settings";
   const fault = machineFault(s.machine);
@@ -102,8 +117,33 @@ export function settingsFault(s) {
   if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && s.sessionTeachings !== false && !teachingsWhole(s.sessionTeachings)) {
     return "the setting for teachings from sessions is neither off (null or false) nor what node settings.js sessions --teachings on writes";
   }
+  if (s.lock !== undefined && s.lock !== "strict" && s.lock !== "open") return 'the lock must be "strict" or "open"';
+  if (s.web !== undefined && s.web !== "held" && s.web !== "open") return 'the web tools must be "held" or "open"';
+  if (s.zoomFolder !== undefined && (typeof s.zoomFolder !== "string" || !isAbsolute(s.zoomFolder))) return "the Zoom folder is not a whole path";
+  if (s.proxyPort !== undefined && !(Number.isInteger(s.proxyPort) && s.proxyPort >= 1024 && s.proxyPort <= 65535)) {
+    return "the proxy port must be a whole number from 1024 to 65535";
+  }
+  if (s.studioNode !== undefined && (typeof s.studioNode !== "string" || !isAbsolute(s.studioNode))) return "the node her folder was written with is not a whole path";
+  if (s.studioAllow !== undefined && !(Array.isArray(s.studioAllow) && s.studioAllow.every(allowedEntry))) {
+    return "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
+  }
   return "";
 }
+
+/** The lock her folder for Claude has, as this Mac's settings say: "open" only when they say so, "strict" for anything else and
+    for no settings at all. It is what the settings say, not the lock in effect, which is open only once OPEN_LOCK_CLAUDE is set
+    too (studio.js effectiveLock). */
+export const lockOf = (s) => (s?.lock === "open" ? "open" : "strict");
+/** Whether the web tools are open in her folder: "open" only when this Mac's settings say so, "held" otherwise. */
+export const webOf = (s) => (s?.web === "open" ? "open" : "held");
+/** Where Zoom keeps its recordings on this Mac: the settings' whole path, else Zoom's own, Documents/Zoom in the home folder. */
+export const zoomFolderOf = (s, home) => (typeof s?.zoomFolder === "string" && isAbsolute(s.zoomFolder) ? s.zoomFolder : join(home, "Documents", "Zoom"));
+/** The entries this Mac allows in her folder besides the default (studio/allow.json): none when the settings name none. */
+export const studioAllowOf = (s) => (Array.isArray(s?.studioAllow) ? s.studioAllow : []);
+/** The port her folder's sandbox proxy is given, or null when this Mac's settings name none. */
+export const proxyPortOf = (s) => (Number.isInteger(s?.proxyPort) ? s.proxyPort : null);
+/** The node settings.js studio last wrote her folder with (R17), or null when this Mac's settings name none. */
+export const studioNodeOf = (s) => (typeof s?.studioNode === "string" && isAbsolute(s.studioNode) ? s.studioNode : null);
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
     "light" in the import setting, and no setting, is today's import. */
@@ -530,8 +570,8 @@ function sessions(home, rest, say, now) {
   }
 }
 
-/** `show`: the settings, with the folders found from them, or why there are none. The settings of the switch are said when
-    the file has them, but not the two accounts the teachings from sessions were turned on for, each said as "(not shown)":
+/** `show`: the settings, with the folders found from them, or why there are none. The settings of the switch, and those of her
+    folder's lock but the node it was written with, are said when the file has them, but not the two accounts the teachings from sessions were turned on for, each said as "(not shown)":
     what this prints may reach a chat, and an account's email is not to. `sessions --teachings on` says them once, to Jason,
     who typed them. */
 function show(home, say, now) {
@@ -555,6 +595,11 @@ function show(home, say, now) {
   if (s.sessionTeachings) {
     say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : teachingsLapsed(s, now) ? "lapsed" : "off"}, turned on ${s.sessionTeachings.at} (the claude command: (not shown); the Code tab: (not shown))`);
   }
+  if (s.lock !== undefined) say(`  Her folder's lock:  ${s.lock}`);
+  if (s.web !== undefined) say(`  The web tools:  ${s.web}`);
+  if (s.zoomFolder !== undefined) say(`  Zoom's recordings:  ${s.zoomFolder}`);
+  if (s.studioAllow !== undefined) say(`  Also allowed in her folder:  ${s.studioAllow.length ? s.studioAllow.map(({ type, name }) => `${type} ${name}`).join(", ") : "nothing more"}`);
+  if (s.proxyPort !== undefined) say(`  Her folder's proxy port:  ${s.proxyPort}`);
   return 0;
 }
 
