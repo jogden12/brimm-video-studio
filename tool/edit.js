@@ -38,7 +38,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
-import { progressFolder, reporter } from "./progress.js";
+import { progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
@@ -54,7 +54,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
-import { buildHandoffV2, handoffFaultV2 } from "./handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
@@ -67,11 +67,28 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
+  node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
+                                        answer first, then the newest; this Mac's drop folder in Finder's words; and how
+                                        many videos from before the switch are not guided. With a video, its next step,
+                                        and for a step on the BRIMM Ops page the step after it. Only on a Mac that does
+                                        the light import: on any other, every form says to ask Jason
+  node edit.js guide drop [zoom] | page | wait
+                                        open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
+                                        BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
+                                        what the guide says: at once when no video is coming in, being imported or read
+  node edit.js guide "<video>" done <step> | finished | show | tell
+                                        note on this Mac that she did its step on the BRIMM Ops page (only the step that
+                                        comes next), that she is done with the video, or show in Finder what its step needs.
+                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, or an
+                                        import or reading that did not finish), then say it in one line. Her skill runs it
+                                        in the background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -168,10 +185,12 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                      --line "<name>" [--line "<role>"] [--no-hand-edits]
                                         a name over a role, at a time on the timeline or the words said there; "drop
                                         <id>" takes one off, and with neither, the list
-  node edit.js graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>")
+  node edit.js graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>)
                      [--for <seconds>] [--place full|corner|lower] [--no-hand-edits]
                                         a picture from the Pictures folder over the timeline; "drop <id>" takes one off,
-                                        "ideas" lists Claude's, and with neither, the list
+                                        "ideas" lists Claude's, numbered, with their times on the timeline, and with
+                                        neither, the list. --idea <n> puts it at idea n's words, for as long as they take,
+                                        in the corner or the lower third when the idea says so
   node edit.js preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]
                                         the timeline's job, caption style and look; with none, what it has and what
                                         there is
@@ -965,7 +984,7 @@ export async function open(ctx, rest) {
   const notes = join(found.folder, `${stem}.edit-notes.txt`);
   if (existsSync(notes)) {
     say("Claude's notes, the first lines:");
-    for (const line of readFileSync(notes, "utf8").split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
+    for (const line of notesForHer(readFileSync(notes, "utf8"), record).split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
   }
   const candidates = record.reels.filter((reel) => reel.status !== "dropped");
   if (candidates.length) {
@@ -1590,6 +1609,8 @@ async function reelTitle(ctx, found, n, words) {
   const reels = (found.record.reels || []).map((r) => ({ ...r }));
   const reel = reels.find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  // A Reel a reading suggested is not made, and no Reel brimm-video makes would show its title: she is told where she makes it.
+  if (notMade(found, n)) return refuse(ctx, notMadeWords(n));
   if (words == null) {
     ctx.say(reel.title ? `Reel ${n}'s title on screen is "${reel.title}".` : `Reel ${n} has no title on screen. Say what it says.`);
     return 0;
@@ -1639,9 +1660,11 @@ async function markReels(ctx, found, ns, status) {
     for (const n of ns) {
       const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
       if (candidate && !candidate.ranges.length) return refuse(ctx, `Reel ${n} has nothing to show: ${String(candidate.failed || "it has no stretch").replace(/\.$/, "")}.`);
-      // A candidate a reading suggested has no crops until it is made (reels.json version 2): its project cannot be written yet.
-      if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
     }
+    // A candidate a reading suggested has no crops until it is made (reels.json version 2), and nothing makes one yet: none is
+    // picked, and each such is named, with where she makes them for now.
+    const unmade = listing.reels ? [...new Set(ns)].filter((n) => listing.reels.candidates.some((c) => c.n === n && uncropped(c))) : [];
+    if (unmade.length) return refuse(ctx, notMadeWords(unmade));
     // A change Dropbox took away is said before anything is written, as save says it.
     const gone = undone(found.record, ctx.home);
     if (gone) {
@@ -1681,21 +1704,26 @@ async function markReels(ctx, found, ns, status) {
 export const pickReels = (ctx, found, ns) => markReels(ctx, found, ns, "picked");
 export const dropReels = (ctx, found, ns) => markReels(ctx, found, ns, "dropped");
 
+/** Whether Reel `n` of the episode `found` is one a reading suggested and nobody has made (reels.json version 2): its candidate
+    has no crops, and no project of its own is listed. There is nothing upright to show or change, whatever the record says of
+    it, and nothing makes one yet (phase V). */
+function notMade(found, n) {
+  const { record } = found;
+  if ((record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) || !existsSync(join(found.folder, REELS_FILE))) return false;
+  const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
+  const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
+  return Boolean(candidate && uncropped(candidate));
+}
+
 /** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
     episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. A Reel a
-    reading suggested and nobody has made yet (its candidate has no crops) is refused first: "make" it first. */
+    reading suggested and nobody has made yet (notMade) is refused first, with where she makes it for now (notMadeWords). */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
-  // A Reel whose candidate has no crops yet, as a reading suggests it (reels.json version 2), is not made: there is nothing
-  // upright to show, whatever the record says of it.
-  if (!(record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) && existsSync(join(found.folder, REELS_FILE))) {
-    const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
-    const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
-    if (candidate && uncropped(candidate)) return refuse(ctx, notMadeWords(n));
-  }
+  if (notMade(found, n)) return refuse(ctx, notMadeWords(n));
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, `Reel ${n} is not picked. Pick it first.`);
   const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
@@ -2092,8 +2120,28 @@ async function show(ctx, rest) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [file] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
   }
-  ctx.say(readFileSync(path, "utf8").replace(/\n$/, ""));
+  const text = readFileSync(path, "utf8");
+  ctx.say((kind === "notes" ? notesForHer(text, record) : text).replace(/\n$/, ""));
   return 0;
+}
+
+/** What is said in place of a raw video's ideas for graphics in Claude's notes: their times there are the recording's. */
+const IDEAS_ELSEWHERE = 'Say "any ideas for graphics?" to see them, numbered, with their times on the version you are watching.';
+/** Claude's notes as her chat shows them (show, open): of a raw video she has answered, with their ideas for graphics, whose
+    times are the recording's and not her timeline's, left out and IDEAS_ELSEWHERE in their place (spec 2026-10-22, section 3,
+    "Times"), and with each idea on words that are cut left out of what could not be used, and that heading too when nothing
+    else is under it; any other video's as written. Each part of the notes is a heading and its lines, after an empty line
+    (notes.js notesText), and Claude's own notes in them hold no empty line. */
+function notesForHer(text, record) {
+  if (!(isAnswered(record) && recordKind(record) === "raw")) return text;
+  return text.split("\n\n").map((block) => {
+    if (block.startsWith("Its ideas for graphics\n")) return `Its ideas for graphics\n${IDEAS_ELSEWHERE}`;
+    if (!block.startsWith("What could not be used from its reply\n")) return block;
+    // An idea on words that are cut is listed by "any ideas for graphics?" (cut now, with its number), not at the recording's time.
+    const lines = block.split("\n").filter((line, i) => i === 0 || !line.startsWith("An idea for a graphic sits on words that are cut, at "));
+    // The notes end with a new line, so the last part's last line is empty: it is no line under the heading.
+    return lines.slice(1).some((line) => line.trim()) ? lines.join("\n") : null;
+  }).filter((block) => block !== null).join("\n\n");
 }
 
 /** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
@@ -2483,7 +2531,7 @@ function recordDifferences(a, b) {
   return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
-/** A record file read as it is, or null when it is not there or cannot be read. */
+/** A record file, or any other JSON file (a hand-off), read as it is, or null when it is not there or cannot be read. */
 function recordAt(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -2558,14 +2606,14 @@ async function resolveIn(ctx, found, keep) {
     }
   })();
   const copies = conflictedCopies(found.folder);
-  const ordered = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
-  if (!ordered.length) {
+  const inOrder = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
+  if (!inOrder.length) {
     rmSync(shownFile, { force: true });
     if (keep && pin) return refuse(ctx, `The version shown was sorted out meanwhile, on this Mac or the other, so nothing was kept here. There is no conflict in ${name} now: say "open ${name}" to see it as it is.`);
     ctx.say(`There is no conflict in ${name}.`);
     return 0;
   }
-  const copy = ordered[0];
+  const copy = inOrder[0];
   const at = (rel) => join(found.folder, rel);
   const isRecord = copy.startsWith("record/");
   let of = conflictedOf(copy);
@@ -2617,7 +2665,7 @@ async function resolveIn(ctx, found, keep) {
     }
     if (blocked) ctx.say(blocked);
     else {
-      const more = ordered.length - 1;
+      const more = inOrder.length - 1;
       ctx.say(`Say which to keep: A or B.${more ? ` ${more} more conflicted cop${more === 1 ? "y" : "ies"} after this one.` : ""}`);
     }
     // What was shown is noted only when a side can be kept from it.
@@ -2944,6 +2992,8 @@ async function reels(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = { found: got.found, record: got.record };
+  // A short video she has answered has no Reels, and its reading writes no list of them: said as pick and push say it.
+  if (isAnswered(record) && record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const at = join(found.folder, REELS_FILE);
   if (!existsSync(at) && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. ${keptOrWait(ctx, found, record)}`);
   if (!existsSync(at)) {
@@ -2970,6 +3020,11 @@ async function reels(ctx, rest) {
     const clock = now && now.clock && now.clock.length ? now : null;
     ctx.say(reelsText(read.reels, record, "", clock));
     if (clock) sayElsewhere(ctx, clock);
+    // Nothing makes a Reel from a suggestion yet (phase V): she is told last where she makes them for now, so that no command sends
+    // her round in a circle (Sallie's walkthrough, 25 Oct). Not once she has dropped every one. The gate refuses a session before
+    // this, and it is never said of one.
+    const dropped = new Set((record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n));
+    if (!gated(record) && read.reels.candidates.some((c) => uncropped(c) && !dropped.has(c.n))) ctx.say(notMadeWords());
     return 0;
   }
   // Whether Claude can be asked again is said as this Mac finds it now, in the words ask would refuse with (PR 19's review).
@@ -3135,6 +3190,8 @@ function layerStart(ctx, words, { writes = true } = {}) {
   if (left.length) return { code: refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`) };
   const target = part === "main" ? got.record.main : (got.record.reels || []).find((r) => r.n === part.reel);
   if (!target) return { code: refuse(ctx, `There is no Reel ${part.reel}.`) };
+  // A Reel a reading suggested cannot be picked, so she is not sent to pick it: she is told where she makes it for now.
+  if (part !== "main" && notMade(found, part.reel)) return { code: refuse(ctx, notMadeWords(part.reel)) };
   if (part !== "main" && target.status !== "picked" && target.status !== "finished") return { code: refuse(ctx, `Reel ${part.reel} is not picked. Pick it first.`) };
   if (!writes) return { found, part, target, words: left };
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
@@ -3165,13 +3222,20 @@ function momentFrom(ctx, found, part, flags, { needed = true } = {}) {
 function timelineRead(ctx, found, part, flags) {
   const guard = guardOf(ctx, found, part, { noHandEdits: Boolean(flags["no-hand-edits"]), handEdits: Boolean(flags["hand-edits"]), withoutOther: Boolean(flags["without-other-macs-changes"]) }, "to go on");
   if (guard.why) return { code: refuse(ctx, guard.why) };
+  const got = clockRead(ctx, found, part);
+  if (got.code === undefined) sayElsewhere(ctx, got.read);
+  return got;
+}
+
+/** The clock she reads on a timeline (clockFor): { read } or { code }. A file Dropbox has not brought over yet is asked for
+    (`bring`, unless one is running), and she is told to say it again when it is here. */
+function clockRead(ctx, found, part) {
   const read = clockFor(found, part, ctx);
   if (read.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: read.bring });
     return { code: refuse(ctx, `Dropbox is still bringing ${read.coming} over to this Mac. Say it again when it is done.`) };
   }
   if (read.why) return { code: refuse(ctx, read.why) };
-  sayElsewhere(ctx, read);
   return { read };
 }
 
@@ -3677,24 +3741,73 @@ async function text(ctx, rest) {
   return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: [...texts, layer] })), `Name title ${id} on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}: "${lines.join('", "')}". ${SHOW_IT}`);
 }
 
-/** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>]
+/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"): each idea of the plan's
+    `claude.graphics` on a phrase of the plan, numbered in the order their words are said (Claude's order for two on one
+    phrase), so that no cut, version or Reel changes a number; one that names no phrase of the plan is left out. Each is
+    { n, idea, phrase, outside, at, for, start, end }: `outside` when the timeline is a Reel whose stretch does not hold its
+    words; `at`, the second of the recording its kept words start at, and `for`, how long they take on the timeline now, `at`
+    null when its words are cut now; `start` and `end`, its times on the clock she is reading (`read.on`), null when its words
+    are not on that version (kept again since it was made). `read` is clockFor's. */
+function graphicIdeas(read) {
+  const phrases = new Map((read.plan.phrases || []).map((p) => [p.id, p]));
+  const listed = ((read.plan.claude && read.plan.claude.graphics) || []).map((g, i) => ({ idea: g.idea, phrase: phrases.get(g.id), i })).filter(({ phrase }) => phrase);
+  return listed.sort((a, b) => a.phrase.start - b.phrase.start || a.i - b.i).map(({ idea, phrase }, k) => {
+    const n = k + 1;
+    if (read.span && !(phrase.end > read.span.from && phrase.start < read.span.to)) return { n, idea, phrase, outside: true, at: null };
+    const kept = read.pieces.filter((r) => phrase.end > r.start && phrase.start < r.end);
+    if (!kept.length) return { n, idea, phrase, at: null };
+    const at = Math.max(phrase.start, kept[0].start);
+    const to = Math.min(phrase.end, kept[kept.length - 1].end);
+    const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(to, r.end) - Math.max(at, r.start)), 0);
+    const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, to)];
+    const on = start !== null && end !== null;
+    return { n, idea, phrase, at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+  });
+}
+/** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or "not on main v0 (kept again
+    since)". */
+const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
+/** An idea's words as a sentence: with a full stop, unless they end in one already. */
+const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
+/** The place an idea says, when it says one: "corner" for a corner of the screen ("in the corner", "at the top right
+    corner"), "lower" for a lower third; null otherwise. A corner the picture shows ("the street corner", "a corner shop") and a
+    "lower price" are no place: Claude is not asked for a place, so the word alone says what is in the picture. */
+const ideaPlace = (idea) => (/\b(?:in|into|at|to) (?:the |a )?(?:(?:top|bottom|upper|lower) )?(?:(?:left|right)(?:-hand)? )?corner\b/i.test(idea) ? "corner" : /\blower[- ]third\b/i.test(idea) ? "lower" : null);
+/** What is said of a finished video's or an iPhone clip's ideas for graphics: Claude gives none (Jason, 22 Oct: "Reel suggestions
+    and spellings, nothing more"). */
+const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"}.`;
+/** What the list of ideas says last, when one of them can be put up: `n`, the first listed that can be, is its example. */
+const ideasAsk = (n) => `To put one up, say its number and a picture from your Pictures folder, as "put idea ${n} up with chart.png".`;
+
+/** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>) [--for <seconds>]
     [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
-    [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). */
+    [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). Claude's
+    ideas are listed as she reads them (graphicIdeas), and `--idea` puts the picture at one's words (Sallie's note 8). */
 async function graphic(ctx, rest) {
-  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place"]);
+  const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place", "idea"]);
   const [said, verb, nameOrId, ...more] = words;
   const takes = verb === "add" || verb === "drop";
   const start = layerStart(ctx, [said, ...(takes ? more : [verb === "ideas" ? undefined : verb, nameOrId, ...more].filter((w) => w !== undefined))], { writes: takes });
   if (start.code !== undefined) return start.code;
   const { found, part, target } = start;
   const graphics = target.graphics || [];
+  if (verb === "ideas" && !hasFinalCut(found.record)) {
+    ctx.say(noIdeas(found.record));
+    return 0;
+  }
+  // The other Mac's newer render is not said here (sayElsewhere): the list's first line names the version its times are on.
   if (verb === "ideas") {
-    const read = clockFor(found, part, ctx);
-    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
-    sayElsewhere(ctx, read);
-    const ideas = ((read.plan.claude && read.plan.claude.graphics) || []).map((idea) => ({ idea: idea.idea, phrase: read.plan.phrases.find((p) => p.id === idea.id) }))
-      .filter(({ phrase }) => phrase && read.pieces.some((r) => phrase.end > r.start && phrase.start < r.end));
-    ctx.say(ideas.length ? ideas.map(({ idea, phrase }) => `${idea}: at ${clockText(timelineAt(read.clock, Math.max(phrase.start, read.pieces.find((r) => phrase.end > r.start && phrase.start < r.end).start)) ?? 0)} on ${read.on}, "${phrase.text}"`).join("\n") : `Claude gave no ideas for graphics on what ${partLabel(part)} keeps.`);
+    const got = clockRead(ctx, found, part);
+    if (got.code !== undefined) return got.code;
+    const { read } = got;
+    const ideas = graphicIdeas(read).filter((i) => !i.outside);
+    if (!ideas.length) {
+      ctx.say(`Claude gave no ideas for graphics on ${partLabel(part)}.`);
+      return 0;
+    }
+    const head = `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
+    const first = ideas.find((i) => i.at !== null);
+    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
     return 0;
   }
   if (!takes) {
@@ -3705,10 +3818,30 @@ async function graphic(ctx, rest) {
     if (!graphics.some((g) => g.id === nameOrId)) return refuse(ctx, `There is no graphic ${nameOrId} on ${partLabel(part)}.`);
     return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, graphics: graphics.filter((g) => g.id !== nameOrId) })), `Graphic ${nameOrId} is taken off ${partLabel(part)}. ${SHOW_IT}`);
   }
-  const place = flags.place ? flags.place[flags.place.length - 1] : "full";
-  if (!["full", "corner", "lower"].includes(place)) return refuse(ctx, `"${place}" is not a place. Say full, corner or lower.`);
-  const moment = momentFrom(ctx, found, part, flags);
-  if (moment.code !== undefined) return moment.code;
+  const named = flags.place ? flags.place[flags.place.length - 1] : null;
+  if (named !== null && !["full", "corner", "lower"].includes(named)) return refuse(ctx, `"${named}" is not a place. Say full, corner or lower.`);
+  // By an idea's number, the moment is its words', from the plan: nothing is read off her timeline, so the guard is not asked.
+  const asked = flags.idea ? flags.idea[flags.idea.length - 1] : undefined;
+  let chosen = null;
+  let moment;
+  if (asked !== undefined) {
+    if (!hasFinalCut(found.record)) return refuse(ctx, noIdeas(found.record));
+    if (flags.at || flags["at-words"]) return refuse(ctx, "Say when by the idea (--idea 2), or by a time or words (--at, --at-words), not both.");
+    const n = /^[1-9]\d*$/.test(asked) ? Number(asked) : null;
+    if (n === null) return refuse(ctx, "Say which idea by its number (--idea 2).");
+    const got = clockRead(ctx, found, part);
+    if (got.code !== undefined) return got.code;
+    const { read } = got;
+    chosen = graphicIdeas(read).find((i) => i.n === n);
+    if (!chosen) return refuse(ctx, `There is no idea ${n} for graphics. Say "any ideas for graphics?" to see them.`);
+    if (chosen.outside) return refuse(ctx, `Idea ${n} is outside Reel ${part.reel}'s stretch of the recording.`);
+    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.phrase.text)}" Keep them first, or pick another idea.`);
+    moment = { at: chosen.at, for: chosen.for, on: read.on, clock: read.clock, read };
+  } else {
+    moment = momentFrom(ctx, found, part, flags);
+    if (moment.code !== undefined) return moment.code;
+  }
+  const place = named || (chosen && ideaPlace(chosen.idea)) || "full";
   const length = lengthFrom(ctx, flags, moment, 4);
   if (length.code !== undefined) return length.code;
   const got = pictureFrom(ctx, found, nameOrId);
@@ -3720,7 +3853,8 @@ async function graphic(ctx, rest) {
   const shown = Math.min(got.size.width / got.size.height / (frame.width / frame.height), (frame.width / frame.height) / (got.size.width / got.size.height));
   const cropped = place === "full" && shown < 0.67 ? ` The picture is another shape than the frame, so only about ${Math.round(shown * 100)}% of it shows: say --place lower to show it whole.` : "";
   const record = { ...found.record, files: { ...found.record.files, [got.picture]: got.bytes } };
-  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, graphics: [...graphics, layer] })), `Graphic ${id}, ${nameOrId}, ${place}, on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}.${cropped} ${SHOW_IT}`, got);
+  const where = !chosen ? `on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}` : `idea ${chosen.n}, ${chosen.start === null ? `not on ${moment.on} (kept again since)` : `on ${moment.on} at ${clockText(chosen.start)}`}`;
+  return saveWithPicture(ctx, found, withPart(record, part, (t) => ({ ...t, graphics: [...graphics, layer] })), `Graphic ${id}, ${nameOrId}, ${place}, ${where}, for ${lengthText(length.seconds)}.${cropped} ${SHOW_IT}`, got);
 }
 
 /** `preset "<episode>" [main | reel <n>] [--job "<job>"] [--captions "<style>"] [--look "<look>"]`: the timeline's job,
@@ -5254,9 +5388,390 @@ async function finishSessionCommand(ctx, found) {
   return 0;
 }
 
+// The guide (spec 2026-10-25): the one next step for each video under way, in her words. guide.js says the steps, from what is
+// read here of each video, as `episodes` and `status` read it.
+
+/** A video's newest hand-off, as the guide reads it (guide.js, as opsNext takes it): { id, revision, kind, emptyAt, at, file }, or
+    null while none is written. It is read from the file its finish wrote (`finished.handoff`), and only when that is whole on this
+    Mac (`ctx.isWhole`), since Dropbox would otherwise have to bring it. One that is not, cannot be read, or names no id, revision
+    or kind that brimm-video gives is read from the record: under the id its versions lead to when it is handed off as version 2
+    (`v2`, finish.js linksOf firstOf), its own otherwise, at the revision and of the kind the record says. A version 1 hand-off
+    says "episode" of a raw one. `emptyAt` is the empty revision of a video that was a session after all, for a session's hand-off: it stays on the
+    record when the session's own hand-off, a later revision, is written, since finish.js does not change it. */
+function guideHandoff(ctx, e, r, links, v2) {
+  const done = r.finished;
+  if (done === null || typeof done !== "object") return null;
+  const file = typeof done.handoff === "string" && done.handoff !== "" ? join(e.folder, done.handoff) : "";
+  const h = file && ctx.isWhole(file) ? recordAt(file) : null;
+  const id = handoffIdIn(h);
+  const kind = !id ? null : h.version === VERSION_2 ? h.video.kind : h.episode.kind === "episode" ? "raw" : h.episode.kind;
+  const read = ["finished", "raw", "short video", "session"].includes(kind) && Number.isInteger(h.revision)
+    ? { id, revision: h.revision, kind, file: h.main && typeof h.main.file === "string" ? h.main.file : "" }
+    : { id: v2 ? links.firstOf(r, e.folder) : r.id, revision: done.revision, kind: recordKind(r), file: "" };
+  const empty = r.session !== null && typeof r.session === "object" ? r.session.emptyRevision : undefined;
+  return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
+}
+
+/** A time the guide works out, such as when a video should be ready, on this Mac's clock to the nearest minute, as aboutLeft
+    rounds how long is left. A due time, such as when the late check is made, is said as the clock shows it (clockAt). */
+const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+
+/** Where Claude's reading of a video has got, for the guide: { reading, readsAt, roughAt }. "done" once the reading that counts is
+    in the record (currentReading; a session's, sessionReading); "later" for a raw video whose reading waits for the import's late
+    check, also while this Mac's reading of it runs but the check still holds it: Claude starts at the time the check is due
+    (`readsAt`, on this Mac's clock), and its rough cut should be ready about `roughAt` (clockNear), by the speeds this Mac
+    measured (`rates`, guide.js roughIn), "" while one is not known; "running" while this Mac's detached reading is at work on it (`running`, the
+    command runningCommand says), with no time, since when the run began is not kept; "failed" when the reading this Mac last ran
+    of it since her answer (a session's, since its teachings were asked for) did not end well; and "none" otherwise. A result's
+    `started` is in milliseconds and the record's times are text: each is read as a time before they are compared. */
+function guideReading(ctx, e, r, kind, running, rates) {
+  if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
+  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  /** A raw reading that waits for the import's late check: when Claude starts, and when its rough cut should be ready. */
+  const later = () => {
+    const rough = roughIn(rates, r.video && r.video.seconds);
+    return { reading: "later", readsAt: clockAt(due), roughAt: rough === null ? "" : clockNear(due + rough * 1000) };
+  };
+  if (running === "read") return due === null ? { reading: "running" } : later();
+  const result = readResult(ctx.home, e.name, "read");
+  const since = Date.parse(kind === "session" ? r.session && r.session.asked : r.answer.at);
+  if (result && result.ok === false && result.started >= since) return { reading: "failed" };
+  return due === null ? { reading: "none" } : later();
+}
+
+/** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
+    read teachings now, how many of its items she has still to keep, drop or change, and whether its empty revision is still owed
+    (revisionOwed). Its items are counted from its teachings file, read only when it is whole on this Mac: one that is not, or that
+    cannot be read, counts as one undecided, so that the guide never says every item is decided of what it could not see. */
+function guideSession(ctx, e, r) {
+  const mark = r.session !== null && typeof r.session === "object" ? r.session : {};
+  const got = readTeachings(e.folder, r, ctx.isWhole);
+  const items = itemsOf(got.teachings, r.session);
+  const undecided = got.coming !== undefined || got.why !== undefined ? 1 : ITEM_LISTS.reduce((n, [key]) => n + items[key].filter((item) => typeof item.approved !== "boolean").length, 0);
+  return { choice: mark.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided, emptyOwed: revisionOwed(r) };
+}
+
+/** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
+    what this Mac holds of it, and the speeds this Mac measured (`rates`, progress.js readRates). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
+    given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
+function guideFacts(ctx, e, links, rates) {
+  const r = e.inForce;
+  const kind = recordKind(r);
+  const hidden = isGated(e);
+  const away = heldElsewhere(r, ctx.machine);
+  const v2 = writesV2For(ctx.settings, e.folder, r);
+  const running = runningCommand(ctx.home, e.name, ctx.alive);
+  const pushed = r.main.pushed;
+  return {
+    name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
+    id: r.id,
+    aliases: [typeof r.label === "string" ? r.label : "", r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [r.name.text, e.name])].filter(Boolean),
+    at: Date.parse(r.imported.at),
+    mac: away ? away.by : "",
+    drop: null,
+    conflicted: e.read.code === "CONFLICTED",
+    kind,
+    waiting: kind === null && r.answer.state === "needs your answer",
+    heldAsSession: e.held && !gated(r),
+    elsewhere: Boolean(away),
+    readingsOff: ctx.settings.readings === false,
+    ...guideReading(ctx, e, r, kind, running, rates),
+    offersAnswered: answerOf(r) !== null,
+    v2,
+    placeholder: r.name.placeholder === true,
+    shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
+    finishRunning: running === "finish",
+    shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    session: kind === "session" ? guideSession(ctx, e, r) : null,
+    handoff: guideHandoff(ctx, e, r, links, v2),
+    // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
+    source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
+  };
+}
+
+/** The runs this Mac's progress panel shows now (progress.js): each run's file in the panel's folder, whose process is alive. One
+    being written, or that cannot be read, is passed over, as `status` passes it over. */
+function panelRuns(ctx) {
+  let names = [];
+  try {
+    names = readdirSync(progressFolder(ctx.home)).filter((n) => /^\d+\.json$/.test(n)).sort();
+  } catch (e) {
+    return [];
+  }
+  return names.flatMap((name) => {
+    try {
+      const run = JSON.parse(readFileSync(join(progressFolder(ctx.home), name), "utf8"));
+      return run !== null && typeof run === "object" && ctx.alive(run.pid) ? [run] : [];
+    } catch (e) {
+      return [];
+    }
+  });
+}
+
+/** The videos in the drop folders of the Macs (dropFolders), as the guide reads them: guide.js VideoFacts, with `drop`, `id` ""
+    and `kind` null. How far a video has got is read from the statuses of its Mac's imports of it, a running import and a hold
+    only at the video's size, as heldBy takes them: one dropped again under the same name is another recording. Its import did
+    not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
+    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
+    imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
+    label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
+    are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
+    says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's own video alone: a run there under the
+    label of the other Mac's video is this Mac's, and says nothing of that one: as of when the panel last wrote the run, with the
+    time since taken off. And when it should be Ready, from the same run (guide.js readyIn), on this Mac's clock to the nearest
+    minute (clockNear). */
+function guideDrops(ctx) {
+  const now = ctx.now();
+  const statuses = readStatuses(ctx.root, now);
+  const seen = readSeen(ctx.home);
+  const runs = panelRuns(ctx);
+  const videos = [];
+  for (const { mac, folder } of dropFolders(ctx)) {
+    let names = [];
+    try {
+      names = readdirSync(folder).filter(isMedia).sort();
+    } catch (e) {
+      continue;
+    }
+    for (const video of names) {
+      const found = ctx.stat(join(folder, video));
+      if (!found) continue;
+      const mine = statuses.filter(({ status }) => status && status.video === video && status.machine === mac && (!["running", "held"].includes(importState(status, now)) || status.bytes === found.size));
+      const states = mine.map(({ status }) => importState(status, now));
+      const running = mine.find(({ status }) => importState(status, now) === "running");
+      const state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      if (state !== "retry") {
+        const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
+        if (holding && !holding.unknown) continue;
+      }
+      const here = mac === ctx.machine;
+      const label = labelIn(mine, video, mac);
+      const run = here && label ? runs.find((r) => r.video === label) : undefined;
+      const noted = here ? seen[seenKey(video, found)] : undefined;
+      // The panel writes a run's times when a step starts and as its percent moves: they are as of `updated`, not now. What has
+      // passed since is taken off, and a time that has run out is not said.
+      const since = run && Number.isFinite(run.updated) ? Math.max(0, now - run.updated) / 1000 : 0;
+      const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
+      const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
+      const ready = times ? readyIn(times) : null;
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
+      // `source` is for `guide tell` alone, which follows the video by it: never said.
+      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
+    }
+  }
+  return apart(videos, clockAt);
+}
+
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
+    video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
+    (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
+    and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
+    Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
+    hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
+    is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
+    again since its finish) stays. Her notes, the versions of every video and this Mac's measured speeds are read once. */
+function guideItems(ctx) {
+  const notes = readGuideNotes(ctx.home);
+  const links = linksOf(ctx.root);
+  const rates = readRates(progressFolder(ctx.home));
+  const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
+  let old = 0;
+  for (const name of folders(ctx)) {
+    const e = episodeAt(ctx, name, links);
+    const r = e.inForce;
+    if (!r || e.newer || r.archived || leftAlone(r)) continue;
+    if (r.answer === null || typeof r.answer !== "object") {
+      old += 1;
+      continue;
+    }
+    const facts = guideFacts(ctx, e, links, rates);
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
+  }
+  const newest = new Map();
+  for (const item of items) {
+    const h = item.facts.handoff;
+    const best = h ? newest.get(h.id) : undefined;
+    if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
+  }
+  const own = (item) => !item.next.done && item.next.stage !== "ops";
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old };
+}
+
+/** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
+    One not on this Mac is refused with `missing`. One Finder could not open is refused too, and why is never said: it may hold
+    a path. */
+function openFolder(ctx, folder, what, words, missing) {
+  if (!ctx.stat(folder)) return refuse(ctx, missing);
+  try {
+    ctx.openApp("Finder", folder);
+  } catch (e) {
+    return refuse(ctx, `Finder could not open ${what}: ask Jason.`);
+  }
+  ctx.say(`Opened ${what} in Finder: ${words}.`);
+  return 0;
+}
+
+/** `guide page`: the BRIMM Ops page (OPS_PAGE), opened in her default browser through this Mac's program runner. */
+async function openPage(ctx) {
+  const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", [OPS_PAGE]);
+  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened: ask Jason.");
+  ctx.say("Opened the BRIMM Ops page in your browser.");
+  return 0;
+}
+
+/** `guide "<video>" show`: what the video's next step on the BRIMM Ops page needs, shown in Finder (showInFinder). For `posted`
+    it is the video to post: a raw episode's Share in final/, which its hand-off names, and any other's the copy of the video she
+    dropped. For any other step it is the hand-off. The chat is told only what it is, never its file's name, which may be a
+    client's. A step that is not the page's has nothing to show; a file not on this Mac, or one its hand-off does not name, is
+    refused. */
+async function showForStep(ctx, { facts, next, folder, record }) {
+  if (next.done || next.stage !== "ops") return refuse(ctx, `There is nothing to show in Finder for ${facts.name} now.`);
+  const video = next.step === "posted";
+  const where = !video ? [record.finished.handoff] : facts.handoff.kind === "raw" ? ["final", facts.handoff.file] : [record.video.file];
+  const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
+  const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
+  if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
+  await showInFinder(ctx, path);
+  ctx.say(`Shown in Finder: ${what}${video ? ", to post" : ""}.`);
+  return 0;
+}
+
+/** Her notes on this Mac (guide-note.js), with `change` made to them, written whole: 0, or 1 when they could not be written, which
+    is said by the error's code alone. */
+function noteGuide(ctx, change) {
+  try {
+    writeGuideNotes(ctx.home, change(readGuideNotes(ctx.home)));
+  } catch (e) {
+    return refuse(ctx, `Not noted: this Mac's note could not be written (${(e && e.code) || "an error"}). Ask Jason.`);
+  }
+  return 0;
+}
+
+/** `guide "<video>" done <step>`: her word that she did the video's next step on the BRIMM Ops page, noted on this Mac by its
+    hand-off's id (noteAfter). Only the step that comes next is taken: a video that is done, one whose next step is brimm-video's
+    or hers, or another step is refused with the step that comes next, and her word is never said again. Once it is noted, the
+    video is read again, and its next step said. */
+function noteDone(ctx, { facts, next }, step) {
+  if (next.done) return refuse(ctx, `Not noted: ${facts.name} is done: nothing is left to do for it.`);
+  if (next.stage !== "ops") return refuse(ctx, `Not noted: ${facts.name} has no step on the BRIMM Ops page now. ${next.text}`);
+  if (step !== next.step) return refuse(ctx, `Not noted: the next step for ${facts.name} is ${next.step}. ${next.text}`);
+  const handoff = facts.handoff;
+  const at = localStamp(new Date(ctx.now()));
+  if (noteGuide(ctx, (notes) => ({ ...notes, handoffs: { ...notes.handoffs, [handoff.id]: noteAfter(handoff, notes.handoffs[handoff.id], step, at) } })) !== 0) return 1;
+  ctx.say(`Noted: ${facts.name}, ${step}.`);
+  // The version she noted has the newest hand-off under its id, and is read again; only a newer one come in since would take its
+  // place, and then nothing more is said.
+  const again = guideItems(ctx).items.find((item) => item.facts.id === facts.id);
+  for (const line of again ? videoLines(again) : []) ctx.say(line);
+  return 0;
+}
+
+/** `guide "<video>" finished`: her word that she is done with an answered video, noted on this Mac by its record's id, so that it
+    is no longer under way. A video still in a drop folder has no record to note it by. A step that nothing noted can skip (guide.js
+    nextFor: a conflict, her answer, a version held as a session, a session after all's withdrawal) is said instead, and nothing is
+    noted. */
+function noteFinished(ctx, { facts }) {
+  if (facts.id === "") return refuse(ctx, `${facts.name} is not imported yet: there is nothing to set aside.`);
+  const at = localStamp(new Date(ctx.now()));
+  const notes = readGuideNotes(ctx.home);
+  const then = nextFor(facts, { ...notes, finished: { ...notes.finished, [facts.id]: at } }, ctx.now());
+  if (!then.done) return refuse(ctx, `Not noted: ${facts.name} cannot be set aside until this is done. ${then.text}`);
+  if (noteGuide(ctx, (notes) => ({ ...notes, finished: { ...notes.finished, [facts.id]: at } })) !== 0) return 1;
+  ctx.say(`${facts.name} is no longer under way.`);
+  return 0;
+}
+
+/** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
+    step, and how many videos from before the switch it does not guide. */
+function sayOverview(ctx, { items, old }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
+  return 0;
+}
+
+/** How the guide waits: the clock's stand-in in a test, else a timer. */
+const sleepOf = (ctx) => ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+
+/** `guide wait`: what the guide says is read again every POLL_MS, for up to WAIT_MS, until it changes (signatureOf: a video come
+    or gone, a stage passed, an import's next step), and then the overview is said. With no change in that time it says so, then
+    the overview all the same. The time left, or a file still coming in, is no change. It answers at once when no video is
+    coming in, being imported or being read (guide.js COMING). */
+async function waitForChange(ctx) {
+  const wait = sleepOf(ctx);
+  const start = ctx.now();
+  let read = guideItems(ctx);
+  // Nothing is on its way, so nothing will change by itself: the guide answers at once.
+  if (!read.items.some(({ next }) => !next.done && COMING.includes(next.stage))) return sayOverview(ctx, read);
+  const was = signatureOf(read.items);
+  while (ctx.now() - start < WAIT_MS) {
+    await wait(Math.min(POLL_MS, WAIT_MS - (ctx.now() - start)));
+    read = guideItems(ctx);
+    if (signatureOf(read.items) !== was) return sayOverview(ctx, read);
+  }
+  ctx.say(`Nothing has changed in ${WAIT_MS / 1000} seconds.`);
+  return sayOverview(ctx, read);
+}
+
+/** `guide "<video>" tell`: the video's next point (guide.js told), waited for in the background (her skill runs it with the Bash
+    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, or its import or its
+    reading did not finish. What the guide says is read again every TELL_POLL_MS, for up to TELL_MS, following the video from its
+    drop folder into Episodes (follow). A video with nothing on its way gets its next step at once, and one still on its way
+    after TELL_MS gets that said, with its next step. Nothing is said before the end, and no notice is posted: the import and the
+    reading post their own. */
+async function tellWhen(ctx, item) {
+  const wait = sleepOf(ctx);
+  const start = ctx.now();
+  let trail = trailOf(item.facts);
+  let seen = item;
+  let line = told(item, item, item);
+  while (line === null && ctx.now() - start < TELL_MS) {
+    await wait(Math.min(TELL_POLL_MS, TELL_MS - (ctx.now() - start)));
+    const found = follow(trail, guideItems(ctx).items);
+    line = told(item, seen, found ? found.item : null);
+    if (found) ({ trail, item: seen } = found);
+  }
+  ctx.say(line ?? stillLine(seen));
+  return 0;
+}
+
+/** `guide ["<video>" [show | finished | tell | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+    that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
+    video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
+    next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
+    `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
+    change in what the guide says, then says the overview: at once when no video is coming in, being imported or being read. With a video, by its name, its label or its id, its next step, and for
+    a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
+    she did that step, the one that comes next; with `finished`, her note that she is done with it; with `tell`, its next point,
+    waited for up to 60 minutes and said in one line. Words that fit no video, or more than one, are refused, and never said
+    again: they may hold a client's name. */
+export async function guideCommand(ctx, rest) {
+  if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
+  const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
+  if (is("drop")) return openFolder(ctx, dropFolder(ctx.root, ctx.machine, ctx.settings.drop), "your drop folder", dropWords(ctx.settings.drop, ctx.machine), "Your drop folder is not there: ask Jason.");
+  if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
+  if (is("page")) return openPage(ctx);
+  if (is("wait")) return waitForChange(ctx);
+  // The form, after a video: "" for its next step, "show", "finished", "tell", or "done" with the step.
+  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished", "tell"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
+  if (form === null) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const { items, old } = guideItems(ctx);
+  if (!rest.length) return sayOverview(ctx, { items, old });
+  const found = findIn(items, rest[0]);
+  if (found.why) return refuse(ctx, found.why);
+  if (form === "show") return showForStep(ctx, found.item);
+  if (form === "done") return noteDone(ctx, found.item, rest[2]);
+  if (form === "finished") return noteFinished(ctx, found.item);
+  if (form === "tell") return tellWhen(ctx, found.item);
+  for (const line of videoLines(found.item)) ctx.say(line);
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and is in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

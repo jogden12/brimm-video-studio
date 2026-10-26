@@ -161,6 +161,16 @@ describe("her folder's settings", () => {
     assert.ok(skill.includes('| "Ask Claude again for Reels" | `ask "<episode>"`'), skill);
     assert.ok(!/Not ready yet[\s\S]*Showing the Reels/.test(skill), skill);
   });
+  it("have the skill say, where she would be sent to make a Reel brimm-video cannot make yet, that she cuts it in OpusClip and BRIMM Ops writes its post text (Sallie's walkthrough, 25 Oct)", () => {
+    // "Show me the Reels" listed them, "Finish Reels 1 and 3" said to make Reel 1 first, and nothing made one: a circle.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const row = (start) => skill.split("\n").find((line) => line.startsWith(start));
+    assert.match(row('| "Show me the Reels" |'), /When it says brimm-video cannot make Reels from this video yet, say so\. For now she cuts them in OpusClip; BRIMM Ops writes their post text \("New short video from a clip", on the episode's Reels card\)\. Never send a client or group session's Reels to OpusClip\. \|$/);
+    assert.match(row('| "Finish Reels 1 and 3" / "Drop 2" |'), /When it says brimm-video cannot make Reels from this video yet, say so, as for "Show me the Reels": never offer to make one/);
+    const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut"));
+    assert.ok(notReady.includes(`- A Reel from Claude's suggestions: say brimm-video can't make it yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.`), notReady);
+    assert.doesNotMatch(skill, /make Reel \d|make it first/);
+  });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const given = commandsIn(skill);
@@ -440,6 +450,9 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
         ...t.ctx.deps, statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }), kickstart: () => {}, agentRunning: () => false, running: async () => false,
         // A raw video read "here" is one not whole on this Mac, which only --here reads: elsewhere every file is whole.
         ...(span.includes("--here") ? { isWhole: (path) => !path.endsWith(".mp4") } : {}),
+        // The guide works only on a Mac on the light import: anywhere else every form says to ask Jason before its words are
+        // read, so a guide span is run on one, where a form edit.js does not take prints the help and ends with 2.
+        ...(span.startsWith("guide") ? { settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 } } : {}),
         run: async (cmd, args, asked) => (cmd === "/usr/bin/git" ? { code: 0, stdout: "0\n", stderr: "" } : t.ctx.deps.run(cmd, args, asked))
       };
       const said = [];
@@ -450,7 +463,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     }
     const inert = [];
     const ran = [];
-    for (const span of [...new Set(commands.filter((c) => c.includes(" ") || ["episodes", "behind", "status"].includes(c)))]) {
+    for (const span of [...new Set(commands.filter((c) => c.includes(" ") || ["episodes", "behind", "status", "guide"].includes(c)))]) {
       const base = await run(span);
       assert.ok(base.code !== 2 && !base.text.startsWith("The command line for episodes on this Mac"), `edit.js does not take what the skill runs: ${span}: ${base.code} ${base.text.split("\n")[0]}`);
       assert.deepEqual(await run(span), base, `${span} does not do the same twice`);
@@ -506,6 +519,46 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       assert.match(row, /when it says it showed [^|]*in Finder/i, start);
       assert.doesNotMatch(row, /(it shows|written and shown) in Finder/, start);
     }
+  });
+  it("guides her one step at a time, a video waiting for her answer first, and takes her word for the BRIMM Ops page", () => {
+    const guide = sectionOf(skill, "## Guide her");
+    assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+    for (const words of [
+      "run `guide`. Say only the one next step it gives, then ask; never read the list out.",
+      "A video waiting for her answer comes first, whatever she said",
+      'one `AskUserQuestion`: "Is this video a private session with a client or a group?": "Yes", "No", "It is a Zoom download"',
+      "`guide drop zoom`", "`guide drop`", "`guide wait`", "`guide page`", '`guide "<video>"`', '`guide "<video>" show`',
+      "held in her drop folder: `guide drop zoom`",
+      '"Done?": "Done", "Not yet", "Something\'s different"', '`guide "<video>" done <step>`', '`guide "<video>" finished`',
+      '"I posted it"', '"I\'ve done that"', '"guide me"', '"That one is all done"', '"Forget that one"',
+      'tell her to choose "Client or group session" and "Yes"',
+      "Claude cannot see or press anything on the BRIMM Ops page",
+      "isn't set up for the guide yet"
+    ]) assert.ok(guide.includes(words), words);
+    assert.doesNotMatch(guide, /https?:|claude\.ai/);
+    // Her word that she is done with a video ends its guidance, and nothing she says brings it back: Claude asks first, on its own
+    // words, never those of the release ("I'm done with it for now"), which hands the episode to the other Mac.
+    const finished = guide.split("\n").find((line) => line.includes('`guide "<video>" finished`'));
+    const asked = finished.indexOf('ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No"');
+    assert.ok(asked >= 0 && finished.indexOf('Only on "Yes"') > asked && finished.indexOf("`guide") > asked, finished);
+    assert.ok(finished.includes("the guide will no longer bring it up"), finished);
+    assert.ok(!guide.includes("I'm done with it"), guide);
+    assert.ok(rowOf(`"Hand it to Jason" / "I'm done with it for now"`).includes('`release "<episode>"`'));
+  });
+  it("tells her when a video is ready or read, from a wait run in the background, and opens the page once in this chat", () => {
+    const guide = sectionOf(skill, "## Guide her");
+    assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+    for (const words of [
+      '"Tell me when it\'s ready"', '"Let me know when Claude has read it"', '`guide "<video>" tell`',
+      "the Bash tool's run_in_background", "once per video, never Monitor",
+      "I'll tell you here; the Mac doing the work shows a notice too", "tell her its one line in plain words",
+      "with any time it gives", "offer to tell her here when it's ready",
+      "If nothing listed is coming in, being imported or waiting for her answer, ask where she dropped it, then run `guide wait` again.",
+      "If it says it is still on its way, offer to wait again.",
+      "`guide page` the first time in this chat"
+    ]) assert.ok(guide.includes(words), words);
+    assert.ok(!guide.includes("the first time in a session"), guide);
+    assert.ok(sectionOf(skill, "## The card").includes("offer to tell her here when Claude has read it"));
   });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);
