@@ -217,7 +217,7 @@ Each graphic is its own file, rendered as a ProRes 4444 `.mov` with a transparen
 
 ## Step 5. The test recording (5 minutes)
 
-1. Point at your recording and read its facts. Use its real path; dragging the file into Terminal after `SRC=` types it for you, but then put quotes around it.
+1. Point at your recording and read its facts. Either type its path in quotes, as below, or type `SRC=` and drag the file from Finder into Terminal. A dragged path comes already escaped, so add no quotes around it.
 
    ```
    SRC="/path/to/your test recording.mov"
