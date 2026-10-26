@@ -8,7 +8,7 @@ import { NEVER_WORDS, BUILT_IN_AGENTS, DRAWING, isConnector, isLocalExtension, n
 
 describe("the never list", () => {
   it("holds the words, the built-in agents and the drawing tools the design names", () => {
-    assert.deepEqual(NEVER_WORDS, ["send", "post", "publish", "share", "schedule", "upload", "forward", "reply", "invite", "delete", "trash", "remove"]);
+    assert.deepEqual(NEVER_WORDS, ["send", "post", "publish", "share", "schedule", "upload", "forward", "reply", "invite", "delete", "trash", "remove", "deploy", "submit", "comment", "respond"]);
     assert.deepEqual(BUILT_IN_AGENTS, ["general-purpose", "Explore", "Plan"]);
     assert.deepEqual(DRAWING, ["mcp__visualize__show_widget", "mcp__visualize__read_me"]);
   });
@@ -18,12 +18,17 @@ describe("the never list", () => {
   it("refuses the screen, the browser, the terminal, every local extension and every tool of the app's own, by kind, and never the drawing tools", () => {
     for (const name of ["mcp__computer-use__screenshot","mcp__Claude_Browser__navigate","mcp__claude-in-chrome__navigate","mcp__Control_Chrome__open_url","mcp__playwright__browser_click","mcp__terminal__run_in_terminal","mcp__PDF_Tools__fill_pdf","mcp__plugin_pdf-viewer_pdf__display_pdf","mcp__knowledge-mcp__kb_search","mcp__ccd_host__reveal_path","mcp__ccd_directory__change_directory","mcp__ccd_session__start_session","mcp__ccd_session_mgmt__send_message","mcp__ccd_settings__set_setting","mcp__ccd_connectors__reconnect_session_connector","mcp__scheduled-tasks__create_scheduled_task","mcp__mcp-registry__search_mcp_registry","mcp__a_server_added_later__anything"]) assert.equal(neverCaught(name), true, name);
     for (const name of DRAWING) assert.equal(neverCaught(name), false, name);
+    for (const name of ["mcp__visualize__show_widget_later", "mcp__visualize__anything"]) assert.deepEqual([isLocalExtension(name), neverCaught(name)], [true, true], name);
   });
   it("catches by word any connector tool that posts, sends, shares, schedules, uploads or deletes, a made-up one included", () => {
     const c = "mcp__4e8268a7-b354-4c23-ab7d-2076f0dc3000__";
     for (const tool of ["opusclip_create_post_task","opusclip_schedule_publish","opusclip_unschedule_publish","opusclip_share_project","opusclip_create_upload_link"]) assert.equal(neverCaught(c + tool), true, tool);
     assert.equal(neverCaught("mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__send_invoice"), true);
     assert.equal(neverCaught(c + "opusclip_list_clips"), false);
+  });
+  it("catches a connector tool that deploys, submits, comments or responds, the strict side taking a tool that reads comments too", () => {
+    for (const name of ["mcp__63b3b71d-8aef-4462-8958-7cff3852ff4b__deploy_website", "mcp__98f0ad85-1c04-4a74-850f-fcf94f10a41c__submit_form", "mcp__4e8268a7-b354-4c23-ab7d-2076f0dc3000__opusclip_submit_project", "mcp__ed7f84ec-3d32-45ce-8d48-963f8811185e__notion-create-comment", "mcp__98f0ad85-1c04-4a74-850f-fcf94f10a41c__create_record_comment", "mcp__fc13441e-97cf-4f22-a919-82c76dc951e0__respond_to_event", "mcp__ed7f84ec-3d32-45ce-8d48-963f8811185e__notion-get-comments"]) assert.equal(neverCaught(name), true, name);
+    for (const name of ["mcp__fc13441e-97cf-4f22-a919-82c76dc951e0__list_events", "mcp__fc13441e-97cf-4f22-a919-82c76dc951e0__get_event"]) assert.equal(neverCaught(name), false, name);
   });
   it("refuses the subagent tool sent elsewhere or of another kind, under either of its names", () => {
     for (const name of ["Agent","Task"]) {
@@ -36,7 +41,8 @@ describe("the never list", () => {
     assert.equal(neverCaught("Bash", { command: "date" }), false);
   });
   it("runs its rule over the Code tab's real tool list, and lists what it catches", (t) => {
-    const { tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));
+    const { recorded, tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));
+    assert.match(recorded, /a subagent's list, with the main chat's tools added/);
     for (const must of ["Bash","Read","Write","Edit","WebFetch","WebSearch","SendUserFile","PushNotification","Skill", ...DRAWING]) assert.ok(tools.includes(must), must);
     assert.ok(tools.some((n) => n.startsWith("mcp__ccd_")));
     const caught = tools.filter((n) => neverCaught(n));

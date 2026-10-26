@@ -15,8 +15,9 @@ import { readFileSync } from "node:fs";
 
 const NEVER = JSON.parse(readFileSync(new URL("./studio/never.json", import.meta.url), "utf8"));
 
-/** The words that, in an MCP tool's own name, mark a tool that posts, publishes, sends, shares, schedules, uploads or deletes. */
-export const NEVER_WORDS = ["send", "post", "publish", "share", "schedule", "upload", "forward", "reply", "invite", "delete", "trash", "remove"];
+/** The words that, in an MCP tool's own name, mark a tool that posts, publishes, sends, shares, schedules, uploads or deletes, or
+    deploys, submits, comments or responds. Stricter is closed: "comment" takes a tool that reads comments too. */
+export const NEVER_WORDS = ["send", "post", "publish", "share", "schedule", "upload", "forward", "reply", "invite", "delete", "trash", "remove", "deploy", "submit", "comment", "respond"];
 /** Claude Code's built-in agents, the only ones the subagent tool may be given (R15). */
 export const BUILT_IN_AGENTS = ["general-purpose", "Explore", "Plan"];
 /** The drawing tools, the app's own MCP tools that are not on the never list. */
@@ -30,9 +31,9 @@ const MCP = /^mcp__(.+?)__(.+)$/;
 /** Whether a tool is a claude.ai connector's, whose server the app names by an id. */
 export const isConnector = (name) => typeof name === "string" && CONNECTOR.test(name);
 
-/** Whether a tool is a local extension's (or one of the app's own): an `mcp__<server>__` tool that is not a connector's and not a
-    drawing tool's. Such a tool runs outside the sandbox. */
-export const isLocalExtension = (name) => typeof name === "string" && MCP.test(name) && !isConnector(name) && !name.startsWith("mcp__visualize__");
+/** Whether a tool is a local extension's (or one of the app's own): an `mcp__<server>__` tool that is not a connector's and not
+    one of the drawing tools by its exact name. Such a tool runs outside the sandbox. */
+export const isLocalExtension = (name) => typeof name === "string" && MCP.test(name) && !isConnector(name) && !DRAWING.includes(name);
 
 /** Whether an MCP tool's own name holds a never word, in any letter case. */
 const caughtByWord = (name) => {
