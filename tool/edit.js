@@ -38,7 +38,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
-import { progressFolder, reporter } from "./progress.js";
+import { progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -82,10 +82,13 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
-                                        what the guide says
-  node edit.js guide "<video>" done <step> | finished | show
+                                        what the guide says: at once when no video is coming in, being imported or read
+  node edit.js guide "<video>" done <step> | finished | show | tell
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
-                                        comes next), that she is done with the video, or show in Finder what its step needs
+                                        comes next), that she is done with the video, or show in Finder what its step needs.
+                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, or an
+                                        import or reading that did not finish), then say it in one line. Her skill runs it
+                                        in the background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -5348,20 +5351,31 @@ function guideHandoff(ctx, e, r, links, v2) {
   return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
 }
 
-/** Where Claude's reading of a video has got, for the guide: { reading, readsAt }. "done" once the reading that counts is in the
-    record (currentReading; a session's, sessionReading); "running" while this Mac's detached reading is at work on it (`running`,
-    the command runningCommand says); "failed" when the reading this Mac last ran of it since her answer (a session's, since its
-    teachings were asked for) did not end well; "later" for a raw video whose reading waits for the import's late check, at the
-    time it is due on this Mac's clock (`readsAt`); and "none" otherwise. A result's `started` is in milliseconds and the record's
-    times are text: each is read as a time before they are compared. */
-function guideReading(ctx, e, r, kind, running) {
+/** A time the guide works out, such as when a video should be ready, on this Mac's clock to the nearest minute, as aboutLeft
+    rounds how long is left. A due time, such as when the late check is made, is said as the clock shows it (clockAt). */
+const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+
+/** Where Claude's reading of a video has got, for the guide: { reading, readsAt, roughAt }. "done" once the reading that counts is
+    in the record (currentReading; a session's, sessionReading); "later" for a raw video whose reading waits for the import's late
+    check, also while this Mac's reading of it runs but the check still holds it: Claude starts at the time the check is due
+    (`readsAt`, on this Mac's clock), and its rough cut should be ready about `roughAt` (clockNear), by the speeds this Mac
+    measured (`rates`, guide.js roughIn), "" while one is not known; "running" while this Mac's detached reading is at work on it (`running`, the
+    command runningCommand says), with no time, since when the run began is not kept; "failed" when the reading this Mac last ran
+    of it since her answer (a session's, since its teachings were asked for) did not end well; and "none" otherwise. A result's
+    `started` is in milliseconds and the record's times are text: each is read as a time before they are compared. */
+function guideReading(ctx, e, r, kind, running, rates) {
   if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
-  if (running === "read") return { reading: "running" };
+  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  /** A raw reading that waits for the import's late check: when Claude starts, and when its rough cut should be ready. */
+  const later = () => {
+    const rough = roughIn(rates, r.video && r.video.seconds);
+    return { reading: "later", readsAt: clockAt(due), roughAt: rough === null ? "" : clockNear(due + rough * 1000) };
+  };
+  if (running === "read") return due === null ? { reading: "running" } : later();
   const result = readResult(ctx.home, e.name, "read");
   const since = Date.parse(kind === "session" ? r.session && r.session.asked : r.answer.at);
   if (result && result.ok === false && result.started >= since) return { reading: "failed" };
-  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
-  return due === null ? { reading: "none" } : { reading: "later", readsAt: clockAt(due) };
+  return due === null ? { reading: "none" } : later();
 }
 
 /** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
@@ -5377,10 +5391,10 @@ function guideSession(ctx, e, r) {
 }
 
 /** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
-    what this Mac holds of it. A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    what this Mac holds of it, and the speeds this Mac measured (`rates`, progress.js readRates). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
-function guideFacts(ctx, e, links) {
+function guideFacts(ctx, e, links, rates) {
   const r = e.inForce;
   const kind = recordKind(r);
   const hidden = isGated(e);
@@ -5401,7 +5415,7 @@ function guideFacts(ctx, e, links) {
     heldAsSession: e.held && !gated(r),
     elsewhere: Boolean(away),
     readingsOff: ctx.settings.readings === false,
-    ...guideReading(ctx, e, r, kind, running),
+    ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,
     v2,
     placeholder: r.name.placeholder === true,
@@ -5409,7 +5423,9 @@ function guideFacts(ctx, e, links) {
     finishRunning: running === "finish",
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     session: kind === "session" ? guideSession(ctx, e, r) : null,
-    handoff: guideHandoff(ctx, e, r, links, v2)
+    handoff: guideHandoff(ctx, e, r, links, v2),
+    // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
+    source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };
 }
 
@@ -5438,9 +5454,12 @@ function panelRuns(ctx) {
     not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
     it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
     imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
-    label, else by what it is and its size, never by its file's name, which may be a client's. It came when this Mac's import
-    first saw it (seen.json), as `episodes` says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's
-    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. */
+    label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
+    are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
+    says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's own video alone: a run there under the
+    label of the other Mac's video is this Mac's, and says nothing of that one: as of when the panel last wrote the run, with the
+    time since taken off. And when it should be Ready, from the same run (guide.js readyIn), on this Mac's clock to the nearest
+    minute (clockNear). */
 function guideDrops(ctx) {
   const now = ctx.now();
   const statuses = readStatuses(ctx.root, now);
@@ -5469,11 +5488,18 @@ function guideDrops(ctx) {
       const label = labelIn(mine, video, mac);
       const run = here && label ? runs.find((r) => r.video === label) : undefined;
       const noted = here ? seen[seenKey(video, found)] : undefined;
-      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null };
-      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
+      // The panel writes a run's times when a step starts and as its percent moves: they are as of `updated`, not now. What has
+      // passed since is taken off, and a time that has run out is not said.
+      const since = run && Number.isFinite(run.updated) ? Math.max(0, now - run.updated) / 1000 : 0;
+      const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
+      const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
+      const ready = times ? readyIn(times) : null;
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
+      // `source` is for `guide tell` alone, which follows the video by it: never said.
+      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
   }
-  return videos;
+  return apart(videos, clockAt);
 }
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
@@ -5483,10 +5509,11 @@ function guideDrops(ctx) {
     Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
     is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
-    again since its finish) stays. Her notes and the versions of every video are read once. */
+    again since its finish) stays. Her notes, the versions of every video and this Mac's measured speeds are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
+  const rates = readRates(progressFolder(ctx.home));
   const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -5497,7 +5524,7 @@ function guideItems(ctx) {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links);
+    const facts = guideFacts(ctx, e, links, rates);
     items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
   }
   const newest = new Map();
@@ -5601,13 +5628,19 @@ function sayOverview(ctx, { items, old }) {
   return 0;
 }
 
+/** How the guide waits: the clock's stand-in in a test, else a timer. */
+const sleepOf = (ctx) => ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+
 /** `guide wait`: what the guide says is read again every POLL_MS, for up to WAIT_MS, until it changes (signatureOf: a video come
     or gone, a stage passed, an import's next step), and then the overview is said. With no change in that time it says so, then
-    the overview all the same. The time left, or a file still coming in, is no change. */
+    the overview all the same. The time left, or a file still coming in, is no change. It answers at once when no video is
+    coming in, being imported or being read (guide.js COMING). */
 async function waitForChange(ctx) {
-  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const wait = sleepOf(ctx);
   const start = ctx.now();
   let read = guideItems(ctx);
+  // Nothing is on its way, so nothing will change by itself: the guide answers at once.
+  if (!read.items.some(({ next }) => !next.done && COMING.includes(next.stage))) return sayOverview(ctx, read);
   const was = signatureOf(read.items);
   while (ctx.now() - start < WAIT_MS) {
     await wait(Math.min(POLL_MS, WAIT_MS - (ctx.now() - start)));
@@ -5618,15 +5651,38 @@ async function waitForChange(ctx) {
   return sayOverview(ctx, read);
 }
 
-/** `guide ["<video>" [show | finished | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+/** `guide "<video>" tell`: the video's next point (guide.js told), waited for in the background (her skill runs it with the Bash
+    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, or its import or its
+    reading did not finish. What the guide says is read again every TELL_POLL_MS, for up to TELL_MS, following the video from its
+    drop folder into Episodes (follow). A video with nothing on its way gets its next step at once, and one still on its way
+    after TELL_MS gets that said, with its next step. Nothing is said before the end, and no notice is posted: the import and the
+    reading post their own. */
+async function tellWhen(ctx, item) {
+  const wait = sleepOf(ctx);
+  const start = ctx.now();
+  let trail = trailOf(item.facts);
+  let seen = item;
+  let line = told(item, item, item);
+  while (line === null && ctx.now() - start < TELL_MS) {
+    await wait(Math.min(TELL_POLL_MS, TELL_MS - (ctx.now() - start)));
+    const found = follow(trail, guideItems(ctx).items);
+    line = told(item, seen, found ? found.item : null);
+    if (found) ({ trail, item: seen } = found);
+  }
+  ctx.say(line ?? stillLine(seen));
+  return 0;
+}
+
+/** `guide ["<video>" [show | finished | tell | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
     that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
     video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
     next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
     `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
-    change in what the guide says, then says the overview. With a video, by its name, its label or its id, its next step, and for
+    change in what the guide says, then says the overview: at once when no video is coming in, being imported or being read. With a video, by its name, its label or its id, its next step, and for
     a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
-    she did that step, the one that comes next; with `finished`, her note that she is done with it. Words that fit no video, or
-    more than one, are refused, and never said again: they may hold a client's name. */
+    she did that step, the one that comes next; with `finished`, her note that she is done with it; with `tell`, its next point,
+    waited for up to 60 minutes and said in one line. Words that fit no video, or more than one, are refused, and never said
+    again: they may hold a client's name. */
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
@@ -5634,8 +5690,8 @@ export async function guideCommand(ctx, rest) {
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
   if (is("page")) return openPage(ctx);
   if (is("wait")) return waitForChange(ctx);
-  // The form, after a video: "" for its next step, "show", "finished", or "done" with the step.
-  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
+  // The form, after a video: "" for its next step, "show", "finished", "tell", or "done" with the step.
+  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished", "tell"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
   if (form === null) {
     ctx.say(HELP);
     return 2;
@@ -5647,6 +5703,7 @@ export async function guideCommand(ctx, rest) {
   if (form === "show") return showForStep(ctx, found.item);
   if (form === "done") return noteDone(ctx, found.item, rest[2]);
   if (form === "finished") return noteFinished(ctx, found.item);
+  if (form === "tell") return tellWhen(ctx, found.item);
   for (const line of videoLines(found.item)) ctx.say(line);
   return 0;
 }
