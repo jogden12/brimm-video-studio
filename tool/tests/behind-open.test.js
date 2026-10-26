@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { settingsFile, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
-import { SECRET_WORDS, environmentWhy } from "../loosened.js";
+import { SECRET_WORDS, environmentWhy, skillFolders } from "../loosened.js";
 import { openWorld, openDeps, NODE, SESSION } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
@@ -282,5 +282,102 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     writeFileSync(join(w.folder, ".claude", ".cc-writes", "a write"), SECRET);
     assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
     w.done();
+  });
+});
+
+describe("behind, with the open lock: plugins, named skills and SessionStart hooks", () => {
+  const pluginLine = (name) => `(Jason: the plugin ${name} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`;
+  const skillLine = (name) => `(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`;
+  /** A plugin's folder at `dir`, carrying `what`: "hooks" (hooks/hooks.json), "hooks key" or "mods key" (in .claude-plugin/plugin.json), or "neither". */
+  function plugin(dir, what) {
+    mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "p", description: SECRET, ...(what === "hooks key" ? { hooks: "./h.json" } : what === "mods key" ? { mods: { a: SECRET } } : {}) }));
+    if (what === "hooks") {
+      mkdirSync(join(dir, "hooks"), { recursive: true });
+      writeFileSync(join(dir, "hooks", "hooks.json"), JSON.stringify({ hooks: { SessionStart: [SECRET] } }));
+    }
+  }
+  const cache = (w, marketplace, name, version = "1.0.0") => join(w.home, ".claude", "plugins", "cache", marketplace, name, version);
+  const synced = (w, name) => join(w.home, ".claude", "plugins", "synced", "acct_0001", name);
+
+  it("refuses for an enabled plugin that carries hooks or a mod, in the cache or synced from her account, and goes on for one turned off or carrying neither", async () => {
+    for (const what of ["hooks", "hooks key", "mods key"])
+      for (const where of ["user", "managed", "app"]) {
+        const w = openWorld();
+        plugin(cache(w, "a-market", "hooky"), what);
+        refusedFor(await behindOn(w, put(w, where, { enabledPlugins: { "hooky@a-market": true } })), pluginLine("hooky@a-market"), `${what} ${where}`);
+        w.done();
+      }
+    for (const what of ["hooks", "mods key"]) {
+      const w = openWorld();
+      plugin(synced(w, "modded"), what);
+      refusedFor(await behindOn(w), pluginLine("modded"), `synced ${what}`);
+      w.done();
+    }
+    // Turned off, not enabled at all, or enabled and carrying neither: nothing to say.
+    const w = openWorld();
+    plugin(cache(w, "a-market", "hooky"), "hooks");
+    plugin(cache(w, "a-market", "plain"), "neither");
+    plugin(synced(w, "plain-synced"), "neither");
+    plugin(cache(w, "b-market", "unnamed"), "hooks");
+    const r = await behindOn(w, put(w, "user", { enabledPlugins: { "hooky@a-market": false, "plain@a-market": true, "missing@a-market": true } }));
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    w.done();
+  });
+  it("refuses for a named skill whose SKILL.md registers hooks, wherever it is kept, and goes on for one that does not, or is not there", async () => {
+    const withHooks = `---\nname: frontend-design\ndescription: ${SECRET}\nhooks:\n  PreToolUse: []\n---\n\n# A skill\n`;
+    const places = {
+      "her folder": (w) => join(w.folder, ".claude", "skills", "frontend-design"),
+      "the user's skills": (w) => join(w.home, ".claude", "skills", "frontend-design"),
+      "a plugin in the cache": (w) => join(cache(w, "a-market", "design"), "skills", "frontend-design"),
+      "a plugin synced from her account": (w) => join(synced(w, "design"), "skills", "frontend-design"),
+    };
+    for (const [where, at] of Object.entries(places)) {
+      const w = openWorld();
+      mkdirSync(at(w), { recursive: true });
+      writeFileSync(join(at(w), "SKILL.md"), withHooks);
+      assert.ok(skillFolders({ home: w.home, folder: w.folder, name: "frontend-design" }).includes(at(w)), where);
+      refusedFor(await behindOn(w), skillLine("frontend-design"), where);
+      w.done();
+    }
+    // A skill this Mac's settings add is named too.
+    const added = openWorld();
+    writeSettings(added.home, { studioAllow: [{ type: "skill", name: "her-own" }] });
+    mkdirSync(join(added.home, ".claude", "skills", "her-own"), { recursive: true });
+    writeFileSync(join(added.home, ".claude", "skills", "her-own", "SKILL.md"), withHooks);
+    refusedFor(await behindOn(added), skillLine("her-own"), "added");
+    added.done();
+    // No hooks: line in its front matter, a skill not named, and a named one that is not there: nothing to say.
+    const w = openWorld();
+    for (const [name, text] of [["frontend-design", `---\nname: frontend-design\ndescription: ${SECRET}\n---\n\nhooks: are written about here, not registered.\n`], ["not-named", withHooks]]) {
+      mkdirSync(join(w.home, ".claude", "skills", name), { recursive: true });
+      writeFileSync(join(w.home, ".claude", "skills", name, "SKILL.md"), text);
+    }
+    assert.deepEqual(skillFolders({ home: w.home, folder: w.folder, name: "theme-factory" }), []);
+    const r = await behindOn(w);
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    w.done();
+  });
+  it("refuses for a SessionStart hook in the user, managed or --settings settings, and goes on for her folder's own guard and receipt hooks", async () => {
+    for (const where of ["user", "managed", "app"]) {
+      const w = openWorld();
+      const r = await behindOn(w, put(w, where, { hooks: { SessionStart: [{ hooks: [{ type: "command", command: SECRET }] }] } }));
+      refusedFor(r, `(Jason: ${LABEL[where]}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`, where);
+      w.done();
+    }
+    const w = openWorld();
+    const r = await behindOn(w, put(w, "user", { hooks: { Stop: [{ hooks: [{ type: "command", command: SECRET }] }], SessionStart: [] } }));
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    w.done();
+  });
+  it("refuses for any hook in her folder's own settings beyond the guard and the receipt, a SessionStart hook the /hooks menu wrote there among them", async () => {
+    // Task 7's "other-hooks": the line names "a hook beside the guard and the receipt"
+    const hook = { matcher: "*", hooks: [{ type: "command", command: SECRET }] };
+    for (const [what, change] of [["SessionStart", (s) => (s.hooks.SessionStart = [{ hooks: [{ type: "command", command: SECRET }] }])], ["a second PreToolUse", (s) => s.hooks.PreToolUse.push(hook)], ["a second PostToolUse", (s) => s.hooks.PostToolUse.push(hook)], ["Stop", (s) => (s.hooks.Stop = [hook])]]) {
+      const w = openWorld();
+      changeOwn(w, change);
+      refusedFor(await behindOn(w), ownLine("a hook beside the guard and the receipt"), what);
+      w.done();
+    }
   });
 });

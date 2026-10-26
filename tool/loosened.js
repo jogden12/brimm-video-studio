@@ -10,13 +10,15 @@
 // (the user's, the managed ones, and the Claude app's --settings for this chat) any sandbox key but the few that only narrow, an
 // Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, and folders added to every session; the chat's environment, by
 // its names alone; anything listening on her folder's proxy port; and a .claude, CLAUDE.md, CLAUDE.local.md or .mcp.json in the
-// workshop, which a session started there would take as its own.
+// workshop, which a session started there would take as its own; an enabled plugin that carries hooks or a mod, and a skill her
+// folder allows whose SKILL.md registers hooks, since those run outside the sandbox (C16, C22); and a SessionStart hook in any
+// settings source, which can change the chat's id that the marks of a session's words rest on (C24).
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { userInfo } from "node:os";
-import { join } from "node:path";
-import { ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
-import { effectiveLock, factsOf, proxyPortOf, readSettings, studioNodeOf } from "./settings.js";
+import { basename, join } from "node:path";
+import { ALLOW_DEFAULT, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
+import { effectiveLock, factsOf, proxyPortOf, readSettings, studioAllowOf, studioNodeOf } from "./settings.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -85,7 +87,8 @@ export function settingsObject(file) {
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
-    the workshop (workshopWhy, deps.workshopLimit entries at most). */
+    the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); and the skills her folder allows
+    (skillsWhy). */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
@@ -140,6 +143,8 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     if (app.disableAllHooks === true) why.push(`(Jason: ${APP_LABEL} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     why.push(...sourceWhy(APP_LABEL, app));
   }
+  why.push(...pluginsWhy({ home, settingsList: [user, ...managed.map(([, set]) => set), app] }));
+  if (folder) why.push(...skillsWhy({ home, folder, allow: [...ALLOW_DEFAULT, ...studioAllowOf(settings)] }));
   why.push(...environmentWhy(deps.env || process.env));
   const port = proxyPortOf(settings);
   if (port !== null) {
@@ -270,6 +275,96 @@ export function sourceWhy(label, settings) {
   if (isObject(settings.env) && Object.hasOwn(settings.env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY") && FALSE_WORDS.includes(String(settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).trim().toLowerCase())) why.push(`(Jason: ${label}: env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, which turns Claude Code's memory on. Its contents are not shown here.)`);
   const added = permissions.additionalDirectories;
   if (added !== undefined && !(Array.isArray(added) && added.length === 0)) why.push(`(Jason: ${label}: permissions.additionalDirectories, which adds folders to every session. Its contents are not shown here.)`);
+  const sessionStart = isObject(settings.hooks) ? settings.hooks.SessionStart : undefined;
+  if (sessionStart !== undefined && !(Array.isArray(sessionStart) && sessionStart.length === 0)) why.push(`(Jason: ${label}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`);
+  return why;
+}
+
+/** The folders in `dir`, by their paths: none when it is not there or cannot be read. Links to folders are not taken. */
+function foldersIn(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(dir, e.name)).sort();
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Whether a name is one folder's name, and nothing that leads elsewhere. */
+const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !name.includes("/");
+
+/** The folders Claude Code may load the skill `name` from (R22), those that are there: her folder's own skills, the user's, each
+    plugin's in the cache (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
+    (~/.claude/plugins/synced/<account>/<plugin>/skills). */
+export function skillFolders({ home, folder, name }) {
+  if (!plainName(name)) return [];
+  const plugins = join(home, ".claude", "plugins");
+  const roots = [
+    join(folder, ".claude", "skills"),
+    join(home, ".claude", "skills"),
+    ...foldersIn(join(plugins, "cache")).flatMap(foldersIn).flatMap(foldersIn).map((dir) => join(dir, "skills")),
+    ...foldersIn(join(plugins, "synced")).flatMap(foldersIn).map((dir) => join(dir, "skills")),
+  ];
+  return roots.map((root) => join(root, name)).filter((dir) => {
+    try {
+      return lstatSync(dir).isDirectory();
+    } catch (e) {
+      return false;
+    }
+  });
+}
+
+/** Whether a plugin's folder carries hooks or a mod (R21): it holds hooks/hooks.json, or its .claude-plugin/plugin.json has a `hooks`
+    or a `mods` key. A plugin.json that is there but cannot be read as a JSON object is taken to, since then it is not known. */
+function carriesHooks(dir) {
+  if (lstatSync(join(dir, "hooks", "hooks.json"), { throwIfNoEntry: false })) return true;
+  const file = join(dir, ".claude-plugin", "plugin.json");
+  if (!lstatSync(file, { throwIfNoEntry: false })) return false;
+  const manifest = settingsObject(file);
+  return manifest === null || Object.hasOwn(manifest, "hooks") || Object.hasOwn(manifest, "mods");
+}
+
+/** What plugins on this Mac could loosen the open lock, as the lines for Jason (R21): each enabled plugin that carries hooks or a mod,
+    since they run outside the sandbox (C16). A plugin is enabled when any of `settingsList` (the settings sources, each an object or
+    null) says `enabledPlugins["<plugin>@<marketplace>"]` is true, and is then looked for in the cache, in every version kept there;
+    every plugin synced from her account (~/.claude/plugins/synced/<account>/<plugin>) is enabled. */
+export function pluginsWhy({ home, settingsList }) {
+  const plugins = join(home, ".claude", "plugins");
+  const enabled = new Set();
+  for (const set of settingsList) {
+    if (!isObject(set) || !isObject(set.enabledPlugins)) continue;
+    for (const [key, on] of Object.entries(set.enabledPlugins)) if (on === true) enabled.add(key);
+  }
+  const why = [];
+  for (const key of [...enabled].sort()) {
+    const at = key.lastIndexOf("@");
+    const [name, marketplace] = [key.slice(0, at), key.slice(at + 1)];
+    if (at < 0 || !plainName(name) || !plainName(marketplace)) continue;
+    if (foldersIn(join(plugins, "cache", marketplace, name)).some(carriesHooks)) why.push(`(Jason: the plugin ${key} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+  }
+  for (const dir of foldersIn(join(plugins, "synced")).flatMap(foldersIn)) {
+    if (carriesHooks(dir)) why.push(`(Jason: the plugin ${basename(dir)} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+  }
+  return why;
+}
+
+/** What skills her folder allows could loosen the open lock, as the lines for Jason: each skill of `allow` (its `skill` entries) whose
+    SKILL.md, in any folder it may be loaded from (skillFolders), registers hooks: a `hooks:` line in its front matter (C22). */
+export function skillsWhy({ home, folder, allow }) {
+  const names = [...new Set((Array.isArray(allow) ? allow : []).filter((entry) => isObject(entry) && entry.type === "skill").map((entry) => entry.name))];
+  const why = [];
+  for (const name of names) {
+    const hooked = skillFolders({ home, folder, name }).some((dir) => {
+      let text;
+      try {
+        text = readFileSync(join(dir, "SKILL.md"), "utf8");
+      } catch (e) {
+        return false;
+      }
+      const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+      return Boolean(front) && /^\s*hooks\s*:/m.test(front[1]);
+    });
+    if (hooked) why.push(`(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`);
+  }
   return why;
 }
 
