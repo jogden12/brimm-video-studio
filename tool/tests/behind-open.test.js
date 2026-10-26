@@ -194,6 +194,36 @@ describe("behind, with the open lock", () => {
     open.done();
     w.done();
   });
+  it("refuses, under the open lock, for a managed preferences file plutil could not be run on or did not finish, and says nothing of one it read as no object (whole-branch review M3)", async () => {
+    const PREFS = join("managed-preferences", "sallie", "com.anthropic.claudecode.plist");
+    const label = "this Mac's managed settings, Managed Preferences/sallie/com.anthropic.claudecode.plist";
+    const UNREAD = `(Jason: ${label}, could not be read (plutil did not finish), so it is not known whether it loosens the lock. Its contents are not shown here.)`;
+    const put = (w) => {
+      mkdirSync(join(w.dir, "managed-preferences", "sallie"), { recursive: true });
+      writeFileSync(join(w.dir, PREFS), SECRET);
+    };
+    const plutil = (answer) => { const calls = []; const spawn = (cmd, args) => { calls.push([cmd, args]); return answer; }; return { spawn, calls }; };
+    const timedOut = { error: Object.assign(new Error("spawnSync /usr/bin/plutil ETIMEDOUT"), { code: "ETIMEDOUT" }), status: null, signal: "SIGTERM", stdout: "" };
+    for (const [what, answer] of [["a timeout", timedOut], ["a program that could not be started", { error: Object.assign(new Error("EPERM"), { code: "EPERM" }), status: null, stdout: "" }], ["a program killed", { status: null, signal: "SIGKILL", stdout: "" }]]) {
+      const w = openWorld();
+      put(w);
+      const p = plutil(answer);
+      refusedFor(await behindOn(w, { plutil: p.spawn }), UNREAD, what);
+      assert.deepEqual(p.calls.map(([cmd]) => cmd), ["/usr/bin/plutil"], what);
+      // A strict Mac (no Claude Code named for the open lock) is as it was: the file is taken as none, and nothing is said.
+      const strict = await behindOn(w, { plutil: p.spawn, minimum: null });
+      assert.deepEqual([strict.code, strict.text.includes("could not be read")], [0, false], what);
+      w.done();
+    }
+    // plutil said the file is not a property list, or not an object: Claude Code takes none of it, and neither does the check.
+    for (const answer of [{ status: 1, stdout: "", stderr: "not a property list" }, { status: 0, stdout: "[1]" }, { status: 0, stdout: "not json" }]) {
+      const w = openWorld();
+      put(w);
+      const r = await behindOn(w, { plutil: plutil(answer).spawn });
+      assert.deepEqual([r.code, r.text], [0, NEWEST], JSON.stringify(answer));
+      w.done();
+    }
+  });
   it("refuses when her user settings lose a Read deny rule brimm-video added, and says nothing of them on a Mac where none were added", async () => {
     const LINE = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
     const w = openWorld();

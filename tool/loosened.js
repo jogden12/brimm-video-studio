@@ -40,17 +40,27 @@ const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 const MANAGED_PREFS = "/Library/Managed Preferences";
 const PREFS_FILE = "com.anthropic.claudecode.plist";
 
-/** A managed preferences file as the object Claude Code reads from it, or null: it is not there, or plutil cannot make it a JSON
-    object (it is not a property list, holds a date or data, or is not a dictionary). Claude Code takes none of such a file. */
-function prefsObject(file) {
-  if (!lstatSync(file, { throwIfNoEntry: false })) return null;
-  const made = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", file], { encoding: "utf8", timeout: 5000 });
-  if (made.status !== 0) return null;
+/** A managed preferences file as [the object Claude Code reads from it, or null, and whether plutil could not be asked]: it is not
+    there, or plutil cannot make it a JSON object (it is not a property list, holds a date or data, or is not a dictionary): then
+    Claude Code takes none of the file, and the object is null. But when plutil could not be started, or did not finish (an error, or
+    no exit status: its time of 5 seconds ran out, or it was killed), it is not known what the file holds, and the second is true: the
+    open lock says so (lockLoosened), and the strict lock, as it was, takes the file as none. `spawn` is spawnSync or a test's
+    stand-in. */
+function prefsObject(file, spawn = spawnSync) {
+  if (!lstatSync(file, { throwIfNoEntry: false })) return [null, false];
+  let made;
+  try {
+    made = spawn("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", file], { encoding: "utf8", timeout: 5000 });
+  } catch (e) {
+    return [null, true];
+  }
+  if (!made || made.error || made.status === null) return [null, true];
+  if (made.status !== 0) return [null, false];
   try {
     const settings = JSON.parse(made.stdout);
-    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
+    return [settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null, false];
   } catch (e) {
-    return null;
+    return [null, false];
   }
 }
 
@@ -69,7 +79,7 @@ export function settingsObject(file) {
     `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The lock
     rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and the folder the
     session runs in, where Claude Code reads the guard from; nothing is written.
-    `home` and `deps` are the command's (deps.env, deps.managedDir, deps.managedPrefs, deps.user and deps.cwd are a test's own), and
+    `home` and `deps` are the command's (deps.env, deps.managedDir, deps.managedPrefs, deps.plutil, deps.user and deps.cwd are a test's own), and
     `checkout` is the one the guard is run from. In this order:
     - the folder the session runs in, which her skill runs `behind` in, as Claude Code runs every command, and which a locked session
       cannot change, since the guard lets only edit.js run: when this Mac has her folder, it must be that folder itself, by its real
@@ -92,6 +102,7 @@ export function settingsObject(file) {
     With the open lock in effect on this Mac (lockFor: this Mac's settings, deps.settings or else read, and deps.minimum, else
     OPEN_LOCK_CLAUDE), her folder's own settings are compared whole (lockBroken, for this Mac's facts and the node its settings
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
+    a managed preferences file plutil could not be run on or did not finish (prefsObject), which the strict lock takes as none;
     and, where this Mac's settings note that `settings.js user-deny` added them (userDeny), the user settings' Read deny rules;
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
@@ -165,6 +176,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   // The open lock: what else could loosen it, after PR #40's lines.
   if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
+  for (const [label, , unread] of managed) if (unread) why.push(`(Jason: ${label}, could not be read (plutil did not finish), so it is not known whether it loosens the lock. Its contents are not shown here.)`);
   if (settings && settings.userDeny === true && !userDenyHeld(user, factsFor(home, settings, deps))) why.push(USER_DENY_LOST);
   let app = deps.appSettings !== undefined ? deps.appSettings : null;
   if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
@@ -617,7 +629,8 @@ export function skillsWhy({ home, folder, allow }) {
 }
 
 /** The settings Claude Code reads on this Mac beside her folder's own, each as [label, the object read from it, or null when Claude
-    Code would take none of it (settingsObject, prefsObject)], the label as `behind`'s lines name it: first the user's settings,
+    Code would take none of it (settingsObject, prefsObject), and for a managed preferences file true when plutil could not be asked,
+    which the open lock says], the label as `behind`'s lines name it: first the user's settings,
     "this Mac's ~/.claude/settings.json" (or $CLAUDE_CONFIG_DIR/settings.json when that is set); then each of this Mac's managed
     settings, "this Mac's managed settings, <file>": managed-settings.json and its drop-ins in MANAGED_DIR, the managed preferences in
     MANAGED_PREFS (the user's, then the Mac's), and the server-managed settings Claude Code keeps beside the user settings. */
@@ -637,7 +650,10 @@ export function sources({ home, deps = {} }) {
   return [
     [`this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json`, settingsObject(config ? join(config, "settings.json") : join(home, ".claude", "settings.json"))],
     ...["managed-settings.json", ...dropIns].map((file) => [of(file), settingsObject(join(managed, file))]),
-    ...[join(account, PREFS_FILE), PREFS_FILE].map((file) => [of(`Managed Preferences/${file}`), prefsObject(join(prefs, file))]),
+    ...[join(account, PREFS_FILE), PREFS_FILE].map((file) => {
+      const [set, unread] = prefsObject(join(prefs, file), deps.plutil);
+      return [of(`Managed Preferences/${file}`), set, unread];
+    }),
     [of(`the server-managed ones Claude Code keeps in ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/remote-settings.json`), settingsObject(config ? join(config, "remote-settings.json") : join(home, ".claude", "remote-settings.json"))]
   ];
 }
