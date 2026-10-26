@@ -65,7 +65,7 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
-import { LOCK_CHANGED, lockLoosened } from "./loosened.js";
+import { LOCK_CHANGED, factsFor, lockFor, lockLoosened } from "./loosened.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
@@ -2320,7 +2320,9 @@ async function behind(ctx) {
 
 /** Whether her folder for Claude (studio.js), when this Mac has one, is not what this checkout would write now, as after a
     git pull, which never rewrites it: {node}, the node its settings name (or Homebrew's, when they cannot be read), for the
-    command that writes it again; or null when it is as this checkout writes it, or there is none. */
+    command that writes it again; or null when it is as this checkout writes it, or there is none. It is compared with the folder
+    of the lock in effect on this Mac (loosened.js lockFor), the open one for this Mac's facts, since the command it names writes
+    that one again. */
 function studioStale(ctx) {
   let folder;
   try {
@@ -2341,7 +2343,8 @@ function studioStale(ctx) {
   } catch (e) {
     // Settings that cannot be read are out of date too, and Homebrew's node is the one the installer finds.
   }
-  const want = studioFiles({ checkout: ctx.settings.checkout, node, folder });
+  const lock = lockFor(ctx.settings, ctx.deps);
+  const want = studioFiles({ checkout: ctx.settings.checkout, node, folder, lock, facts: lock === "open" ? factsFor(ctx.home, ctx.settings, ctx.deps) : undefined });
   return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node: nameableNode(node) };
 }
 

@@ -84,6 +84,7 @@ export const openDeps = (w, more = {}) => ({
   env: {},
   pid: 900,
   tmp: w.tmp,
+  uid: w.uid,
   managedDir: join(w.dir, "managed"),
   managedPrefs: join(w.dir, "managed-preferences"),
   user: "sallie",

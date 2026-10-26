@@ -1,12 +1,20 @@
 // The one check of her folder's lock for Claude (design 2026-10-26, section 6, "One check of the lock, made by both"): what on this
 // Mac has loosened it, as the lines `behind` says under LOCK_CHANGED for Jason, each in parentheses and none holding a word of any
-// file. It is PR #40's check (spec 2026-10-22, section 7), moved here from edit.js unchanged, so that the guard can make it too
-// under the open lock. edit.js says LOCK_CHANGED from here.
+// file. It is PR #40's check (spec 2026-10-22, section 7), moved here from edit.js, so that the guard can make it too under the open
+// lock. edit.js says LOCK_CHANGED from here.
+//
+// On a Mac whose lock in effect is strict it is PR #40's check, and nothing more (R18). On one whose lock in effect is open
+// (settings.js effectiveLock: this Mac's settings say open and OPEN_LOCK_CLAUDE is named), it also says, after PR #40's lines, what
+// else could loosen the open lock (design section 1, "Modes, and the settings that could loosen it"): her folder's own settings
+// compared whole with what this checkout writes for this Mac (studio.js lockBroken, R17), and in every settings source beside them
+// (the user's, the managed ones, and the Claude app's --settings for this chat) any sandbox key but the few that only narrow, an
+// Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, and folders added to every session.
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { lockBroken, studioFolder } from "./studio.js";
+import { OPEN_LOCK_CLAUDE, lockBroken, studioFolder } from "./studio.js";
+import { effectiveLock, factsOf, readSettings, studioNodeOf } from "./settings.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -69,9 +77,16 @@ export function settingsObject(file) {
       not begin with a dot (a file or a link), in the order of their names; then its managed preferences (MANAGED_PREFS), the user's,
       then the Mac's; then the server-managed settings Claude Code keeps beside the user settings, remote-settings.json. Each when it
       sets disableAllHooks true, or allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. Claude
-      Code takes its managed settings from one of these only, but which one is not looked into: any of them is said. */
+      Code takes its managed settings from one of these only, but which one is not looked into: any of them is said.
+    With the open lock in effect on this Mac (lockFor: this Mac's settings, deps.settings or else read, and deps.minimum, else
+    OPEN_LOCK_CLAUDE), her folder's own settings are compared whole (lockBroken, for this Mac's facts and the node its settings
+    recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
+    and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off. */
 export function lockLoosened({ home, checkout, deps = {} }) {
+  const settings = deps.settings || readSettings(home).settings || null;
+  const open = lockFor(settings, deps) === "open";
   const why = [];
+  let changed = [];
   let folder = null;
   try {
     folder = realpathSync.native(studioFolder(home));
@@ -97,7 +112,8 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     const own = settingsObject(join(folder, ".claude", "settings.json"));
     if (own === null) why.push("(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)");
     else {
-      const broken = lockBroken(own, { checkout, folder });
+      const broken = open ? lockBroken(own, { checkout, folder, lock: "open", facts: factsFor(home, settings, deps), node: studioNodeOf(settings) }) : lockBroken(own, { checkout, folder });
+      changed = Object.keys(OPEN_PARTS).filter((part) => broken.includes(part));
       if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)");
       if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
       const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
@@ -111,6 +127,72 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     if (set.disableAllHooks === true) why.push(`(Jason: ${label}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     if (set.allowManagedHooksOnly === true) why.push(`(Jason: ${label}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`);
   }
+  if (!open) return why;
+  // The open lock: what else could loosen it, after PR #40's lines.
+  if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
+  for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
+  const app = deps.appSettings || null;
+  if (app) {
+    if (app.disableAllHooks === true) why.push(`(Jason: ${APP_LABEL} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
+    why.push(...sourceWhy(APP_LABEL, app));
+  }
+  return why;
+}
+
+/** The Claude Code version the open lock was checked on, for a check given `deps`: a test's own (deps.minimum, null among them), else
+    OPEN_LOCK_CLAUDE. */
+const minimumOf = (deps = {}) => (deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE);
+
+/** The lock in effect on this Mac, from its settings (settings.js effectiveLock), for a check given `deps`. */
+export const lockFor = (settings, deps = {}) => effectiveLock(settings, minimumOf(deps));
+
+/** What her folder's open settings are written for on this Mac (settings.js factsOf), for a check given `deps`: a test gives its own
+    temp folder and uid, so that this Mac's own are never looked at. */
+export const factsFor = (home, settings, deps = {}) => factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
+
+/** How the Claude app's --settings for a chat is named in the lines for Jason. */
+const APP_LABEL = "the Claude app's --settings for this chat";
+
+/** The parts of her folder's own open settings that lockBroken can find changed beyond PR #40's four, as the line for Jason names them,
+    in the order it names them. */
+const OPEN_PARTS = { sandbox: "the sandbox's settings", permissions: "the allow and deny rules", memory: "memory off", "skill-shell": "skills' shell lines off", receipt: "the card's receipt hook", "other-hooks": "a hook beside the guard and the receipt", other: "settings brimm-video does not write there", node: "the node it was written with (this Mac's settings name none)" };
+
+/** The sandbox's keys, in a settings source, that only narrow it, and so loosen nothing: more places it may not read or write, and
+    `credentials.envVars` while every entry of it takes a name away (`mode` "deny"). Every other sandbox key loosens the lock. */
+export const NARROWING = ["filesystem.denyRead", "filesystem.denyWrite", "credentials.envVars"];
+
+/** The sandbox's keys whose own keys are named each with it, as `network.allowedDomains`. */
+const PARENTS = ["network", "filesystem", "credentials"];
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** Whether a sandbox key, by its path and what it holds, only narrows the sandbox (NARROWING). */
+const narrows = (path, value) => (path === "credentials.envVars" ? Array.isArray(value) && value.every((entry) => isObject(entry) && entry.mode === "deny") : NARROWING.includes(path));
+
+/** The values of CLAUDE_CODE_DISABLE_AUTO_MEMORY that do not turn memory off, in any letter case. */
+const FALSE_WORDS = ["0", "false", "no", "off", ""];
+
+/** What in a settings source, `settings`, named `label`, could loosen the open lock, as the lines for Jason: none holds a value. Each
+    sandbox key but NARROWING's (one line each, sorted: a key under network, filesystem or credentials named with its parent, and any
+    key a later version adds); an Edit( allow rule, which the sandbox merges into its writes (C3); a WebFetch(domain:…) deny rule,
+    which brings the sandbox's proxy login back (C38); autoMemoryEnabled or autoDreamEnabled true, and an env that turns memory on
+    (C37); and folders added to every session (permissions.additionalDirectories). */
+export function sourceWhy(label, settings) {
+  if (!isObject(settings)) return [];
+  const why = [];
+  const sandbox = settings.sandbox;
+  if (sandbox !== undefined) {
+    const paths = !isObject(sandbox) ? [["", sandbox]] : Object.entries(sandbox).flatMap(([key, value]) => (PARENTS.includes(key) && isObject(value) ? Object.entries(value).map(([inner, v]) => [`${key}.${inner}`, v]) : [[key, value]]));
+    for (const path of paths.filter(([path, value]) => !narrows(path, value)).map(([path]) => path).sort()) why.push(`(Jason: ${label}: sandbox${path ? `.${path}` : ""}, which can open her folder's lock. Its contents are not shown here.)`);
+  }
+  const permissions = isObject(settings.permissions) ? settings.permissions : {};
+  const rules = (list) => (Array.isArray(list) ? list.filter((rule) => typeof rule === "string") : []);
+  if (rules(permissions.allow).some((rule) => rule.startsWith("Edit("))) why.push(`(Jason: ${label}: an Edit( allow rule, which lets sandboxed commands write there. Its contents are not shown here.)`);
+  if (rules(permissions.deny).some((rule) => rule.startsWith("WebFetch(domain:"))) why.push(`(Jason: ${label}: a WebFetch(domain:…) deny rule, which brings the sandbox's proxy login back. Its contents are not shown here.)`);
+  for (const key of ["autoMemoryEnabled", "autoDreamEnabled"]) if (settings[key] === true) why.push(`(Jason: ${label}: ${key} true, which turns Claude Code's memory on. Its contents are not shown here.)`);
+  if (isObject(settings.env) && Object.hasOwn(settings.env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY") && FALSE_WORDS.includes(String(settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).trim().toLowerCase())) why.push(`(Jason: ${label}: env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, which turns Claude Code's memory on. Its contents are not shown here.)`);
+  const added = permissions.additionalDirectories;
+  if (added !== undefined && !(Array.isArray(added) && added.length === 0)) why.push(`(Jason: ${label}: permissions.additionalDirectories, which adds folders to every session. Its contents are not shown here.)`);
   return why;
 }
 
