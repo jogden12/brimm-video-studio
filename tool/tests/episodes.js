@@ -91,7 +91,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
     // No test reads this computer's own Claude settings: `behind` looks at the environment, the managed settings folder and the
-    // managed preferences (edit.js lockLoosened), and here they are empty and in the test's own folder. Its session runs in her
+    // managed preferences (loosened.js lockLoosened), and here they are empty and in the test's own folder. Its session runs in her
     // folder for Claude, as her sessions do, whether or not a test has written that folder.
     env: {}, managedDir: join(dir, "managed"), managedPrefs: join(dir, "managed-preferences"), user: "sallie", cwd: join(home, "BRIMM Video Studio"),
     wait: async (ms) => {
