@@ -210,6 +210,15 @@ describe("paths by what they are", () => {
     assert.equal(shut.at(join(w.root, "Assets", "logo.png"))?.path, realOf(w.root));
     assert.equal(gatedIndex(gatedPlaces(w), [w.ownTmp]).at(snapshot)?.carve, "claude");
   });
+  it("lets a path through a carve-out one call is given, and only for that call", () => {
+    const output = join(w.ownTmp, ID, "tasks", "a.output");
+    const shut = gatedIndex(gatedPlaces(w), [join(realOf(w.root), "Assets")]);
+    assert.equal(shut.at(output)?.carve, "tmp");
+    assert.equal(shut.at(output, [join(realOf(join(w.tmp, `claude-${w.uid}`)), claudeDirName(w.folder), ID, "tasks")]), null);
+    assert.equal(shut.at(output)?.carve, "tmp");
+    assert.equal(shut.at(join(w.root, "Assets", "logo.png"), [join(w.home, "Documents")]), null);
+    assert.equal(shut.at(join(w.tmp, `claude-${w.uid}`, "-another-folder", "b.output"), [join(realOf(join(w.tmp, `claude-${w.uid}`)), claudeDirName(w.folder))])?.carve, "tmp");
+  });
   it("holds a gated place that is not there yet by its text, both spellings, any letter case", () => {
     // Zoom's folder is not made; "<home>/documents/ZOOM/x.m4a" and "/System/Volumes/Data<home>/Documents/Zoom" are held.
     assert.equal(ix.at(join(w.home, "documents", "ZOOM", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));

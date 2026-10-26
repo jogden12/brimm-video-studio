@@ -3,12 +3,12 @@
 // test asks this Mac's resolver, reads its settings or runs `ps`.
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { NEVER_REFUSED, NOT_NAMED, WEB_HELD, openDecision } from "../open-lock.js";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, WEB_HELD, WRITE_REFUSED, openDecision } from "../open-lock.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS } from "../fetchable.js";
-import { gatedIndex, gatedPlaces, realOf } from "../places.js";
+import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { SESSION, openWorld } from "./open-world.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
@@ -95,5 +95,125 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
     const allow = [...ctx.allow, { type: "tool", name: "CronCreate" }];
     assert.equal((await decide("CronCreate", {}, { allow })).decision, "allow");
     assert.deepEqual(await decide("CronDelete", {}, { allow }), { decision: "deny", reason: NOT_NAMED });
+  });
+});
+
+describe("the open guard, II: paths and writes", () => {
+  const notAMac = process.platform !== "darwin" && "/System/Volumes/Data and letter case are a Mac's";
+  const OTHER = "22222222-3333-4444-8555-666666666666";
+  let w;
+  let ctx;
+  let p;
+  before(() => {
+    w = openWorld();
+    const AS = join(w.home, "Library", "Application Support");
+    const dir = claudeDirName(w.folder);
+    p = {
+      episode: join(w.root, "Episodes", "x", "t.txt"),
+      transcript: join(w.home, ".claude", "projects", dir, `${SESSION}.jsonl`),
+      ownResults: join(w.home, ".claude", "projects", dir, SESSION, "tool-results", "r.txt"),
+      otherResults: join(w.home, ".claude", "projects", dir, OTHER, "tool-results", "r.txt"),
+      ownTasks: join(w.tmp, `claude-${w.uid}`, dir, SESSION, "tasks", "a.output"),
+      otherTasks: join(w.tmp, `claude-${w.uid}`, dir, OTHER, "tasks", "a.output"),
+      ownWords: join(AS, "BRIMM Video Words", SESSION, "x.txt"),
+      otherWords: join(AS, "BRIMM Video Words", OTHER, "x.txt"),
+      allowedSkill: join(w.home, ".claude", "skills", "theme-factory", "SKILL.md"),
+      otherSkill: join(w.home, ".claude", "skills", "canva-creator", "SKILL.md"),
+      notes: join(w.home, "Documents", "notes.txt"),
+      logo: join(w.root, "Assets", "logo.png"),
+      code: join(w.checkout, "tool", "edit.js"),
+      zshrc: join(w.home, ".zshrc"),
+    };
+    for (const file of Object.values(p)) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "x");
+    }
+    mkdirSync(join(w.root, "Drop", "Mac Studio"), { recursive: true });
+    symlinkSync(join(w.root, "Episodes"), join(w.home, "Documents", "eps"));
+    symlinkSync(p.notes, join(w.root, "Episodes", "out"));
+    symlinkSync(p.transcript, join(w.workshop, "t"));
+    symlinkSync(p.otherWords, join(w.workshop, "o"));
+    symlinkSync(p.zshrc, join(w.workshop, "z"));
+    symlinkSync(join(w.home, ".zshenv"), join(w.workshop, "zz"));
+    symlinkSync(join(w.root, "Drop", "Mac Studio"), join(w.workshop, "d"));
+    symlinkSync(w.folder, join(w.workshop, "h"));
+    mkdirSync(join(w.workshop, "sub"));
+    ctx = { checkout: w.checkout, node: w.node, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(w.facts), [join(realOf(w.root), "Assets")]), allow: w.facts.allow, web: "held", resolve: PUBLIC, loosened: false, held: false };
+  });
+  after(() => w.done());
+  const decide = (name, input, more = {}) => openDecision({ session_id: SESSION, transcript_path: p.transcript, cwd: w.folder, hook_event_name: "PreToolUse", tool_name: name, tool_input: input, ...more }, ctx);
+  const read = (file_path, more) => decide("Read", { file_path }, more);
+  const send = (file) => decide("SendUserFile", { files: [file], status: "normal" });
+  const write = (file_path) => decide("Write", { file_path, content: "x" });
+  const edit = (file_path) => decide("Edit", { file_path, old_string: "a", new_string: "b" });
+  const GATED = { decision: "deny", reason: GATED_REFUSED };
+  const NO_WRITE = { decision: "deny", reason: WRITE_REFUSED };
+
+  it("refuses every gated place for Read, Write, Edit and SendUserFile: by .., by a link into it and out of it, and by a path in a field it did not know of", async () => {
+    for (const path of [p.episode, `${w.root}/Assets/../Episodes/x/t.txt`, join(w.home, "Documents", "eps", "x", "t.txt"), join(w.root, "Episodes", "out"), "~/.ssh/id_ed25519", p.transcript, p.otherWords]) {
+      assert.deepEqual(await read(path), GATED, `Read ${path}`);
+      assert.deepEqual(await send(path), GATED, `SendUserFile ${path}`);
+      assert.equal((await write(path)).decision, "deny", `Write ${path}`);
+      assert.equal((await edit(path)).decision, "deny", `Edit ${path}`);
+    }
+    assert.deepEqual(await decide("Read", { file_path: p.notes, extra: { deep: [p.episode] } }), GATED);
+    assert.deepEqual(await decide("Write", { file_path: join(w.workshop, "ok.txt"), content: "x", also: [p.episode] }), GATED);
+    assert.deepEqual(await decide("mcp__visualize__show_widget", { widget_code: "x", file: p.episode }), GATED);
+    assert.deepEqual(await read(p.notes, { cwd: join(w.root, "Episodes") }), { decision: "allow", reason: "outside the gated places" });
+    assert.deepEqual(await read("x/t.txt", { cwd: join(w.root, "Episodes") }), GATED);
+  });
+  it("takes no path from what Write writes or what Edit changes", async () => {
+    assert.equal((await decide("Write", { file_path: join(w.workshop, "ok.txt"), content: `${p.episode}\n~/.ssh/id_ed25519\n../Episodes` })).decision, "allow");
+    assert.equal((await decide("Edit", { file_path: join(w.workshop, "ok.txt"), old_string: p.episode, new_string: "~/.ssh/config" })).decision, "allow");
+  });
+  it("refuses them by /System/Volumes/Data and by changed letter case", { skip: notAMac }, async () => {
+    for (const path of [`/System/Volumes/Data${p.episode}`, p.episode.replace("Episodes", "EPISODES"), join(w.home, ".SSH", "config"), `/System/Volumes/Data${p.otherWords}`]) {
+      assert.deepEqual(await read(path), GATED, path);
+      assert.deepEqual(await send(path), GATED, path);
+    }
+  });
+  it("allows Read anywhere else: her documents, Assets, the checkout's code", async () => {
+    for (const path of [p.notes, p.logo, p.code, join(w.folder, "CLAUDE.md"), "~/Documents/notes.txt"]) assert.equal((await read(path)).decision, "allow", path);
+    assert.equal((await send(p.logo)).decision, "allow");
+  });
+  it("allows Read of the chat's own tool-results, tasks and words folders and the named skills' folders, and refuses another chat's", async () => {
+    for (const path of [p.ownResults, p.ownTasks, p.ownWords, p.allowedSkill]) assert.equal((await read(path)).decision, "allow", path);
+    for (const path of [p.otherResults, p.otherTasks, p.otherWords, p.otherSkill, p.transcript]) assert.deepEqual(await read(path), GATED, path);
+    for (const path of [p.ownResults, p.ownTasks, p.ownWords]) assert.deepEqual(await send(path), GATED, `SendUserFile ${path}`);
+    assert.deepEqual(await read(p.ownWords, { session_id: "../x" }), GATED);
+    assert.deepEqual(await read(p.ownResults, { session_id: undefined }), GATED);
+  });
+  it("refuses a link in the workshop to a gated file for Read and SendUserFile, and any link for Write and Edit", async () => {
+    for (const name of ["t", "o"]) {
+      assert.deepEqual(await read(join(w.workshop, name)), GATED, name);
+      assert.deepEqual(await send(join(w.workshop, name)), GATED, name);
+    }
+    for (const path of [join(w.workshop, "z"), join(w.workshop, "zz"), join(w.workshop, "d", "x.mov"), join(w.workshop, "t")]) {
+      assert.deepEqual(await write(path), NO_WRITE, `Write ${path}`);
+      assert.deepEqual(await edit(path), NO_WRITE, `Edit ${path}`);
+    }
+  });
+  it("allows Write and Edit only inside the workshop, and never a CLAUDE.md, CLAUDE.local.md, .mcp.json or anything in a .claude folder there", async () => {
+    for (const path of [join(w.workshop, "a.txt"), join(w.workshop, "sub", "b.html"), join(w.workshop, "new", "c.css"), "~/BRIMM Video Workshop/d.txt"]) {
+      assert.equal((await write(path)).decision, "allow", path);
+      assert.equal((await edit(path)).decision, "allow", path);
+    }
+    for (const path of [join(w.workshop, "CLAUDE.md"), join(w.workshop, "sub", "claude.MD"), join(w.workshop, "CLAUDE.local.md"), join(w.workshop, ".mcp.json"), join(w.workshop, ".claude", "settings.json"), join(w.workshop, "sub", ".Claude", "x"), w.workshop, p.notes, join(w.folder, "x.txt"), join(w.home, "BRIMM Video Workshop2", "x"), `${w.workshop}/../BRIMM Video Studio/x`, join(w.dir, "elsewhere.txt")]) {
+      assert.deepEqual(await write(path), NO_WRITE, path);
+      assert.deepEqual(await edit(path), NO_WRITE, path);
+    }
+    assert.deepEqual(await decide("Write", { content: "x" }), NO_WRITE);
+  });
+  it("refuses a write through a link from the workshop into her folder", async () => {
+    assert.deepEqual(await write(join(w.workshop, "h", "CLAUDE.md")), NO_WRITE);
+    assert.deepEqual(await write(join(w.workshop, "h", "notes.txt")), NO_WRITE);
+  });
+  it("refuses, for a later Claude Code, a Glob or Grep whose folder is in a gated place or holds one, a Glob's absolute or ~/ pattern with no path among them", async () => {
+    for (const [name, input] of [["Glob", { pattern: "**/*.txt", path: join(w.root, "Episodes") }], ["Grep", { pattern: "x", path: w.home }], ["Grep", { pattern: "x", path: dirname(w.root) }], ["Glob", { pattern: `${w.root}/Ep*/**` }], ["Glob", { pattern: "~/Lib*/**" }], ["Glob", { pattern: "../**/*.txt" }]]) {
+      assert.deepEqual(await decide(name, input), GATED, `${name} ${JSON.stringify(input)}`);
+    }
+    for (const [name, input] of [["Glob", { pattern: "**/*.md" }], ["Grep", { pattern: "x", path: join(w.home, "Pictures") }], ["Grep", { pattern: "x" }], ["Glob", { pattern: "*.png", path: join(w.root, "Assets") }]]) {
+      assert.equal((await decide(name, input)).decision, "allow", `${name} ${JSON.stringify(input)}`);
+    }
   });
 });
