@@ -121,6 +121,10 @@ describe("her folder's settings under the open lock", () => {
     // Exact names only, as envVars takes them.
     for (const { name } of names) assert.match(name, /^[A-Za-z_][A-Za-z0-9_]*$/);
   });
+  it("takes 2.1.308's second list of credentials from sandboxed commands too", () => {
+    const names = open().sandbox.credentials.envVars;
+    for (const n of ["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR", "CCR_AGENT_PROXY_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_HFI_BEARER_TOKEN", "CLAUDE_BRIDGE_OAUTH_TOKEN", "CLAUDE_TRUSTED_DEVICE_TOKEN", "AGENT_PROXY_AUTH_TOKEN", "CLAUDE_CODE_MCP_SERVE_AUTH_TOKEN", "CLAUDE_BG_AUTH_SNAPSHOT_PATH", "CLAUDE_BG_SOCKET_TOKENS_PATH", "CLAUDE_BG_RV_AUTH", "CLAUDE_BG_PTY_AUTH", "CLAUDE_BG_CLAIM_AUTH"]) assert.ok(names.some((e) => e.name === n && e.mode === "deny"), n);
+  });
   it("turns Claude Code's memory off, and a skill's shell lines", () => {
     const s = open();
     assert.deepEqual([s.autoMemoryEnabled, s.autoDreamEnabled, s.disableSkillShellExecution, s.disableAllHooks], [false, false, true, false]);
