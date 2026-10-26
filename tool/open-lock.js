@@ -36,6 +36,7 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { promises as dns } from "node:dns";
+import { userInfo } from "node:os";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
@@ -43,7 +44,7 @@ import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
 import { HELD_NARROWED, HELD_REFUSED, chatHeld, wordsFolder } from "./held.js";
-import { LOCK_CHANGED, addedWhy, lockLoosened, skillFolders } from "./loosened.js";
+import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
 import { effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
 import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
@@ -310,7 +311,8 @@ function foldersOf(dir) {
 
 /** Every file and folder the lock check looks at, read, lists or looks for (loosened.js lockLoosened): this Mac's settings, her
     folder's own, the user's and the server-managed ones, the managed settings, drop-ins and preferences, the plugins and their
-    hooks, the skills her folder allows, the app's --settings file, the workshop, and this checkout's data the open shape is made from. */
+    hooks, the skills her folder allows, the app's --settings file and the folders it adds, the workshop, and this checkout's data the
+    open shape is made from. */
 function watched({ home, folder, checkout, env, deps, settings, claude }) {
   const config = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
   const managed = deps.managedDir || MANAGED_DIR;
@@ -325,7 +327,9 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
   } catch (e) {
     // None.
   }
-  const appSettings = claude ? argsOf(claude.args).flags.filter((f) => f.name === "--settings" && typeof f.value === "string" && isAbsolute(f.value.trim())).map((f) => f.value.trim()) : [];
+  const account = deps.user || userInfo().username;
+  // The app's --settings, when it names a file, and the folders it adds (its notes folder, which must stay a folder of its own).
+  const appPaths = claude ? argsOf(claude.args).flags.filter((f) => (f.name === "--settings" || f.name === "--add-dir") && typeof f.value === "string" && isAbsolute(f.value.trim())).map((f) => f.value.trim()) : [];
   return [
     settingsFile(home),
     folder, join(folder, ".claude"), join(folder, ".claude", "settings.json"), join(folder, ".claude", "settings.local.json"),
@@ -335,8 +339,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
-    prefs, join(prefs, deps.user || ""), join(prefs, deps.user || "", PREFS_FILE), join(prefs, PREFS_FILE),
-    ...appSettings,
+    prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),
+    ...appPaths,
     workshopFolder(home),
     ...["never.json", "allow.json", "environment.json", "app-flags.json"].map((name) => fileURLToPath(new URL(`./studio/${name}`, import.meta.url))),
   ];
@@ -382,9 +386,12 @@ function without(lines, less) {
 function lockLines({ home, checkout, folder, node, input, deps, env, settings, facts, claude, now }) {
   const sessionId = input.session_id;
   const signature = JSON.stringify({
-    checkout, node, folder, session: sessionId, transcript: deps.transcript, cwd: deps.cwd,
+    checkout, node, folder, session: sessionId, transcript: deps.transcript, cwd: deps.cwd, real: realOf(String(deps.cwd)),
+    there: Boolean(deps.transcript && lstatSync(deps.transcript, { throwIfNoEntry: false })?.isFile()),
     claude: claude ? [claude.pid, claude.start, claude.args] : null,
-    env: Object.keys(env).sort(),
+    minimum: deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE, flags: deps.appFlags || null,
+    // The names, and what the check says of them: a value it reads (whether memory is turned on) is never kept, only its line.
+    env: [Object.keys(env).sort(), environmentWhy(env)],
     shape: studioNodeOf(settings) ? openSettingsOf({ checkout, node: studioNodeOf(settings), folder, facts }) : null,
     files: watched({ home, folder, checkout, env, deps, settings, claude }).map(stamp),
   });

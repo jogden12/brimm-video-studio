@@ -443,6 +443,19 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.equal(looks, before);
     w.done();
   });
+  it("looks again when a value the check reads in the environment changes, or the app's notes folder becomes a link", async () => {
+    const w = chat();
+    assert.equal((await date(w, { more: { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } } })).decision, "allow");
+    assert.deepEqual(await date(w, { more: { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0" } } }), CHANGED);
+    const notes = join(w.home, "Library", "Application Support", "Claude", "side-session-notes", "local_00000000-0000-4000-8000-000000000000");
+    mkdirSync(notes, { recursive: true });
+    assert.equal((await date(w)).decision, "allow");
+    rmSync(notes, { recursive: true });
+    mkdirSync(join(w.dir, "elsewhere"));
+    symlinkSync(join(w.dir, "elsewhere"), notes);
+    assert.deepEqual(await date(w), CHANGED);
+    w.done();
+  });
   it("ignores a cache another call is writing, or one that is not JSON", async () => {
     const w = chat();
     const cache = join(w.home, "Library", "Application Support", "BRIMM Video", "lock-cache.json");
