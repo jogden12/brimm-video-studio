@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { studioFiles, writeStudio, openSettingsOf, workshopFolder, ALLOW_DEFAULT, ENVIRONMENT, APP_FLAGS, OPEN_LOCK_CLAUDE } from "../studio.js";
+import { studioFiles, writeStudio, openSettingsOf, lockBroken, workshopFolder, ALLOW_DEFAULT, ENVIRONMENT, APP_FLAGS, OPEN_LOCK_CLAUDE } from "../studio.js";
 import { bothSpellings, claudeDirName, gatedPlaces, readAllowed, realOf } from "../places.js";
 import { openWorld } from "./open-world.js";
 
@@ -159,5 +159,89 @@ describe("her folder's settings under the open lock", () => {
     assert.equal(files[".claude/skills/brimm-edit/SKILL.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/SKILL.md"]);
     assert.equal(files["CLAUDE.md"], readFileSync(new URL("../studio/CLAUDE-open.md", import.meta.url), "utf8"));
     assert.ok(statSync(join(w.folder, "Pictures")).isDirectory());
+  });
+});
+
+describe("what is changed in her folder's settings under the open lock (lockBroken)", () => {
+  let w;
+  before(() => {
+    w = openWorld();
+  });
+  after(() => w.done());
+  const open = () => JSON.parse(readFileSync(join(w.folder, ".claude", "settings.json"), "utf8"));
+  const where = () => ({ checkout: w.checkout, folder: w.folder, facts: w.facts });
+  const broken = (s, node = w.node) => lockBroken(s, { ...where(), lock: "open", node });
+
+  it("finds nothing broken in the open shape it writes, for the node this Mac recorded", () => {
+    assert.deepEqual(broken(open()), []);
+    assert.deepEqual(broken(openSettingsOf({ checkout: w.checkout, node: w.node, folder: w.folder, facts: w.facts })), []);
+  });
+  it("says the guard, the allow rule and the excluded command are changed when another program stands in node's place in all three", () => {
+    const text = readFileSync(join(w.folder, ".claude", "settings.json"), "utf8").split(w.node).join(join(w.workshop, "x"));
+    const s = JSON.parse(text);
+    const found = broken(s);
+    for (const key of ["guard", "permissions", "sandbox"]) assert.ok(found.includes(key), key);
+    // The node is the one this Mac recorded, never the one the file names.
+    assert.deepEqual(lockBroken(s, { ...where(), lock: "open", node: join(w.workshop, "x") }), []);
+  });
+  it("names a SessionStart hook, another hook beside the guard, an env, a statusLine or an enabledPlugins key in her folder's own settings", () => {
+    const hook = { type: "command", command: "/bin/sh", args: ["/x.sh"] };
+    for (const [change, key] of [
+      [(s) => { s.hooks.SessionStart = [{ matcher: "*", hooks: [hook] }]; }, "other-hooks"],
+      [(s) => { s.hooks.PreToolUse.push({ matcher: "Bash", hooks: [hook] }); }, "other-hooks"],
+      [(s) => { s.hooks.PostToolUse.push({ matcher: "*", hooks: [hook] }); }, "other-hooks"],
+      [(s) => { s.env = { X: "1" }; }, "other"],
+      [(s) => { s.statusLine = { type: "command", command: "/x.sh" }; }, "other"],
+      [(s) => { s.enabledPlugins = { "x@y": true }; }, "other"],
+      [(s) => { s.apiKeyHelper = "/x.sh"; }, "other"],
+      [(s) => { delete s.disableAllHooks; }, "other"],
+      [(s) => { s.disableAllHooks = true; }, "hooks"]
+    ]) {
+      const s = open();
+      change(s);
+      assert.deepEqual(broken(s), [key], change.toString());
+    }
+  });
+  it("says the node is not known when this Mac's settings name none", () => {
+    assert.deepEqual(broken(open(), null), ["node"]);
+    assert.deepEqual(lockBroken(open(), { ...where(), lock: "open" }), ["node"]);
+  });
+  it("names each part of the open shape that is changed", () => {
+    for (const [change, key] of [[(s) => { s.sandbox.enabled = false; }, "sandbox"], [(s) => s.sandbox.filesystem.denyRead.pop(), "sandbox"], [(s) => s.sandbox.filesystem.allowRead.push("/Users"), "sandbox"], [(s) => s.sandbox.excludedCommands.push("python3 *"), "sandbox"], [(s) => s.sandbox.credentials.envVars.pop(), "sandbox"], [(s) => { s.sandbox.network.allowUnixSockets = ["/x"]; }, "sandbox"], [(s) => { s.sandbox.network.socksProxyPort = 1; }, "sandbox"], [(s) => s.permissions.deny.splice(s.permissions.deny.findIndex((r) => r.startsWith("Read(")), 1), "permissions"], [(s) => s.permissions.deny.push("mcp__visualize__*"), "permissions"], [(s) => s.permissions.allow.push("WebFetch"), "permissions"], [(s) => { s.permissions.additionalDirectories = ["/x"]; }, "permissions"], [(s) => { s.autoMemoryEnabled = true; }, "memory"], [(s) => { s.disableSkillShellExecution = false; }, "skill-shell"], [(s) => { delete s.hooks.PostToolUse; }, "receipt"]]) {
+      const s = open(); change(s); assert.deepEqual(lockBroken(s, { ...where(), lock: "open", node: w.node }), [key], change.toString());
+    }
+    for (const [change, keys] of [
+      [(s) => { s.autoDreamEnabled = true; }, ["memory"]],
+      [(s) => { delete s.hooks.PreToolUse; }, ["guard"]],
+      [(s) => { s.hooks.PreToolUse[0].hooks[0].onFailure = "ignore"; }, ["guard"]],
+      [(s) => { s.permissions.disableBypassPermissionsMode = "enable"; }, ["bypass", "permissions"]],
+      [(s) => { delete s.permissions.disableAutoMode; }, ["auto", "permissions"]]
+    ]) {
+      const s = open();
+      change(s);
+      assert.deepEqual(broken(s), keys, change.toString());
+    }
+  });
+  it("names what a folder written strict lacks on a Mac with the open lock", () => {
+    const strict = JSON.parse(studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/settings.json"]);
+    assert.deepEqual(broken(strict), ["sandbox", "permissions", "memory", "skill-shell", "receipt"]);
+  });
+  it("keeps the strict lock's check as it was", () => {
+    const strict = () => JSON.parse(studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/settings.json"]);
+    assert.deepEqual(lockBroken(strict(), { checkout: w.checkout, folder: w.folder }), []);
+    assert.deepEqual(lockBroken(strict(), { ...where(), lock: "strict", node: "/elsewhere/node" }), []);
+    // The strict check is not the whole: the node, and any other key, are only out of date there.
+    for (const change of [(s) => { s.hooks.PreToolUse[0].hooks[0].args[1] = "/x/node"; }, (s) => { s.env = { X: "1" }; }, (s) => { s.permissions.deny.pop(); }]) {
+      const s = strict();
+      change(s);
+      assert.deepEqual(lockBroken(s, { checkout: w.checkout, folder: w.folder }), [], change.toString());
+    }
+    for (const [change, keys] of [[(s) => { s.disableAllHooks = true; }, ["hooks"]], [(s) => { delete s.hooks; }, ["guard"]], [(s) => { s.permissions.disableBypassPermissionsMode = "enable"; }, ["bypass"]], [(s) => { delete s.permissions.disableAutoMode; }, ["auto"]]]) {
+      const s = strict();
+      change(s);
+      assert.deepEqual(lockBroken(s, { checkout: w.checkout, folder: w.folder }), keys, change.toString());
+    }
+    // The open shape holds all the strict lock rests on.
+    assert.deepEqual(lockBroken(open(), { checkout: w.checkout, folder: w.folder }), []);
   });
 });

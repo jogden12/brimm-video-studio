@@ -26,6 +26,7 @@
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { neverDenyRules } from "./never.js";
 import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
@@ -135,13 +136,15 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   };
 }
 
-/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on,
-    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is true: absent, as main's studio.js wrote
-    the folder, or false, it turns no hook off), "guard" (no entry with the guard
+/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on.
+    With the strict lock (`lock` "strict"), against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is
+    true: absent, as main's studio.js wrote the folder, or false, it turns no hook off), "guard" (no entry with the guard
     hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
     node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
-    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date". */
-export function lockBroken(settings, { checkout, folder }) {
+    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date".
+    With the open lock, the whole of it is compared (openBroken, below). */
+export function lockBroken(settings, { checkout, folder, lock = "strict", facts, node }) {
+  if (lock === "open") return openBroken(settings, { checkout, folder, facts, node });
   const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
   const want = settingsOf({ checkout, node: "", folder });
   const entry = want.hooks.PreToolUse[0];
@@ -155,6 +158,44 @@ export function lockBroken(settings, { checkout, folder }) {
   const permissions = object(settings.permissions) ? settings.permissions : {};
   if (permissions.disableBypassPermissionsMode !== want.permissions.disableBypassPermissionsMode) broken.push("bypass");
   if (permissions.disableAutoMode !== want.permissions.disableAutoMode) broken.push("auto");
+  return broken;
+}
+
+/** What is changed in her folder's settings under the open lock (R17): the whole of `settings` is compared, as an object, with what
+    openSettingsOf writes for this checkout, her folder, this Mac's facts and `node`, the node this Mac's settings recorded her folder
+    was written with (studioNode), never the node the file names. Any difference is changed, not out of date, and each part that
+    differs is named: "hooks", "guard", "bypass" and "auto" as for the strict lock (the guard's entry compared whole, its node among
+    it); "sandbox" (the sandbox's settings, whole); "permissions" (allow, deny, the modes and anything added, such as a folder);
+    "memory" (autoMemoryEnabled or autoDreamEnabled not false); "skill-shell" (disableSkillShellExecution not true); "receipt" (no
+    entry with the receipt hook after a card); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
+    guard's and the receipt's); and "other" (any other key, such as env, statusLine, enabledPlugins or apiKeyHelper, or
+    disableAllHooks not false). ["node"] alone when this Mac's settings name no node, so that nothing can be compared. */
+function openBroken(settings, { checkout, folder, facts, node }) {
+  if (!node) return ["node"];
+  const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const s = object(settings) ? settings : {};
+  const want = openSettingsOf({ checkout, node, folder, facts });
+  const hooks = object(s.hooks) ? s.hooks : {};
+  const entries = (event) => (Array.isArray(hooks[event]) ? hooks[event] : []);
+  const holds = (event) => entries(event).some((entry) => isDeepStrictEqual(entry, want.hooks[event][0]));
+  const count = (event) => entries(event).reduce((n, entry) => n + (object(entry) && Array.isArray(entry.hooks) ? entry.hooks.length : 1), 0);
+  const permissions = object(s.permissions) ? s.permissions : {};
+  const broken = [];
+  if (s.disableAllHooks === true) broken.push("hooks");
+  if (!holds("PreToolUse")) broken.push("guard");
+  if (permissions.disableBypassPermissionsMode !== want.permissions.disableBypassPermissionsMode) broken.push("bypass");
+  if (permissions.disableAutoMode !== want.permissions.disableAutoMode) broken.push("auto");
+  if (!isDeepStrictEqual(s.sandbox, want.sandbox)) broken.push("sandbox");
+  if (!isDeepStrictEqual(s.permissions, want.permissions)) broken.push("permissions");
+  if (s.autoMemoryEnabled !== false || s.autoDreamEnabled !== false) broken.push("memory");
+  if (s.disableSkillShellExecution !== true) broken.push("skill-shell");
+  if (!holds("PostToolUse")) broken.push("receipt");
+  // A hook of another event, or more than the one each, is another hook; and so is any other difference in the hooks that the
+  // guard's and the receipt's do not already name.
+  const otherEvent = Object.keys(hooks).some((event) => !Object.hasOwn(want.hooks, event));
+  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt");
+  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > 1 || unnamed) broken.push("other-hooks");
+  if (Object.keys(s).some((key) => !Object.hasOwn(want, key)) || (s.disableAllHooks !== false && s.disableAllHooks !== true)) broken.push("other");
   return broken;
 }
 
