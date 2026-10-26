@@ -157,11 +157,15 @@ describe("her folder's settings under the open lock", () => {
     assert.equal(s.permissions.additionalDirectories, undefined);
     assert.deepEqual(Object.keys(s), ["permissions", "sandbox", "autoMemoryEnabled", "autoDreamEnabled", "disableSkillShellExecution", "disableAllHooks", "hooks"]);
     assert.deepEqual(Object.keys(s.permissions), ["defaultMode", "allow", "deny", "disableBypassPermissionsMode", "disableAutoMode"]);
-    // Her folder's other files are written as they are for the strict lock, but for the open lock's CLAUDE.md, and Pictures/.
+    // Her folder's three files are the open lock's own CLAUDE.md and skill (studio.test.js has what they say), with the checkout's
+    // path and node's put in, and Pictures/.
     const files = studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder, lock: "open", facts: w.facts });
     for (const [name, text] of Object.entries(files)) assert.equal(readFileSync(join(w.folder, name), "utf8"), text, name);
-    assert.equal(files[".claude/skills/brimm-edit/SKILL.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/SKILL.md"]);
-    assert.equal(files["CLAUDE.md"], readFileSync(new URL("../studio/CLAUDE-open.md", import.meta.url), "utf8"));
+    const template = (name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8").split("{{CHECKOUT}}").join(w.checkout).split("{{NODE}}").join(w.node);
+    assert.equal(files[".claude/skills/brimm-edit/SKILL.md"], template("SKILL-open.md"));
+    assert.notEqual(files[".claude/skills/brimm-edit/SKILL.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/SKILL.md"]);
+    assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`${w.node} "${w.checkout}/tool/edit.js"`));
+    assert.equal(files["CLAUDE.md"], template("CLAUDE-open.md"));
     assert.ok(statSync(join(w.folder, "Pictures")).isDirectory());
   });
 });

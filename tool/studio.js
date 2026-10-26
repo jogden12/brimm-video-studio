@@ -200,13 +200,15 @@ function openBroken(settings, { checkout, folder, facts, node }) {
 }
 
 /** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. With the
-    strict lock, today's; with the open lock, its settings (for the Mac `facts` describes) and its own CLAUDE.md. */
+    strict lock, today's; with the open lock, its settings (for the Mac `facts` describes), its own CLAUDE.md, and its own skill,
+    which asks the card exactly as `episodes` prints it and reads a session's words from the file `edit.js` names. The strict lock's
+    CLAUDE.md and skill are kept as they are, so that a Mac with the strict lock keeps today's folder. */
 export function studioFiles({ checkout, node, folder, lock = "strict", facts }) {
   const open = lock === "open";
   return {
     "CLAUDE.md": filled(open ? "CLAUDE-open.md" : "CLAUDE.md", { checkout, node }),
     ".claude/settings.json": JSON.stringify(open ? openSettingsOf({ checkout, node, folder, facts }) : settingsOf({ checkout, node, folder }), null, 2) + "\n",
-    ".claude/skills/brimm-edit/SKILL.md": filled("SKILL.md", { checkout, node })
+    ".claude/skills/brimm-edit/SKILL.md": filled(open ? "SKILL-open.md" : "SKILL.md", { checkout, node })
   };
 }
 
