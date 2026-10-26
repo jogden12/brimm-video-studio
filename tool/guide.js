@@ -130,13 +130,15 @@ export function opsText(handoff, step, again) {
     - `name`, as the lists name it; `id`, its record's id ("" for a file in a drop folder); `aliases`, the other words that find
       it (its label, its id, its short id); `at`, when it came (ms); and `mac`, the other Mac's name, where it is held or open
       there ("" otherwise).
-    - `drop`, for a file in a drop folder, and null for anything else: { here, state, step, left, total }. `here` is true for this
-      Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish) or "zoom" (a Zoom download held
-      there). `step` is the panel's step, and `left` and `total` the seconds left of it and in all, null when not known.
+    - `drop`, for a file in a drop folder, and null for anything else: { here, state, step, left, total, readyAt }. `here` is true
+      for this Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish) or "zoom" (a Zoom
+      download held there). `step` is the panel's step, and `left` and `total` the seconds left of it and in all, null when not
+      known. `readyAt` is the time it should be Ready, as this Mac's clock says it ("15:06"), "" when not known.
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
       `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
-    - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none".
+    - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
+      is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2.
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning`; and
       `shownSinceFinish`, when it was shown in Final Cut again since its finish.
@@ -145,6 +147,8 @@ export function opsText(handoff, step, again) {
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
       its empty revision is still to be written.
     - `handoff`, its newest hand-off (as opsNext reads it), or null.
+    - `source`, what `guide tell` follows it by, and never said: { mac, file, bytes }, the Mac whose drop folder it is or was in,
+      and its file's name and size; or null when they are not known.
     Her notes on this Mac (Notes): { version: 1, handoffs, finished }: her note on each hand-off, by the hand-off's id, and when
     she said each video was finished (localStamp), by its record's id.
     The next step (Next): { done: true }, or { done: false, stage, text, step, after }. `stage` names where it has got, `text` is
@@ -166,8 +170,30 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
+/** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. */
+export const READING_STEPS = ["Asking Claude", "Making the rough cut"];
+
+/** Seconds until an import on this Mac is Ready, from its run in the panel (progress.js): the time left in all, or on its last
+    step, where the panel gives none, the time left of that step. Null when it is not known. */
+export function readyIn({ left, total, n, of }) {
+  if (Number.isFinite(total)) return total;
+  return Number.isFinite(left) && Number.isInteger(n) && n > 0 && n === of ? left : null;
+}
+
+/** Seconds from the start of Claude's reading of a raw video `seconds` long to its rough cut, by the speeds this Mac measured
+    (`rates`, progress.js readRates), rounded. Null while either speed, or the video's length, is not known. */
+export function roughIn(rates, seconds) {
+  const speeds = READING_STEPS.map((step) => rates[step]);
+  if (!(seconds > 0) || !speeds.every((s) => Number.isFinite(s) && s > 0)) return null;
+  return Math.round(speeds.reduce((sum, s) => sum + s * seconds, 0));
+}
+
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
+
+/** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
+    it opens with Claude's name or a quoted word, as unedited.js clause() keeps them. */
+const midSentence = (step) => (/^(Claude|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
 
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {
@@ -177,7 +203,8 @@ function dropNext(drop, mac) {
   if (drop.state === "arriving") return toDo("arriving", `${drop.here ? "It is coming into your drop folder." : `It is in the drop folder of ${spokenMac(mac)}.`} ${ready}`);
   if (drop.state === "importing") {
     const left = drop.total != null ? `${aboutLeft(drop.total)} left in all` : drop.left != null ? `${aboutLeft(drop.left)} left of this step` : "";
-    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${drop.step}` : ""}${left ? `, ${left}` : ""}. ${ready}`);
+    const readyAt = drop.readyAt ? ` Ready about ${drop.readyAt}.` : "";
+    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${midSentence(drop.step)}` : ""}${left ? `, ${left}` : ""}.${readyAt} ${ready}`);
   }
   if (drop.state === "retry") return toDo("retry", `Its import did not finish${on}. Say "try it again"${there}.`);
   // A Zoom download. On the other Mac the place it goes is a sentence of its own, to keep each under 25 words.
@@ -235,7 +262,7 @@ function videoNext(facts, notes, now) {
   }
   if (facts.reading !== "done") {
     if (facts.readingsOff) return toDo("readings-off", "Readings are off on this Mac: ask Jason.");
-    if (facts.reading === "later") return toDo("reading-later", `Claude reads it at ${facts.readsAt}, once the import has checked its copies. A notice comes when it is done.`);
+    if (facts.reading === "later") return toDo("reading-later", `Claude starts reading it about ${facts.readsAt}, once the import has checked its copies.${facts.roughAt ? ` Its rough cut is ready about ${facts.roughAt}.` : ""} A notice comes when it is done.`);
     if (facts.reading === "failed") return toDo("reading-failed", READING_FAILED);
     return toDo("reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".');
   }
@@ -269,6 +296,27 @@ export function nextFor(facts, notes, now) {
   if (facts.heldAsSession) return toDo("held-session", 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.');
   if (notes.finished[facts.id] && !withdrawalOwed(facts, notes)) return { done: true };
   return facts.kind === "session" ? sessionNext(facts, notes, now) : videoNext(facts, notes, now);
+}
+
+/** The names of the videos in the drop folders, told apart. A video with no label yet (no `aliases`) is named by what it is and
+    its size, and two of one size would share that name: each of those is said with when it came (`clock(at)`, "14:58"), and two
+    that came in the same minute with a number too, in the order they came. A file's name is never part of it. */
+export function apart(videos, clock) {
+  const shared = (list) => {
+    const count = new Map();
+    for (const v of list) if (!v.aliases.length) count.set(v.name, (count.get(v.name) || 0) + 1);
+    return (v) => !v.aliases.length && count.get(v.name) > 1;
+  };
+  const once = shared(videos);
+  const timed = videos.map((v) => (once(v) ? { ...v, name: `${v.name} that came at ${clock(v.at)}` } : v));
+  const still = shared(timed);
+  const nth = new Map();
+  const counts = new Map();
+  for (const v of [...timed].filter(still).sort((a, b) => a.at - b.at)) {
+    counts.set(v.name, (counts.get(v.name) || 0) + 1);
+    nth.set(v, counts.get(v.name));
+  }
+  return timed.map((v) => (nth.has(v) ? { ...v, name: `${v.name} (${nth.get(v)})` } : v));
 }
 
 /** The videos in the order the guide says them: one waiting for her answer first, as only she can answer it; then the newest
@@ -315,8 +363,68 @@ export function videoLines({ facts, next }) {
 export const WAIT_MS = 90000;
 export const POLL_MS = 5000;
 
+/** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
+    and Claude's reading. `guide wait` and `guide tell` wait only while a video is at one. A running finish is not among them:
+    the guide cannot tell a finish that failed from one not begun. */
+export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading"];
+
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
     come or gone, a stage passed or an import's next step changes it; a name, which holds the size of a file still coming in, and
     the time left do not. Each is kept as JSON and the list sorted, so the order the videos were read in is no change. */
 export const signatureOf = (items) =>
   JSON.stringify(items.filter(({ next }) => !next.done).map(({ facts, next }) => JSON.stringify([facts.id, next.stage, facts.drop ? facts.drop.step : ""])).sort());
+
+/** How long `guide tell` waits at most for a video's next point, in the background, and how often it looks again in that time. */
+export const TELL_MS = 60 * 60 * 1000;
+export const TELL_POLL_MS = 15000;
+
+/** What `guide tell` follows a video by (Trail), from what is read of it (`facts.source`, never said): the Mac whose drop folder
+    it is or was in, and its file's name and size; and its record's id once it has one. In a drop folder, also whether the file
+    was still coming in (`growing`), and when it came (`came`, ms). */
+export const trailOf = (facts) =>
+  facts.id
+    ? { id: facts.id, ...(facts.source || {}) }
+    : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes, growing: facts.drop.state === "arriving", came: facts.at };
+
+/** The video `trail` follows, found again among `items`: { item, trail }, with the trail as it is now, or null when none is. By
+    its id once it has one, unless the import of its file, at its size, did not finish: that is said of the file in its drop
+    folder, which the import shows again, and is where it ends. In a drop folder, by its Mac and file, whose size grows while it
+    comes in. Once it has left the drop folder, by the newest answered video holding a file of that name and size, as the import
+    files it (filing.js holdingEpisode); or, when the file was still coming in when last seen, a larger one, imported since it
+    came, as it may have grown and been filed between two looks. From then on by that one's id. */
+export function follow(trail, items) {
+  if (trail.id) {
+    const failed = trail.file && items.find(({ facts }) => facts.drop && facts.drop.state === "retry" && facts.source.mac === trail.mac && facts.source.file === trail.file && facts.source.bytes === trail.bytes);
+    if (failed) return { item: failed, trail };
+    const item = items.find(({ facts }) => facts.id === trail.id);
+    return item ? { item, trail } : null;
+  }
+  const dropped = items.find(({ facts }) => facts.drop && facts.source.mac === trail.mac && facts.source.file === trail.file);
+  if (dropped) return { item: dropped, trail: trailOf(dropped.facts) };
+  const fits = ({ source, at }) => source.bytes === trail.bytes || (trail.growing && source.bytes > trail.bytes && at >= trail.came);
+  const filed = items.filter(({ facts }) => !facts.drop && facts.source && facts.source.file === trail.file && fits(facts)).sort((a, b) => b.facts.at - a.facts.at)[0];
+  return filed ? { item: filed, trail: { id: filed.facts.id, mac: trail.mac, file: trail.file, bytes: filed.facts.source.bytes } } : null;
+}
+
+const READ_IT = "Claude has read it.";
+
+/** What `guide tell` says once its video has reached its next point, or null while it is still on its way. `was` is the video
+    when the wait began, `seen` as it was last found, and `now` as it is found now, or null when it is not under way any more.
+    It is on its way while it is at the stage it was at (COMING): in a drop folder, coming in or being imported; or Claude's
+    reading. Then: it is ready, once it has left the drop folder for Episodes; Claude has read it, once its reading is in; and
+    otherwise its next step, as the guide says it, which says when an import or a reading did not finish. At the start (all
+    three the same) a video with nothing on its way gets its next step at once. Its file's name is never said. */
+export function told(was, seen, now) {
+  if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
+  if (now.next.done) return videoLines(now)[0];
+  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : "reading");
+  if (on(now) && on(now) === on(was)) return null;
+  const { facts, next } = now;
+  if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;
+  if (on(was) === "reading" && facts.reading === "done") return `${facts.name}: ${next.text.startsWith(READ_IT) ? next.text : `${READ_IT} ${next.text}`}`;
+  return `${facts.name}: ${next.text}`;
+}
+
+/** What `guide tell` says of a video still on its way after TELL_MS: so, and its next step. It may have moved on meanwhile, from
+    coming in to being imported, or from waiting for its reading to being read. */
+export const stillLine = ({ facts, next }) => `${facts.name}: It is still on its way after ${TELL_MS / 60000} minutes. ${next.text}`;

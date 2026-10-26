@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
+import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
+import { TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "../guide.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -107,10 +109,10 @@ describe("the BRIMM Ops page's steps", () => {
   });
 });
 
-const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null };
+const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null, source: null };
 const NONE = { version: 1, handoffs: {}, finished: {} };
 const NOW = Date.parse("2026-10-25T12:00:00-05:00");
-const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, ...over } });
+const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, readyAt: "", ...over } });
 const SESSION = (over) => ({ kind: "session", session: { choice: "asked", teachingsOn: true, undecided: 0, emptyOwed: false, ...over } });
 const RAW = (over) => ({ kind: "raw", ...over });
 const shown = (n) => (n.done ? { done: true } : { stage: n.stage, text: n.text });
@@ -119,15 +121,19 @@ const V1 = "Its hand-off is written once this Mac hands off version 2: ask Jason
 const STAGE_ROWS = [
   [DROP(), "arriving", 'It is coming into your drop folder. Wait for the "Ready" notice.'],
   [{ ...DROP({ here: false }), mac: "Mac Studio" }, "arriving", 'It is in the drop folder of the Mac Studio. Wait for the "Ready" notice on that Mac.'],
-  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360 }), "importing", 'It is being imported, at Writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'],
-  [DROP({ state: "importing", step: "Writing the transcript", left: 180 }), "importing", 'It is being imported, at Writing the transcript, about 3 minutes left of this step. Wait for the "Ready" notice.'],
-  [{ ...DROP({ here: false, state: "importing", step: "Writing the transcript" }), mac: "Mac Studio" }, "importing", 'It is being imported on the Mac Studio, at Writing the transcript. Wait for the "Ready" notice on that Mac.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360 }), "importing", 'It is being imported, at writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180 }), "importing", 'It is being imported, at writing the transcript, about 3 minutes left of this step. Wait for the "Ready" notice.'],
+  [{ ...DROP({ here: false, state: "importing", step: "Writing the transcript" }), mac: "Mac Studio" }, "importing", 'It is being imported on the Mac Studio, at writing the transcript. Wait for the "Ready" notice on that Mac.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360, readyAt: "15:06" }), "importing", 'It is being imported, at writing the transcript, about 6 minutes left in all. Ready about 15:06. Wait for the "Ready" notice.'],
+  [DROP({ state: "importing", step: "Filing", left: 120, readyAt: "15:02" }), "importing", 'It is being imported, at filing, about 2 minutes left of this step. Ready about 15:02. Wait for the "Ready" notice.'],
   [DROP({ state: "retry" }), "retry", 'Its import did not finish. Say "try it again".'],
   [{ ...DROP({ here: false, state: "retry" }), mac: "Sallie's laptop" }, "retry", "Its import did not finish on Sallie's laptop. Say \"try it again\" on that Mac."],
   [DROP({ state: "zoom" }), "zoom", "It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder."],
   // Not in the plan's rows: a Zoom download in the other Mac's drop folder, and an import whose step is not known yet.
   [{ ...DROP({ here: false, state: "zoom" }), mac: "Mac Studio" }, "zoom", "It is a Zoom download on the Mac Studio. Those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder on that Mac."],
   [DROP({ state: "importing" }), "importing", 'It is being imported. Wait for the "Ready" notice.'],
+  // A step that opens with Claude's name keeps its capital mid-sentence, as unedited.js clause() keeps it.
+  [DROP({ state: "importing", step: "Claude's notes" }), "importing", 'It is being imported, at Claude\'s notes. Wait for the "Ready" notice.'],
   [{ conflicted: true }, "conflicted", 'Dropbox kept two copies of a change to it. Say "sort out the conflict".'],
   [{ kind: null, waiting: true }, "waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
   [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, "answering-elsewhere", "It is being answered on the Mac Studio. Carry on there."],
@@ -136,7 +142,8 @@ const STAGE_ROWS = [
   [{ readingsOff: true, reading: "none" }, "readings-off", "Readings are off on this Mac: ask Jason."],
   [{ reading: "running" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [{ reading: "none" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
-  [RAW({ reading: "later", readsAt: "10:58" }), "reading-later", "Claude reads it at 10:58, once the import has checked its copies. A notice comes when it is done."],
+  [RAW({ reading: "later", readsAt: "10:58" }), "reading-later", "Claude starts reading it about 10:58, once the import has checked its copies. A notice comes when it is done."],
+  [RAW({ reading: "later", readsAt: "10:58", roughAt: "11:15" }), "reading-later", "Claude starts reading it about 10:58, once the import has checked its copies. Its rough cut is ready about 11:15. A notice comes when it is done."],
   [{ reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
   [{ offersAnswered: false }, "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
   [{ v2: false }, "waits-v2", V1],
@@ -267,6 +274,31 @@ describe("the guide's lists", () => {
   });
 });
 
+describe("the times the guide gives", () => {
+  it("are from the panel's run and this Mac's speeds, and none while one is not known", () => {
+    assert.deepEqual(READING_STEPS, ["Asking Claude", "Making the rough cut"]);
+    assert.equal(readyIn({ left: 180, total: 360, n: 2, of: 4 }), 360);
+    assert.equal(readyIn({ left: 120, total: null, n: 4, of: 4 }), 120);
+    assert.equal(readyIn({ left: 120, total: null, n: 2, of: 4 }), null);
+    assert.equal(readyIn({ left: null, total: null, n: 4, of: 4 }), null);
+    assert.equal(readyIn({ left: 30, total: null, n: null, of: null }), null);
+    assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, 2400), 1032);
+    assert.equal(roughIn({ "Asking Claude": 0.31 }, 2400), null);
+    assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, undefined), null);
+    assert.equal(roughIn({}, 2400), null);
+  });
+});
+
+describe("the names of videos with no label yet", () => {
+  it("tell apart two of one size by when they came, and by a number when that is the same minute; never by a file's name", () => {
+    const v = (name, at, aliases = []) => ({ name, at, aliases });
+    assert.deepEqual(apart([v("A video of 5 bytes", 1), v("A video of 5 bytes", 2), v("A video of 9 bytes", 3), v("Video of 20 Oct, 14:58 (Mac Studio)", 4, ["Video of 20 Oct, 14:58 (Mac Studio)"])], (ms) => `t${ms}`).map((x) => x.name),
+      ["A video of 5 bytes that came at t1", "A video of 5 bytes that came at t2", "A video of 9 bytes", "Video of 20 Oct, 14:58 (Mac Studio)"]);
+    assert.deepEqual(apart([v("A video of 5 bytes", 2), v("A video of 5 bytes", 1), v("A video of 5 bytes", 1)], () => "14:58").map((x) => x.name),
+      ["A video of 5 bytes that came at 14:58 (3)", "A video of 5 bytes that came at 14:58 (1)", "A video of 5 bytes that came at 14:58 (2)"]);
+  });
+});
+
 describe("what counts as a change while the guide waits", () => {
   it("is a video come or gone, a stage or an import's step, never the time left or a size", () => {
     const at = (over, next = { done: false, stage: "importing", text: "x", step: "", after: "" }) => ({ facts: { ...BASE, id: "", name: "A video of 5 bytes", ...DROP({ state: "importing", step: "Reading the sound", left: 60, total: 300 }), ...over }, next, folder: null, record: null });
@@ -276,5 +308,77 @@ describe("what counts as a change while the guide waits", () => {
     assert.notEqual(signatureOf([at({ drop: { here: true, state: "importing", step: "Writing the transcript", left: 10, total: 100 } })]), base);
     assert.notEqual(signatureOf([at({}), at({})]), base);
     assert.notEqual(signatureOf([at({}, { done: false, stage: "arriving", text: "x", step: "", after: "" })]), base);
+  });
+  it("waits only while a video is coming in, being imported or being read", () => {
+    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading"]);
+  });
+});
+
+describe("what guide tell says", () => {
+  const JANE = { mac: "Mac Studio", file: "Client Jane.mov", bytes: 5 };
+  const at = (facts) => ({ facts, next: nextFor(facts, NONE, NOW), folder: null, record: null });
+  const arriving = at({ ...BASE, id: "", name: "A video of 5 bytes", source: JANE, ...DROP() });
+  const importing = at({ ...arriving.facts, name: "Video of 20 Oct, 15:00 (Mac Studio)", aliases: ["Video of 20 Oct, 15:00 (Mac Studio)"], ...DROP({ state: "importing", step: "Reading the sound" }) });
+  const retry = at({ ...arriving.facts, ...DROP({ state: "retry" }) });
+  const waiting = at({ ...BASE, name: "Video of 20 Oct, 15:00 (Mac Studio) (3fa9c1)", kind: null, waiting: true, reading: "none", source: JANE });
+  const reading = at({ ...BASE, reading: "none" });
+  const later = at({ ...BASE, ...RAW({ reading: "later", readsAt: "10:58" }) });
+  const read = at({ ...BASE, offersAnswered: false });
+  const failed = at({ ...BASE, reading: "failed" });
+  const sessionReading = at({ ...BASE, ...SESSION(), reading: "running" });
+  const sessionRead = at({ ...BASE, ...SESSION({ undecided: 2 }) });
+  const ops = at({ ...BASE, handoff: OPS_HANDOFF });
+  const done = at({ ...BASE, ...SESSION({ choice: "transcript only" }) });
+  it("waits up to 60 minutes, looking every 15 seconds, and follows a video from its drop folder into Episodes by its file, which it never says", () => {
+    assert.deepEqual([TELL_MS, TELL_POLL_MS], [3600000, 15000]);
+    const ep = at({ ...BASE, id: "e-20261020-aaaaaa", source: JANE, at: 2 });
+    const older = at({ ...BASE, id: "e-20261014-bbbbbb", source: JANE, at: 1 });
+    const ID = "e-20261020-aaaaaa";
+    assert.deepEqual(trailOf(arriving.facts), { ...JANE, growing: true, came: 0 });
+    assert.deepEqual(trailOf(importing.facts), { ...JANE, growing: false, came: 0 });
+    assert.deepEqual(trailOf(ep.facts), { id: ID, ...JANE });
+    assert.deepEqual(trailOf(reading.facts), { id: BASE.id });
+    // In a drop folder by its Mac and file, whose size grows while it comes in.
+    const grown = at({ ...arriving.facts, source: { ...JANE, bytes: 9 } });
+    assert.deepEqual(follow(trailOf(arriving.facts), [ep, grown]), { item: grown, trail: { ...JANE, bytes: 9, growing: true, came: 0 } });
+    // Out of it, by the newest answered video that holds a file of that name and size; then by its id, with its file.
+    assert.deepEqual(follow(JANE, [older, ep]), { item: ep, trail: { id: ID, ...JANE } });
+    assert.equal(follow({ ...JANE, bytes: 9 }, [older, ep]), null);
+    // A file still coming in when last seen may grow and be filed before the next look: then a larger one, filed since it came.
+    const ep9 = at({ ...ep.facts, source: { ...JANE, bytes: 9 } });
+    assert.deepEqual(follow({ ...JANE, growing: true, came: 2 }, [older, ep9]), { item: ep9, trail: { id: ID, ...JANE, bytes: 9 } });
+    assert.equal(follow({ ...JANE, bytes: 9, growing: true, came: 0 }, [ep]), null);
+    assert.equal(follow({ ...JANE, growing: true, came: 2 }, [at({ ...older.facts, source: { ...JANE, bytes: 9 } })]), null);
+    // A file of that name in the other Mac's drop folder is another video.
+    assert.equal(follow({ ...JANE, mac: "Sallie's laptop" }, [grown]), null);
+    assert.deepEqual(follow({ id: ID, ...JANE }, [older, ep]), { item: ep, trail: { id: ID, ...JANE } });
+    assert.deepEqual(follow({ id: ID }, [older, ep]), { item: ep, trail: { id: ID } });
+    assert.equal(follow({ id: "e-20261020-cccccc" }, [ep]), null);
+    // By its id, until the import of its file, at its size, did not finish: then by that file in its drop folder.
+    assert.deepEqual(follow({ id: ID, ...JANE }, [ep, retry]), { item: retry, trail: { id: ID, ...JANE } });
+    assert.equal(follow({ id: ID, ...JANE }, [ep, arriving]).item, ep);
+    assert.equal(follow({ id: ID, ...JANE }, [ep, at({ ...retry.facts, source: { ...JANE, bytes: 9 } })]).item, ep);
+    assert.equal(follow({ id: ID }, [ep, retry]).item, ep);
+  });
+  it("says in one line that it is ready, that Claude has read it, or its next step; and nothing while it is still on its way", () => {
+    for (const [was, seen, now, want] of [
+      [arriving, arriving, arriving, null],
+      [arriving, arriving, importing, null],
+      [later, later, reading, null],
+      [arriving, importing, null, 'Video of 20 Oct, 15:00 (Mac Studio) is not under way any more. Say "what\'s next?" to see the ones that are.'],
+      [importing, importing, waiting, 'Video of 20 Oct, 15:00 (Mac Studio) (3fa9c1): It is ready. It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
+      [importing, importing, reading, 'Pricing talk (3fa9c1): It is ready. Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
+      [importing, importing, retry, 'A video of 5 bytes: Its import did not finish. Say "try it again".'],
+      [reading, reading, read, 'Pricing talk (3fa9c1): Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
+      [sessionReading, sessionReading, sessionRead, 'Pricing talk (3fa9c1): Claude has read it. Keep, drop or change each of its principles and Reel ideas. Say "show me the principles".'],
+      [reading, reading, failed, 'Pricing talk (3fa9c1): Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
+      // Nothing on its way: its next step at once, as the guide says it.
+      [waiting, waiting, waiting, 'Video of 20 Oct, 15:00 (Mac Studio) (3fa9c1): It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
+      [read, read, read, 'Pricing talk (3fa9c1): Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
+      [ops, ops, ops, 'Pricing talk (3fa9c1): On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".'],
+      [retry, retry, retry, 'A video of 5 bytes: Its import did not finish. Say "try it again".'],
+      [done, done, done, "Pricing talk (3fa9c1) is done: nothing is left to do for it."]
+    ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
+    assert.equal(stillLine(arriving), 'A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
   });
 });

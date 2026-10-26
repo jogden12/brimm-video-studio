@@ -535,6 +535,21 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(!guide.includes("I'm done with it"), guide);
     assert.ok(rowOf(`"Hand it to Jason" / "I'm done with it for now"`).includes('`release "<episode>"`'));
   });
+  it("tells her when a video is ready or read, from a wait run in the background, and opens the page once in this chat", () => {
+    const guide = sectionOf(skill, "## Guide her");
+    assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+    for (const words of [
+      '"Tell me when it\'s ready"', '"Let me know when Claude has read it"', '`guide "<video>" tell`',
+      "the Bash tool's run_in_background", "once per video, never Monitor",
+      "I'll tell you here; the Mac doing the work shows a notice too", "tell her its one line in plain words",
+      "with any time it gives", "offer to tell her here when it's ready",
+      "If nothing listed is coming in, being imported or waiting for her answer, ask where she dropped it, then run `guide wait` again.",
+      "If it says it is still on its way, offer to wait again.",
+      "`guide page` the first time in this chat"
+    ]) assert.ok(guide.includes(words), words);
+    assert.ok(!guide.includes("the first time in a session"), guide);
+    assert.ok(sectionOf(skill, "## The card").includes("offer to tell her here when Claude has read it"));
+  });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);
     const asked = row.indexOf('on one `AskUserQuestion`: "Is it a private session with a client or a group?": "Yes", "No"');
