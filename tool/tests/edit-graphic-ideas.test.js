@@ -158,3 +158,26 @@ describe("graphic add --idea", () => {
     }
   });
 });
+
+// --- Task 3 ---
+
+describe("Claude's notes of a raw video she has answered", () => {
+  const NOTES_FILE = "Pricing talk.edit-notes.txt";
+  const IDEA_LINE = "0:13  So the first thing you need to do is know your costs.  |  A chart of what it costs";
+  const NOTES = ["Claude wrote this from the words of the recording and their times only.", "", "Its notes", "A tight talk.", "", "Its ideas for graphics", IDEA_LINE, "", "Its clips", "1. 0:13 to 0:21, 8 seconds", ""].join("\n");
+  const PLACE = 'Say "any ideas for graphics?" to see them, numbered, with their times on the version you are watching.';
+  it("are printed, and open shows their first lines, without the ideas for graphics, whose times are the recording's, and say where they are", async () => {
+    for (const [kind, expected] of [["raw", NOTES.replace(IDEA_LINE, PLACE)], ["episode", NOTES]]) {
+      const t = setup();
+      const record = kind === "episode" ? {} : { version: 3, kind, answer: ANSWERED, name: { text: "Pricing talk", placeholder: false } };
+      const found = episodeFor(t, { record });
+      writeFileSync(join(found.folder, NOTES_FILE), NOTES);
+      const r = await on(t.ctx.deps, "show", FOLDER, "notes");
+      assert.deepEqual([r.code, r.text], [0, expected.replace(/\n$/, "")], kind);
+      const opened = (await on({ ...t.ctx.deps, wait: async () => {}, online: async () => true }, "open", FOLDER)).text.split("\n");
+      const from = opened.indexOf("Claude's notes, the first lines:") + 1;
+      assert.deepEqual(opened.slice(from, from + 7), expected.split("\n").filter((l) => l.trim()).map((l) => `  ${l}`), kind);
+      t.done();
+    }
+  });
+});

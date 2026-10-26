@@ -967,7 +967,7 @@ export async function open(ctx, rest) {
   const notes = join(found.folder, `${stem}.edit-notes.txt`);
   if (existsSync(notes)) {
     say("Claude's notes, the first lines:");
-    for (const line of readFileSync(notes, "utf8").split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
+    for (const line of notesForHer(readFileSync(notes, "utf8"), record).split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
   }
   const candidates = record.reels.filter((reel) => reel.status !== "dropped");
   if (candidates.length) {
@@ -2094,8 +2094,20 @@ async function show(ctx, rest) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [file] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
   }
-  ctx.say(readFileSync(path, "utf8").replace(/\n$/, ""));
+  const text = readFileSync(path, "utf8");
+  ctx.say((kind === "notes" ? notesForHer(text, record) : text).replace(/\n$/, ""));
   return 0;
+}
+
+/** What is said in place of a raw video's ideas for graphics in Claude's notes: their times there are the recording's. */
+const IDEAS_ELSEWHERE = 'Say "any ideas for graphics?" to see them, numbered, with their times on the version you are watching.';
+/** Claude's notes as her chat shows them (show, open): of a raw video she has answered, with their ideas for graphics, whose
+    times are the recording's and not her timeline's, left out and IDEAS_ELSEWHERE in their place (spec 2026-10-22, section 3,
+    "Times"); any other video's as written. Each part of the notes is a heading and its lines, after an empty line (notes.js
+    notesText), and Claude's own notes in them hold no empty line. */
+function notesForHer(text, record) {
+  if (!(isAnswered(record) && recordKind(record) === "raw")) return text;
+  return text.split("\n\n").map((block) => (block.startsWith("Its ideas for graphics\n") ? `Its ideas for graphics\n${IDEAS_ELSEWHERE}` : block)).join("\n\n");
 }
 
 /** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
