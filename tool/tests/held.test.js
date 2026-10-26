@@ -209,6 +209,23 @@ describe("chats that hold a session's words", () => {
     assert.equal(w.held(THIRD), false, "a chat compacted after its own first message is not a fork");
     w.done();
   });
+  it("holds a fork made after a compaction without holding the chat it was forked from", () => {
+    const w = world();
+    const boundary = { type: "system", subtype: "compact_boundary", uuid: "cb-1", timestamp: "2026-10-26T11:00:00.000Z" };
+    untiedMark({ home: w.home, now: at("2026-10-26T09:00:00.000Z") });
+    w.talk(SESSION, [line("a-1", "2026-10-26T10:00:00.000Z")]);
+    // A fork of it made before its compaction: its early lines only.
+    w.talk(THIRD, [{ type: "mode", mode: "default" }, line("a-1", "2026-10-26T10:00:00.000Z"), line("e-1", "2026-10-26T10:30:00.000Z")]);
+    w.more(SESSION, [boundary, line("s-1", "2026-10-26T11:00:01.000Z"), line("p-3", "2026-10-26T11:30:00.000Z")]);
+    assert.equal(w.held(SESSION), false, "begun after the untied mark");
+    w.talk(OTHER, [{ type: "mode", mode: "default" }, boundary, line("s-1", "2026-10-26T11:00:01.000Z"), line("p-3", "2026-10-26T11:30:00.000Z"), line("f-1", "2026-10-26T12:00:00.000Z")]);
+    assert.equal(w.held(OTHER), true, "its first message is a compaction's: it was forked after one");
+    assert.equal(w.held(SESSION), false, "the chat it was forked from, by the lines they share");
+    assert.equal(w.held(THIRD), false, "a fork of that chat made before its compaction");
+    assert.equal(w.held(OTHER), true, "held for good");
+    assert.equal(existsSync(join(heldFolder(w.home), `${OTHER}.uuids.json`)), false, "its uuids, mostly its parent's, are not kept");
+    w.done();
+  });
   it("holds a fork made before the teaching too", () => {
     const w = world();
     w.talk(SESSION, [line("a-1")]);

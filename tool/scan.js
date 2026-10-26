@@ -15,7 +15,9 @@
 // its next look. Found once, a fork stays found. While a uuids file cannot be read, a look is unread and keeps nothing, so the chat
 // is held for that look alone. The scan also counts the times the transcript was compacted (a `compact_boundary` line), so that
 // held.js keeps a held chat's uuids again after each: a fork made after carries only the lines from there on. A transcript whose
-// first message is a compaction's was made that way, from a chat it cannot tell, and is taken as forked too.
+// first message is a compaction's was made that way, from a chat it cannot tell: the scan says so apart (`compactedFirst`, which
+// stays found as a fork does), not as forked, since held.js holds such a chat without keeping its uuids, which are mostly the lines
+// of the chat it was forked from.
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -164,13 +166,14 @@ function keep(file, state) {
 /** The earlier of two timestamps, either of which may be null. */
 const earlier = (a, b) => (a === null ? b : b === null ? a : Date.parse(b) < Date.parse(a) ? b : a);
 
-/** What a look at the transcript `transcriptPath` of the chat `sessionId` finds, in `home`: { start, added, unread, forked }. `start`
-    is the least timestamp of any complete line so far, or null while none has one; `added` is the additionalWorkingDirectories of the
-    latest line whose attachment is an environment snapshot, or null while there is none; `forked` is whether a line holds a message
-    uuid of a held chat; `compactions` how many lines mark the transcript compacted; `unread` is true when the transcript, or the held folder, cannot be read, or the id is not a chat's id (and
-    then nothing is read or written). */
+/** What a look at the transcript `transcriptPath` of the chat `sessionId` finds, in `home`: { start, added, unread, forked,
+    compactions, compactedFirst }. `start` is the least timestamp of any complete line so far, or null while none has one; `added` is
+    the additionalWorkingDirectories of the latest line whose attachment is an environment snapshot, or null while there is none;
+    `forked` is whether a line holds a message uuid of a held chat; `compactions` how many lines mark the transcript compacted;
+    `compactedFirst` whether its first message is a compaction's; `unread` is true when the transcript, or the held folder, cannot be
+    read, or the id is not a chat's id (and then nothing is read or written). */
 export function scanTranscript({ home, sessionId, transcriptPath }) {
-  const none = { start: null, added: null, unread: true, forked: false, compactions: 0 };
+  const none = { start: null, added: null, unread: true, forked: false, compactions: 0, compactedFirst: false };
   const file = scanFile(home, sessionId);
   if (!file || typeof transcriptPath !== "string" || !transcriptPath) return none;
   let fd;
@@ -185,7 +188,9 @@ export function scanTranscript({ home, sessionId, transcriptPath }) {
     if (!files) return none;
     const was = kept(file);
     const same = was && was.ino === ino && was.offset <= size && allChecked(was.checked, files);
-    const state = same ? { ...was, forked: Boolean(was.forked) } : { ino, offset: 0, start: null, added: null, forked: Boolean(was && was.forked), compactions: 0, messages: false };
+    const state = same
+      ? { ...was, forked: Boolean(was.forked), compactedFirst: Boolean(was.compactedFirst) }
+      : { ino, offset: 0, start: null, added: null, forked: Boolean(was && was.forked), compactions: 0, messages: false, compactedFirst: Boolean(was && was.compactedFirst) };
     state.compactions = Number.isSafeInteger(state.compactions) ? state.compactions : 0;
     let uuids;
     const isHeld = (uuid) => {
@@ -204,14 +209,14 @@ export function scanTranscript({ home, sessionId, transcriptPath }) {
       if (boundary) state.compactions += 1;
       if (typeof entry.uuid === "string" && !state.messages) {
         state.messages = true;
-        if (boundary) state.forked = true;
+        if (boundary) state.compactedFirst = true;
       }
       if (!state.forked && files.length && typeof entry.uuid === "string" && isHeld(entry.uuid)) state.forked = true;
     });
     state.size = size;
     state.checked = files;
     keep(file, state);
-    return { start: state.start, added: state.added, unread: false, forked: state.forked, compactions: state.compactions };
+    return { start: state.start, added: state.added, unread: false, forked: state.forked, compactions: state.compactions, compactedFirst: state.compactedFirst };
   } catch (e) {
     return none;
   } finally {

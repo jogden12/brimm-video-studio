@@ -2,8 +2,10 @@
 // keeps today's lock, so that nothing a page or a file steers it to do can carry those words out. edit.js marks such a chat before
 // it prints anything drawn from a session's words (markChat): the time, the chat's id (CLAUDE_CODE_SESSION_ID) and the `claude`
 // process above it, tied when CLAUDE_PID is that process. The guard then holds (chatHeld) a chat whose id is a mark's, whose claude
-// is a mark's, or whose transcript began at or before an untied mark or a session after all (noteAfterAll), and a fork of a held
-// chat, whose transcript holds that chat's message uuids (scan.js). Everything is kept in Application Support (held/), on this Mac's
+// is a mark's, or whose transcript began at or before an untied mark or a session after all (noteAfterAll), a fork of a held
+// chat, whose transcript holds that chat's message uuids (scan.js), and a fork made after a compaction, whose transcript begins with
+// the compaction's lines, from a chat it cannot tell: held for good, its uuids not kept, since they are mostly the lines of the
+// chat it was forked from, which they would then hold too. Everything is kept in Application Support (held/), on this Mac's
 // own disk, which the sandbox cannot reach, each file made new; and the check fails closed: a marks folder, a mark or a note that
 // cannot be read, an id that is not a chat's, or a transcript that cannot be read while any mark or note exists, holds the chat.
 //
@@ -227,9 +229,11 @@ export const clearStrictSeen = (home) => rmSync(strictSeenFile(home), { force: t
     none, or "unknown" when the claude above could not be found),
     holds a session's words: a mark's id is its id; a mark's claude is its claude; an untied mark's or a session after all's time is
     at or after its transcript's start (the least timestamp of any line; none at all, while such a time exists, holds it); or its
-    transcript holds a held chat's message uuid, or begins with a compaction's (a fork). When it holds a chat it keeps that chat's
-    uuids, and it keeps those of each marked or held chat whose transcript lies beside this one, again after each compaction, so
-    that a fork made before that chat is asked again is held too.
+    transcript holds a held chat's message uuid (a fork), or begins with a compaction's (a fork made after one). When it holds a chat
+    it keeps that chat's uuids, and it keeps those of each marked or held chat whose transcript lies beside this one, again after
+    each compaction, so that a fork made before that chat is asked again is held too. A fork made after a compaction it holds
+    without keeping its uuids: they are mostly the lines of the chat it was forked from, which they would hold for good, and its
+    own transcript always begins so, which holds it at each call.
     It fails closed: an id that is not a chat's, a held folder, a mark or a note that cannot be read, or a transcript that cannot be
     read while any mark or note exists, holds the chat; with none, it lets the chat go without reading its transcript. */
 export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
@@ -260,6 +264,7 @@ export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
   const scan = scanTranscript({ home, sessionId, transcriptPath });
   if (scan.unread) return true;
   if (scan.forked) return hold(scan);
+  if (scan.compactedFirst) return true;
   if (times.length && (scan.start === null || times.some((at) => Date.parse(at) >= Date.parse(scan.start)))) return hold(scan);
   return false;
 }
