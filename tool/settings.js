@@ -34,7 +34,7 @@ import { textWriter } from "./dropbox.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, realOf } from "./places.js";
-import { untiedMark } from "./held.js";
+import { clearStrictSeen, strictSeen, untiedMark } from "./held.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -95,7 +95,7 @@ function teachingsWhole(t) {
 
 /** The tools the open guard decides by a rule of its own (open-lock.js), which no `tool` entry speaks for: Bash, Claude's file
     tools, skills, the subagent tool, SendUserFile, the web tools (held until --web open), and those it leaves to Claude Code. */
-export const TOOLS_WITH_RULES = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SendUserFile", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"];
+export const TOOLS_WITH_RULES = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SubagentHandback", "SendUserFile", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"];
 
 /** Whether `entry` is one her folder may allow besides the default (design 2026-10-26, section 2, "The allowlist is data"):
     typed, and exact. A skill by its name; a claude.ai connector's tool by its exact name, never a local extension's, never a
@@ -768,10 +768,13 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
       say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts: shown })[".claude/settings.json"].trimEnd());
       return 0;
     }
-    if (open && !openAlready(home)) {
+    // Chats from before the open lock, or from a time her folder kept the open shape under the strict lock, may hold a session's words
+    // in their command output (R7).
+    if (open && (!openAlready(home) || strictSeen(home))) {
       try {
         untiedMark({ home, now });
         clearChatOutput(facts.tmp, facts.uid, realOf(studioFolder(home)));
+        clearStrictSeen(home);
       } catch (e) {
         say(`The folder for Claude could not be written (the chats before the open lock could not be marked: ${e.code || "an error"}).`);
         return 1;

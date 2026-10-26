@@ -224,6 +224,9 @@ describe("paths by what they are", () => {
     assert.equal(ix.at(join(w.home, "documents", "ZOOM", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));
     assert.equal(ix.at(`/System/Volumes/Data${join(w.home, "Documents", "Zoom")}`)?.path, realOf(join(w.home, "Documents", "Zoom")));
     assert.equal(ix.at(join(w.home, "Documents", "Zoom recordings", "x.m4a")), null);
+    // A long s is an s to macOS, whose names fold letter case as Unicode does.
+    assert.equal(ix.at(join(w.home, "Document\u017f", "Zoom", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));
+    assert.equal(ix.at(join(w.home, "Movie\u017f", "Final Cut Backup\u017f", "x.fcpbundle"))?.path, realOf(join(w.home, "Movies", "Final Cut Backups")));
   });
   it("holds a path by macOS's dot-root spellings, /.vol, /.nofollow and /.resolve, and a search of them", () => {
     for (const p of ["/.vol", "/.vol/16777234/2", `/.nofollow${w.episode}`, `/.resolve/1${w.episode}`, `/.nofollow${w.notes}`]) assert.ok(ix.at(p), p);
@@ -252,6 +255,9 @@ describe("paths by what they are", () => {
     assert.deepEqual(pathsIn({ file_path: "~/x", nested: { list: ["../y", "plain words", "/abs", "notes.txt"] }, url: "https://a.b/c", n: 3 }, w.cwd, w.home).sort(), [join(w.home, "x"), resolve(w.cwd, "../y"), "/abs", join(w.cwd, "notes.txt")].sort());
     assert.deepEqual(pathsIn({ a: "~", b: ["", null, true, { c: [[`${w.root}/Episodes`]] }] }, w.cwd, w.home).sort(), [w.home, join(w.root, "Episodes")].sort());
     assert.deepEqual(pathsIn("plain words", w.cwd, w.home), []);
+    // White space around a path is taken off, as Claude Code's own tools take it off.
+    assert.deepEqual(pathsIn({ a: ` ${w.episode}`, b: `\n${w.episode}`, c: `${w.episode} `, d: `\t~/x\n` }, w.cwd, w.home).sort(), [w.episode, join(w.home, "x")].sort());
+    assert.deepEqual(pathsIn({ a: "   ", b: "\n" }, w.cwd, w.home), []);
   });
   it("says a search folder holds a gated place when one is inside it", () => {
     // Zoom's folder, <home>/Documents/Zoom, is gated, so Documents holds one; Pictures holds none.

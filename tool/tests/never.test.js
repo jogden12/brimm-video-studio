@@ -15,6 +15,12 @@ describe("the never list", () => {
   it("refuses by name every tool the design puts on the never list", () => {
     for (const name of ["Artifact","ArtifactComments","ArtifactData","RemoteTrigger","EnterWorktree","ExitWorktree","SearchPlugins","SuggestPluginInstall","SuggestSkills","SendMessage","DesignSync","NotebookEdit","Monitor"]) assert.equal(neverCaught(name), true, name);
   });
+  it("refuses the tools that read an MCP server's resources, which reach a local extension's whatever server they name", () => {
+    for (const name of ["ReadMcpResourceTool", "ReadMcpResourceDirTool", "ListMcpResourcesTool", "ReadMcpResource", "ReadMcpResourceDir", "ListMcpResources"]) {
+      assert.equal(neverCaught(name, { server: "knowledge-mcp", uri: "x" }), true, name);
+      assert.ok(neverDenyRules().includes(name), name);
+    }
+  });
   it("refuses the screen, the browser, the terminal, every local extension and every tool of the app's own, by kind, and never the drawing tools", () => {
     for (const name of ["mcp__computer-use__screenshot","mcp__Claude_Browser__navigate","mcp__claude-in-chrome__navigate","mcp__Control_Chrome__open_url","mcp__playwright__browser_click","mcp__terminal__run_in_terminal","mcp__PDF_Tools__fill_pdf","mcp__plugin_pdf-viewer_pdf__display_pdf","mcp__knowledge-mcp__kb_search","mcp__ccd_host__reveal_path","mcp__ccd_directory__change_directory","mcp__ccd_session__start_session","mcp__ccd_session_mgmt__send_message","mcp__ccd_settings__set_setting","mcp__ccd_connectors__reconnect_session_connector","mcp__scheduled-tasks__create_scheduled_task","mcp__mcp-registry__search_mcp_registry","mcp__a_server_added_later__anything"]) assert.equal(neverCaught(name), true, name);
     for (const name of DRAWING) assert.equal(neverCaught(name), false, name);

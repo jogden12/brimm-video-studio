@@ -8,7 +8,8 @@
 //   6. a skill this Mac's allowlist names: allow;
 //   then a tool an exact `tool` entry names (PushNotification, the drawing tools), unless it is one with a rule of its own;
 //   7. an MCP tool: allow only a claude.ai connector's tool an `mcp-tool` entry names exactly, that the never list does not catch;
-//   8. the subagent tool (its limits are the never list's), SendUserFile, and the web tools: held until this Mac opens them, and
+//   8. the subagent tool (its limits are the never list's) and a subagent's hand-back, SendUserFile, and the web tools: held until
+//      this Mac opens them, and
 //      WebFetch never to a numeric, local or privately answering address (fetchable.js);
 //   9. the card, the task list and ToolSearch: no answer, left to Claude Code (the card must stay so);
 //  10. anything else: deny.
@@ -16,7 +17,7 @@
 // that holds a session's words (held.js) may also Read its own words file, answered allow, never pass: a pass would leave it to
 // Claude Code, whose card for a file outside her folder offers to add the folder or always allow, either of which loosens the lock;
 // and it runs only the edit.js commands a session runs (R29), so that it cannot write a session's words into a record another chat
-// reads.
+// reads: in a loosened lock too, since such a record outlives the loosening, and in a call the guard cannot judge.
 //
 // guardAnswer is what the hook runs: the home folder is the one above her folder (R25); the lock in effect is this Mac's
 // (effectiveLock), strict, or settings that cannot be read, being today's guard alone; on an open-lock Mac it makes the shared lock
@@ -41,9 +42,9 @@ import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
 import { fetchWhy } from "./fetchable.js";
-import { claudeDirName, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
+import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
-import { HELD_NARROWED, HELD_REFUSED, chatHeld, wordsFolder } from "./held.js";
+import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeen, wordsFolder } from "./held.js";
 import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
@@ -72,7 +73,6 @@ const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
 const NEVER_WRITTEN = new Set(["claude.md", "claude.local.md", ".mcp.json"]);
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const fold = (text) => text.toLowerCase();
 
 /** `path` as the real path of the gated place `place` with the rest of it after, when it lies inside it; else `path` resolved; null
     when it is the place itself, which no carve-out opens whole. */
@@ -110,11 +110,12 @@ function ownIdentity(path) {
   }
 }
 
-/** Whether Write or Edit may write `filePath`: a path inside the workshop, found by the identity of the workshop folder itself, with
+/** Whether Write or Edit may write `filePath`: spelled with no white space around it (which Claude Code would take off, so that the
+    path written is not the path looked at), a path inside the workshop, found by the identity of the workshop folder itself, with
     no part below it a link (the last part included, dangling or not), no `.claude` part, and a name that is not CLAUDE.md,
     CLAUDE.local.md or .mcp.json, in any letter case; one that is there must have its real path inside the workshop. */
 function writable(filePath, cwd, home) {
-  if (typeof filePath !== "string" || filePath === "") return false;
+  if (typeof filePath !== "string" || filePath === "" || filePath !== filePath.trim()) return false;
   try {
     const path = filePath === "~" || filePath.startsWith("~/") ? resolve(home, filePath.slice(2)) : resolve(cwd, filePath);
     const workshop = ownIdentity(workshopFolder(home));
@@ -182,8 +183,10 @@ function bashDecision(command, background, cwd, ctx) {
     if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("brimm-video's own command");
     return deny(RUN_ALONE);
   }
-  const folded = fold(command);
-  if (folded.includes("edit.js") || folded.includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
+  // The command as written, and its words with quotes and backslashes taken off, as the shell would run them.
+  for (const text of [command, wordsOf(command).join(" ")]) {
+    if (fold(text).includes("edit.js") || fold(text).includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
+  }
   if (pathsIn(wordsOf(command), cwd, ctx.home).some((path) => ctx.index.at(path))) return deny(GATED_REFUSED);
   return allow("a command in the sandbox");
 }
@@ -212,13 +215,18 @@ function firstWord(command, ctx) {
   return word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word;
 }
 
+/** `answer`, today's guard's, narrowed for a chat that holds a session's words: edit.js only for the commands a session runs. */
+function narrowed(answer, input, ctx) {
+  const command = isObject(input) && isObject(input.tool_input) ? input.tool_input.command : undefined;
+  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(command, ctx))) return deny(HELD_NARROWED);
+  return answer;
+}
+
 /** Step 2: what a chat that holds a session's words may do. Today's guard, with a Read of its own words file allowed, edit.js only
     for the commands a session runs, and every refusal saying the chat is held. */
 function heldDecision(input, ctx) {
   if (ownWords(input, ctx)) return allow("its own words");
-  const answer = todays(input, ctx, HELD_REFUSED);
-  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(input.tool_input.command, ctx))) return deny(HELD_NARROWED);
-  return answer;
+  return narrowed(todays(input, ctx, HELD_REFUSED), input, ctx);
 }
 
 /** The tool's input as step 4 looks for paths in it: all of it, but what Write writes and what Edit changes. */
@@ -233,14 +241,14 @@ const PASS = { decision: "pass", reason: "" };
 
 /** What the open guard answers to a tool call, `input` as the PreToolUse hook is given it, in the context `ctx` (GuardCtx):
     { checkout, node, folder, home, uid, tmp, index, allow, web, resolve, loosened, held }, `allow` being the allowlist (the
-    default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its addresses. Gives
-    { decision: "allow"|"deny"|"pass", reason }. */
+    default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its addresses. A loosened
+    lock is today's guard, narrowed as for a held chat when `held` is true too. Gives { decision: "allow"|"deny"|"pass", reason }. */
 export async function openDecision(input, ctx) {
   const name = isObject(input) ? input.tool_name : undefined;
   const given = isObject(input) && isObject(input.tool_input) ? input.tool_input : {};
   const named = (type, what) => Array.isArray(ctx.allow) && ctx.allow.some((entry) => isObject(entry) && entry.type === type && entry.name === what);
 
-  if (ctx.loosened) return todays(input, ctx, LOCK_CHANGED);
+  if (ctx.loosened) return ctx.held ? narrowed(todays(input, ctx, LOCK_CHANGED), input, ctx) : todays(input, ctx, LOCK_CHANGED);
   if (ctx.held) return heldDecision(input, ctx);
 
   if (neverCaught(name, given)) return deny(NEVER_REFUSED);
@@ -259,6 +267,7 @@ export async function openDecision(input, ctx) {
   if (!OWN_RULES.has(name) && named("tool", name)) return allow("a tool this folder allows");
   if (name.startsWith("mcp__")) return isConnector(name) && named("mcp-tool", name) ? allow("a connector's tool this Mac allows") : deny(NOT_NAMED);
   if (name === "Agent" || name === "Task") return allow("a subagent of Claude Code's own");
+  if (name === "SubagentHandback") return allow("a subagent's report, handed back");
   if (name === "SendUserFile") return allow("a file shown to her");
   if (name === "WebSearch" || name === "WebFetch") {
     if (ctx.web !== "open") return deny(WEB_HELD);
@@ -279,6 +288,15 @@ const cacheFile = (home) => join(home, "Library", "Application Support", "BRIMM 
 const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 const MANAGED_PREFS = "/Library/Managed Preferences";
 const PREFS_FILE = "com.anthropic.claudecode.plist";
+
+/** The entries of `dir`, by their paths; none when it cannot be listed. */
+function entriesOf(dir) {
+  try {
+    return readdirSync(dir).map((name) => join(dir, name));
+  } catch (e) {
+    return [];
+  }
+}
 
 /** What a file or folder is now, for the cache's signature: its size, time and inode (and, for a link, those of where it leads), or
     "missing". */
@@ -317,6 +335,7 @@ function foldersOf(dir) {
     open shape is made from. */
 function watched({ home, folder, checkout, env, deps, settings, claude }) {
   const config = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  const agentFolders = [join(home, ".claude", "agents"), join(config, "agents"), join(folder, ".claude", "agents")];
   const managed = deps.managedDir || MANAGED_DIR;
   const prefs = deps.managedPrefs || MANAGED_PREFS;
   const plugins = join(home, ".claude", "plugins");
@@ -340,6 +359,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     join(home, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
     join(plugins, "synced"), ...foldersOf(join(plugins, "synced")),
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
+    // The agent definitions Claude Code would load, one named as a built-in agent among them, each file by itself.
+    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...entriesOf(dir)]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
     prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),
@@ -408,6 +429,29 @@ function lockLines({ home, checkout, folder, node, input, deps, env, settings, f
   return lines;
 }
 
+/** Whether her folder has the open lock's shape: its settings hold the sandbox, which only the open shape writes. */
+function openShaped(folder) {
+  try {
+    const written = JSON.parse(readFileSync(join(folder, ".claude", "settings.json"), "utf8"));
+    return isObject(written) && Object.hasOwn(written, "sandbox");
+  } catch (e) {
+    return false;
+  }
+}
+
+/** What loosens the open lock beyond the shared lock check, as lines for Jason: Claude Code keeping its settings and chats somewhere
+    other than ~/.claude (CLAUDE_CONFIG_DIR), which no gated place holds; and a time her folder kept the open shape under the strict
+    lock (noteStrictSeen), whose chats may have left a session's words in command output, until settings.js studio writes it again. */
+function beyondWhy(env, home) {
+  const why = [];
+  const config = env.CLAUDE_CONFIG_DIR;
+  if (config && (!isAbsolute(config) || fold(realOf(resolve(config))) !== fold(realOf(join(home, ".claude"))))) {
+    why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
+  }
+  if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");
+  return why;
+}
+
 /** Look a name up as WebFetch would, every address it has, within five seconds. */
 function lookUp(host) {
   let timer;
@@ -430,7 +474,12 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   if (typeof folder !== "string" || !isAbsolute(folder)) return today();
   const home = dirname(folder);
   const settings = readSettings(home).settings;
-  if (!settings || effectiveLock(settings, deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE) !== "open") return today();
+  if (!settings || effectiveLock(settings, deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE) !== "open") {
+    // Her folder left with the open shape while the lock in effect is strict: noted, so that the open lock is not in effect again
+    // until its chats' command output is taken away (R7).
+    if (openShaped(folder)) noteStrictSeen(home, deps.now ? Number(deps.now()) : Date.now());
+    return today();
+  }
   const facts = factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
   const ctx = {
     checkout, node, folder, home, uid: facts.uid, tmp: facts.tmp,
@@ -439,7 +488,8 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   };
   const whole = isObject(input) && typeof input.cwd === "string" && isAbsolute(input.cwd) && typeof input.session_id === "string" && SESSION_ID.test(input.session_id)
     && typeof input.transcript_path === "string" && isAbsolute(input.transcript_path) && isObject(input.tool_input);
-  if (!whole) return openDecision(input, { ...ctx, loosened: true });
+  // A call it cannot judge is loosened, and kept to a session's commands, since whether its chat holds a session's words is not known.
+  if (!whole) return openDecision(input, { ...ctx, loosened: true, held: true });
   const text = (deps.ps || readProcesses)();
   const table = typeof text === "string" ? processTable(text) : null;
   const above = table ? claudeAbove(chainUp(table, deps.pid !== undefined ? deps.pid : process.pid)) : null;
@@ -449,8 +499,7 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const env = { ...(deps.env || process.env), CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: input.session_id };
   const check = { ...deps, settings, env, ps: () => text, cwd: hers ? folder : input.cwd, transcript: hers ? input.transcript_path : null };
   const now = deps.now ? Number(deps.now()) : Date.now();
-  const lines = lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now });
-  if (lines.length) return openDecision(input, { ...ctx, loosened: true });
-  const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : null });
-  return openDecision(input, { ...ctx, held });
+  const lines = [...lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now }), ...beyondWhy(env, home)];
+  const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : "unknown" });
+  return openDecision(input, { ...ctx, loosened: lines.length > 0, held });
 }

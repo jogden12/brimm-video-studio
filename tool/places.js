@@ -133,7 +133,9 @@ function upward(path) {
   }
 }
 
-const fold = (path) => path.toLowerCase();
+/** A path or name as macOS compares names: letter case folded as Unicode folds it, wider than toLowerCase (a long s is an s, a
+    dotless i an i), and compatibility forms made plain. Stricter is closed: a name it folds that macOS keeps apart is held too. */
+export const fold = (path) => path.normalize("NFKC").toLowerCase().replace(/\u0131/g, "i");
 
 /** A path under one of macOS's dot-root folders, /.vol (a file by its device and inode), /.nofollow or /.resolve, which name a
     file by a way no folder along it shows: such a path is held, whatever it names. */
@@ -243,9 +245,10 @@ const PATH_MAX = 1024;
 
 /** One string of a tool's input as a path, resolved, or null when it is not one: absolute, starting with `~` (`~/` from the home
     folder, `~name` from the folder that holds the home folders), holding `..`, or naming something there from `cwd`; and, so
-    that a long text (a file's contents) is not walked folder by folder, shorter than any path macOS takes. */
+    that a long text (a file's contents) is not walked folder by folder, shorter than any path macOS takes. White space around it
+    is taken off first, as Claude Code's own tools take it off (expandPath). */
 function pathOf(text, cwd, home) {
-  const path = resolvedOf(text, cwd, home);
+  const path = resolvedOf(text.trim(), cwd, home);
   return path !== null && Buffer.byteLength(path) < PATH_MAX ? path : null;
 }
 
