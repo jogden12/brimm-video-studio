@@ -2,14 +2,18 @@
 // openApp and run are stand-ins, and nothing opens.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
 import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
 import { localStamp } from "../episode.js";
 import { writeStatus } from "../importing.js";
-import { progressFolder } from "../progress.js";
+import { progressFolder, RATES } from "../progress.js";
+import { clockAt } from "../unedited.js";
+import { writePending } from "../filing.js";
+import { pendingFolder } from "../settings.js";
+import { lockOf } from "../detached.js";
 import { setup, episodeAs, otherMac } from "./episodes.js";
 
 async function on(deps, ...argv) {
@@ -154,6 +158,29 @@ describe("guide, from the records", () => {
     assert.equal((await on(there, "guide", "Launch talk")).said.at(-1), "Step: taken");
     t.done();
   });
+  it("says when Claude starts reading a raw video, once the import has checked its copies, and when its rough cut is ready, from this Mac's speeds; and no time once Claude is at work", async () => {
+    const t = setup();
+    const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
+    writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    const due = t.now() + 10 * 60 * 1000;
+    const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(due)}, once the import has checked its copies.`;
+    const ROUGH = `Its rough cut is ready about ${clockAt(due + 1032 * 1000)}.`;
+    const NOTICE = "A notice comes when it is done.";
+    // No speed measured yet: the time it starts alone.
+    assert.deepEqual((await on(light(t), "guide", "Long talk")).said, [`${STARTS} ${NOTICE}`]);
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    writeFileSync(join(progressFolder(t.home), RATES), JSON.stringify({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }));
+    assert.deepEqual((await on(light(t), "guide", "Long talk")).said, [`${STARTS} ${ROUGH} ${NOTICE}`]);
+    // Her answer started its reading, which waits for the check: the same times, not "Claude is reading it".
+    mkdirSync(dirname(lockOf(t.home, found.name)), { recursive: true });
+    writeFileSync(lockOf(t.home, found.name), JSON.stringify({ pid: 777, command: "read" }));
+    const reading = light(t, { alive: (pid) => pid === 777 });
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, [`${STARTS} ${ROUGH} ${NOTICE}`]);
+    // The check made, Claude is at work: when it began is not kept, so no time.
+    rmSync(join(pendingFolder(t.home), `${found.record.id}.json`));
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, ['Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".']);
+    t.done();
+  });
   it("gives a video that was a session after all its withdrawal on Principles first, whatever her note says, and then the session's own step", async () => {
     const t = setup();
     const rel = "final/Session, 2026-10-20.brimm-ops.json";
@@ -202,7 +229,7 @@ describe("guide, from the drop folders", () => {
       '  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.',
       "  GMT20261020-140000_Recording: It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder.",
       '  Video of 20 Oct, 14:00 (Mac Studio): Its import did not finish. Say "try it again".',
-      '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'
+      `  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at writing the transcript, about 6 minutes left in all. Ready about ${clockAt(t.now() + 360000)}. Wait for the "Ready" notice.`
     ]);
     assert.doesNotMatch(r.said.join("\n"), /Jane|Client|Second|Third|Other|Filed|\.mov|\.mp4/);
     t.done();
@@ -223,6 +250,20 @@ describe("guide, from the drop folders", () => {
       "  Video of 20 Oct, 14:50 (Sallie's laptop): It is being imported on Sallie's laptop, at writing the transcript. Wait for the \"Ready\" notice on that Mac."
     ]);
     assert.doesNotMatch(r.said.join("\n"), /Other|Another|\.mov|minute/);
+    assert.doesNotMatch(r.said.join("\n"), /Ready about/);
+    t.done();
+  });
+  it("says when a video importing on this Mac should be ready: by the time left in all, or on its last step by that step's, and gives no time while a later step's speed is not known", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    statusOf(t, { import: "d1", video: "Client Jane.mov", step: "Filing", label: "Video of 20 Oct, 14:58 (Mac Studio)", pid: 4242 });
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    const run = (over) => writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Filing", n: 4, of: 4, percent: 50, left: 120, total: null, detail: "", started: 0, updated: 0, ...over }));
+    const deps = light(t, { alive: (pid) => pid === 4242 });
+    run({});
+    assert.equal((await on(deps, "guide")).said[2], `  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at filing, about 2 minutes left of this step. Ready about ${clockAt(t.now() + 120000)}. Wait for the "Ready" notice.`);
+    run({ n: 2 });
+    assert.equal((await on(deps, "guide")).said[2], '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at filing, about 2 minutes left of this step. Wait for the "Ready" notice.');
     t.done();
   });
   // Not in the plan's tests: the other ways an import does not finish, and the size a running import or a hold is taken at.

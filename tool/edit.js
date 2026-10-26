@@ -38,7 +38,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
 import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
-import { progressFolder, reporter } from "./progress.js";
+import { progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -5249,20 +5249,27 @@ function guideHandoff(ctx, e, r, links, v2) {
   return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
 }
 
-/** Where Claude's reading of a video has got, for the guide: { reading, readsAt }. "done" once the reading that counts is in the
-    record (currentReading; a session's, sessionReading); "running" while this Mac's detached reading is at work on it (`running`,
-    the command runningCommand says); "failed" when the reading this Mac last ran of it since her answer (a session's, since its
-    teachings were asked for) did not end well; "later" for a raw video whose reading waits for the import's late check, at the
-    time it is due on this Mac's clock (`readsAt`); and "none" otherwise. A result's `started` is in milliseconds and the record's
-    times are text: each is read as a time before they are compared. */
-function guideReading(ctx, e, r, kind, running) {
+/** Where Claude's reading of a video has got, for the guide: { reading, readsAt, roughAt }. "done" once the reading that counts is
+    in the record (currentReading; a session's, sessionReading); "later" for a raw video whose reading waits for the import's late
+    check, also while this Mac's reading of it runs but the check still holds it: Claude starts at the time the check is due
+    (`readsAt`, on this Mac's clock), and its rough cut should be ready at `roughAt`, by the speeds this Mac measured (`rates`,
+    guide.js roughIn), "" while one is not known; "running" while this Mac's detached reading is at work on it (`running`, the
+    command runningCommand says), with no time, since when the run began is not kept; "failed" when the reading this Mac last ran
+    of it since her answer (a session's, since its teachings were asked for) did not end well; and "none" otherwise. A result's
+    `started` is in milliseconds and the record's times are text: each is read as a time before they are compared. */
+function guideReading(ctx, e, r, kind, running, rates) {
   if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
-  if (running === "read") return { reading: "running" };
+  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  /** A raw reading that waits for the import's late check: when Claude starts, and when its rough cut should be ready. */
+  const later = () => {
+    const rough = roughIn(rates, r.video && r.video.seconds);
+    return { reading: "later", readsAt: clockAt(due), roughAt: rough === null ? "" : clockAt(due + rough * 1000) };
+  };
+  if (running === "read") return due === null ? { reading: "running" } : later();
   const result = readResult(ctx.home, e.name, "read");
   const since = Date.parse(kind === "session" ? r.session && r.session.asked : r.answer.at);
   if (result && result.ok === false && result.started >= since) return { reading: "failed" };
-  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
-  return due === null ? { reading: "none" } : { reading: "later", readsAt: clockAt(due) };
+  return due === null ? { reading: "none" } : later();
 }
 
 /** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
@@ -5278,10 +5285,10 @@ function guideSession(ctx, e, r) {
 }
 
 /** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
-    what this Mac holds of it. A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    what this Mac holds of it, and the speeds this Mac measured (`rates`, progress.js readRates). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
-function guideFacts(ctx, e, links) {
+function guideFacts(ctx, e, links, rates) {
   const r = e.inForce;
   const kind = recordKind(r);
   const hidden = isGated(e);
@@ -5302,7 +5309,7 @@ function guideFacts(ctx, e, links) {
     heldAsSession: e.held && !gated(r),
     elsewhere: Boolean(away),
     readingsOff: ctx.settings.readings === false,
-    ...guideReading(ctx, e, r, kind, running),
+    ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,
     v2,
     placeholder: r.name.placeholder === true,
@@ -5341,7 +5348,8 @@ function panelRuns(ctx) {
     imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
     label, else by what it is and its size, never by its file's name, which may be a client's. It came when this Mac's import
     first saw it (seen.json), as `episodes` says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's
-    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. */
+    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. And when it
+    should be Ready, from the same run (guide.js readyIn), on this Mac's clock. */
 function guideDrops(ctx) {
   const now = ctx.now();
   const statuses = readStatuses(ctx.root, now);
@@ -5370,7 +5378,7 @@ function guideDrops(ctx) {
       const label = labelIn(mine, video, mac);
       const run = here && label ? runs.find((r) => r.video === label) : undefined;
       const noted = here ? seen[seenKey(video, found)] : undefined;
-      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null };
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null, readyAt: run && readyIn(run) !== null ? clockAt(now + readyIn(run) * 1000) : "" };
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
     }
   }
@@ -5384,10 +5392,11 @@ function guideDrops(ctx) {
     Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
     is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
-    again since its finish) stays. Her notes and the versions of every video are read once. */
+    again since its finish) stays. Her notes, the versions of every video and this Mac's measured speeds are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
+  const rates = readRates(progressFolder(ctx.home));
   const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -5398,7 +5407,7 @@ function guideItems(ctx) {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links);
+    const facts = guideFacts(ctx, e, links, rates);
     items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
   }
   const newest = new Map();
