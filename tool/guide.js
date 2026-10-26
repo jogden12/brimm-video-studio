@@ -147,6 +147,8 @@ export function opsText(handoff, step, again) {
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
       its empty revision is still to be written.
     - `handoff`, its newest hand-off (as opsNext reads it), or null.
+    - `source`, what `guide tell` follows it by, and never said: { mac, file, bytes }, the Mac whose drop folder it is or was in,
+      and its file's name and size; or null when they are not known.
     Her notes on this Mac (Notes): { version: 1, handoffs, finished }: her note on each hand-off, by the hand-off's id, and when
     she said each video was finished (localStamp), by its record's id.
     The next step (Next): { done: true }, or { done: false, stage, text, step, after }. `stage` names where it has got, `text` is
@@ -370,3 +372,48 @@ export const COMING = ["arriving", "importing", "reading-later", "reading", "ses
     the time left do not. Each is kept as JSON and the list sorted, so the order the videos were read in is no change. */
 export const signatureOf = (items) =>
   JSON.stringify(items.filter(({ next }) => !next.done).map(({ facts, next }) => JSON.stringify([facts.id, next.stage, facts.drop ? facts.drop.step : ""])).sort());
+
+/** How long `guide tell` waits at most for a video's next point, in the background, and how often it looks again in that time. */
+export const TELL_MS = 60 * 60 * 1000;
+export const TELL_POLL_MS = 15000;
+
+/** What `guide tell` follows a video by (Trail): its record's id once it has one; in a drop folder, the Mac whose folder it is in,
+    and its file's name and size (`facts.source`), which are never said. */
+export const trailOf = (facts) => (facts.id ? { id: facts.id } : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes });
+
+/** The video `trail` follows, found again among `items`: { item, trail }, with the trail as it is now, or null when none is. By
+    its id once it has one. In a drop folder, by its Mac and file, whose size grows while it comes in. Once it has left the drop
+    folder, by the newest answered video holding a file of that name and size, as the import files it (filing.js
+    holdingEpisode): from then on by that one's id. */
+export function follow(trail, items) {
+  if (trail.id) {
+    const item = items.find(({ facts }) => facts.id === trail.id);
+    return item ? { item, trail } : null;
+  }
+  const dropped = items.find(({ facts }) => facts.drop && facts.source.mac === trail.mac && facts.source.file === trail.file);
+  if (dropped) return { item: dropped, trail: { ...trail, bytes: dropped.facts.source.bytes } };
+  const filed = items.filter(({ facts }) => !facts.drop && facts.source && facts.source.file === trail.file && facts.source.bytes === trail.bytes).sort((a, b) => b.facts.at - a.facts.at)[0];
+  return filed ? { item: filed, trail: { id: filed.facts.id } } : null;
+}
+
+const READ_IT = "Claude has read it.";
+
+/** What `guide tell` says once its video has reached its next point, or null while it is still on its way. `was` is the video
+    when the wait began, `seen` as it was last found, and `now` as it is found now, or null when it is not under way any more.
+    It is on its way while it is at the stage it was at (COMING): in a drop folder, coming in or being imported; or Claude's
+    reading. Then: it is ready, once it has left the drop folder for Episodes; Claude has read it, once its reading is in; and
+    otherwise its next step, as the guide says it, which says when an import or a reading did not finish. At the start (all
+    three the same) a video with nothing on its way gets its next step at once. Its file's name is never said. */
+export function told(was, seen, now) {
+  if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
+  if (now.next.done) return videoLines(now)[0];
+  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : "reading");
+  if (on(now) && on(now) === on(was)) return null;
+  const { facts, next } = now;
+  if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;
+  if (on(was) === "reading" && facts.reading === "done") return `${facts.name}: ${next.text.startsWith(READ_IT) ? next.text : `${READ_IT} ${next.text}`}`;
+  return `${facts.name}: ${next.text}`;
+}
+
+/** What `guide tell` says of a video still on its way after TELL_MS: so, and its next step. */
+export const stillLine = ({ facts, next }) => `${facts.name}: Nothing has changed in ${TELL_MS / 60000} minutes. ${next.text}`;
