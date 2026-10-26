@@ -393,6 +393,18 @@ describe("guide wait", () => {
     assert.deepEqual(t.waits, Array(18).fill(5000));
     t.done();
   });
+  it("answers at once, waiting for nothing, when no video is coming in, being imported or being read", async () => {
+    const t = setup();
+    assert.deepEqual(await on(light(t), "guide", "wait"), { code: 0, said: [DROP_LINE, "Nothing is under way. To start, put the video in your drop folder."] });
+    episodeAs(t, VIDEOS.waiting);
+    dropIn(t, "Mac Studio", "Third.mov");
+    statusOf(t, { import: "a2", video: "Third.mov", label: "Video of 20 Oct, 14:00 (Mac Studio)", at: "2026-10-20T14:00:00-05:00", failed: "the sound could not be read" });
+    assert.deepEqual(await on(light(t), "guide", "wait"), { code: 0, said: [DROP_LINE, "Under way:",
+      '  Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa): It is waiting for your answer. Say "what\'s waiting?" to see its card.',
+      '  Video of 20 Oct, 14:00 (Mac Studio): Its import did not finish. Say "try it again".'] });
+    assert.deepEqual(t.waits, []);
+    t.done();
+  });
 });
 
 const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';

@@ -360,6 +360,11 @@ export function videoLines({ facts, next }) {
 export const WAIT_MS = 90000;
 export const POLL_MS = 5000;
 
+/** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
+    and Claude's reading. `guide wait` and `guide tell` wait only while a video is at one. A running finish is not among them:
+    the guide cannot tell a finish that failed from one not begun. */
+export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading"];
+
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
     come or gone, a stage passed or an import's next step changes it; a name, which holds the size of a file still coming in, and
     the time left do not. Each is kept as JSON and the list sorted, so the order the videos were read in is no change. */

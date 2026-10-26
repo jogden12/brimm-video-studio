@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -82,7 +82,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
-                                        what the guide says
+                                        what the guide says: at once when no video is coming in, being imported or read
   node edit.js guide "<video>" done <step> | finished | show
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs
@@ -5512,13 +5512,19 @@ function sayOverview(ctx, { items, old }) {
   return 0;
 }
 
+/** How the guide waits: the clock's stand-in in a test, else a timer. */
+const sleepOf = (ctx) => ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+
 /** `guide wait`: what the guide says is read again every POLL_MS, for up to WAIT_MS, until it changes (signatureOf: a video come
     or gone, a stage passed, an import's next step), and then the overview is said. With no change in that time it says so, then
-    the overview all the same. The time left, or a file still coming in, is no change. */
+    the overview all the same. The time left, or a file still coming in, is no change. It answers at once when no video is
+    coming in, being imported or being read (guide.js COMING). */
 async function waitForChange(ctx) {
-  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const wait = sleepOf(ctx);
   const start = ctx.now();
   let read = guideItems(ctx);
+  // Nothing is on its way, so nothing will change by itself: the guide answers at once.
+  if (!read.items.some(({ next }) => !next.done && COMING.includes(next.stage))) return sayOverview(ctx, read);
   const was = signatureOf(read.items);
   while (ctx.now() - start < WAIT_MS) {
     await wait(Math.min(POLL_MS, WAIT_MS - (ctx.now() - start)));
@@ -5534,7 +5540,7 @@ async function waitForChange(ctx) {
     video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
     next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
     `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
-    change in what the guide says, then says the overview. With a video, by its name, its label or its id, its next step, and for
+    change in what the guide says, then says the overview: at once when no video is coming in, being imported or being read. With a video, by its name, its label or its id, its next step, and for
     a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
     she did that step, the one that comes next; with `finished`, her note that she is done with it. Words that fit no video, or
     more than one, are refused, and never said again: they may hold a client's name. */

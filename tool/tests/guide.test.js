@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
-import { readyIn, roughIn, READING_STEPS, apart } from "../guide.js";
+import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -305,5 +305,8 @@ describe("what counts as a change while the guide waits", () => {
     assert.notEqual(signatureOf([at({ drop: { here: true, state: "importing", step: "Writing the transcript", left: 10, total: 100 } })]), base);
     assert.notEqual(signatureOf([at({}), at({})]), base);
     assert.notEqual(signatureOf([at({}, { done: false, stage: "arriving", text: "x", step: "", after: "" })]), base);
+  });
+  it("waits only while a video is coming in, being imported or being read", () => {
+    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading"]);
   });
 });
