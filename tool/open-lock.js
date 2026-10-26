@@ -12,7 +12,7 @@
 //      WebFetch never to a numeric, local or privately answering address (fetchable.js);
 //   9. the card, the task list and ToolSearch: no answer, left to Claude Code (the card must stay so);
 //  10. anything else: deny.
-// Steps 1, 2 and 5 are not here yet: until they are, Bash falls to step 10.
+// Steps 1 and 2 are not here yet.
 //
 // Step 4 takes every path-like string of the tool's input, at any depth (places.js pathsIn), but what Write writes and what Edit
 // changes, which are a file's words, not paths; and judges each by what it is (gatedIndex), a link to a file by its real path too.
@@ -20,6 +20,11 @@
 // skills this folder allows; each is given as a gated place's real path with the rest after it, so that a link on the way opens
 // nothing. Write and Edit go only into the workshop, through no link, and never to a CLAUDE.md, CLAUDE.local.md, .mcp.json or a
 // .claude folder there.
+//
+// Step 5 lets edit.js through in one spelling only, the one the sandbox's excluded command takes: this Mac's node, the checkout's
+// edit.js in double quotes, and one or more words (studio.js WORD), with nothing before it and nothing after; and not in the
+// background, but for her skill's `guide <label> tell` (R6). Any other command naming edit.js or the checkout's tool folder is
+// refused; any naming a gated place too, as a courtesy, since the sandbox holds it anyway; and any other runs in the sandbox.
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
@@ -28,13 +33,14 @@ import { pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
 import { wordsFolder } from "./held.js";
 import { skillFolders } from "./loosened.js";
-import { workshopFolder } from "./studio.js";
+import { WORD, literally, workshopFolder } from "./studio.js";
 
 export const NEVER_REFUSED = "That is never done from this folder: nothing here posts, sends, publishes or shares, or works the screen, the browser or another session. Ask Jason.";
 export const NOT_NAMED = "That is not among the tools and skills this folder allows. Ask Jason.";
 export const WEB_HELD = "The web is not turned on for this folder yet: ask Jason.";
 export const GATED_REFUSED = "That is one of the places only brimm-video reads or writes. Ask for it through brimm-video, or ask Jason.";
 export const WRITE_REFUSED = "Claude writes files here only in the workshop, ~/BRIMM Video Workshop, and never a CLAUDE.md, a .mcp.json or a .claude folder.";
+export const RUN_ALONE = "Run brimm-video's commands on their own, exactly as her skill says, and not in the background.";
 
 /** The tools left to Claude Code's own rules (step 9): its card, its list of what it is doing and ToolSearch, which only loads a
     tool that then meets this guard. The card must stay so: an answer of the guard's would answer it without her. */
@@ -115,6 +121,55 @@ function writable(filePath, cwd, home) {
   }
 }
 
+/** A command's words, split at white space, with quotes and backslashes taken off as a shell would: what a command names, for the
+    courtesy of step 5. */
+function wordsOf(command) {
+  const words = [];
+  let word = "";
+  let started = false;
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else word += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && i + 1 < command.length && '"\\$`'.includes(command[i + 1])) word += command[++i];
+      else word += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      started = true;
+    } else if (ch === "\\" && i + 1 < command.length) {
+      word += command[++i];
+      started = true;
+    } else if (/\s/.test(ch)) {
+      if (started) words.push(word);
+      word = "";
+      started = false;
+    } else {
+      word += ch;
+      started = true;
+    }
+  }
+  if (started) words.push(word);
+  return words;
+}
+
+/** What step 5 answers to the Bash command `command`, run in the background when `background`. */
+function bashDecision(command, background, cwd, ctx) {
+  if (typeof command !== "string") return deny(NOT_NAMED);
+  const edit = `^${literally(ctx.node)} "${literally(ctx.checkout)}/tool/edit\\.js"`;
+  if (new RegExp(`${edit}(?: ${WORD})+$`).test(command)) {
+    if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("brimm-video's own command");
+    return deny(RUN_ALONE);
+  }
+  const folded = fold(command);
+  if (folded.includes("edit.js") || folded.includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
+  if (pathsIn(wordsOf(command), cwd, ctx.home).some((path) => ctx.index.at(path))) return deny(GATED_REFUSED);
+  return allow("a command in the sandbox");
+}
+
 /** The tool's input as step 4 looks for paths in it: all of it, but what Write writes and what Edit changes. */
 function pathFields(name, toolInput) {
   if (!isObject(toolInput)) return toolInput;
@@ -145,6 +200,7 @@ export async function openDecision(input, ctx) {
     if (ctx.index.at(root) || ctx.index.holds(root)) return deny(GATED_REFUSED);
   }
   if (FILE_TOOLS.has(name)) return allow(name === "Write" || name === "Edit" ? "in the workshop" : "outside the gated places");
+  if (name === "Bash") return bashDecision(given.command, Boolean(given.run_in_background), cwd, ctx);
   if (name === "Skill") return typeof given.skill === "string" && named("skill", given.skill) ? allow("a skill this folder allows") : deny(NOT_NAMED);
   if (!OWN_RULES.has(name) && named("tool", name)) return allow("a tool this folder allows");
   if (name.startsWith("mcp__")) return isConnector(name) && named("mcp-tool", name) ? allow("a connector's tool this Mac allows") : deny(NOT_NAMED);

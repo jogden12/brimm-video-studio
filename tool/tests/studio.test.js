@@ -13,11 +13,9 @@ import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain } from "../edit.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
+import { CHECKOUT, NODE, EDIT, ALLOWED } from "./guard-cases.js";
 
-const CHECKOUT = "/Users/sallie/Claude Code/BRIMM video";
 const FOLDER = "/Users/sallie/BRIMM Video Studio";
-const NODE = "/opt/homebrew/bin/node";
-const EDIT = `${NODE} "${CHECKOUT}/tool/edit.js"`;
 const bash = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout: CHECKOUT, node: NODE }).decision;
 const tool = (tool_name) => guardDecision({ tool_name, tool_input: {} }, { checkout: CHECKOUT, node: NODE }).decision;
 /** The guard as Claude Code runs it, in exec form: /bin/sh, the guard's own script in this checkout, and a node. */
@@ -95,20 +93,6 @@ const randomCommand = (next) => {
   for (let words = 1 + Math.floor(next() * 4); words > 0; words--) command += (next() < 0.9 ? " " : pick(["", ";", "|", "&", "#", "\n"])) + word();
   return command;
 };
-/** Commands the guard lets through, each with the words edit.js must be given, in zsh and in bash. */
-const ALLOWED = [
-  [`${EDIT} episodes`, ["episodes"]],
-  [`${EDIT} open "Pricing talk"`, ["open", "Pricing talk"]],
-  [`node "${CHECKOUT}/tool/edit.js" open "Talk (Sallie's laptop)"`, ["open", "Talk (Sallie's laptop)"]],
-  [`${EDIT} title "Pricing talk" --words "Price it right" --approve`, ["title", "Pricing talk", "--words", "Price it right", "--approve"]],
-  [`${EDIT} finish "Pricing talk" --take "main=this Mac"`, ["finish", "Pricing talk", "--take", "main=this Mac"]],
-  // Every letter a plain word may hold.
-  [`${EDIT} open a_b.c,d:e+f=g@h%i/j-k9`, ["open", "a_b.c,d:e+f=g@h%i/j-k9"]],
-  // Words in single quotes, with what would run something outside them: inside, each is only a letter.
-  [`${EDIT} title "Pricing talk" --words 'Charge $99 \`now\` \\ok'`, ["title", "Pricing talk", "--words", "Charge $99 `now` \\ok"]],
-  [`${EDIT} name "Pricing talk" '"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}'`, ["name", "Pricing talk", `"Real" ~/x *? {a,b} (c) ; & | < > =d #e !f $(g) \${h}`]],
-  [`${EDIT} name "Pricing talk" ''`, ["name", "Pricing talk", ""]]
-];
 
 /** The command lines a skill's text runs: every backticked span that starts with a lowercase word. Flags start with - and are
     not among them. */

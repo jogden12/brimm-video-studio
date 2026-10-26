@@ -5,11 +5,12 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, WEB_HELD, WRITE_REFUSED, openDecision } from "../open-lock.js";
+import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, openDecision } from "../open-lock.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { SESSION, openWorld } from "./open-world.js";
+import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
 
@@ -215,5 +216,56 @@ describe("the open guard, II: paths and writes", () => {
     for (const [name, input] of [["Glob", { pattern: "**/*.md" }], ["Grep", { pattern: "x", path: join(w.home, "Pictures") }], ["Grep", { pattern: "x" }], ["Glob", { pattern: "*.png", path: join(w.root, "Assets") }]]) {
       assert.equal((await decide(name, input)).decision, "allow", `${name} ${JSON.stringify(input)}`);
     }
+  });
+});
+
+describe("the open guard, III: Bash", () => {
+  let w;
+  let ctx;
+  before(() => {
+    w = openWorld();
+    for (const dir of [join(w.root, "Episodes", "x"), join(w.root, "Drop", "Mac Studio"), join(w.home, ".ssh"), join(w.home, ".claude", "projects"), join(w.home, "Documents")]) mkdirSync(dir, { recursive: true });
+    ctx = { checkout: CHECKOUT, node: NODE, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(w.facts), [join(realOf(w.root), "Assets")]), allow: w.facts.allow, web: "held", resolve: PUBLIC, loosened: false, held: false };
+  });
+  after(() => w.done());
+  const bash = (command, more = {}) => openDecision({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command, description: "x", ...more } }, ctx);
+  const ALONE = { decision: "deny", reason: RUN_ALONE };
+
+  it("allows edit.js in its one spelling, and every form it allows is one the excluded entry takes", async () => {
+    for (const [command] of ALLOWED.filter(([c]) => !c.startsWith("node "))) {
+      assert.equal((await bash(command)).decision, "allow", command);
+      assert.ok(command.startsWith(`${NODE} "${CHECKOUT}/tool/edit.js" `), command);
+    }
+    assert.equal(RUN_ALONE, "Run brimm-video's commands on their own, exactly as her skill says, and not in the background.");
+  });
+  it("refuses edit.js with bare node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
+    for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
+      assert.deepEqual(await bash(command), ALONE, command);
+    }
+  });
+  it("refuses edit.js with nice, env -u SANDBOX_RUNTIME, env, timeout, nohup, time, stdbuf, xargs, sudo, command or exec in front of it", async () => {
+    for (const before of ["nice", "env -u SANDBOX_RUNTIME", "env", "timeout 60", "nohup", "time", "stdbuf -o0", "xargs", "sudo", "command", "exec", "A=1"]) assert.deepEqual(await bash(`${before} ${EDIT} episodes`), ALONE, before);
+  });
+  it("refuses edit.js in the background, but for guide's tell", async () => {
+    assert.deepEqual(await bash(`${EDIT} episodes`, { run_in_background: true }), ALONE);
+    assert.equal((await bash(`${EDIT} guide "Pricing talk" tell`, { run_in_background: true })).decision, "allow");
+    assert.equal((await bash(`${EDIT} guide Talk tell`, { run_in_background: true })).decision, "allow");
+    for (const command of [`${EDIT} guide "Pricing talk" tell --now`, `${EDIT} guide "Pricing talk"`, `${EDIT} guide tell`, `${EDIT} finish "Pricing talk"`]) assert.deepEqual(await bash(command, { run_in_background: true }), ALONE, command);
+    assert.equal((await bash(`${EDIT} episodes`, { run_in_background: false })).decision, "allow");
+  });
+  it("refuses edit.js with no words after it", async () => {
+    assert.deepEqual(await bash(EDIT), ALONE);
+    assert.deepEqual(await bash(`${EDIT} `), ALONE);
+  });
+  it("refuses any other command that names edit.js or the checkout's tool folder", async () => {
+    for (const command of [`cat "${CHECKOUT}/tool/studio.js"`, `ls "${CHECKOUT}/tool"`, "python3 edit.js", `cd "${CHECKOUT}" && node tool/EDIT.JS episodes`, `cat "/System/Volumes/Data${CHECKOUT}/tool/never.js"`]) assert.deepEqual(await bash(command), ALONE, command);
+  });
+  it("refuses, as a courtesy, cat, grep -r, rg and find naming a gated place", async () => {
+    for (const command of [`cat "${join(w.root, "Episodes", "x", "t.txt")}"`, "grep -r secret ~/.ssh", `rg talk '${join(w.root, "Drop")}'`, "find ~/.claude -name '*.jsonl'", `ls ${join(w.root, "Episodes").replaceAll(" ", "\\ ")}`]) {
+      assert.deepEqual(await bash(command), { decision: "deny", reason: GATED_REFUSED }, command);
+    }
+  });
+  it("allows any other command, which runs in the sandbox", async () => {
+    for (const c of ["date", "ls ~/Documents", "python3 -c 'print(1)'", "rg TODO ~/Documents", `cat "${join(w.root, "Assets", "logo.png")}"`, "cd Pictures"]) assert.equal((await bash(c)).decision, "allow", c);
   });
 });

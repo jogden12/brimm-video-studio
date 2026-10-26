@@ -280,7 +280,7 @@ function readable(input, folder, tmp, uid) {
 const SKILL = "brimm-edit";
 
 /** A text as a regular expression matches it, letter for letter. */
-const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** One word after edit.js: a plain word of letters, digits and _ . , : + = @ % / - (not starting with =); a word in double
     quotes holding no double quote, $, backtick, backslash or line break; or a word in single quotes holding no single quote
@@ -295,7 +295,7 @@ const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     app's 2.1.295 is /(\d?&?>+[ \t]*)nul(?=\s|$|[|&;)\n])/ with nul in any case. So the title Profit > nul margin, in
     either kind of quotes, reaches edit.js as Profit > /dev/null margin, still one word inside its quotes, and nothing else
     runs. The guard is given the command as written, before the rewrite. */
-const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
+export const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
 
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run with node (the word node, or the node the installer found)
