@@ -523,6 +523,56 @@ describe("the installer's own text", () => {
     const steps = [...guide.slice(guide.indexOf("\n## Steps\n")).matchAll(/^\d+\. \*\*([^*]+):\*\*/gm)].map((m) => m[1]);
     assert.ok(steps.includes(TITLE), `no step of docs/setup/sallies-laptop.md is titled "${TITLE}":\n${steps.join("\n")}`);
   });
+  it("names the lock-down checks by titles that are steps of the setup guide, for both locks", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const STRICT = "Check that her Claude folder only runs BRIMM Video";
+    const OPEN = "Check her Claude folder's open lock";
+    // The steps: each a numbered line that opens with its title in bold, numbered 1, 2, 3 and on with no gap. Those whose title ends in a
+    // colon are the ones the pattern above finds by their titles.
+    const steps = guide.slice(guide.indexOf("\n## Steps\n"), guide.indexOf("\n## If something goes wrong\n"));
+    const numbers = [...steps.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]));
+    assert.deepEqual(numbers, numbers.map((n, i) => i + 1), numbers.join(" "));
+    const numberOf = Object.fromEntries([...steps.matchAll(/^(\d+)\. \*\*([^*]+):\*\*/gm)].map((m) => [m[2], Number(m[1])]));
+    assert.deepEqual([numberOf[STRICT], numberOf[OPEN]], [9, 10], JSON.stringify(numberOf));
+    for (const title of [STRICT, OPEN]) {
+      assert.ok(text.includes(`the setup guide's \\"${title}\\", in the Code tab`), `install.sh: ${title}`);
+      assert.ok(readme.includes(`"${title}"`), `README.md: ${title}`);
+    }
+    // The steps after the open-lock check moved on by one, and so did every reference to them.
+    assert.equal(numberOf["The first real run"], 11, JSON.stringify(numberOf));
+    assert.ok(guide.includes("step 11 is then the first check that 12.3 opens brimm-video's timelines"), "morning check 1");
+    assert.ok(guide.includes("8. **A first run:** step 11, with your own test recordings, never her episodes."), "Switching her laptop, item 8");
+    assert.doesNotMatch(guide, /\bstep 10 is then|\*\*A first run:\*\* step 10\b|ask it again after step 10\b/);
+    // Each "step 9's check again" names the open lock's too.
+    const again = [...guide.matchAll(/step 9's check again[^.;:]*/g)].map((m) => m[0]);
+    assert.ok(again.length >= 4, again.join("\n"));
+    for (const said of again) assert.ok(said.includes("or step 10's, on an open-lock laptop"), said);
+  });
+  it("has the setup guide's open-lock check name every refusal, every hidden name and every card-free step the design lists", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const step = guide.split("\n").find((l) => /^\d+\. \*\*Check her Claude folder's open lock:\*\*/.test(l));
+    assert.ok(step, "no step is titled Check her Claude folder's open lock");
+    for (const words of ["trust", "`behind`", "`cat`", "`node -e`", "`python3`", "/System/Volumes/Data", "letter case", "`grep -r`", "`rg`", "`find`", "`mdfind`", "`osascript", "`curl`", "`nice`", "`env -u SANDBOX_RUNTIME`", "http://127.0.0.1/", "`printenv`", "HTTP_PROXY", "memory", "side-session-notes", "teachings", "words file",
+      "Episodes/0000 Lock check (test)/", "removed afterwards", "never her episodes", "the deploy key", "named owner's check", "no approval card", "every mode the menu offers"]) assert.ok(step.includes(words), words);
+    // It opens nothing that the design keeps for later phases, and runs no git pull of its own.
+    assert.doesNotMatch(step, /`picture |OpenRouter key|`[^`]*\bgit\b[^`]*\bpull`/);
+  });
+  it("has the setup guide give Jason the open lock's steps alone, and Sallie hers, and says what each new line of behind means", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const section = (heading) => {
+      const at = guide.indexOf(`\n## ${heading}`);
+      assert.ok(at >= 0, heading);
+      const end = guide.indexOf("\n## ", at + 1);
+      return guide.slice(at, end < 0 ? undefined : end);
+    };
+    const jason = section("The open lock (for Jason alone)");
+    for (const words of ["Finder's and QuickTime's recent", "memory/", "skills and plugins", "frontend-design", "node tool/settings.js studio --node <node> --zoom", "--lock open", "--web open", "OPEN_LOCK_CLAUDE", 'pull as under "Jason has a newer brimm-video", above', "--user-deny"]) assert.ok(jason.includes(words), words);
+    const sallie = section("The open lock (for Sallie)");
+    for (const words of ["Zoom recording into her drop folder rather than copy it", "delete Zoom's original", "add this folder", "No sandbox", "`/sandbox`", "`/memory`"]) assert.ok(sallie.includes(words), words);
+    const wrong = section("If something goes wrong");
+    for (const words of ["sandbox", "Edit(", "additionalDirectories", "--add-dir", "flag", "SessionStart", "plugin", "hooks:", "the workshop holds", "No sandbox", "memory", "looks like a secret", "proxy port", "Claude Code has not trusted this folder yet", "Read deny rule", "This chat holds a session's words", "brimm-video was run inside Claude Code's sandbox", "`/sandbox exclude`", 'choose the one-time "Yes" only']) assert.ok(wrong.includes(words), words);
+  });
   // A check agent a setup cut short left behind asks Claude at every login, and nothing on screen says so. So after a real
   // setup, the guide (for her laptop) and the README (for either Mac) have its file looked for, by install.sh's own name for
   // it, and say how to take that one agent away alone: --remove would stop the import's own agent too.
