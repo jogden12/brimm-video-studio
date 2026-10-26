@@ -2,17 +2,17 @@
 // inside them (design 2026-10-26, section 2, "The gated places"). Each test makes a home of its own, with a space and an
 // apostrophe in it, a BRIMM Video in a made-up Dropbox and a made-up temp folder, and removes them after: nothing here reads this
 // Mac's own home, Dropbox or Claude Code's temp folder.
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { claudeDirName, realOf, bothSpellings, gatedPlaces, readAllowed, isEnvFile } from "../places.js";
+import { dirname, join, resolve } from "node:path";
+import { claudeDirName, realOf, bothSpellings, gatedPlaces, readAllowed, isEnvFile, gatedIndex, pathsIn, searchRoot } from "../places.js";
 
 /** A made-up Mac: a home with a space and an apostrophe, BRIMM Video in a Dropbox whose root holds `.dropbox.cache` (unless
-    told not to), and a temp folder of its own. */
+    told not to), and a temp folder of its own. Its folder is by its real path, as Claude Code is given one. */
 function world({ cache = true } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "brimm-places-"));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), "brimm-places-")));
   const home = join(dir, "Sallie's home");
   const dropbox = join(dir, "Dropbox (Personal)");
   const root = join(dropbox, "The BRIMM DB", "BRIMM Video");
@@ -113,5 +113,120 @@ describe("the gated places", () => {
     assert.equal(realOf(join(w.home, "not", "there", "yet")), join(realpathSync.native(w.home), "not", "there", "yet"));
     assert.equal(realOf(w.home), realpathSync.native(w.home));
     w.done();
+  });
+});
+
+describe("paths by what they are", () => {
+  const notAMac = process.platform !== "darwin" && "/System/Volumes/Data and letter case are a Mac's";
+  const ID = "0f1e2d3c-4b5a-4968-8776-655443322110";
+  const OTHER = "11111111-2222-4333-8444-555555555555";
+  let w;
+  let ix;
+  before(() => {
+    w = world();
+    const AS = join(w.home, "Library", "Application Support");
+    w.cwd = w.folder;
+    w.workshop = join(w.home, "BRIMM Video Workshop");
+    w.transcript = join(w.home, ".claude", "projects", claudeDirName(w.folder), `${ID}.jsonl`);
+    w.words = join(AS, "BRIMM Video Words", OTHER, "x.txt");
+    w.episode = join(w.root, "Episodes", "x", "t.txt");
+    w.notes = join(w.home, "Documents", "notes.txt");
+    w.ownTmp = join(w.tmp, `claude-${w.uid}`, claudeDirName(w.folder));
+    for (const d of [w.cwd, w.workshop, join(w.root, "Assets"), dirname(w.transcript), dirname(w.words), dirname(w.episode), dirname(w.notes), join(w.ownTmp, ID, "tasks"), join(w.tmp, `claude-${w.uid}`, "-another-folder"), join(w.home, ".claude", "shell-snapshots")]) mkdirSync(d, { recursive: true });
+    for (const f of [w.transcript, w.words, w.episode, w.notes, join(w.root, "Assets", "logo.png"), join(w.ownTmp, ID, "tasks", "a.output"), join(w.tmp, `claude-${w.uid}`, "-another-folder", "b.output"), join(w.home, ".claude", "shell-snapshots", "snap.sh")]) writeFileSync(f, "x");
+    symlinkSync(join(w.root, "Episodes"), join(w.home, "Documents", "link-to-episodes"));
+    symlinkSync(join(w.root, "Episodes", "x"), join(w.root, "Assets", "eps-link"));
+    symlinkSync(join(w.root, "Assets", "logo.png"), join(w.root, "Episodes", "to-logo.png"));
+    symlinkSync(join(w.root, "Episodes", "x"), join(w.workshop, "eps-folder"));
+    for (const [at, prefix] of [[w.workshop, ""], [join(w.root, "Assets"), "a-"]]) {
+      symlinkSync(w.transcript, join(at, `${prefix}transcript.jsonl`));
+      symlinkSync(w.words, join(at, `${prefix}words.txt`));
+      symlinkSync(w.episode, join(at, `${prefix}episode.txt`));
+      symlinkSync(join(w.root, "Drop", "Mac Studio", "x.mov"), join(at, `${prefix}dangling.mov`));
+      symlinkSync(w.notes, join(at, `${prefix}notes.txt`));
+    }
+    ix = gatedIndex(gatedPlaces(w), readAllowed(w));
+  });
+  after(() => w.done());
+
+  it("finds a gated place by any spelling: .., a link into it, a file not there yet", () => {
+    for (const p of [join(w.root, "Episodes", "x", "t.txt"), join(w.root, "Assets", "..", "Episodes"), join(w.home, "Documents", "link-to-episodes", "t.txt"), join(w.root, "Episodes", "not-yet", "new.txt")]) assert.ok(ix.at(p), p);
+    assert.equal(ix.at(join(w.home, "Documents", "notes.txt")), null);
+    assert.equal(ix.at(join(w.root, "Assets", "..", "Episodes")).path, realOf(w.root));
+    // `..` as a string keeps it, as a tool's input would: as text (Claude Code's own tools) and as macOS takes it, after a link.
+    assert.equal(ix.at(`${w.root}/Assets/../Episodes/x/t.txt`)?.path, realOf(w.root));
+    assert.equal(ix.at(`${w.root}/Assets/eps-link/../t.txt`)?.path, realOf(w.root));
+    assert.equal(ix.at(`${w.workshop}/eps-folder/../t.txt`)?.path, realOf(w.root));
+    assert.equal(ix.at(`${w.workshop}/eps-folder/../../../../../BRIMM Video Workshop/x.txt`), null);
+  });
+  it("finds one by /System/Volumes/Data and by changed letter case", { skip: notAMac }, () => {
+    for (const p of [`/System/Volumes/Data${w.episode}`, `/System/Volumes/Data${join(w.home, ".ssh", "id_ed25519")}`, w.episode.replace("BRIMM Video", "brimm video").replace("Episodes", "EPISODES"), join(w.home, ".SSH", "config")]) {
+      assert.ok(ix.at(p), p);
+    }
+    assert.equal(ix.at(`/System/Volumes/Data${w.notes}`), null);
+  });
+  it("finds a gated file through a link to it, from an open folder or the workshop, dangling or not", () => {
+    const AS = join(w.home, "Library", "Application Support");
+    for (const [at, prefix] of [[w.workshop, ""], [join(w.root, "Assets"), "a-"]]) {
+      assert.equal(ix.at(join(at, `${prefix}transcript.jsonl`))?.path, realOf(join(w.home, ".claude")), `${prefix}transcript`);
+      assert.equal(ix.at(join(at, `${prefix}words.txt`))?.path, realOf(join(AS, "BRIMM Video Words")), `${prefix}words`);
+      assert.equal(ix.at(join(at, `${prefix}episode.txt`))?.path, realOf(w.root), `${prefix}episode`);
+      assert.equal(ix.at(join(at, `${prefix}dangling.mov`))?.path, realOf(w.root), `${prefix}dangling`);
+    }
+    assert.equal(ix.at(join(w.workshop, "notes.txt")), null);
+  });
+  it("lets a path inside Assets through, and not a link from Assets into Episodes", () => {
+    assert.equal(ix.at(join(w.root, "Assets", "logo.png")), null);
+    assert.equal(ix.at(join(w.root, "Assets", "not-yet.png")), null);
+    assert.equal(ix.at(join(w.root, "Assets", "eps-link", "t.txt"))?.path, realOf(w.root));
+    assert.equal(ix.at(join(w.root, "Assets", "a-notes.txt")), null);
+    assert.equal(ix.at(join(w.root, "Episodes", "to-logo.png"))?.path, realOf(w.root), "a link in a gated place is held, the stricter, wherever it leads");
+  });
+  it("lets a path in a carve-out through only when that carve-out is among those open", () => {
+    const output = join(w.ownTmp, ID, "tasks", "a.output");
+    const snapshot = join(w.home, ".claude", "shell-snapshots", "snap.sh");
+    assert.equal(ix.at(output), null);
+    assert.equal(ix.at(snapshot), null);
+    assert.equal(ix.at(join(w.tmp, `claude-${w.uid}`, "-another-folder", "b.output"))?.carve, "tmp");
+    assert.equal(ix.at(join(w.home, ".claude", "projects"))?.carve, "claude");
+    const shut = gatedIndex(gatedPlaces(w), []);
+    assert.equal(shut.at(output)?.carve, "tmp");
+    assert.equal(shut.at(snapshot)?.carve, "claude");
+    assert.equal(shut.at(join(w.root, "Assets", "logo.png"))?.path, realOf(w.root));
+    assert.equal(gatedIndex(gatedPlaces(w), [w.ownTmp]).at(snapshot)?.carve, "claude");
+  });
+  it("holds a gated place that is not there yet by its text, both spellings, any letter case", () => {
+    // Zoom's folder is not made; "<home>/documents/ZOOM/x.m4a" and "/System/Volumes/Data<home>/Documents/Zoom" are held.
+    assert.equal(ix.at(join(w.home, "documents", "ZOOM", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));
+    assert.equal(ix.at(`/System/Volumes/Data${join(w.home, "Documents", "Zoom")}`)?.path, realOf(join(w.home, "Documents", "Zoom")));
+    assert.equal(ix.at(join(w.home, "Documents", "Zoom recordings", "x.m4a")), null);
+  });
+  it("holds a .env file anywhere", () => {
+    for (const p of ["/anywhere/.env", join(w.home, "Documents", ".env.local"), join(w.workshop, ".env")]) assert.ok(ix.at(p), p);
+    assert.equal(ix.at(join(w.home, "Documents", "env.txt")), null);
+  });
+  it("takes every path-like string from any field, nested, and nothing else", () => {
+    writeFileSync(join(w.cwd, "notes.txt"), "x");
+    assert.deepEqual(pathsIn({ file_path: "~/x", nested: { list: ["../y", "plain words", "/abs", "notes.txt"] }, url: "https://a.b/c", n: 3 }, w.cwd, w.home).sort(), [join(w.home, "x"), resolve(w.cwd, "../y"), "/abs", join(w.cwd, "notes.txt")].sort());
+    assert.deepEqual(pathsIn({ a: "~", b: ["", null, true, { c: [[`${w.root}/Episodes`]] }] }, w.cwd, w.home).sort(), [w.home, join(w.root, "Episodes")].sort());
+    assert.deepEqual(pathsIn("plain words", w.cwd, w.home), []);
+  });
+  it("says a search folder holds a gated place when one is inside it", () => {
+    // Zoom's folder, <home>/Documents/Zoom, is gated, so Documents holds one; Pictures holds none.
+    assert.ok(ix.holds(w.home)); assert.ok(ix.holds(join(w.home, "Documents"))); assert.ok(!ix.holds(join(w.home, "Pictures")));
+    assert.ok(ix.holds(w.root)); assert.ok(ix.holds(dirname(w.root))); assert.ok(!ix.holds(join(w.root, "Assets"))); assert.ok(!ix.holds(w.workshop));
+  });
+  it("takes Glob's folder from the literal start of an absolute or ~/ pattern, before path", () => {
+    assert.equal(searchRoot("Glob", { pattern: `${w.root}/Ep*/**`, path: "/tmp" }, w.cwd, w.home), w.root);
+    assert.equal(searchRoot("Glob", { pattern: "~/Lib*/x" }, w.cwd, w.home), w.home);
+    assert.equal(searchRoot("Glob", { pattern: "**/*.md", path: "/tmp" }, w.cwd, w.home), "/tmp");
+    assert.equal(searchRoot("Grep", {}, w.cwd, w.home), w.cwd);
+  });
+  it("takes a .. pattern's folder from where it climbs to, and a search's path as given", () => {
+    assert.equal(searchRoot("Glob", { pattern: "../Episodes/*" }, w.cwd, w.home), join(dirname(w.cwd), "Episodes"));
+    assert.equal(searchRoot("Glob", { pattern: "*/../../x/*" }, w.cwd, w.home), dirname(w.cwd));
+    assert.equal(searchRoot("Glob", { pattern: "/*" }, w.cwd, w.home), "/");
+    assert.equal(searchRoot("Grep", { path: "~/Documents" }, w.cwd, w.home), join(w.home, "Documents"));
+    assert.equal(searchRoot("Grep", { path: "sub" }, w.cwd, w.home), join(w.cwd, "sub"));
   });
 });

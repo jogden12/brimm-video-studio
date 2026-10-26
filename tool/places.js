@@ -9,10 +9,16 @@
 // the guard hold); `carve` marks a place the guard opens a part of to one call (its own words, its own tool results, its own
 // tasks, Claude Code's own program); `readAllowed` is what the sandbox lets Bash read inside them, and nothing else.
 //
-// This file reads only whether folders are there and what their real paths are. It is given the home, BRIMM Video, the uid,
-// Claude Code's temp folder and her folder, so that a test gives made-up ones and never reads this Mac's own.
-import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+// A path is then judged by what it is (gatedIndex, R19): each folder along its real path is compared by its identity (device and
+// inode) with the gated places that are there, and by its text, both spellings, letter case folded, with those that are not
+// there yet. So `..`, a link, /System/Volumes/Data and a changed letter case all come to the same place. pathsIn takes every
+// path-like string from a tool's input, at any depth, and searchRoot the folder a search starts from.
+//
+// This file reads only whether files and folders are there, what they are and where links lead, never what is in them. It is
+// given the home, BRIMM Video, the uid, Claude Code's temp folder and her folder, so that a test gives made-up ones and never
+// reads this Mac's own.
+import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 /** Claude Code's name for a folder, as it names the folder's own subfolders of ~/.claude/projects and of its temp folder: every
     character but a letter or a digit made a dash. */
@@ -104,4 +110,168 @@ export function readAllowed({ home, root, uid, tmp = "/private/tmp", folder }) {
     realOf(join(home, ".claude", "shell-snapshots")),
     realOf(join(home, "Library", "Application Support", "Claude", "claude-code")),
   ];
+}
+
+/** A file's or folder's identity, its device and inode, with links followed; null when it is not there. */
+function identity(path) {
+  try {
+    const st = statSync(path);
+    return `${st.dev}:${st.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/** A path and each folder above it, from the path itself up to /. */
+function upward(path) {
+  const all = [];
+  for (let at = path; ; at = dirname(at)) {
+    all.push(at);
+    if (dirname(at) === at) return all;
+  }
+}
+
+const fold = (path) => path.toLowerCase();
+
+/** The real paths a path may come to, each walked by gatedIndex: its real path (links followed, `..` as text, as Claude Code's
+    own tools take it); where it lies, with its last part not followed (a link in a gated place is held wherever it leads); its
+    real path with `..` as macOS takes it, after a link; and, when its last part is a link that leads nowhere, where that link
+    would lead, link after link. */
+function comings(path) {
+  const given = String(path);
+  const resolved = resolve(given);
+  const all = [realOf(resolved), join(realOf(dirname(resolved)), basename(resolved))];
+  if (given.split("/").includes("..")) all.push(realOf(given));
+  let link = resolved;
+  for (let hops = 0; hops < 40; hops++) {
+    let st;
+    try {
+      st = lstatSync(link);
+    } catch {
+      break;
+    }
+    if (!st.isSymbolicLink() || existsSync(link)) break;
+    link = resolve(realOf(dirname(link)), readlinkSync(link));
+    all.push(realOf(link));
+  }
+  return all;
+}
+
+/** The gated places, ready to judge paths by what they are. `open` are the folders inside them that are let through: the
+    sandbox's allowRead (Assets, and the three Bash needs), or the carve-outs one call is given. Every identity of the places and
+    of the open folders is taken once, here.
+    - `at(path)`: the gated place `path` comes to, or null. Each folder along each of its real paths (comings) is walked from the
+      path upwards: the first that is an open folder lets it through, the first that is a place holds it, by identity, or by
+      text, both spellings and letter case folded, for one not there. Any walk that is held holds the path, the stricter. A
+      path whose name is a .env file's is a gated place of its own, wherever it is (R20).
+    - `holds(dir)`: whether some gated place lies inside `dir`, or is `dir`: a search of it would reach one. */
+export function gatedIndex(places, open = []) {
+  const byIdentity = new Map();
+  const byText = new Map();
+  const openIdentities = new Set();
+  const openTexts = new Set();
+  const insideIdentities = new Set();
+  const insideTexts = new Set();
+  for (const place of places) {
+    const id = identity(place.path);
+    if (id && !byIdentity.has(id)) byIdentity.set(id, place);
+    for (const spelling of bothSpellings(place.path)) if (!byText.has(fold(spelling))) byText.set(fold(spelling), place);
+    for (const above of upward(place.path)) {
+      const aboveId = identity(above);
+      if (aboveId) insideIdentities.add(aboveId);
+      for (const spelling of bothSpellings(above)) insideTexts.add(fold(spelling));
+    }
+  }
+  for (const dir of open) {
+    const real = realOf(dir);
+    const id = identity(real);
+    if (id) openIdentities.add(id);
+    for (const spelling of bothSpellings(real)) openTexts.add(fold(spelling));
+  }
+  const walk = (real) => {
+    for (const at of upward(real)) {
+      const id = identity(at);
+      if ((id && openIdentities.has(id)) || openTexts.has(fold(at))) return null;
+      const place = (id && byIdentity.get(id)) || byText.get(fold(at));
+      if (place) return place;
+    }
+    return null;
+  };
+  return {
+    at(path) {
+      const ways = comings(path);
+      for (const real of ways) {
+        const place = walk(real);
+        if (place) return place;
+      }
+      const env = [String(path), ...ways].find(isEnvFile);
+      return env ? { path: resolve(env), readRules: [], kind: "file", env: true } : null;
+    },
+    holds(dir) {
+      const real = realOf(resolve(dir));
+      const id = identity(real);
+      return Boolean(id && insideIdentities.has(id)) || insideTexts.has(fold(real));
+    },
+  };
+}
+
+/** One string of a tool's input as a path, resolved, or null when it is not one: absolute, starting with `~` (`~/` from the home
+    folder, `~name` from the folder that holds the home folders), holding `..`, or naming something there from `cwd`. */
+function pathOf(text, cwd, home) {
+  if (text === "") return null;
+  if (text === "~" || text.startsWith("~/")) return resolve(home, text.slice(2));
+  if (text.startsWith("~")) return resolve(dirname(home), text.slice(1));
+  if (isAbsolute(text)) return resolve(text);
+  if (text.includes("..")) return resolve(cwd, text);
+  try {
+    lstatSync(resolve(cwd, text));
+    return resolve(cwd, text);
+  } catch {
+    return null;
+  }
+}
+
+/** Every path-like string in a tool's input, at any depth of its objects and arrays, each resolved once: a path may come in a
+    field the guard does not know of. */
+export function pathsIn(input, cwd, home) {
+  const found = new Set();
+  const seen = new Set();
+  const visit = (value) => {
+    if (typeof value === "string") {
+      const path = pathOf(value, cwd, home);
+      if (path) found.add(path);
+    } else if (value && typeof value === "object" && !seen.has(value)) {
+      seen.add(value);
+      for (const inner of Array.isArray(value) ? value : Object.values(value)) visit(inner);
+    }
+  };
+  visit(input);
+  return [...found];
+}
+
+const GLOB = /[*?[\]{}]/;
+
+/** The folder a search starts from, for Glob and Grep, kept for a later version of Claude Code that has them again (C20). For a
+    Glob pattern that is absolute, starts with `~/` or holds `..`, the pattern's literal start, before `path`, gone up as far as
+    its `..` after that start can climb: Glob searches from there whatever `path` says. Otherwise `path`, otherwise `cwd`. */
+export function searchRoot(tool, input, cwd, home) {
+  const given = input && typeof input === "object" ? input : {};
+  const from = (path) => (path === "~" || path.startsWith("~/") ? resolve(home, path.slice(2)) : resolve(cwd, path));
+  const base = typeof given.path === "string" && given.path !== "" ? from(given.path) : resolve(cwd);
+  const pattern = given.pattern;
+  if (tool !== "Glob" || typeof pattern !== "string") return base;
+  const parts = pattern.split("/");
+  const tilde = pattern === "~" || pattern.startsWith("~/");
+  if (!isAbsolute(pattern) && !tilde && !parts.includes("..")) return base;
+  const first = parts.findIndex((part) => GLOB.test(part));
+  const literal = (first === -1 ? parts : parts.slice(0, first)).join("/");
+  const start = tilde ? resolve(home, literal.slice(2)) : isAbsolute(pattern) ? resolve("/", literal) : resolve(base, literal);
+  let depth = 0;
+  let lowest = 0;
+  for (const part of first === -1 ? [] : parts.slice(first)) {
+    if (part === "..") depth -= 1;
+    else if (part !== "" && part !== ".") depth += 1;
+    lowest = Math.min(lowest, depth);
+  }
+  return resolve(start, ...Array(-lowest).fill(".."));
 }
