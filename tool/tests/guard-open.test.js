@@ -575,6 +575,21 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.equal(looks, before);
     w.done();
   });
+  it("still sees a plugin gain hooks while a link in the plugins cache cannot be looked through", async () => {
+    const w = chat();
+    const cache = join(w.home, ".claude", "plugins", "cache");
+    const plugin = join(cache, "market", "hooky", "1.0.0");
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "hooky" }));
+    writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "hooky@market": true } }));
+    // A link to itself cannot be looked at (ELOOP), and must not hide the real marketplace beside it.
+    symlinkSync("loop", join(cache, "loop"));
+    assert.equal((await date(w)).decision, "allow");
+    mkdirSync(join(plugin, "hooks"));
+    writeFileSync(join(plugin, "hooks", "hooks.json"), "{}");
+    assert.deepEqual(await date(w), CHANGED, "the next call, with no waiting out the cache");
+    w.done();
+  });
   it("looks again when a value the check reads in the environment changes, or the app's notes folder becomes a link", async () => {
     const w = chat();
     assert.equal((await date(w, { more: { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } } })).decision, "allow");
