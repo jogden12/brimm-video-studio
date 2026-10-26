@@ -892,6 +892,9 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
     const skill = openSkill();
     const start = sectionOf(skill, "## At the start of each session");
     assert.ok(start.includes(`If \`behind\` says Claude Code has not trusted this folder yet, tell her: "Open this folder again in the Claude app and choose to trust it, then start a new chat."`), start);
+    // Whole-branch review, note f: Claude Code ignores this folder's allow rules until it is trusted, so the skill stops there, and
+    // the `episodes` that the strict skill's line, kept as it is, says to run after the other lines of `behind` is not run.
+    assert.ok(start.includes(`then start a new chat." Then stop: run nothing else, not even \`episodes\`, whatever the paragraph above says to run next, since Claude Code ignores this folder's allow rules until it is trusted.`), start);
     assert.ok(UNTRUSTED.startsWith("Claude Code has not trusted this folder yet"), UNTRUSTED);
     const sessions = sectionOf(skill, "## A client or group session");
     assert.ok(sessions.includes(`If a refusal says "This chat holds a session's words", say that to her in plain words.`), sessions);

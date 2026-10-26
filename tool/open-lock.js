@@ -71,7 +71,7 @@ const LEFT_TO_CLAUDE_CODE = new Set(["AskUserQuestion", "TodoWrite", "TaskCreate
 const OWN_RULES = new Set([...TOOLS_WITH_RULES, ...LEFT_TO_CLAUDE_CODE]);
 
 /** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`. */
-export const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
+const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
 
 /** The tools step 4 lets through once no path of theirs is in a gated place or the workshop. Write and Edit are not among them:
     they are refused whatever their path. */

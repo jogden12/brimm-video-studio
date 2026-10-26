@@ -124,7 +124,7 @@ export function afterAllNoted(home, id, revision) {
 }
 
 /** The latest time each video was noted a session after all, by its id. A note that cannot be read is left out here; the held check
-    holds every chat for it. */
+    holds every chat for it. Nothing in the tool calls it: tests/held.test.js does, to show what the notes on disk say. */
 export function afterAllTimes(home) {
   const times = new Map();
   for (const name of heldNames(home) || []) {

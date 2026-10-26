@@ -209,6 +209,42 @@ describe("a session's words, by file", () => {
     }
   });
 
+  // Whole-branch review, earlier note (b): the two paths of task 21 that no test reached.
+  it("ends with MARK_FAILED and code 1, the lines shown nowhere, when the chat's words file cannot be written after the lines were kept", async () => {
+    const { t, deps } = wordsMac();
+    // The chat is marked (the held folder is fine), but BRIMM Video Words is a file, so no folder can be made in it.
+    mkdirSync(dirname(wordsFolder(t.home)), { recursive: true });
+    writeFileSync(wordsFolder(t.home), "not a folder");
+    const r = await on(deps("open"), "principles", LABEL);
+    assert.deepEqual([r.code, r.said], [1, [MARK_FAILED]]);
+    assert.ok(!r.text.includes("KEY PHRASE"));
+    assert.equal(readFileSync(wordsFolder(t.home), "utf8"), "not a folder");
+    assert.equal(marksOf(t.home).length, 1, "the chat was marked before the words were kept");
+    // A command that says nothing of a session's words, said as the same, has the same end, and shows nothing.
+    for (const argv of [["ideas", LABEL], ["teachings", LABEL]]) {
+      const again = await on(deps("open"), ...argv);
+      assert.deepEqual([again.code, again.said], [1, [MARK_FAILED]], argv.join(" "));
+    }
+    assert.equal(readFileSync(wordsFolder(t.home), "utf8"), "not a folder");
+    t.done();
+  });
+
+  it("says MARK_FAILED, ends with 1 and shows no words, when the mark cannot be written on a Mac whose lock in effect is strict", async () => {
+    for (const [what, lock, more] of [["strict settings", "strict", {}], ["open settings, no Claude Code named", "open", { minimum: null }]]) {
+      const { t, found, deps } = wordsMac();
+      mkdirSync(dirname(heldFolder(t.home)), { recursive: true });
+      writeFileSync(heldFolder(t.home), "not a folder");
+      const r = await on(deps(lock, { ...more, env: CHAT }), "principles", LABEL);
+      assert.deepEqual([r.code, r.said], [1, [MARK_FAILED]], what);
+      assert.ok(!r.text.includes("KEY PHRASE"), what);
+      assert.equal(existsSync(wordsFolder(t.home)), false, what);
+      const before = reread(found);
+      const drop = await on(deps(lock, { ...more, env: CHAT }), "principles", LABEL, "drop", "1");
+      assert.deepEqual([drop.code, drop.said, reread(found)], [1, [MARK_FAILED], before], what);
+      t.done();
+    }
+  });
+
   it("prints an ordinary video's words as today, and marks nothing", async () => {
     const ordinary = { version: 3, kind: "finished", answer: { ...ANSWERED, private: "no" }, label: "Video of 14 Oct, 09:00 (Mac Studio)", name: { text: "Pricing talk", placeholder: false } };
     const { t, deps, ps } = wordsMac({ record: ordinary, files: { "Pricing talk.mp4": "the raw video", "Pricing talk.transcript.txt": "THE VIDEO'S WORDS\n" } });

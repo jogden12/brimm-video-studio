@@ -36,7 +36,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
-import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
+import { effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, readRates, reporter } from "./progress.js";
@@ -359,8 +359,9 @@ function episodeAt(ctx, name, links = null) {
 /** Note each of `records` that is a session after all (its `session.emptyRevision` is set: it was read as another kind, and answered
     a session since) the first time this Mac reads it at that revision, with the time it is read (held.js noteAfterAll; design
     2026-10-26, R9): every chat begun before then may hold its words, and is held. episodeAt reads every record so, for `episodes`,
-    `status`, `guide`, `behind`'s lists and findEpisode alike, so the other Mac notes it at the start of her next chat. A note that
-    cannot be written now is tried again at the next read, which notes a later time and so holds more chats, not fewer. */
+    `status`, `guide` and findEpisode alike (`behind` reads no record, so it notes none), so the other Mac notes it at the start of
+    her next chat. A note that cannot be written now is tried again at the next read, which notes a later time and so holds more
+    chats, not fewer. */
 function noteSessionsAfterAll(ctx, records) {
   for (const r of records) {
     const revision = r.session !== null && typeof r.session === "object" && !Array.isArray(r.session) ? r.session.emptyRevision : undefined;
@@ -5895,8 +5896,10 @@ export async function editMain(argv, deps = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js).
-  const sandboxed = sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync });
+  // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js). The check is the open lock's:
+  // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
+  const open = effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
+  const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync }) : "";
   if (sandboxed) {
     process.stdout.write(`${sandboxed}\n`);
     process.exitCode = 1;

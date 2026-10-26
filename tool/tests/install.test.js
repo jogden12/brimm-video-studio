@@ -1537,7 +1537,9 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
     const text = readFileSync(INSTALL, "utf8");
     const runs = text.split("\n").filter((line) => line.includes('"$HERE/settings.js" user-deny'));
     assert.equal(runs.length, 1, runs.join("\n"));
-    assert.ok(runs[0].includes('[[ -n "$user_deny" ]]'), runs[0]);
+    // Earlier note (e): and only when her folder was written, never when studio_why says it was not, since the deny rules are those
+    // of the places her open folder keeps from Claude.
+    assert.ok(runs[0].includes('[[ -n "$user_deny" && -z "$studio_why" ]]'), runs[0]);
     assert.ok(text.indexOf(runs[0]) > text.indexOf('if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi'), "after her folder");
     // Refused, changing nothing, where her folder gets the strict lock: the rules are the open lock's places.
     for (const [install, settings] of [[INSTALL, { lock: "open" }], [copy.install, undefined]]) {

@@ -571,17 +571,19 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
 
 describe("node settings.js user-deny: her user settings' Read deny rules (question 5, R24)", () => {
   /** One test's made-up Mac: BRIMM Video and Claude Code's temp folder in its home, never this Mac's own, and `run(…argv)`. */
-  function userWorld() {
+  function userWorld({ lock = "open", minimum = "2.1.308" } = {}) {
     const t = setup();
     const home = realpathSync.native(t.home);
     const root = join(home, "Dropbox", "The BRIMM DB", "BRIMM Video");
     const tmp = join(home, "tmp");
     mkdirSync(root, { recursive: true });
     mkdirSync(tmp);
-    writeSettings(home, { ...t.given, root });
+    // Her user settings get the rules only under the open lock (whole-branch review I2): this Mac's settings say open, and the
+    // Claude Code version it was checked on is named, unless a test says otherwise.
+    writeSettings(home, { ...t.given, root, ...(lock ? { lock } : {}) });
     const run = (...argv) => {
       t.said.length = 0;
-      return settingsMain(argv, { home, say: (line) => t.said.push(line), tmp, uid: 502 });
+      return settingsMain(argv, { home, say: (line) => t.said.push(line), openMinimum: minimum, tmp, uid: 502 });
     };
     const user = join(home, ".claude", "settings.json");
     const settings = () => readSettings(home).settings;
@@ -625,6 +627,30 @@ describe("node settings.js user-deny: her user settings' Read deny rules (questi
     assert.deepEqual(JSON.parse(readFileSync(elsewhere, "utf8")), { model: "opus", permissions: { deny: t.folderReads() } });
     t.done();
   });
+  it("keeps the mode her user settings had when it rewrites them, and gives a file it makes 0600 (earlier note d)", () => {
+    const t = userWorld();
+    mkdirSync(dirname(t.user), { recursive: true });
+    for (const mode of [0o600, 0o640, 0o644]) {
+      writeFileSync(t.user, JSON.stringify({ model: "opus" }));
+      chmodSync(t.user, mode);
+      assert.equal(t.run("user-deny"), 0);
+      assert.equal(statSync(t.user).mode & 0o777, mode, mode.toString(8));
+    }
+    // Through a link, the file it leads to keeps its mode.
+    const elsewhere = join(t.home, "dotfiles", "claude-settings.json");
+    mkdirSync(dirname(elsewhere), { recursive: true });
+    writeFileSync(elsewhere, JSON.stringify({ model: "opus" }));
+    chmodSync(elsewhere, 0o600);
+    rmSync(t.user);
+    symlinkSync(elsewhere, t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.equal(statSync(elsewhere).mode & 0o777, 0o600);
+    // A file that was not there is made 0600.
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.equal(statSync(t.user).mode & 0o777, 0o600);
+    t.done();
+  });
   it("refuses user settings that are not a JSON object, changing nothing", () => {
     const t = userWorld();
     mkdirSync(dirname(t.user), { recursive: true });
@@ -646,6 +672,27 @@ describe("node settings.js user-deny: her user settings' Read deny rules (questi
     assert.equal(t.run("user-deny"), 2);
     assert.equal(existsSync(t.user), false);
     t.done();
+  });
+  it("adds nothing on a Mac whose lock in effect is strict: settings that say strict or none, or open with no version checked (whole-branch review I2)", () => {
+    const NOT_OPEN = "Not changed: her user settings get these deny rules only under the open lock, which waits for the checks by hand.";
+    for (const [what, options] of [["strict settings", { lock: "strict" }], ["no lock set", { lock: null }], ["open, but no version checked", { minimum: null }]]) {
+      const t = userWorld(options);
+      mkdirSync(dirname(t.user), { recursive: true });
+      const hers = JSON.stringify({ model: "opus", permissions: { deny: ["Read(//Users/sallie/private/**)"] } });
+      writeFileSync(t.user, hers);
+      const before = readFileSync(settingsFile(t.home), "utf8");
+      assert.equal(t.run("user-deny"), 1, what);
+      assert.deepEqual(t.said, [NOT_OPEN], what);
+      assert.equal(readFileSync(t.user, "utf8"), hers, what);
+      assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"], what);
+      assert.equal(readFileSync(settingsFile(t.home), "utf8"), before, what);
+      assert.equal(t.settings().userDeny, undefined, what);
+      // Nor does it make the file on a Mac with none.
+      rmSync(t.user);
+      assert.equal(t.run("user-deny"), 1, what);
+      assert.equal(existsSync(t.user), false, what);
+      t.done();
+    }
   });
   it("takes the note that her user settings were given the rules only as true or false", () => {
     const good = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT };
