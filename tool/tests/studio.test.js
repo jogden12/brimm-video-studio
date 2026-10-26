@@ -900,10 +900,12 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
   it("tells Claude in the open lock's CLAUDE.md what it may help with, where it writes, and what never leaves the chat", () => {
     const md = openFiles()["CLAUDE.md"];
     for (const words of ["brimm-edit skill", "graphics, research, writing, other programs", "only through brimm-video's commands", "Nothing here posts, sends or publishes anything.",
-      "~/BRIMM Video Workshop", "heredoc", "posted by hand", "never go into a web search, a picture's description, a drawing or the workshop",
+      "~/BRIMM Video Workshop", "printf", "python3 -c", "node -e", "base64 -d", "never a heredoc", "cat", "Claude's own Write, Edit and Read do not work in the workshop", "posted by hand", "never go into a web search, a picture's description, a drawing or the workshop",
       "Never rate, report or share a chat about a session", "a chat that has a session's teachings is for brimm-video only", "Never show her command names, paths or flags.", "suggest she asks Jason"]) assert.ok(md.includes(words), words);
     assert.ok(!md.includes("do not run any other program"), md);
+    assert.ok(!md.includes("write a file with Write"), md);
     assert.ok(!md.includes("{{"), md);
+    assert.ok(md.trimEnd().split("\n").length <= 11, "kept as short as it was");
   });
   it("keeps the strict lock's CLAUDE.md and skill as they are: the strict folder runs nothing but brimm-video, and words its own card", () => {
     assert.ok(strict["CLAUDE.md"].includes("Everything is done through brimm-video's commands. Do not open, read or change any code, and do not run any other program."));

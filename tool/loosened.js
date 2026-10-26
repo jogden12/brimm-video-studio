@@ -370,7 +370,7 @@ export function addedWhy({ home, sessionId, transcriptPath }) {
 }
 
 /** What `behind` says, and goes on, when Claude Code has not trusted her folder yet: an untrusted folder drops its allow rules, so
-    edit.js and the workshop ask cards (C31). */
+    edit.js asks a card (C31). */
 export const UNTRUSTED = "Claude Code has not trusted this folder yet: open it once and choose to trust it.";
 
 /** UNTRUSTED when Claude Code has not trusted her folder, `folder` (its real path), else "": as Claude Code reads it, from

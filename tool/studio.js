@@ -18,9 +18,10 @@
 //
 // That is the strict lock, and it stays as it is. The open lock (design 2026-10-26, section 7) is the other shape her folder can be
 // written in (openSettingsOf): Claude Code's sandbox on, with edit.js the one command outside it and no network; the never list
-// (never.js) and the gated places (places.js) denied, by their real paths in both spellings; writes only into the workshop,
-// ~/BRIMM Video Workshop; the app's secrets taken from sandboxed commands; Claude Code's memory off; and, beside the guard, a hook
-// after every card she answers (the receipt). It is written only where this Mac's settings say open and OPEN_LOCK_CLAUDE is set
+// (never.js) and the gated places (places.js) denied, by their real paths in both spellings; sandboxed commands writing only in
+// the workshop, ~/BRIMM Video Workshop, where Claude's own file tools do not act; the app's secrets taken from sandboxed commands;
+// Claude Code's memory off; and, beside the guard, a hook after every card she answers (the receipt). It is written only where
+// this Mac's settings say open and OPEN_LOCK_CLAUDE is set
 // (settings.js effectiveLock), so while that is null every Mac keeps the strict lock. What it rests on that the by-hand round
 // records is data here (studio/allow.json, environment.json, app-flags.json), and starts so that the open lock fails closed.
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -32,7 +33,8 @@ import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
 /** Her folder for Claude, in the home folder. */
 export const studioFolder = (home) => join(home, "BRIMM Video Studio");
-/** The workshop, in the home folder, on this Mac's own disk: the one folder Claude writes into under the open lock. */
+/** The workshop, in the home folder, on this Mac's own disk: the one folder the sandbox lets commands write into under the open
+    lock. Claude makes and reads files there with commands, never with its own file tools. */
 export const workshopFolder = (home) => join(home, "BRIMM Video Workshop");
 
 /** The Claude Code version the by-hand round in the Code tab passed the open lock on (R2). While it is null, the lock in effect is
@@ -89,12 +91,18 @@ export function gatedReadRules(facts) {
     sandbox's own lists plainly. What it denies:
     - to Claude's own tools: the never list; Read of each gated place's read rules, and of a .env file in her folder (R20); Write
       and Edit in her folder, the checkout, BRIMM Video and every place only brimm-video writes, the app's data, LaunchAgents,
-      ~/.claude and ~/.ssh, and of a CLAUDE.md, CLAUDE.local.md, .mcp.json or .claude anywhere in the workshop;
+      ~/.claude and ~/.ssh. And, to every tool, the names a session started in the workshop would take as its own (a CLAUDE.md,
+      CLAUDE.local.md, .mcp.json or .claude anywhere in it): an Edit() deny rule, which Claude Code merges into the sandbox's
+      denyWrite, so that even a sandboxed command cannot write them;
     - to sandboxed commands: reading any gated place but Assets and the three places Bash needs (readAllowed), writing anywhere
       but the workshop, the network (with both proxy ports set to one nothing listens on, so no proxy login is made: C38), and the
       app's secret names.
-    It allows edit.js (outside the sandbox: its one excluded command), writes into the workshop, and the web tools only once this
-    Mac's settings open them. No folder is added to the session. */
+    It allows edit.js (outside the sandbox: its one excluded command), and the web tools only once this Mac's settings open them.
+    No allow rule names the workshop, and no Edit() or Read() deny rule names it whole (only the four names above): Claude Code
+    merges an Edit() deny rule into the sandbox's denyWrite and a Read() one into its denyRead (C3), which would stop sandboxed
+    commands making and reading files there, and commands are how a file is made or read in the workshop. The guard refuses
+    Claude's own Write, Edit, Read, SendUserFile, Glob and Grep there (open-lock.js), and a call it let through would ask a card.
+    No folder is added to the session. */
 export function openSettingsOf({ checkout, node, folder, facts }) {
   const { home } = facts;
   const AS = join(home, "Library", "Application Support");
@@ -107,7 +115,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   return {
     permissions: {
       defaultMode: "default",
-      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, `Edit(/${W}/**)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
+      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
       deny: [
         ...neverDenyRules(facts.allow),
         ...gatedReadRules(facts),

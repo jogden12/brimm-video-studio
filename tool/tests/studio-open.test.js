@@ -96,12 +96,21 @@ describe("her folder's settings under the open lock", () => {
     }
     assert.ok(s.permissions.deny.includes(`Read(/${realOf(join(w.home, ".claude.json"))})`));
   });
-  it("lets sandboxed commands write only the workshop, and never her folder or the app's data", () => {
+  it("lets sandboxed commands write only the workshop, and never her folder or the app's data, with no allow rule for Claude's own file tools there", () => {
     const s = open();
     assert.deepEqual(s.sandbox.filesystem.allowWrite, [w.workshop]);
     assert.deepEqual(s.sandbox.filesystem.denyWrite, [...bothSpellings(w.folder), ...both(join(AS(), "Claude"))]);
-    assert.ok(s.permissions.allow.includes(`Edit(/${w.workshop}/**)`));
-    assert.equal(s.permissions.allow.filter((r) => r.startsWith("Edit(")).length, 1);
+    // The guard refuses Write and Edit everywhere, so no rule allows them in the workshop: with one, a call the guard let through would
+    // not ask a card.
+    assert.deepEqual(s.permissions.allow.filter((rule) => /^(Edit|Write|Read|MultiEdit)\b/.test(rule)), []);
+    assert.ok(!s.permissions.allow.some((rule) => rule.includes(w.workshop)), "no allow rule names the workshop");
+  });
+  it("puts no Edit() or Read() deny rule on the workshop as a whole, which Claude Code would merge into the sandbox's denyWrite and denyRead and so stop commands making and reading files there", () => {
+    const s = open();
+    const inner = bothSpellings(w.workshop).flatMap((spelling) => [".claude/**", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json"].map((name) => `Edit(/${spelling}/**/${name})`));
+    const aboutIt = s.permissions.deny.filter((rule) => /^(Edit|Write|Read|MultiEdit)\(/.test(rule) && bothSpellings(w.workshop).some((spelling) => rule.includes(spelling)));
+    assert.deepEqual(aboutIt, inner);
+    for (const place of [s.sandbox.filesystem.denyWrite, s.sandbox.filesystem.denyRead]) assert.ok(!place.some((path) => bothSpellings(w.workshop).includes(path)), "the sandbox's lists do not hold the workshop");
   });
   it("denies Write and Edit in her folder, the checkout, BRIMM Video, the app's data and every place only brimm-video writes, and the workshop's CLAUDE.md, CLAUDE.local.md, .mcp.json and .claude", () => {
     const s = open();
@@ -129,9 +138,9 @@ describe("her folder's settings under the open lock", () => {
     const s = open();
     assert.deepEqual([s.autoMemoryEnabled, s.autoDreamEnabled, s.disableSkillShellExecution, s.disableAllHooks], [false, false, true, false]);
   });
-  it("has no WebFetch or WebSearch allow rule while the web tools are held, and both once they are opened", () => {
-    assert.deepEqual(open().permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`, `Edit(/${w.workshop}/**)`]);
-    assert.deepEqual(openWith({ web: "open" }).permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`, `Edit(/${w.workshop}/**)`, "WebFetch", "WebSearch"]);
+  it("allows edit.js alone while the web tools are held, and the web tools too once they are opened", () => {
+    assert.deepEqual(open().permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`]);
+    assert.deepEqual(openWith({ web: "open" }).permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`, "WebFetch", "WebSearch"]);
   });
   it("never denies the drawing tools, and denies Monitor and NotebookEdit", () => {
     const { deny } = open().permissions;
@@ -191,6 +200,11 @@ describe("what is changed in her folder's settings under the open lock (lockBrok
     for (const key of ["guard", "permissions", "sandbox"]) assert.ok(found.includes(key), key);
     // The node is the one this Mac recorded, never the one the file names.
     assert.deepEqual(lockBroken(s, { ...where(), lock: "open", node: join(w.workshop, "x") }), []);
+  });
+  it("names the permissions as changed when the allow rule for Claude's own file tools in the workshop is there, as a folder written before this was", () => {
+    const s = open();
+    s.permissions.allow = [s.permissions.allow[0], `Edit(/${w.workshop}/**)`];
+    assert.deepEqual(broken(s), ["permissions"]);
   });
   it("names a SessionStart hook, another hook beside the guard, an env, a statusLine or an enabledPlugins key in her folder's own settings", () => {
     const hook = { type: "command", command: "/bin/sh", args: ["/x.sh"] };

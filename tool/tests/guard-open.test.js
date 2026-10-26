@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
+import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WORKSHOP_FILES_REFUSED, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
 import { LOCK_CHANGED } from "../loosened.js";
 import { HELD_NARROWED, HELD_REFUSED, clearStrictSeen, markChat, noteStrictSeen, untiedMark } from "../held.js";
 import { processTable } from "../chain.js";
@@ -149,17 +149,26 @@ describe("the open guard, II: paths and writes", () => {
     symlinkSync(join(w.home, ".zshenv"), join(w.workshop, "zz"));
     symlinkSync(join(w.root, "Drop", "Mac Studio"), join(w.workshop, "d"));
     symlinkSync(w.folder, join(w.workshop, "h"));
-    mkdirSync(join(w.workshop, "sub"));
+    mkdirSync(join(w.workshop, "sub", "deep"), { recursive: true });
+    writeFileSync(join(w.workshop, "a.txt"), "x");
+    writeFileSync(join(w.workshop, "sub", "deep", "f.txt"), "x");
+    // A link in the workshop to a file outside it, and links outside it that lead in, to the workshop, to a file in it and to a
+    // path in it that is not there yet.
+    symlinkSync(p.notes, join(w.workshop, "out"));
+    symlinkSync(w.workshop, join(w.home, "Documents", "shop"));
+    symlinkSync(join(w.workshop, "a.txt"), join(w.home, "Documents", "shop-file"));
+    symlinkSync(join(w.workshop, "later", "new.txt"), join(w.home, "Documents", "shop-later"));
     ctx = { checkout: w.checkout, node: w.node, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(w.facts), [join(realOf(w.root), "Assets")]), allow: w.facts.allow, web: "held", resolve: PUBLIC, loosened: false, held: false };
   });
   after(() => w.done());
-  const decide = (name, input, more = {}) => openDecision({ session_id: SESSION, transcript_path: p.transcript, cwd: w.folder, hook_event_name: "PreToolUse", tool_name: name, tool_input: input, ...more }, ctx);
+  const decide = (name, input, more = {}, context = ctx) => openDecision({ session_id: SESSION, transcript_path: p.transcript, cwd: w.folder, hook_event_name: "PreToolUse", tool_name: name, tool_input: input, ...more }, context);
   const read = (file_path, more) => decide("Read", { file_path }, more);
   const send = (file) => decide("SendUserFile", { files: [file], status: "normal" });
   const write = (file_path) => decide("Write", { file_path, content: "x" });
   const edit = (file_path) => decide("Edit", { file_path, old_string: "a", new_string: "b" });
   const GATED = { decision: "deny", reason: GATED_REFUSED };
   const NO_WRITE = { decision: "deny", reason: WRITE_REFUSED };
+  const IN_WORKSHOP = { decision: "deny", reason: WORKSHOP_FILES_REFUSED };
 
   it("refuses every gated place for Read, Write, Edit and SendUserFile: by .., by a link into it and out of it, and by a path in a field it did not know of", async () => {
     for (const path of [p.episode, `${w.root}/Assets/../Episodes/x/t.txt`, join(w.home, "Documents", "eps", "x", "t.txt"), join(w.root, "Episodes", "out"), "~/.ssh/id_ed25519", p.transcript, p.otherWords]) {
@@ -169,24 +178,15 @@ describe("the open guard, II: paths and writes", () => {
       assert.equal((await edit(path)).decision, "deny", `Edit ${path}`);
     }
     assert.deepEqual(await decide("Read", { file_path: p.notes, extra: { deep: [p.episode] } }), GATED);
-    assert.deepEqual(await decide("Write", { file_path: join(w.workshop, "ok.txt"), content: "x", also: [p.episode] }), GATED);
     assert.deepEqual(await decide("mcp__visualize__show_widget", { widget_code: "x", file: p.episode }), GATED);
-    assert.deepEqual(await read(p.notes, { cwd: join(w.root, "Episodes") }), { decision: "allow", reason: "outside the gated places" });
+    assert.deepEqual(await read(p.notes, { cwd: join(w.root, "Episodes") }), { decision: "allow", reason: "outside the gated places and the workshop" });
     assert.deepEqual(await read("x/t.txt", { cwd: join(w.root, "Episodes") }), GATED);
   });
-  it("finds a path with white space around it, as Claude Code's tools take it, and writes none so spelled", async () => {
+  it("finds a path with white space around it, as Claude Code's tools take it", async () => {
     for (const path of [` ${p.otherWords}`, `\t${p.transcript}`, `\n${p.episode}`, `${p.otherWords} `]) {
       assert.deepEqual(await send(path), GATED, JSON.stringify(path));
       assert.deepEqual(await read(path), GATED, JSON.stringify(path));
     }
-    for (const path of [" ~/.zshrc", ` ${join(w.workshop, "a.txt")}`, `${join(w.workshop, "a.txt")} `, `${join(w.workshop, "a.txt")}\n`]) {
-      assert.deepEqual(await decide("Write", { file_path: path, content: "x" }, { cwd: w.workshop }), NO_WRITE, JSON.stringify(path));
-      assert.deepEqual(await decide("Edit", { file_path: path, old_string: "a", new_string: "b" }, { cwd: w.workshop }), NO_WRITE, JSON.stringify(path));
-    }
-  });
-  it("takes no path from what Write writes or what Edit changes", async () => {
-    assert.equal((await decide("Write", { file_path: join(w.workshop, "ok.txt"), content: `${p.episode}\n~/.ssh/id_ed25519\n../Episodes` })).decision, "allow");
-    assert.equal((await decide("Edit", { file_path: join(w.workshop, "ok.txt"), old_string: p.episode, new_string: "~/.ssh/config" })).decision, "allow");
   });
   it("refuses them by /System/Volumes/Data and by changed letter case", { skip: notAMac }, async () => {
     for (const path of [`/System/Volumes/Data${p.episode}`, p.episode.replace("Episodes", "EPISODES"), join(w.home, ".SSH", "config"), `/System/Volumes/Data${p.otherWords}`]) {
@@ -205,36 +205,48 @@ describe("the open guard, II: paths and writes", () => {
     assert.deepEqual(await read(p.ownWords, { session_id: "../x" }), GATED);
     assert.deepEqual(await read(p.ownResults, { session_id: undefined }), GATED);
   });
-  it("refuses a link in the workshop to a gated file for Read and SendUserFile, and any link for Write and Edit", async () => {
+  it("refuses a link in the workshop to a gated file for Read and SendUserFile as a gated place, not as the workshop", async () => {
     for (const name of ["t", "o"]) {
       assert.deepEqual(await read(join(w.workshop, name)), GATED, name);
       assert.deepEqual(await send(join(w.workshop, name)), GATED, name);
     }
-    for (const path of [join(w.workshop, "z"), join(w.workshop, "zz"), join(w.workshop, "d", "x.mov"), join(w.workshop, "t")]) {
-      assert.deepEqual(await write(path), NO_WRITE, `Write ${path}`);
-      assert.deepEqual(await edit(path), NO_WRITE, `Edit ${path}`);
-    }
+    assert.deepEqual(await read(join(w.workshop, "a.txt"), {}), IN_WORKSHOP);
+    assert.deepEqual(await decide("Read", { file_path: join(w.workshop, "a.txt"), also: [p.episode] }), GATED, "a gated path anywhere in the input answers first");
   });
-  it("allows Write and Edit only inside the workshop, and never a CLAUDE.md, CLAUDE.local.md, .mcp.json or anything in a .claude folder there", async () => {
-    for (const path of [join(w.workshop, "a.txt"), join(w.workshop, "sub", "b.html"), join(w.workshop, "new", "c.css"), "~/BRIMM Video Workshop/d.txt"]) {
-      assert.equal((await write(path)).decision, "allow", path);
-      assert.equal((await edit(path)).decision, "allow", path);
+  it("refuses Write and Edit for every path, the workshop included, saying where a file is made", async () => {
+    for (const [what, path] of [
+      ["a file in the workshop", join(w.workshop, "a.txt")],
+      ["a file in a folder not there yet", join(w.workshop, "new", "c.css")],
+      ["a file in the workshop, by ~", "~/BRIMM Video Workshop/d.txt"],
+      ["the workshop itself", w.workshop],
+      ["a CLAUDE.md in the workshop", join(w.workshop, "CLAUDE.md")],
+      ["a .mcp.json in the workshop spelled with a long s, which macOS takes as that name", join(w.workshop, ".mcp.j\u017fon")],
+      ["a file in a .claude folder in the workshop", join(w.workshop, ".claude", "settings.json")],
+      ["a link in the workshop to a file in her home", join(w.workshop, "z")],
+      ["a link in the workshop that leads nowhere", join(w.workshop, "zz")],
+      ["a file through a link in the workshop into the Drop folder", join(w.workshop, "d", "x.mov")],
+      ["a file through a link in the workshop into her folder", join(w.workshop, "h", "CLAUDE.md")],
+      ["a link in the workshop to a gated file", join(w.workshop, "t")],
+      ["a file in a link outside the workshop that leads in", join(w.home, "Documents", "shop", "b.txt")],
+      ["a path that leaves the workshop by ..", `${w.workshop}/../BRIMM Video Studio/x`],
+      ["a file in a folder named like the workshop's", join(w.home, "BRIMM Video Workshop2", "x")],
+      ["a path with white space before it", ` ${join(w.workshop, "a.txt")}`],
+      ["a path with white space after it", `${join(w.workshop, "a.txt")}\n`],
+      ["her folder", join(w.folder, "x.txt")],
+      ["her documents", p.notes],
+      ["a gated place", p.episode],
+      ["her ssh folder, by ~", "~/.ssh/id_ed25519"],
+    ]) {
+      assert.deepEqual(await write(path), NO_WRITE, `Write ${what}`);
+      assert.deepEqual(await edit(path), NO_WRITE, `Edit ${what}`);
+      assert.deepEqual(await decide("Write", { file_path: path, content: "x" }, { cwd: w.workshop }), NO_WRITE, `Write in the workshop ${what}`);
     }
-    for (const path of [join(w.workshop, "CLAUDE.md"), join(w.workshop, "sub", "claude.MD"), join(w.workshop, "CLAUDE.local.md"), join(w.workshop, ".mcp.json"), join(w.workshop, ".claude", "settings.json"), join(w.workshop, "sub", ".Claude", "x"), w.workshop, p.notes, join(w.folder, "x.txt"), join(w.home, "BRIMM Video Workshop2", "x"), `${w.workshop}/../BRIMM Video Studio/x`, join(w.dir, "elsewhere.txt")]) {
-      assert.deepEqual(await write(path), NO_WRITE, path);
-      assert.deepEqual(await edit(path), NO_WRITE, path);
+    // No path, or one that is no text, or a path in another field.
+    for (const input of [{ content: "x" }, { file_path: undefined, content: "x" }, { file_path: "", content: "x" }, { file_path: 7 }, { file_path: [join(w.workshop, "a.txt")] }, { file_path: join(w.workshop, "a.txt"), content: "x", also: [p.episode] }, "text", null]) {
+      assert.deepEqual(await decide("Write", input), NO_WRITE, JSON.stringify(input));
+      assert.deepEqual(await decide("Edit", input), NO_WRITE, JSON.stringify(input));
     }
-    assert.deepEqual(await decide("Write", { content: "x" }), NO_WRITE);
-  });
-  it("never writes a .mcp.json spelled with a long s, which macOS takes as that name", async () => {
-    for (const path of [join(w.workshop, ".mcp.j\u017fon"), join(w.workshop, "sub", ".MCP.J\u017fON")]) {
-      assert.deepEqual(await write(path), NO_WRITE, path);
-      assert.deepEqual(await edit(path), NO_WRITE, path);
-    }
-  });
-  it("refuses a write through a link from the workshop into her folder", async () => {
-    assert.deepEqual(await write(join(w.workshop, "h", "CLAUDE.md")), NO_WRITE);
-    assert.deepEqual(await write(join(w.workshop, "h", "notes.txt")), NO_WRITE);
+    assert.equal(WRITE_REFUSED, "Claude's own file tools do not write files here. Make a file in the workshop, ~/BRIMM Video Workshop, with a command, which runs in the sandbox.");
   });
   it("refuses, for a later Claude Code, a Glob or Grep whose folder is in a gated place or holds one, a Glob's absolute or ~/ pattern with no path among them", async () => {
     for (const [name, input] of [["Glob", { pattern: "**/*.txt", path: join(w.root, "Episodes") }], ["Grep", { pattern: "x", path: w.home }], ["Grep", { pattern: "x", path: dirname(w.root) }], ["Glob", { pattern: `${w.root}/Ep*/**` }], ["Glob", { pattern: "~/Lib*/**" }], ["Glob", { pattern: "../**/*.txt" }]]) {
@@ -243,6 +255,100 @@ describe("the open guard, II: paths and writes", () => {
     for (const [name, input] of [["Glob", { pattern: "**/*.md" }], ["Grep", { pattern: "x", path: join(w.home, "Pictures") }], ["Grep", { pattern: "x" }], ["Glob", { pattern: "*.png", path: join(w.root, "Assets") }]]) {
       assert.equal((await decide(name, input)).decision, "allow", `${name} ${JSON.stringify(input)}`);
     }
+  });
+
+  describe("the workshop: files there are made and read with commands, never with Claude's own file tools", () => {
+    /** Paths in the workshop, or leading into it, as Read, SendUserFile and the search tools meet them. */
+    const spellings = () => [
+      ["the workshop itself", w.workshop],
+      ["a file in it", join(w.workshop, "a.txt")],
+      ["a file in a folder in it", join(w.workshop, "sub", "deep", "f.txt")],
+      ["a folder in it", join(w.workshop, "sub")],
+      ["a file in it, by ~", "~/BRIMM Video Workshop/a.txt"],
+      ["a file in it, by ..", join(w.home, "Documents", "..", "BRIMM Video Workshop", "a.txt")],
+      ["a link in it to a file outside it", join(w.workshop, "out")],
+      ["a link outside it that leads to it", join(w.home, "Documents", "shop")],
+      ["a file through a link outside it that leads to it", join(w.home, "Documents", "shop", "sub", "deep", "f.txt")],
+      ["a link outside it to a file in it", join(w.home, "Documents", "shop-file")],
+      ["a link outside it to a path in it that is not there yet", join(w.home, "Documents", "shop-later")],
+      ["a path in it that is not there yet", join(w.workshop, "later", "new.txt")],
+      ["a path in a folder in it that is not there yet", join(w.workshop, "sub", "not", "yet", "x.txt")],
+      ["a path with white space around it", ` ${join(w.workshop, "a.txt")}\n`],
+    ];
+    const macSpellings = () => [
+      ["by /System/Volumes/Data", `/System/Volumes/Data${join(w.workshop, "a.txt")}`],
+      ["by /System/Volumes/Data, a folder in it", `/System/Volumes/Data${join(w.workshop, "sub")}`],
+      ["by /System/Volumes/Data, not there yet", `/System/Volumes/Data${join(w.workshop, "later", "new.txt")}`],
+      ["in another letter case", join(w.home, "BRIMM VIDEO WORKSHOP", "A.TXT")],
+      ["in another letter case, a folder", join(w.home, "brimm video workshop", "SUB")],
+      ["in another letter case, not there yet", join(w.home, "Brimm Video Workshop", "Later", "New.txt")],
+      ["through a link, in another letter case", join(w.home, "DOCUMENTS", "SHOP", "a.txt")],
+    ];
+
+    it("refuses Read and SendUserFile of any path in the workshop, or that leads into it, as the workshop's, by what the path is", async () => {
+      for (const [what, path] of spellings()) {
+        assert.deepEqual(await read(path), IN_WORKSHOP, `Read ${what}`);
+        assert.deepEqual(await send(path), IN_WORKSHOP, `SendUserFile ${what}`);
+      }
+      assert.equal(WORKSHOP_FILES_REFUSED, "Claude's own file tools do not read the workshop. Read a file there with a command, which runs in the sandbox.");
+    });
+    it("refuses them by /System/Volumes/Data and by changed letter case", { skip: notAMac }, async () => {
+      for (const [what, path] of macSpellings()) {
+        assert.deepEqual(await read(path), IN_WORKSHOP, `Read ${what}`);
+        assert.deepEqual(await send(path), IN_WORKSHOP, `SendUserFile ${what}`);
+      }
+    });
+    it("refuses Glob and Grep whose folder is in the workshop, or leads into it, or whose pattern names a place in it", async () => {
+      for (const [what, path] of [
+        ["the workshop itself", w.workshop],
+        ["a folder in it", join(w.workshop, "sub", "deep")],
+        ["the workshop, by ~", "~/BRIMM Video Workshop"],
+        ["a folder in it that is not there yet", join(w.workshop, "sub", "not")],
+        ["a link in it to a file outside it", join(w.workshop, "out")],
+        ["a link outside it that leads to it", join(w.home, "Documents", "shop")],
+        ["a folder in it, through that link", join(w.home, "Documents", "shop", "sub")],
+        ["the workshop, with white space around it", ` ${w.workshop} `],
+      ]) {
+        for (const name of ["Glob", "Grep"]) assert.deepEqual(await decide(name, { pattern: "*", path }), IN_WORKSHOP, `${name} ${what}`);
+      }
+      for (const name of ["Glob", "Grep"]) {
+        assert.deepEqual(await decide(name, { pattern: "x", path: join(w.workshop, "a.txt") }), IN_WORKSHOP, `${name} a file in it`);
+        assert.deepEqual(await decide(name, { pattern: "x" }, { cwd: w.workshop }), IN_WORKSHOP, `${name} from the workshop`);
+        assert.deepEqual(await decide(name, { pattern: "x" }, { cwd: join(w.workshop, "sub") }), IN_WORKSHOP, `${name} from a folder in it`);
+      }
+      for (const pattern of [`${w.workshop}/**/*.txt`, "~/BRIMM Video Workshop/*.txt", `${w.home}/Documents/shop/**`, `${w.workshop}/sub/../*.txt`]) assert.deepEqual(await decide("Glob", { pattern }), IN_WORKSHOP, pattern);
+    });
+    it("refuses Glob and Grep of a folder above the workshop, which holds it, even where no gated place is in the way", async () => {
+      const bare = { ...ctx, index: gatedIndex([]) };
+      for (const root of [w.home, w.dir, "/"]) for (const name of ["Glob", "Grep"]) assert.deepEqual(await decide(name, { pattern: "x", path: root }, {}, bare), IN_WORKSHOP, `${name} ${root}`);
+      assert.deepEqual(await decide("Glob", { pattern: "../**/*.txt" }, {}, bare), IN_WORKSHOP);
+      for (const root of [join(w.home, "Documents"), w.folder, join(w.home, "BRIMM Video Workshop2"), join(w.home, "Documents", "BRIMM Video Workshop")]) for (const name of ["Glob", "Grep"]) assert.equal((await decide(name, { pattern: "x", path: root }, {}, bare)).decision, "allow", `${name} ${root}`);
+    });
+    it("answers a gated place before the workshop, and the workshop for every other tool whose input holds a path in it", async () => {
+      assert.deepEqual(await decide("Read", { file_path: join(w.workshop, "a.txt"), also: [p.episode] }), GATED);
+      assert.deepEqual(await decide("Grep", { pattern: "x", path: join(w.workshop, "a.txt"), also: p.episode }), GATED);
+      assert.deepEqual(await send(join(w.workshop, "t")), GATED, "a link in the workshop to a gated file");
+      for (const [name, input] of [["mcp__visualize__show_widget", { widget_code: "x", file: join(w.workshop, "a.txt") }], ["Agent", { prompt: "x", files: [{ path: join(w.workshop, "sub") }] }], ["PushNotification", { message: join(w.workshop, "a.txt") }], ["Skill", { skill: "brimm-edit", args: join(w.workshop, "a.txt") }]]) {
+        assert.deepEqual(await decide(name, input), IN_WORKSHOP, name);
+      }
+      assert.deepEqual(await decide("PushNotification", { message: "Done" }), { decision: "allow", reason: "a tool this folder allows" });
+      assert.equal((await decide("Agent", { prompt: "Look in the workshop for the pictures" })).decision, "allow");
+    });
+    it("still allows Read of her documents, Assets and the checkout's code, and a path that only looks like the workshop's", async () => {
+      for (const path of [p.notes, p.logo, p.code, join(w.folder, "CLAUDE.md"), "~/Documents/notes.txt", join(w.home, "BRIMM Video Workshop2", "x"), join(w.home, "Documents", "BRIMM Video Workshop", "x"), join(w.home, "Workshop")]) {
+        assert.equal((await read(path)).decision, "allow", path);
+        assert.equal((await send(path)).decision, "allow", path);
+      }
+      for (const [name, input] of [["Glob", { pattern: "**/*.md" }], ["Grep", { pattern: "x", path: join(w.home, "Pictures") }], ["Glob", { pattern: "*.png", path: join(w.root, "Assets") }]]) assert.equal((await decide(name, input)).decision, "allow", name);
+    });
+    it("uses the workshop's index it is given, and builds one from the home folder when it is given none", async () => {
+      const none = { ...ctx, workshop: gatedIndex([]) };
+      assert.equal((await decide("Read", { file_path: join(w.workshop, "a.txt") }, {}, none)).decision, "allow", "an index with no place in it");
+      const all = { ...ctx, workshop: { at: () => ({ path: "x" }), holds: () => false } };
+      assert.deepEqual(await read(p.notes, {}), { decision: "allow", reason: "outside the gated places and the workshop" });
+      assert.deepEqual(await decide("Read", { file_path: p.notes }, {}, all), IN_WORKSHOP);
+      assert.deepEqual(await decide("Read", { file_path: join(w.workshop, "a.txt") }), IN_WORKSHOP, "none given: built from ctx.home");
+    });
   });
 });
 
@@ -295,6 +401,12 @@ describe("the open guard, III: Bash", () => {
   it("allows any other command, which runs in the sandbox", async () => {
     for (const c of ["date", "ls ~/Documents", "python3 -c 'print(1)'", "rg TODO ~/Documents", `cat "${join(w.root, "Assets", "logo.png")}"`, "cd Pictures"]) assert.equal((await bash(c)).decision, "allow", c);
   });
+  it("allows a command that makes, reads or lists files in the workshop, which is how Claude does it: the sandbox writes there", async () => {
+    const shop = join(w.workshop, "a b.txt");
+    for (const c of [`cat "${shop}"`, `printf 'hello' > "${shop}"`, `printf '%s' 'aGk=' | base64 -d > "${shop}"`, `python3 -c 'open("${shop}", "w").write("x")'`, `node -e 'require("fs").writeFileSync("${shop}", "x")'`, `ls "${w.workshop}"`, `cd "${w.workshop}" && cat 'a b.txt'`, "cat ~/'BRIMM Video Workshop'/x.txt", `rg x "${w.workshop}"`]) {
+      assert.deepEqual(await bash(c), { decision: "allow", reason: "a command in the sandbox" }, c);
+    }
+  });
 });
 
 describe("the open guard, IV: falling back to today's, and the hook", () => {
@@ -318,7 +430,11 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
   it("goes on with the open lock when nothing loosens it", async () => {
     const w = chat();
     assert.equal((await date(w)).decision, "allow");
-    assert.equal((await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" })).decision, "allow");
+    assert.deepEqual(await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" }), { decision: "deny", reason: WRITE_REFUSED });
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.workshop, "a.txt") }), { decision: "deny", reason: WORKSHOP_FILES_REFUSED });
+    assert.deepEqual(await guard(w, "Grep", { pattern: "x", path: w.workshop }), { decision: "deny", reason: WORKSHOP_FILES_REFUSED });
+    assert.equal((await guard(w, "Bash", { command: `printf x > "${join(w.workshop, "a.txt")}"` })).decision, "allow");
+    assert.equal((await guard(w, "Read", { file_path: join(w.home, "Documents", "notes.txt") })).decision, "allow");
     w.done();
   });
   it("answers as today's guard does, saying the lock is changed, while anything loosens the lock", async () => {
@@ -360,7 +476,9 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     symlinkSync(join(w.words, SESSION, "x.txt"), join(w.workshop, "mine.txt"));
     markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: processTable(chatChain({ args: APP_ARGS(w.folder, w.home) })), pid: 900, now: Date.parse("2026-10-26T10:30:00.000Z") });
     assert.equal((await guard(w, "Read", { file_path: join(w.words, SESSION, "x.txt") })).decision, "allow");
-    assert.equal((await guard(w, "Read", { file_path: join(w.workshop, "mine.txt") })).decision, "allow", "by its real path");
+    // Not through a link in the workshop: a path there is one Claude's own tools do not act on, since a loop in the sandbox can swap a
+    // link in it between the guard's look and the Read.
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.workshop, "mine.txt") }), { decision: "deny", reason: HELD_REFUSED });
     assert.deepEqual(await guard(w, "Read", { file_path: join(w.words, OTHER, "x.txt") }), { decision: "deny", reason: HELD_REFUSED });
     assert.deepEqual(await date(w), { decision: "deny", reason: HELD_REFUSED });
     for (const [name, input] of [["WebSearch", { query: "x" }], ["SendUserFile", { files: [join(w.folder, "CLAUDE.md")] }], ["PushNotification", { message: "x" }], ["mcp__visualize__show_widget", {}], ["Write", { file_path: join(w.workshop, "a.txt"), content: "x" }]]) {
@@ -455,7 +573,7 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     const w = chat();
     const pictures = join(w.folder, "Pictures");
     assert.equal((await date(w, { call: { cwd: pictures } })).decision, "allow");
-    assert.equal((await guard(w, "Write", { file_path: join(w.workshop, "a.txt"), content: "x" }, { call: { cwd: pictures } })).decision, "allow");
+    assert.deepEqual(await guard(w, "Read", { file_path: join(w.workshop, "a.txt") }, { call: { cwd: pictures } }), { decision: "deny", reason: WORKSHOP_FILES_REFUSED });
     const there = transcript(join(w.home, ".claude", "projects", claudeDirName(pictures)), [{ type: "user", uuid: "p-1", timestamp: AT }], OTHER);
     assert.deepEqual(await date(w, { call: { cwd: pictures, session_id: OTHER, transcript_path: there } }), CHANGED);
     w.done();
@@ -505,7 +623,7 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     try {
       assert.equal((await date(w, { more: { env: { HOME: join(w.dir, "elsewhere") } } })).decision, "allow");
       assert.deepEqual(await guard(w, "Read", { file_path: "~/.ssh/id_ed25519" }), { decision: "deny", reason: GATED_REFUSED });
-      assert.equal((await guard(w, "Write", { file_path: "~/BRIMM Video Workshop/a.txt", content: "x" })).decision, "allow");
+      assert.deepEqual(await guard(w, "Read", { file_path: "~/BRIMM Video Workshop/a.txt" }), { decision: "deny", reason: WORKSHOP_FILES_REFUSED });
     } finally {
       process.env.HOME = was;
     }

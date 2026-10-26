@@ -3,7 +3,8 @@
 //   1. the lock loosened on this Mac: today's guard (guardDecision), saying the lock is changed;
 //   2. a chat that holds a session's words: today's guard, with Read of its own words folder, and only a session's commands;
 //   3. the never list (never.js): deny;
-//   4. every path in the tool's input, by what it is (places.js): a gated place, or a write outside the workshop: deny;
+//   4. Write and Edit: deny, always; then every path in the tool's input, by what it is (places.js): a gated place, or the
+//      workshop (Claude's own file tools do not act there): deny;
 //   5. Bash: edit.js in its one spelling (outside the sandbox), or any other command, which runs in the sandbox;
 //   6. a skill this Mac's allowlist names: allow;
 //   then a tool an exact `tool` entry names (PushNotification, the drawing tools), unless it is one with a rule of its own;
@@ -23,18 +24,22 @@
 // (effectiveLock), strict, or settings that cannot be read, being today's guard alone; on an open-lock Mac it makes the shared lock
 // check (loosened.js, kept in a cache while nothing it looked at has changed) and the held check, then openDecision.
 //
-// Step 4 takes every path-like string of the tool's input, at any depth (places.js pathsIn), but what Write writes and what Edit
-// changes, which are a file's words, not paths; and judges each by what it is (gatedIndex), a link to a file by its real path too.
-// A Read may reach this call's own carve-outs: the chat's tool-results and tasks folders, its words folder, and the folders of the
-// skills this folder allows; each is given as a gated place's real path with the rest after it, so that a link on the way opens
-// nothing. Write and Edit go only into the workshop, through no link, and never to a CLAUDE.md, CLAUDE.local.md, .mcp.json or a
-// .claude folder there.
+// Step 4 refuses every Write and Edit, the workshop included: Claude's own file tools never write a file here. A file is made in
+// the workshop, ~/BRIMM Video Workshop, with a command, which runs in the sandbox (the one folder it may write). Then it takes
+// every path-like string of the tool's input, at any depth (places.js pathsIn), and judges each by what it is (gatedIndex), a link
+// to a file by its real path too: first against the gated places, then against the workshop. A Read may reach this call's own
+// carve-outs: the chat's tool-results and tasks folders, its words folder, and the folders of the skills this folder allows; each
+// is given as a gated place's real path with the rest after it, so that a link on the way opens nothing. The workshop has no
+// carve-out: a command running in the sandbox, left going in the background, can swap a folder in it for a link, or back, between
+// the guard's look at a path and Claude Code's own Read, SendUserFile, Glob or Grep acting on it, and the guard cannot close that gap.
+// So none of them acts on a path in the workshop, or searches a folder that is in it or holds it; Claude reads a file there with
+// a command. The same holds for a held chat's Read of its own words, when the path is in the workshop.
 //
 // Step 5 lets edit.js through in one spelling only, the one the sandbox's excluded command takes: this Mac's node, the checkout's
 // edit.js in double quotes, and one or more words (studio.js WORD), with nothing before it and nothing after; and not in the
 // background, but for her skill's `guide <label> tell` (R6). Any other command naming edit.js or the checkout's tool folder is
 // refused; any naming a gated place too, as a courtesy, since the sandbox holds it anyway; and any other runs in the sandbox.
-import { lstatSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { promises as dns } from "node:dns";
 import { userInfo } from "node:os";
@@ -55,7 +60,8 @@ export const NEVER_REFUSED = "That is never done from this folder: nothing here 
 export const NOT_NAMED = "That is not among the tools and skills this folder allows. Ask Jason.";
 export const WEB_HELD = "The web is not turned on for this folder yet: ask Jason.";
 export const GATED_REFUSED = "That is one of the places only brimm-video reads or writes. Ask for it through brimm-video, or ask Jason.";
-export const WRITE_REFUSED = "Claude writes files here only in the workshop, ~/BRIMM Video Workshop, and never a CLAUDE.md, a .mcp.json or a .claude folder.";
+export const WRITE_REFUSED = "Claude's own file tools do not write files here. Make a file in the workshop, ~/BRIMM Video Workshop, with a command, which runs in the sandbox.";
+export const WORKSHOP_FILES_REFUSED = "Claude's own file tools do not read the workshop. Read a file there with a command, which runs in the sandbox.";
 export const RUN_ALONE = "Run brimm-video's commands on their own, exactly as her skill says, and not in the background.";
 
 /** The tools left to Claude Code's own rules (step 9): its card, its list of what it is doing and ToolSearch, which only loads a
@@ -67,10 +73,13 @@ const OWN_RULES = new Set([...TOOLS_WITH_RULES, ...LEFT_TO_CLAUDE_CODE]);
 /** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`. */
 export const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
 
-/** The tools step 4 lets through once no path of theirs is in a gated place. */
-const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
-/** The names Write and Edit never write, in any letter case. */
-const NEVER_WRITTEN = new Set(["claude.md", "claude.local.md", ".mcp.json"]);
+/** The tools step 4 lets through once no path of theirs is in a gated place or the workshop. Write and Edit are not among them:
+    they are refused whatever their path. */
+const FILE_TOOLS = new Set(["Read", "Glob", "Grep"]);
+
+/** The workshop as a place to be judged by what it is, with gatedIndex: its real path, as a folder with no read rules and nothing
+    opened inside it. A path is in it, or leads into it, when `at` finds it; a folder holds it when `holds` says so. */
+const workshopIndex = (home) => gatedIndex([{ path: realOf(workshopFolder(home)), readRules: [], kind: "folder" }]);
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -97,47 +106,6 @@ function carveOuts(input, ctx) {
   const skills = (Array.isArray(ctx.allow) ? ctx.allow : []).filter((entry) => isObject(entry) && entry.type === "skill");
   for (const { name } of skills) for (const dir of skillFolders({ home: ctx.home, folder: ctx.folder, name })) carves.push(under(claude, dir));
   return carves.filter(Boolean);
-}
-
-/** A file or folder's own identity, a link's its own; null when it is not there. Throws for anything else it cannot look at. */
-function ownIdentity(path) {
-  try {
-    const st = lstatSync(path);
-    return { id: `${st.dev}:${st.ino}`, link: st.isSymbolicLink() };
-  } catch (e) {
-    if (e.code === "ENOENT" || e.code === "ENOTDIR") return null;
-    throw e;
-  }
-}
-
-/** Whether Write or Edit may write `filePath`: spelled with no white space around it (which Claude Code would take off, so that the
-    path written is not the path looked at), a path inside the workshop, found by the identity of the workshop folder itself, with
-    no part below it a link (the last part included, dangling or not), no `.claude` part, and a name that is not CLAUDE.md,
-    CLAUDE.local.md or .mcp.json, in any letter case; one that is there must have its real path inside the workshop. */
-function writable(filePath, cwd, home) {
-  if (typeof filePath !== "string" || filePath === "" || filePath !== filePath.trim()) return false;
-  try {
-    const path = filePath === "~" || filePath.startsWith("~/") ? resolve(home, filePath.slice(2)) : resolve(cwd, filePath);
-    const workshop = ownIdentity(workshopFolder(home));
-    if (!workshop || workshop.link) return false;
-    const below = [];
-    for (let at = path; ; at = dirname(at)) {
-      const own = ownIdentity(at);
-      if (own && own.id === workshop.id) break;
-      if (own && own.link) return false;
-      if (dirname(at) === at) return false;
-      below.unshift(basename(at));
-    }
-    if (!below.length || below.some((part) => fold(part) === ".claude") || NEVER_WRITTEN.has(fold(below.at(-1)))) return false;
-    if (ownIdentity(path)) {
-      const real = realpathSync.native(path);
-      const inside = realpathSync.native(workshopFolder(home));
-      if (!real.startsWith(`${inside}/`)) return false;
-    }
-    return true;
-  } catch (e) {
-    return false;
-  }
 }
 
 /** A command's words, split at white space, with quotes and backslashes taken off as a shell would: what a command names, for the
@@ -198,12 +166,13 @@ function todays(input, ctx, reason) {
 }
 
 /** Whether `input` is a Read of the chat's own words file: a path the gated places hold as the words folder, and let through with
-    the chat's own words folder opened, by identity, a link by its real path too. */
+    the chat's own words folder opened, by identity, a link by its real path too; but not a path in the workshop, such as a link
+    there to the file, which the sandbox could swap before the Read. */
 function ownWords(input, ctx) {
   if (input.tool_name !== "Read" || !isObject(input.tool_input) || typeof input.session_id !== "string" || !SESSION_ID.test(input.session_id)) return false;
   const cwd = typeof input.cwd === "string" && isAbsolute(input.cwd) ? input.cwd : ctx.folder;
   const [path] = pathsIn([input.tool_input.file_path], cwd, ctx.home);
-  if (!path) return false;
+  if (!path || ctx.workshop.at(path)) return false;
   return ctx.index.at(path)?.carve === "words" && ctx.index.at(path, [join(realOf(wordsFolder(ctx.home)), input.session_id)]) === null;
 }
 
@@ -229,39 +198,39 @@ function heldDecision(input, ctx) {
   return narrowed(todays(input, ctx, HELD_REFUSED), input, ctx);
 }
 
-/** The tool's input as step 4 looks for paths in it: all of it, but what Write writes and what Edit changes. */
-function pathFields(name, toolInput) {
-  if (!isObject(toolInput)) return toolInput;
-  const skip = name === "Write" ? ["content"] : name === "Edit" ? ["old_string", "new_string"] : [];
-  return Object.fromEntries(Object.entries(toolInput).filter(([key]) => !skip.includes(key)));
-}
 const allow = (reason) => ({ decision: "allow", reason });
 const deny = (reason) => ({ decision: "deny", reason });
 const PASS = { decision: "pass", reason: "" };
 
 /** What the open guard answers to a tool call, `input` as the PreToolUse hook is given it, in the context `ctx` (GuardCtx):
-    { checkout, node, folder, home, uid, tmp, index, allow, web, resolve, loosened, held }, `allow` being the allowlist (the
-    default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its addresses. A loosened
-    lock is today's guard, narrowed as for a held chat when `held` is true too. Gives { decision: "allow"|"deny"|"pass", reason }. */
+    { checkout, node, folder, home, uid, tmp, index, workshop, allow, web, resolve, loosened, held }, `index` judging the gated
+    places and `workshop` the workshop (made from `home` when it is not given and the lock is not loosened), `allow` being the
+    allowlist (the default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its
+    addresses. A loosened lock is today's guard, narrowed as for a held chat when `held` is true too. Gives
+    { decision: "allow"|"deny"|"pass", reason }. */
 export async function openDecision(input, ctx) {
   const name = isObject(input) ? input.tool_name : undefined;
   const given = isObject(input) && isObject(input.tool_input) ? input.tool_input : {};
   const named = (type, what) => Array.isArray(ctx.allow) && ctx.allow.some((entry) => isObject(entry) && entry.type === type && entry.name === what);
 
   if (ctx.loosened) return ctx.held ? narrowed(todays(input, ctx, LOCK_CHANGED), input, ctx) : todays(input, ctx, LOCK_CHANGED);
+  if (!ctx.workshop) ctx = { ...ctx, workshop: workshopIndex(ctx.home) };
   if (ctx.held) return heldDecision(input, ctx);
 
   if (neverCaught(name, given)) return deny(NEVER_REFUSED);
 
+  if (name === "Write" || name === "Edit") return deny(WRITE_REFUSED);
+
   const cwd = typeof input.cwd === "string" && isAbsolute(input.cwd) ? input.cwd : ctx.folder;
-  if ((name === "Write" || name === "Edit") && !writable(given.file_path, cwd, ctx.home)) return deny(WRITE_REFUSED);
   const carves = name === "Read" ? carveOuts(input, ctx) : [];
-  for (const path of pathsIn(pathFields(name, input.tool_input), cwd, ctx.home)) if (ctx.index.at(path, carves)) return deny(GATED_REFUSED);
-  if (name === "Glob" || name === "Grep") {
-    const root = searchRoot(name, given, cwd, ctx.home);
-    if (ctx.index.at(root) || ctx.index.holds(root)) return deny(GATED_REFUSED);
-  }
-  if (FILE_TOOLS.has(name)) return allow(name === "Write" || name === "Edit" ? "in the workshop" : "outside the gated places");
+  const paths = pathsIn(input.tool_input, cwd, ctx.home);
+  const root = name === "Glob" || name === "Grep" ? searchRoot(name, given, cwd, ctx.home) : null;
+  // A gated place answers first, whatever else the input holds.
+  if (paths.some((path) => ctx.index.at(path, carves))) return deny(GATED_REFUSED);
+  if (root !== null && (ctx.index.at(root) || ctx.index.holds(root))) return deny(GATED_REFUSED);
+  if (paths.some((path) => ctx.workshop.at(path))) return deny(WORKSHOP_FILES_REFUSED);
+  if (root !== null && (ctx.workshop.at(root) || ctx.workshop.holds(root))) return deny(WORKSHOP_FILES_REFUSED);
+  if (FILE_TOOLS.has(name)) return allow("outside the gated places and the workshop");
   if (name === "Bash") return bashDecision(given.command, Boolean(given.run_in_background), cwd, ctx);
   if (name === "Skill") return typeof given.skill === "string" && named("skill", given.skill) ? allow("a skill this folder allows") : deny(NOT_NAMED);
   if (!OWN_RULES.has(name) && named("tool", name)) return allow("a tool this folder allows");
@@ -489,7 +458,7 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const facts = factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
   const ctx = {
     checkout, node, folder, home, uid: facts.uid, tmp: facts.tmp,
-    index: gatedIndex(gatedPlaces(facts), [join(realOf(facts.root), "Assets")]),
+    index: gatedIndex(gatedPlaces(facts), [join(realOf(facts.root), "Assets")]), workshop: workshopIndex(home),
     allow: facts.allow, web: facts.web, resolve: deps.resolve || lookUp, loosened: false, held: false,
   };
   const whole = isObject(input) && typeof input.cwd === "string" && isAbsolute(input.cwd) && typeof input.session_id === "string" && SESSION_ID.test(input.session_id)
