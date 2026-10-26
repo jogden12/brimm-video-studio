@@ -3,8 +3,12 @@
 // environment"). `ps` is always a stand-in here: no test runs the real one, and no test takes the runner's own environment.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { writeSettings } from "../settings.js";
 import { SANDBOXED, sandboxedWhy } from "../sandboxed.js";
 import { editMain } from "../edit.js";
 import { ENVIRONMENT } from "../studio.js";
@@ -75,6 +79,33 @@ describe("edit.js inside Claude Code's sandbox", () => {
     const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (process.argv[1]").at(-1);
     assert.ok(entry.indexOf("sandboxedWhy(") >= 0 && entry.indexOf("sandboxedWhy(") < entry.indexOf("editMain("));
     assert.ok(entry.includes("pid: process.pid") && !entry.includes("process.ppid"));
+  });
+
+  // Whole-branch review I1: the check is the open lock's, so a strict Mac runs edit.js as it did before the open lock was built, with
+  // SANDBOX_RUNTIME set or not, and never asks ps. It is run here as a program, with a made-up home and SANDBOX_RUNTIME=1, which is
+  // refused without ps being asked (above), so no test asks the real ps.
+  it("does not refuse a Mac whose lock in effect is strict, and asks ps nothing, under SANDBOX_RUNTIME=1", () => {
+    const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (process.argv[1]").at(-1);
+    assert.match(entry, /effectiveLock\(/);
+    assert.ok(entry.indexOf("effectiveLock(") < entry.indexOf("sandboxedWhy("));
+    assert.match(entry, /\? sandboxedWhy\(/, "sandboxedWhy is called only when the lock in effect is open");
+    const dir = mkdtempSync(join(tmpdir(), "brimm-sandboxed-"));
+    try {
+      // With the settings of a strict Mac, of a Mac whose settings say open while OPEN_LOCK_CLAUDE is null, and with none.
+      for (const [what, fields] of [["strict", {}], ["open, but not in effect", { lock: "open" }], ["no settings", null]]) {
+        const home = join(dir, what.replace(/\W+/g, "-"));
+        mkdirSync(join(home, "BRIMM Video", "Episodes"), { recursive: true });
+        if (fields) writeSettings(home, { machine: "Mac Studio", root: join(home, "BRIMM Video"), checkout: fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""), ...fields });
+        const ran = spawnSync(process.execPath, [fileURLToPath(new URL("../edit.js", import.meta.url)), "episodes"], {
+          encoding: "utf8", timeout: 30000, env: { PATH: process.env.PATH, HOME: home, SANDBOX_RUNTIME: "1" }
+        });
+        assert.ok(!`${ran.stdout}${ran.stderr}`.includes(SANDBOXED), `${what}: ${ran.stdout}${ran.stderr}`);
+        assert.notEqual(ran.status, null, what);
+        if (fields) assert.equal(ran.status, 0, `${what}: ${ran.stdout}${ran.stderr}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("prints and logs no value of a listed variable of the app's environment", async () => {
