@@ -289,10 +289,14 @@ const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 const MANAGED_PREFS = "/Library/Managed Preferences";
 const PREFS_FILE = "com.anthropic.claudecode.plist";
 
-/** The entries of `dir`, by their paths; none when it cannot be listed. */
-function entriesOf(dir) {
+/** The entries of `dir` and of every folder inside it, by their paths, a link listed and never followed; none when it cannot be
+    listed. A file added or changed in a folder inside moves that folder's own time, not `dir`'s, so each is looked at. */
+function treeOf(dir) {
   try {
-    return readdirSync(dir).map((name) => join(dir, name));
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      return entry.isDirectory() ? [path, ...treeOf(path)] : [path];
+    });
   } catch (e) {
     return [];
   }
@@ -368,8 +372,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     join(home, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
     join(plugins, "synced"), ...foldersOf(join(plugins, "synced")),
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
-    // The agent definitions Claude Code would load, one named as a built-in agent among them, each file by itself.
-    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...entriesOf(dir)]),
+    // The agent definitions Claude Code would load (loosened.js agentsWhy), each folder and file inside the agents folders by itself.
+    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...treeOf(dir)]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
     prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),
