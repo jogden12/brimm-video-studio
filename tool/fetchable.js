@@ -4,7 +4,7 @@
 // a redirect between the two without asking again). Any numeric host is refused, in any spelling: the URL parser turns
 // `2130706433`, `0x7f.1` and `017700000001` into 127.0.0.1 first. So is a local name: `localhost`, a name with no dot, and one
 // under .local, .localhost, .internal or .home.arpa. An answer that is IPv4 inside IPv6 (`::ffff:…`, NAT64's `64:ff9b::…`) is
-// judged by the IPv4 inside it. A redirect to another host comes back to the guard as a new address; a name whose answer changes
+// judged by the IPv4 inside it, as are 6to4's (`2002::…`) and Teredo's (`2001:0::…`). A redirect to another host comes back to the guard as a new address; a name whose answer changes
 // between the look-up and the fetch is let through (section 11).
 //
 // The look-up is given (`resolve`, a host to its addresses), so that a test gives a stand-in and never asks this Mac's resolver.
@@ -51,7 +51,8 @@ function v6Groups(text) {
 }
 
 /** Whether `address`, an IPv4 or IPv6 address as a look-up gives it, is global unicast. IPv4 outside the blocks above; IPv6 in
-    2000::/3 but not 2001:db8::/32, after an IPv4-mapped (`::ffff:…`) or NAT64 (`64:ff9b::/96`) address is judged by its IPv4.
+    2000::/3 but not 2001:db8::/32, after an IPv4-mapped (`::ffff:…`), NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) or Teredo
+    (`2001::/32`) address is judged by its IPv4 (both of a Teredo address's).
     Anything else, a name or a bracketed address among them, is not. */
 export function isGlobalUnicast(address) {
   if (typeof address !== "string") return false;
@@ -64,6 +65,11 @@ export function isGlobalUnicast(address) {
   const v4 = [g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255];
   if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return v4Global(v4);
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4Global(v4);
+  // 6to4 (2002::/16) holds the IPv4 address it is made from in bits 16 to 47; Teredo (2001:0::/32) holds its server's in bits 32 to 63
+  // and its client's in the last 32, each bit flipped. A tunnel to a private or local address is judged by what it leads to, so each
+  // one inside must be global.
+  if (g[0] === 0x2002) return v4Global([g[1] >> 8, g[1] & 255, g[2] >> 8, g[2] & 255]);
+  if (g[0] === 0x2001 && g[1] === 0) return v4Global([g[2] >> 8, g[2] & 255, g[3] >> 8, g[3] & 255]) && v4Global(v4.map((b) => b ^ 255));
   return (g[0] & 0xe000) === 0x2000 && !(g[0] === 0x2001 && g[1] === 0x0db8);
 }
 

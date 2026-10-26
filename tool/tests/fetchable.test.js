@@ -15,6 +15,20 @@ const resolver = (table) => async (host) => {
   throw Object.assign(new Error(`${host} not found`), { code: "ENOTFOUND" });
 };
 
+describe("6to4 and Teredo addresses (whole-branch review M5)", () => {
+  // 6to4 (2002::/16) holds an IPv4 address in its bits 16 to 47, Teredo (2001::/32) its server's in bits 32 to 63 and its client's,
+  // each bit flipped, in the last 32: they are judged by the IPv4 inside, as ::ffff: and NAT64 are.
+  const SIX_TO_FOUR = { local: ["2002:7f00:1::", "2002:0a00:1::1", "2002:c0a8:101::1", "2002:a9fe:a9fe::", "2002:6440:1::", "2002:0:0::1"], global: ["2002:808:808::", "2002:5db8:d70e::1"] };
+  const TEREDO = { local: ["2001:0:4136:e378:8000:63bf:80ff:fffe", "2001:0:a00:1:8000:63bf:f7f7:f7f7", "2001:0:7f00:1:8000:63bf:f7f7:f7f7", "2001:0:4136:e378:8000:63bf:3fff:fdd2"], global: ["2001:0:4136:e378:8000:63bf:f7f7:f7f7"] };
+  it("judges 6to4 and Teredo addresses by the IPv4 inside them", () => {
+    for (const a of [...SIX_TO_FOUR.global, ...TEREDO.global]) assert.equal(isGlobalUnicast(a), true, a);
+    for (const a of [...SIX_TO_FOUR.local, ...TEREDO.local]) assert.equal(isGlobalUnicast(a), false, a);
+  });
+  it("refuses a name that answers with one that has a private IPv4 inside, and goes on for one that has a public one", async () => {
+    for (const answer of [...SIX_TO_FOUR.local, ...TEREDO.local]) assert.equal(await fetchWhy("https://bad.example.com/", resolver({ "bad.example.com": [answer] })), LOCAL_ADDRESS, answer);
+    for (const answer of [...SIX_TO_FOUR.global, ...TEREDO.global]) assert.equal(await fetchWhy("https://good.example.com/", resolver({ "good.example.com": [answer] })), "", answer);
+  });
+});
 describe("WebFetch's addresses", () => {
   it("refuses every numeric or local address, in every spelling", async () => {
     for (const url of ["http://127.0.0.1/", "http://2130706433/", "http://0x7f.1/", "http://017700000001/", "http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://192.168.1.1/", "http://169.254.169.254/", "http://100.64.0.1/", "http://localhost/", "http://printer.local/", "http://router/"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
