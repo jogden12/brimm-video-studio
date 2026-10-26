@@ -418,7 +418,8 @@ function lookUp(host) {
     one whose settings cannot be read, gets today's guard alone, and no `ps` or `lsof` is run. On an open-lock Mac: a call with no
     folder, no chat id that is one, no transcript or no tool_input object is loosened; so is a lock check that finds anything. The
     session is hers when its transcript is in her folder's projects folder (R30), its folder then taken as hers, whatever `cwd` says
-    after a sandboxed `cd`. A chat is held by the held check (held.js), its claude the one above the guard. */
+    after a sandboxed `cd`, when that `cwd` is her folder or inside it. A chat is held by the held check (held.js), its claude the one
+    above the guard. */
 export async function guardAnswer(input, { checkout, node, folder, deps = {} }) {
   const today = () => guardDecision(input, { checkout, node, folder, ...(deps.tmp !== undefined ? { tmp: deps.tmp } : {}), ...(deps.uid !== undefined ? { uid: deps.uid } : {}) });
   if (typeof folder !== "string" || !isAbsolute(folder)) return today();
@@ -437,7 +438,9 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const text = (deps.ps || readProcesses)();
   const table = typeof text === "string" ? processTable(text) : null;
   const above = table ? claudeAbove(chainUp(table, deps.pid !== undefined ? deps.pid : process.pid)) : null;
-  const hers = basename(dirname(input.transcript_path)) === claudeDirName(folder);
+  // Her chat by its transcript's folder (R30), and by its folder being hers or inside it: Claude Code's name for a folder makes every
+  // letter but a letter or a digit a dash, so a chat started in ~/BRIMM-Video-Studio keeps its transcript in her projects folder too.
+  const hers = basename(dirname(input.transcript_path)) === claudeDirName(folder) && (input.cwd === folder || input.cwd.startsWith(`${folder}/`));
   const env = { ...(deps.env || process.env), CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: input.session_id };
   const check = { ...deps, settings, env, ps: () => text, cwd: hers ? folder : input.cwd, transcript: hers ? input.transcript_path : null };
   const now = deps.now ? Number(deps.now()) : Date.now();

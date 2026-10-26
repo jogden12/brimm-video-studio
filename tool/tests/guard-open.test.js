@@ -362,6 +362,19 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.deepEqual(await date(w, { call: { cwd: pictures, session_id: OTHER, transcript_path: there } }), CHANGED);
     w.done();
   });
+  it("says the lock is changed for a chat started in a folder whose projects folder is spelled as hers, as ~/BRIMM-Video-Studio", async () => {
+    const w = chat();
+    for (const name of ["BRIMM-Video-Studio", "BRIMM_Video_Studio", join("BRIMM Video", "Studio")]) {
+      const elsewhere = join(w.home, name);
+      mkdirSync(elsewhere, { recursive: true });
+      assert.equal(claudeDirName(elsewhere), claudeDirName(w.folder), name);
+      const there = transcript(w.projects, [{ type: "user", uuid: "e-1", timestamp: AT }], OTHER);
+      assert.deepEqual(await date(w, { call: { cwd: elsewhere, session_id: OTHER, transcript_path: there } }), CHANGED, name);
+      assert.deepEqual(await date(w, { call: { cwd: `${w.folder}x`, session_id: OTHER, transcript_path: there } }), CHANGED, `${name}: a folder beside hers whose name begins as hers does`);
+    }
+    assert.equal((await date(w, { call: { cwd: join(w.folder, "Pictures", "deeper") } })).decision, "allow");
+    w.done();
+  });
   it("decides a subagent's call, with its chat's session id and an agent_id, as its chat's own", async () => {
     const w = chat();
     const call = { agent_id: "a-1", agent_type: "Explore" };
