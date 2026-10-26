@@ -92,7 +92,21 @@ describe("the process chain", () => {
       calls.push(args);
       return { status: 0, stdout: "" };
     });
-    assert.deepEqual(calls, [["/bin/ps", PS_ARGS, { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 }]]);
+    assert.equal(calls.length, 1);
+    const [file, args, { maxBuffer, ...options }] = calls[0];
+    assert.deepEqual([file, args, options], ["/bin/ps", PS_ARGS, { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 }]);
+    assert.ok(Number.isFinite(maxBuffer));
+  });
+  it("lets ps print far more than spawn's default 1 MiB, for one process with about 1 MB of arguments", () => {
+    let given;
+    readProcesses((file, args, options) => {
+      given = options;
+      return { status: 0, stdout: "" };
+    });
+    assert.ok(given.maxBuffer >= 16 * 1024 * 1024, `maxBuffer ${given.maxBuffer}`);
+    // A table over the default, which spawnSync would have ended with ENOBUFS, is read whole when the buffer allows it.
+    const big = psText([[1, 0, "/sbin/launchd"], [700, 1, `/x/claude ${"a".repeat(1024 * 1024 + 10)}`]]);
+    assert.equal(readProcesses((file, args, options) => (big.length > options.maxBuffer ? { error: Object.assign(new Error("spawnSync /bin/ps ENOBUFS"), { code: "ENOBUFS" }), status: null, stdout: big.slice(0, options.maxBuffer) } : { status: 0, stdout: big })), big);
   });
   it("gives no row for a line whose start time is not 24 letters, rather than a wrong one", () => {
     const text = [
