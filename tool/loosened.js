@@ -96,15 +96,19 @@ export function settingsObject(file) {
     the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); the skills her folder allows
     (skillsWhy); the Claude app's flags on this chat (appWhy, from deps.ps, else `ps` itself, walked up from deps.pid, else this
     process, against deps.appFlags, else APP_FLAGS), its --settings among them, which deps.appSettings stands in for when given; and,
-    under Claude Code (CLAUDECODE=1), the folders added to the chat while it ran (addedWhy, from deps.transcript, else the transcript
-    of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's id, the session runs
-    in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30); otherwise, and on a strict
-    Mac, when the folder it runs in is hers. */
+    under Claude Code (CLAUDECODE=1, or a claude above), the folders added to the chat while it ran (addedWhy, from deps.transcript,
+    else the transcript of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's
+    id, the session runs in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30);
+    otherwise, and on a strict Mac, when the folder it runs in is hers. */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
   const env = deps.env || process.env;
-  const underClaude = env.CLAUDECODE === "1";
+  // On an open-lock Mac, the processes above this check (chain.js), null when they could not be read, and the Claude Code among them.
+  const table = open ? (deps.ps || readProcesses)() : null;
+  const claude = table === null ? null : claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
+  // Under Claude Code by its CLAUDECODE, or by a claude above, since a command can take CLAUDECODE out of its own environment.
+  const underClaude = env.CLAUDECODE === "1" || claude !== null;
   const sessionId = env.CLAUDE_CODE_SESSION_ID;
   const why = [];
   let changed = [];
@@ -160,10 +164,8 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
   let app = deps.appSettings !== undefined ? deps.appSettings : null;
-  const table = (deps.ps || readProcesses)();
   if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
   else {
-    const claude = claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
     const found = appWhy({ claude, underClaude, folder, home, record: deps.appFlags || APP_FLAGS, minimum: minimumOf(deps) });
     why.push(...found.lines);
     if (deps.appSettings === undefined) app = found.settings;

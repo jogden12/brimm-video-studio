@@ -11,7 +11,7 @@ import { settingsFile, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders } from "../loosened.js";
 import { claudeDirName } from "../places.js";
-import { openWorld, openDeps, psText, chatChain, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, transcript } from "./open-world.js";
+import { openWorld, openDeps, psText, chatChain, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, CHAT_ENV, transcript } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
 const SECRET = "SECRET-WORDS-OF-A-FILE";
@@ -198,7 +198,7 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
   it("refuses for a secret-shaped name not on the list, naming it and never its value", async () => {
     for (const name of ["GITHUB_TOKEN", "MY_API_KEY", "DB_PASSWORD", "OPENROUTER_KEY", "npm_config__auth", "Apple_PubSub_Socket_Render", "GIT_ASKPASS_PASSWD", "SESSION_COOKIE", "AWS_CREDENTIALS_FILE", "BILLING_EMAIL", "ACCOUNT_ID", "ORGANIZATION_ID", "A_SECRET"]) {
       const w = openWorld();
-      refusedFor(await behindOn(w, { env: { PATH: "/usr/bin", [name]: SECRET } }), secretLine(name), name);
+      refusedFor(await behindOn(w, { env: { ...CHAT_ENV, PATH: "/usr/bin", [name]: SECRET } }), secretLine(name), name);
       w.done();
     }
     assert.deepEqual(SECRET_WORDS, ["TOKEN","SECRET","PASSWORD","PASSWD","KEY","AUTH","COOKIE","CREDENTIAL","EMAIL","ACCOUNT","ORGANIZATION","SOCK"]);
@@ -221,14 +221,14 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     const on = "(Jason: this chat's environment turns Claude Code's memory on (CLAUDE_CODE_DISABLE_AUTO_MEMORY). Its value is not shown here.)";
     for (const [env, line] of [[{ CLAUDE_CODE_POST_TURN_MEMORY: SECRET }, server("CLAUDE_CODE_POST_TURN_MEMORY")], [{ CLAUDE_CODE_MEMORY_API_TOKEN: SECRET }, server("CLAUDE_CODE_MEMORY_API_TOKEN")], ...["0", "false", "Off", "no", ""].map((value) => [{ CLAUDE_CODE_DISABLE_AUTO_MEMORY: value }, on])]) {
       const w = openWorld();
-      const r = await behindOn(w, { env });
+      const r = await behindOn(w, { env: { ...CHAT_ENV, ...env } });
       refusedFor(r, line, JSON.stringify(env));
       // The memory server's token is said once, as that, and not again as a secret.
       assert.deepEqual(r.text.split("\n").slice(1), [line], JSON.stringify(env));
       w.done();
     }
     const w = openWorld();
-    assert.deepEqual(Object.values(await behindOn(w, { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } })).slice(0, 2), [0, NEWEST]);
+    assert.deepEqual(Object.values(await behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } })).slice(0, 2), [0, NEWEST]);
     w.done();
   });
   it("refuses when something listens on the proxy port, or that cannot be checked", async () => {
@@ -563,8 +563,18 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     goesOn(await behindOn(w, { env: UNDER }), "the notes folder");
     w.done();
   });
+  it("is under Claude Code with a claude above, though CLAUDECODE is taken out of its environment", async () => {
+    // `env -u CLAUDECODE node edit.js behind`, run in her chat: the folders added mid-chat are still read, and the session's folder
+    // still judged by its transcript.
+    const w = openWorld();
+    chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }, { type: "attachment", attachment: { type: "environment", snapshot: { additionalWorkingDirectories: [`/${SECRET}`] } } }]);
+    refusedFor(await behindOn(w, { env: { CLAUDE_CODE_SESSION_ID: SESSION } }), MID_CHAT_WHY, "no CLAUDECODE");
+    goesOn(await behindOn(w, { env: { CLAUDE_CODE_SESSION_ID: SESSION }, ps: () => psText([[1, 0, "/sbin/launchd"], [300, 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], [320, 300, "-zsh"], [900, 320, `${NODE} ${w.checkout}/tool/edit.js behind`]]) }), "Jason's run, with no claude above");
+    w.done();
+  });
   it("refuses when the chat's transcript cannot be read, under Claude Code", async () => {
     const w = openWorld();
+    rmSync(join(w.home, ".claude", "projects"), { recursive: true });
     const r = await behindOn(w, { env: UNDER });
     refusedFor(r, "(Jason: this chat's transcript could not be read, so whether a folder was added to it is not known.)", "no transcript");
     // And with no chat's id that is one, the transcript cannot be found at all.
@@ -587,7 +597,7 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
   it("says nothing of the app's flags for Jason's own run, with no claude above it and not under Claude Code", async () => {
     const w = openWorld();
     const terminal = () => psText([[1, 0, "/sbin/launchd"], [300, 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], [320, 300, "-zsh"], [900, 320, `${NODE} ${w.checkout}/tool/edit.js behind`]]);
-    goesOn(await behindOn(w, { ps: terminal }), "Terminal");
+    goesOn(await behindOn(w, { ps: terminal, env: {} }), "Terminal");
     w.done();
   });
   it("refuses under Claude Code when no claude is found above, as for a Claude Code run as node …/cli.js", async () => {
@@ -653,10 +663,10 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     const w = openWorld();
     writeFileSync(join(w.home, ".claude.json"), JSON.stringify({ projects: { [w.home]: { hasTrustDialogAccepted: true } } }));
     goesOn(await behindOn(w), "the home folder trusted");
-    // With $CLAUDE_CONFIG_DIR, Claude Code keeps its trust there.
+    // With $CLAUDE_CONFIG_DIR, Claude Code keeps its trust there, beside the chat's transcript.
     const config = join(w.dir, "config");
-    mkdirSync(config);
-    assert.ok((await behindOn(w, { env: { CLAUDE_CONFIG_DIR: config } })).text.split("\n").includes(UNTRUSTED));
+    transcript(join(config, "projects", claudeDirName(w.folder)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+    assert.ok((await behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CONFIG_DIR: config } })).text.split("\n").includes(UNTRUSTED));
     w.done();
   });
   it("says the entries this Mac adds to her folder's allowlist, and says nothing of the default ones", async () => {
