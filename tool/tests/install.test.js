@@ -652,6 +652,30 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     changedNothing(r);
     d.done();
   });
+  // The Code tab runs the Claude app's own copy of Claude Code, not the Terminal's, and the app keeps each copy in a folder named
+  // for its version, running the newest (2026-10-25, on the Mac Studio). The installer says which that is, and whether her folder's
+  // guard can rest on it; only the Terminal's decides whether her folder is written, and /status in the Code tab proves it.
+  it("says the newest copy of Claude Code the Claude app keeps, which its Code tab runs, and whether her folder's guard can rest on it", () => {
+    const copy = (v) => `Library/Application Support/Claude/claude-code/${v}/a93ded4b1b47/claude.app/Contents/MacOS/claude`;
+    const line = (rest) => `  The Claude app's own Claude Code:  ${rest}`;
+    const cases = [
+      [[], line("no copy found here (in ~/Library/Application Support/Claude/claude-code), so only /status in the Code tab can say its version")],
+      [["2.1.304", "2.1.308", "2.1.40"], line("2.1.308, the newest copy the app keeps here (her folder's guard needs 2.1.295 or later; /status in the Code tab says which copy runs)")],
+      [["2.1.200", "notes"], line("2.1.200, the newest copy the app keeps here, older than the 2.1.295 her folder's guard needs: on it the guard could let a call through. In the app, choose Claude > Check for Updates, then check /status in the Code tab")]
+    ];
+    for (const [versions, expected] of cases) {
+      const d = dropbox();
+      const r = askWith({ files: versions.map(copy), onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      const out = said(r);
+      assert.ok(out.includes(`\n${expected}\n`), `${expected}\n---\n${out}`);
+      assert.ok(out.indexOf("\n  The Claude app's Code tab:") < out.indexOf("\n  The Claude app's own Claude Code:"), out);
+      // Her folder is written, or not, by the Terminal's version alone, as before: this line only says.
+      assert.ok(out.includes("\n  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)\n"), out);
+      assert.match(r.out, /\nNothing was changed\.\n$/);
+      d.done();
+    }
+  });
   it("with --rules-only, asks Claude nothing at the end of the setup either, so nothing leaves this Mac", () => {
     const d = dropbox();
     const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);

@@ -3,6 +3,7 @@
 // loosened on this Mac (spec 2026-10-22, section 7). git is a stand-in here: no test runs it, and each test has a home of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,8 @@ import { dirname, join } from "node:path";
 import { SHOWN_MARKER, editMain } from "../edit.js";
 import { episodeWork, workFolder } from "../settings.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
+
+const notAMac = process.platform !== "darwin" ? "managed preferences are a Mac's, and plutil, which reads them, is a Mac's" : false;
 
 /** Run a command of edit.js by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -251,6 +254,13 @@ describe("behind", () => {
     }
     const LOCAL_WHY = "(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)";
     const HOOKS_WHY = "(Jason: this Mac's ~/.claude/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)";
+    const INSIDE_WHY = "(Jason: this session runs in a folder inside her folder for Claude, not in the folder itself, and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)";
+    const ELSEWHERE_WHY = "(Jason: this session runs in a folder other than her folder for Claude, and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)";
+    /** The managed preferences' file for Claude Code, and a property list of `entries` (true, false or words) as a person writes one. */
+    const PREFS_FILE = "com.anthropic.claudecode.plist";
+    const plist = (entries) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n${Object.entries(entries).map(([key, value]) => `  <key>${key}</key>${value === true ? "<true/>" : value === false ? "<false/>" : `<string>${value}</string>`}\n`).join("")}</dict>\n</plist>\n`;
+    /** The server-managed settings, as `behind` names the copy Claude Code keeps of them. */
+    const REMOTE = "the server-managed ones Claude Code keeps in ~/.claude/remote-settings.json";
 
     it("goes on as it always did when her folder is as the installer writes it and this Mac's settings leave hooks on", async () => {
       for (const settings of [undefined, {}, { disableAllHooks: false }, { disableAllHooks: false, env: { A: "b" }, hooks: { Stop: [] }, permissions: { allow: ["Bash(ls)"] } }, { permissions: { disableBypassPermissionsMode: "disable" } }]) {
@@ -466,15 +476,18 @@ describe("behind", () => {
         t.done();
       }
     });
-    it("says the causes in order: her folder's settings.local.json, her folder's settings.json, this Mac's user settings, its managed settings", async () => {
+    it("says the causes in order: the session's folder, her folder's settings.local.json, her folder's settings.json, this Mac's user settings, its managed settings, managed preferences and server-managed settings", { skip: notAMac }, async () => {
       const { t, folder } = mac();
       writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
       editSettings(folder, (s) => { s.disableAllHooks = true; });
       userSettings(t, { disableAllHooks: true });
       mkdirSync(join(t.dir, "managed"), { recursive: true });
       writeFileSync(join(t.dir, "managed", "managed-settings.json"), JSON.stringify({ disableAllHooks: true }));
-      const r = await behindOn(t);
-      assert.deepEqual(r.text.split("\n"), [LOCK, LOCAL_WHY, FOLDER_HOOKS_WHY, HOOKS_WHY, MANAGED_HOOKS_WHY("managed-settings.json")]);
+      mkdirSync(join(t.dir, "managed-preferences"), { recursive: true });
+      writeFileSync(join(t.dir, "managed-preferences", PREFS_FILE), plist({ disableAllHooks: true }));
+      writeFileSync(join(t.home, ".claude", "remote-settings.json"), JSON.stringify({ disableAllHooks: true }));
+      const r = await behindOn(t, { cwd: join(folder, "Pictures") });
+      assert.deepEqual(r.text.split("\n"), [LOCK, INSIDE_WHY, LOCAL_WHY, FOLDER_HOOKS_WHY, HOOKS_WHY, MANAGED_HOOKS_WHY("managed-settings.json"), MANAGED_HOOKS_WHY(`Managed Preferences/${PREFS_FILE}`), MANAGED_HOOKS_WHY(REMOTE)]);
       assert.equal(r.code, 1);
       t.done();
     });
@@ -574,14 +587,16 @@ describe("behind", () => {
     // --- When brimm-video has no settings on this Mac (fix round 1, item 4) ---
     describe("on a Mac with no settings for episodes", () => {
       const THIS_CHECKOUT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-      /** A home with no settings for brimm-video, the managed folder and the environment of the test, and what `behind` says there. */
-      async function bare(prepare = () => {}) {
+      /** A home with no settings for brimm-video, the managed folders and the environment of the test, and what `behind` says there,
+          run in the folder `cwd` gives for the home (her folder for Claude unless a test says otherwise), or, when it is null, in the
+          folder this test runs in. */
+      async function bare(prepare = () => {}, cwd = (home) => join(home, "BRIMM Video Studio")) {
         const dir = mkdtempSync(join(tmpdir(), "brimm-lock-"));
         const home = join(dir, "home");
         mkdirSync(home, { recursive: true });
         prepare(home);
         const said = [];
-        const code = await editMain(["behind"], { home, say: (line) => said.push(line), env: {}, managedDir: join(dir, "managed"), run: async () => assert.fail("git is not run") });
+        const code = await editMain(["behind"], { home, say: (line) => said.push(line), env: {}, managedDir: join(dir, "managed"), managedPrefs: join(dir, "managed-preferences"), user: "sallie", ...(cwd && { cwd: cwd(home) }), run: async () => assert.fail("git is not run") });
         rmSync(dir, { recursive: true, force: true });
         return { code, text: said.join("\n") };
       }
@@ -604,6 +619,14 @@ describe("behind", () => {
       it("takes the checkout this edit.js runs from for the guard her folder's settings should name", async () => {
         const other = await bare((home) => writeStudio(home, { checkout: "/elsewhere", node: NODE }));
         assert.deepEqual(other, { code: 1, text: `${LOCK}\n${FOLDER_GUARD_WHY}` });
+      });
+      it("still refuses when the session is not in her folder, and takes the folder edit.js runs in for the session's when it is given none", async () => {
+        const write = (home) => writeStudio(home, { checkout: THIS_CHECKOUT, node: NODE });
+        assert.deepEqual(await bare(write, (home) => join(home, "BRIMM Video Studio", "Pictures")), { code: 1, text: `${LOCK}\n${INSIDE_WHY}` });
+        assert.deepEqual(await bare(write, (home) => home), { code: 1, text: `${LOCK}\n${ELSEWHERE_WHY}` });
+        // This test runs in no folder for Claude, and edit.js, as Claude Code runs it, in the session's.
+        assert.notEqual(realpathSync(process.cwd()).split("/").pop(), "BRIMM Video Studio");
+        assert.deepEqual(await bare(write, null), { code: 1, text: `${LOCK}\n${ELSEWHERE_WHY}` });
       });
     });
     it("writes nothing when it refuses, and still clears the copies show made", async () => {
@@ -631,6 +654,149 @@ describe("behind", () => {
       const put = await behindOn(t);
       assert.deepEqual([put.code, put.text], [0, "This Mac has the newest brimm-video."]);
       t.done();
+    });
+
+    // --- The session's own folder (2026-10-25). Claude Code 2.1.308 reads .claude/settings.json only from the folder a session runs
+    // in, but her CLAUDE.md and her skill from the folders above it too. So a session in Pictures, or in a folder above hers, looks
+    // like hers and has no guard, no deny list and no Auto and Bypass off. Her skill runs `behind` first, as Claude Code runs every
+    // command, in the session's folder, which a locked session cannot change: the guard lets only edit.js run. ---
+    it("refuses when the session runs in a folder inside hers, Pictures among them, saying nothing of which; git is not asked", async () => {
+      const { t, folder } = mac();
+      mkdirSync(join(folder, `Client ${SECRET}`), { recursive: true });
+      for (const cwd of [join(folder, "Pictures"), join(folder, ".claude"), join(folder, `Client ${SECRET}`)]) {
+        const r = await behindOn(t, { cwd });
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${INSIDE_WHY}`, 0], cwd);
+      }
+      t.done();
+    });
+    it("refuses when the session runs in a folder above hers, beside it, anywhere else, or in one that is not there any more", async () => {
+      const { t } = mac();
+      mkdirSync(join(t.home, "BRIMM Video Studio copy"), { recursive: true });
+      for (const cwd of [t.home, dirname(t.home), "/", join(t.home, "BRIMM Video Studio copy"), join(t.home, "gone")]) {
+        const r = await behindOn(t, { cwd });
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${ELSEWHERE_WHY}`, 0], cwd);
+      }
+      t.done();
+    });
+    it("goes on when the session runs in her folder itself, by any path that leads there: a link, .. or another case", async () => {
+      const { t, folder } = mac();
+      symlinkSync(folder, join(t.home, "Studio link"));
+      const paths = [folder, join(t.home, "BRIMM Video Studio"), join(t.home, "Studio link"), join(folder, "Pictures", "..")];
+      // A Mac's disk does not mind case, unless it was made to.
+      if (existsSync(join(t.home, "brimm video studio"))) paths.push(join(t.home, "brimm video studio"));
+      for (const cwd of paths) {
+        const r = await behindOn(t, { cwd });
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], cwd);
+      }
+      t.done();
+    });
+    it("says nothing of the session's folder on a Mac with no folder for Claude: no session there looks like hers", async () => {
+      const t = setup();
+      for (const cwd of [t.home, "/"]) assert.deepEqual((await behindOn(t, { cwd })).code, 0, cwd);
+      t.done();
+    });
+    it("takes the folder edit.js runs in for the session's unless a test gives another", () => {
+      assert.match(readFileSync(new URL("../edit.js", import.meta.url), "utf8"), /\(deps\.cwd \|\| process\.cwd\(\)\)/);
+    });
+
+    // --- This Mac's managed preferences, and its server-managed settings (2026-10-25). Claude Code 2.1.308's own binary reads managed
+    // settings from these too: the managed preferences of the user, /Library/Managed Preferences/<user>/com.anthropic.claudecode.plist,
+    // then the Mac's, /Library/Managed Preferences/com.anthropic.claudecode.plist, each made JSON by /usr/bin/plutil; and the settings
+    // a server sends for her account, which it keeps in remote-settings.json beside the user settings. ---
+    const prefs = (t) => join(t.dir, "managed-preferences");
+    /** A managed preferences file at `name` in the test's folder for them: a property list of `entries`, or the words given. */
+    function putPrefs(t, name, entries) {
+      mkdirSync(dirname(join(prefs(t), name)), { recursive: true });
+      writeFileSync(join(prefs(t), name), typeof entries === "string" ? entries : plist(entries));
+      return join(prefs(t), name);
+    }
+    it("refuses when this Mac's managed preferences, the user's or the Mac's, turn hooks off or allow only managed hooks, and says which file", { skip: notAMac }, async () => {
+      const MAC = `Managed Preferences/${PREFS_FILE}`;
+      const USER = `Managed Preferences/sallie/${PREFS_FILE}`;
+      const cases = [
+        ["the Mac's, hooks off", [[PREFS_FILE, { disableAllHooks: true, Token: SECRET }]], [MANAGED_HOOKS_WHY(MAC)]],
+        ["the Mac's, only managed hooks", [[PREFS_FILE, { allowManagedHooksOnly: true }]], [MANAGED_ONLY_WHY(MAC)]],
+        ["the user's, both", [[`sallie/${PREFS_FILE}`, { disableAllHooks: true, allowManagedHooksOnly: true }]], [MANAGED_HOOKS_WHY(USER), MANAGED_ONLY_WHY(USER)]],
+        ["both files, the user's first, as Claude Code reads them", [[PREFS_FILE, { disableAllHooks: true }], [`sallie/${PREFS_FILE}`, { allowManagedHooksOnly: true }]], [MANAGED_ONLY_WHY(USER), MANAGED_HOOKS_WHY(MAC)]],
+        ["a binary property list", [[PREFS_FILE, null]], [MANAGED_HOOKS_WHY(MAC)]]
+      ];
+      for (const [what, files, lines] of cases) {
+        const { t } = mac();
+        for (const [name, entries] of files) {
+          if (entries !== null) putPrefs(t, name, entries);
+          else assert.equal(spawnSync("/usr/bin/plutil", ["-convert", "binary1", putPrefs(t, name, { disableAllHooks: true })]).status, 0);
+        }
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, [LOCK, ...lines].join("\n"), 0], what);
+        assert.ok(!r.text.includes(SECRET), what);
+        t.done();
+      }
+    });
+    it("goes on when the managed preferences say neither, are another user's or another program's, or are files Claude Code would not read", { skip: notAMac }, async () => {
+      const cases = [
+        [PREFS_FILE, { disableAllHooks: false, allowManagedHooksOnly: false }],
+        [PREFS_FILE, { disableAllHooks: "true", allowManagedHooksOnly: "1" }],
+        [PREFS_FILE, { env: "x", allowManagedPluginsOnly: true }],
+        [`jason/${PREFS_FILE}`, { disableAllHooks: true }],
+        ["com.anthropic.claude.plist", { disableAllHooks: true }],
+        [`${PREFS_FILE}.bak`, { disableAllHooks: true }],
+        [PREFS_FILE, "{ not a property list"],
+        [PREFS_FILE, ""],
+        // A list, not a dictionary, and one that holds a date, which plutil cannot make JSON: Claude Code takes none of either.
+        [PREFS_FILE, plist({}).replace("<dict>\n</dict>", "<array><true/></array>")],
+        [PREFS_FILE, plist({ disableAllHooks: true }).replace("</dict>", "  <key>When</key><date>2026-10-25T12:00:00Z</date>\n</dict>")]
+      ];
+      for (const [name, entries] of cases) {
+        const { t } = mac();
+        putPrefs(t, name, entries);
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], `${name}: ${JSON.stringify(entries)}`);
+        t.done();
+      }
+      // A Mac nobody manages has no managed preferences folder.
+      const { t } = mac();
+      assert.ok(!existsSync(prefs(t)));
+      assert.equal((await behindOn(t)).code, 0);
+      t.done();
+    });
+    it("reads the managed preferences from the folder Claude Code reads them from, for the user this Mac says, unless it is told others", () => {
+      const text = readFileSync(new URL("../edit.js", import.meta.url), "utf8");
+      assert.match(text, /const MANAGED_PREFS = "\/Library\/Managed Preferences";/);
+      assert.match(text, /deps\.user \|\| userInfo\(\)\.username/);
+    });
+    it("refuses when the server-managed settings Claude Code keeps beside the user settings turn hooks off or allow only managed hooks", async () => {
+      const remote = (t, set, dir = join(t.home, ".claude")) => {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "remote-settings.json"), JSON.stringify(set));
+      };
+      const CONFIG_REMOTE = "the server-managed ones Claude Code keeps in $CLAUDE_CONFIG_DIR/remote-settings.json";
+      {
+        const { t } = mac();
+        remote(t, { disableAllHooks: true, env: { TOKEN: SECRET } });
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [1, `${LOCK}\n${MANAGED_HOOKS_WHY(REMOTE)}`, 0]);
+        assert.ok(!r.text.includes(SECRET));
+        t.done();
+      }
+      {
+        const { t } = mac();
+        remote(t, { allowManagedHooksOnly: true });
+        const r = await behindOn(t);
+        assert.deepEqual([r.code, r.text], [1, `${LOCK}\n${MANAGED_ONLY_WHY(REMOTE)}`]);
+        // With the configuration home elsewhere, the copy kept there is the one.
+        const config = join(t.dir, "config");
+        assert.equal((await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } })).code, 0);
+        remote(t, { disableAllHooks: true }, config);
+        const named = await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } });
+        assert.deepEqual([named.code, named.text], [1, `${LOCK}\n${MANAGED_HOOKS_WHY(CONFIG_REMOTE)}`]);
+        t.done();
+      }
+      for (const set of [{}, { disableAllHooks: false }, { disableAllHooks: "true" }, []]) {
+        const { t } = mac();
+        remote(t, set);
+        assert.equal((await behindOn(t)).code, 0, JSON.stringify(set));
+        t.done();
+      }
     });
   });
   it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there; otherwise Homebrew's", async () => {
