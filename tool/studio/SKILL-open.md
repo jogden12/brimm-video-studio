@@ -13,7 +13,7 @@ Words with a `$`, a backtick, a backslash or a straight double quote go in singl
 
 Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits." Then run `episodes`, and show the card below for each video waiting for her answer.
 
-If `behind` says Claude Code has not trusted this folder yet, tell her: "Open this folder again in the Claude app and choose to trust it, then start a new chat."
+If `behind` says Claude Code has not trusted this folder yet, tell her: "Open this folder again in the Claude app and choose to trust it, then start a new chat." Then stop: run nothing else, not even `episodes`, whatever the paragraph above says to run next, since Claude Code ignores this folder's allow rules until it is trusted.
 
 ## The card: what a video is
 
