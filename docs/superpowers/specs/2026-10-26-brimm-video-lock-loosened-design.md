@@ -74,6 +74,18 @@ The table in section 1 says where each fact comes from.
 
 ## 1. What stays locked, and how
 
+> **K0, 2026-10-26.** Some claims in this design did not hold in K0's lab checks. They are:
+>
+> - C4, C7 and C14, in part;
+> - Glob and Grep, which 2.1.308 does not have;
+> - the app's `--settings`, which can be read;
+> - the app's own added folder, which the sandbox can write;
+> - `SANDBOX_RUNTIME`, which a command can remove;
+> - a chat's `session_id`, which a fork escapes;
+> - process arguments, which are readable from the sandbox.
+>
+> See `docs/superpowers/notes/2026-10-26-lock-k0-findings.md` for each claim's result, what the design must change, and what is left for Jason by hand. This design is not yet revised to match.
+
 ### What Claude Code does (2.1.296 and 2.1.308)
 
 Each choice below rests on one of these. "Lab" means the lab saw it with `claude -p` of 2.1.308 (above). K0, the by-hand test in the Code tab (section 9), checks each before anything is built.
