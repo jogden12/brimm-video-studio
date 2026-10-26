@@ -1609,6 +1609,8 @@ async function reelTitle(ctx, found, n, words) {
   const reels = (found.record.reels || []).map((r) => ({ ...r }));
   const reel = reels.find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
+  // A Reel a reading suggested is not made, and no Reel brimm-video makes would show its title: she is told where she makes it.
+  if (notMade(found, n)) return refuse(ctx, notMadeWords(n));
   if (words == null) {
     ctx.say(reel.title ? `Reel ${n}'s title on screen is "${reel.title}".` : `Reel ${n} has no title on screen. Say what it says.`);
     return 0;
@@ -2947,6 +2949,8 @@ async function reels(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = { found: got.found, record: got.record };
+  // A short video she has answered has no Reels, and its reading writes no list of them: said as pick and push say it.
+  if (isAnswered(record) && record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const at = join(found.folder, REELS_FILE);
   if (!existsSync(at) && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. ${keptOrWait(ctx, found, record)}`);
   if (!existsSync(at)) {
@@ -2972,10 +2976,12 @@ async function reels(ctx, rest) {
     }
     const clock = now && now.clock && now.clock.length ? now : null;
     ctx.say(reelsText(read.reels, record, "", clock));
-    // Nothing makes a Reel from a suggestion yet (phase V): she is told where she makes them for now, so that no command sends her
-    // round in a circle (Sallie's walkthrough, 25 Oct). The gate refuses a session before this, and it is never said of one.
-    if (!gated(record) && read.reels.candidates.some(uncropped)) ctx.say(notMadeWords());
     if (clock) sayElsewhere(ctx, clock);
+    // Nothing makes a Reel from a suggestion yet (phase V): she is told last where she makes them for now, so that no command sends
+    // her round in a circle (Sallie's walkthrough, 25 Oct). Not once she has dropped every one. The gate refuses a session before
+    // this, and it is never said of one.
+    const dropped = new Set((record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n));
+    if (!gated(record) && read.reels.candidates.some((c) => uncropped(c) && !dropped.has(c.n))) ctx.say(notMadeWords());
     return 0;
   }
   // Whether Claude can be asked again is said as this Mac finds it now, in the words ask would refuse with (PR 19's review).

@@ -327,7 +327,7 @@ A raw video, after its rough cut:
 4. **Finish.** For the main video: Command-E (check the dialog says From Final Cut), wait for Final Cut's notice, then click in that timeline and File > Export XML…, into From Final Cut. Say "finish the episode", answer its questions, then drop the hand-off it shows onto the BRIMM Ops page. A spelling after a finish makes the hand-off again: drop it again.
 5. **Hand it to Jason** when you stop part-way: "hand it to Jason", and keep the Mac open and online until Dropbox shows the folder is up to date.
 
-Reels are not made from Claude's suggestions yet (phase V). Wherever she would be sent to make one (the list of Reels, finishing one, showing one in Final Cut, or a change on one), brimm-video says it cannot make Reels from this video yet: for now she cuts them in OpusClip (never from a session), and BRIMM Ops writes their post text, on the episode's Reels card ("New short video from a clip"). The Reels, captions and styles of an episode imported before the switch work as before.
+Reels are not made from Claude's suggestions yet (phase V). Wherever she would be sent to make one (the list of Reels, finishing one, showing one in Final Cut, or a change on one), brimm-video says it cannot make Reels from this video yet. For now she cuts them in OpusClip, and BRIMM Ops writes their post text, on the episode's "Reels" card ("New short video from a clip"). A client or group session's Reels never go to OpusClip, even once the client agreed: cutting them is not ready yet. The Reels, captions and styles of an episode imported before the switch work as before.
 
 ## Reel candidates
 

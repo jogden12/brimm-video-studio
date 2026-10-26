@@ -209,7 +209,7 @@ export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candi
 export const notMadeWords = (n) => {
   const ns = n === undefined ? [] : [].concat(n);
   const them = ns.length === 0 ? "them" : ns.length === 1 ? `Reel ${ns[0]}` : `Reels ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`;
-  return `brimm-video cannot make Reels from this video yet: for now, cut ${them} in OpusClip. BRIMM Ops writes ${ns.length === 1 ? "its" : "their"} post text: on the episode's Reels card, press "New short video from a clip".`;
+  return `brimm-video cannot make Reels from this video yet: for now, cut ${them} in OpusClip. BRIMM Ops writes ${ns.length === 1 ? "its" : "their"} post text: on the episode's "Reels" card, press "New short video from a clip".`;
 };
 
 /** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment

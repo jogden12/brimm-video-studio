@@ -78,7 +78,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Call it …" | `name "<episode>" "<name>"` |
 | "Use that title" / "Make the title …" | `title "<episode>" --approve` / `title "<episode>" --words "<words>" --approve` (an approved title changes only with `--change`; say BRIMM Ops may have it already) |
 | "Reel 2's title is …" | `title "<episode>" reel 2 --words "<words>"` |
-| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview, when it has one, opens in QuickTime Player. When it says brimm-video cannot make Reels from this video yet, say so. For now she cuts them in OpusClip; BRIMM Ops writes their post text ("New short video from a clip", on the episode's Reels card). Never a client or group session's |
+| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview, when it has one, opens in QuickTime Player. When it says brimm-video cannot make Reels from this video yet, say so. For now she cuts them in OpusClip; BRIMM Ops writes their post text ("New short video from a clip", on the episode's Reels card). Never send a client or group session's Reels to OpusClip. |
 | "Ask Claude again for Reels" | `ask "<episode>"`: it runs in the background, so say so, and that "how far is it?" shows how far it has got |
 | "Finish Reels 1 and 3" / "Drop 2" | `reel pick "<episode>" 1 3` / `reel drop "<episode>" 2`. When it says brimm-video cannot make Reels from this video yet, say so, as for "Show me the Reels": never offer to make one |
 | "Show it in Final Cut" / "Show reel 1 in Final Cut" | `push "<episode>"` / `push "<episode>" reel 1`, with the guard below |
@@ -134,7 +134,7 @@ When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut 
 ## Not ready yet: say so, and what to do by hand
 
 - A logo or a look on a Reel: "That comes with the brand templates, later. For now, do it by hand in Final Cut."
-- A Reel from Claude's suggestions: brimm-video can't make one from this video yet. Say so, and where she makes them for now, as "Show me the Reels" says; never offer to make one here.
+- A Reel from Claude's suggestions: say brimm-video can't make it yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.
 - Bringing in her hand edits: "That part of brimm-video isn't ready yet. Make your changes by hand last, after brimm-video's, or finish that timeline by hand in Final Cut."
 - Archiving, checking the setup, freeing space: "That isn't ready yet; ask Jason." (For space: Final Cut's File > Delete Generated Library Files.)
 
