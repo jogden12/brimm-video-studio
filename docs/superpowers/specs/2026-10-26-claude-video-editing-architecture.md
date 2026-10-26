@@ -1,7 +1,7 @@
 # Claude video editing: system architecture
 
 - **Date:** 2026-10-26.
-- **Status:** a proposal for Jason. Nothing in it is built, installed or turned on. Section 11 lists what needs his yes.
+- **Status:** a proposal for Jason. Nothing in it is built, installed or turned on. Section 11 lists what needs his yes. He answered two of those decisions (3 and 6) on 2026-10-26.
 - **What it is:** one design for editing The BRIMM's videos by talking to Claude, graphics included. Outside services may be used. Nobody has to edit in Final Cut Pro. Final Cut stays available: Claude can send an edit to it, read back what a person changed there, and use it to export finished files.
 - **How it was made:** a fresh design. It was not bound by the research handoff of 2026-10-26 or by the design of 2026-10-22. It does keep this repo's rules from `CLAUDE.md`. Facts about outside tools were checked on 2026-10-26; "Sources" at the end says how.
 
@@ -65,7 +65,7 @@ flowchart TB
 3. **Graphics are made from a brand kit, written as code.** Each graphic is a HyperFrames component (HTML, CSS and animation) with the brand's colours and typefaces built in. Claude fills in the words and settings, and does not design from scratch each time (4.5).
 4. **Times hang on words.** A graphic, a b-roll insert or a music cue is tied to the words it goes with, not to a second. A later cut moves it with its words. If its words are cut, it says so ("cut now").
 5. **Every change is seen before it is final.** A preview is rendered, Claude checks its frames, and Sallie watches. Only "done" makes the full-quality files.
-6. **Outside services get as little as possible.** By default they get a prompt Claude wrote, never footage. Each service has a list of what it may receive (4.6). A client or group session never goes to any of them.
+6. **Outside services get as little as possible.** By default they get a prompt Claude wrote, never footage. A video meant for posting may go to one named tool after a yes for that video (Jason, 2026-10-26). Each service has a list of what it may receive (4.6). A client or group session never goes to any of them.
 7. **Drafts only.** No tool in the system can post or publish. Those tools are denied in the settings (section 8).
 
 ## 4. The parts
@@ -319,7 +319,7 @@ It is opened with `open -a "Final Cut Pro"` into the library in `~/BRIMM Video W
 
 **Export from Final Cut.** Three ways, in the order proposed:
 
-1. **Claude, with computer use.** Claude Code's computer use can open apps, click and see the screen on macOS.
+1. **Claude, with computer use.** Claude Code's computer use can open apps, click and see the screen on macOS. Jason allowed Claude to drive Final Cut's screen on 2026-10-26, in his sessions first.
    - **Limits** (Claude Code docs):
      - it is a research preview;
      - it needs a Pro or Max plan;
@@ -407,10 +407,10 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 
 1. **The architecture itself.** One edit record as the truth, HyperFrames for graphics in place of the planned Swift drawer, and path A as the default.
 2. **Installing HyperFrames** (an npm package, with its own Chrome for rendering) on the Mac Studio, and later on Sallie's laptop. Installing needs your yes.
-3. **Footage leaving the Mac.** This design keeps the 2026-10-22 rule ("no video or sound leaves the Mac") as the default. It proposes one exception: a public-bound video may be sent to one named tool after a yes for that video, for example a Higgsfield upscale or OpenRouter "eyes". Yes, no, or not yet?
+3. **Footage leaving the Mac. Answered on 2026-10-26: yes, as proposed** (Jason: "two earlier rules can change"). The 2026-10-22 rule ("no video or sound leaves the Mac") stays the default. The one exception: a public-bound video may be sent to one named tool after a yes for that video, for example a Higgsfield upscale or OpenRouter "eyes". A client or group session never leaves the Mac.
 4. **Higgsfield.** Which plan. Whether its training terms are acceptable even for prompts. Which of its tools her folder may call.
 5. **OpenRouter beyond pictures.** Video generation and "eyes".
-6. **Claude driving Final Cut's screen.** On 2026-10-22 you said no to driving Final Cut's screen. This design asks for it again, as an option for exporting and for Final Cut-only tools. It would run in your sessions first, and never be needed on Sallie's path.
+6. **Claude driving Final Cut's screen. Answered on 2026-10-26: yes, as proposed** (the same answer). It replaces the no of 2026-10-22. It is an option for exporting and for Final Cut-only tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
 7. **Typeface licences** that cover rendering in a browser engine on the Mac.
 8. **Music.** ElevenLabs, a music library subscription, or Sallie's own picks.
 9. **Labelling generated media** in the hand-off, so Sallie can answer YouTube's disclosure question.

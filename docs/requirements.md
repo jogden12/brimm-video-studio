@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-10-22.
+- **Last updated:** 2026-10-26.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -21,6 +21,10 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
 
 - **Which editor Sallie's laptop gets: Final Cut Pro, as on the Mac Studio.** Jason decided it on 2026-10-14 ("Let's stick with final cut pro for now.") and installs it on her laptop, so both Macs use Final Cut Pro. The design's "What this rests on" records the decision; setting her laptop up is `docs/setup/sallies-laptop.md`.
 - **The workflows of 2026-10-22.** After his MacBook test stopped at step 2.5 of the test guide, Jason walked through every kind of video with the BRIMM Ops session "Write up the video workflows, user steps marked", and decided the shape below (BRIMM Ops memory, `video-workflow-redesign-2026-10-22`). The design is `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`, which supersedes the design of 2026-10-14 where they differ. Nothing of it is built.
+- **Two rules of 2026-10-22 changed (2026-10-26).** The proposed architecture of 2026-10-26 (`docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`, section 11, decisions 3 and 6) asked about two of the rules below. Jason answered, word for word: "two earlier rules can change". So, as that design proposed:
+  - **Footage may leave the Mac, one video at a time.** A video meant for posting may be sent to one named outside tool after a yes for that video, for example Higgsfield to upscale it, or a model on OpenRouter to watch a small copy of it. By default nothing but a prompt Claude wrote leaves the Mac. A client or group session never does.
+  - **Claude may drive Final Cut's screen** (Claude Code's computer use), to export finished files and to use Final Cut's own tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
+  - The rest of that design waits on his yes. Nothing of it is built.
 
 ## The workflows (2026-10-22)
 
@@ -38,11 +42,11 @@ What brimm-video must do, as Jason decided it on 2026-10-22. The design says how
 - **Zoom:** recordings from Zoom are taken by the same drop, through phase T; `BRIMM VIDEO Transfer` retires after two weeks of both running side by side.
 - **Her folder's lock** is an allowlist that can be changed as her work changes, and can admit a connector later. OpusClip's posting tools stay denied. brimm-video never uploads video: OpusClip takes an episode's YouTube link. Option b (her folder sending that link to OpusClip) comes after a test in the Code tab.
 - **The hand-off, version 2,** shared with BRIMM Ops: kinds for a finished video and a session, no episode title (titles live only on the page), a session's approved principles. A Reel's words on the picture still travel in it.
-- **Kept:** the tool drafts and never posts, sends or publishes; no video or sound leaves the Mac.
+- **Kept:** the tool drafts and never posts, sends or publishes; no video or sound leaves the Mac. (The second part changed on 2026-10-26: see "Decisions".)
 
 Jason's answers to the design's questions, the same evening:
 
-- **brimm-video renders its own versions:** no to driving Final Cut's screen; yes to the render test first (R0).
+- **brimm-video renders its own versions:** no to driving Final Cut's screen; yes to the render test first (R0). (The no changed on 2026-10-26: see "Decisions".)
 - **Fine edits by chat are a must:** "if sallie can't do fine edits via chat, then she won't use this." Nobody finishes her raw videos in Final Cut.
 - **Sending:** "option b is not sending. sending is ok when needed." Posting and publishing stay forbidden. Jason tests OpusClip with an existing clip's YouTube link.
 - **A session first handed off as another kind:** the page redacts the earlier words in place.
@@ -105,3 +109,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone. A video dropped in `BRIMM Video/Unedited Video/Mac Studio/` is imported into its own folder in `BRIMM Video/Episodes/`, every file put into Dropbox as a clone and checked again 15 minutes later, and `tool/edit.js` lists, opens and shows episodes in Final Cut Pro. Described in the README, under "Episodes".
 - 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.
 - 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed. The same evening, Jason's answers to the design's questions, recorded under that section.
+- 2026-10-26: recorded Jason's answer to two questions of the proposed architecture of the same day, `docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`: "two earlier rules can change". A line under "Decisions" says what changed: a video meant for posting may go to one named outside tool after a yes for that video, and Claude may drive Final Cut's screen. The two lines of 2026-10-22 they change point to it.
