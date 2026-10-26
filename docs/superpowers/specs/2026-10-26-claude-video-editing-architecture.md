@@ -1,7 +1,7 @@
 # Claude video editing: system architecture
 
 - **Date:** 2026-10-26.
-- **Status:** a proposal for Jason. Nothing in it is built, installed or turned on. Section 11 lists what needs his yes. He answered two of those decisions (3 and 6) on 2026-10-26.
+- **Status:** a design Jason has said yes to, on 2026-10-26, with the half-day render test (H0) as its gate. Nothing in it is built, installed or turned on yet. Section 11 records his answers, and the one item still open: buying Sinthya.
 - **What it is:** one design for editing The BRIMM's videos by talking to Claude, graphics included. Outside services may be used. Nobody has to edit in Final Cut Pro. Final Cut stays available: Claude can send an edit to it, read back what a person changed there, and use it to export finished files.
 - **How it was made:** a fresh design. It was not bound by the research handoff of 2026-10-26 or by the design of 2026-10-22. It does keep this repo's rules from `CLAUDE.md`. Facts about outside tools were checked on 2026-10-26; "Sources" at the end says how.
 
@@ -25,7 +25,7 @@ flowchart TB
     S["Sallie's Claude chat<br/>(her Studio folder)"] --> CL
     J["Jason's Claude Code"] --> CL
     CL["Claude<br/>editor · graphics director · checker"]
-    OUT["Outside services, optional and gated<br/>Higgsfield · OpenRouter · ElevenLabs"]
+    OUT["Outside services, optional and gated<br/>Higgsfield · OpenRouter"]
 
     subgraph Mac["On the Mac: brimm-video"]
         IN["Intake and analysis<br/>transcript, word times, cut plan,<br/>faces, loudness, contact sheets"]
@@ -119,7 +119,7 @@ One JSON file per part, versioned. Today's episode record already holds much of 
 |---|---|---|
 | **Editor** | the transcript, the cut plan, contact sheets | cuts, order, where a Reel starts and ends |
 | **Graphics director** | the words, the brand kit's list of components, contact sheets (where her face is) | graphics with their words and settings, ideas for b-roll and pictures |
-| **Prompt writer** | what Sallie asked for, the brand notes | prompts for pictures, b-roll and music, which go to outside services |
+| **Prompt writer** | what Sallie asked for, the brand notes | prompts for pictures and b-roll, which go to outside services |
 | **Checker** | frames taken from each render: every graphic's first and last frame, the frames either side of each cut, each insert | "looks right", or a fix it makes itself (a title that hides her face, a typo, a card that runs into a cut, text outside an upright frame's safe area), before Sallie sees the render |
 
 - **Where it runs:** Claude Code on the Mac. That is Sallie's chat in the Claude app, in her Studio folder, or Jason's terminal. The skill `brimm-edit` teaches it the commands. HyperFrames' own Claude Code skills teach the component format, and are used by Jason when building the brand kit, not in her folder.
@@ -179,7 +179,7 @@ The brand kit is a HyperFrames project kept in the repo (`tool/brand/`, once bui
 
 - **Tokens**, in `brand.css`:
   - colours: navy `#1F2D42`, sand `#C1AD97`, mist `#E8E3DA`, and the rest of the brand guide;
-  - typefaces: Sweet Sans Pro and Sinthya, loaded from their font files with `@font-face`;
+  - typefaces: Sweet Sans Pro through Adobe Fonts (Jason, 2026-10-26), used as a font installed on the Mac, so H0 checks that the renderer's Chrome can see it; Sinthya from its font file with `@font-face`, once bought;
   - spacing and safe areas: Meta's upright safe zone of top 14%, bottom 35% and sides 6% (preset research).
 - **Motion presets.** A few short entrances and exits, the same everywhere, so every graphic moves like the brand.
 - **Components.** Each is a small HTML composition with a list of settings that Claude fills in:
@@ -211,15 +211,17 @@ Each service has a role, a list of what it may receive, and guards. The privacy 
 
 | Service | Used for | What it receives | Allowed for | Guards |
 |---|---|---|---|---|
-| **HyperFrames** (local, open source, Apache-2.0) | every graphic, Reel compositions, beat finding for music cuts | nothing: it renders on the Mac | every kind | version pinned; telemetry turned off; `publish`, `cloud`, `lambda` and `cloudrun` denied, since they upload the project |
-| **Higgsfield** (connector, account credits) | b-roll from a prompt or a still (models such as Kling, Seedance, Veo); animating a still; video upscaling (Topaz or ByteDance); background removal on video; reframing to upright (60 s at most); scene analysis | a prompt; for the tools that work on footage, the clip itself | prompts: any kind but a session. Footage: public-bound videos only, after a yes for that video | Higgsfield says it uses uploaded content to improve its models (its own post, from 2026-08-27), so footage is never sent by default. A cost check (`get_cost`) before every paid job. A daily credit budget. Its publishing and website tools denied (section 8) |
-| **OpenRouter** (API key, in the Keychain) | pictures (one zero-retention model and provider, pinned, as designed on 2026-10-25); b-roll through its video API (Veo 3.1, Seedance, Wan, Sora 2 Pro, Kling; some listed as alpha); optional "eyes": a Gemini model watching a small proxy, to judge energy or find visual moments | a prompt; for "eyes", a low-resolution proxy | prompts: any kind but a session. "Eyes": public-bound videos only, after a yes | the key's own guardrail (model and provider allowlists, zero retention, daily budget). The key is read by `edit.js` from the Keychain, never by Claude |
-| **ElevenLabs** or a music library (optional) | music beds, sound effects for graphics, voice clean-up | a prompt; for voice clean-up, the sound | music and effects: any kind. Sound: public-bound only, after a yes | check the plan's commercial licence before use |
+| **HyperFrames** (local, open source, Apache-2.0) | every graphic, Reel compositions, beat finding for music cuts, background removal (on the Mac, with no upload) | nothing: it renders on the Mac | every kind | version pinned; telemetry turned off; `publish`, `cloud`, `lambda` and `cloudrun` denied, since they upload the project |
+| **Higgsfield** (connector, account credits) | the one source of generated b-roll: from a prompt or a still (models such as Kling, Seedance, Veo); animating a still; video upscaling (Topaz or ByteDance); reframing to upright (60 s at most) | a prompt; for the tools that work on footage, the clip itself | prompts: any kind but a session. Footage: public-bound videos only, after a yes for that video | Higgsfield says it uses uploaded content to improve its models (its own post, from 2026-08-27), so footage is never sent by default. The smallest paid plan, bought when H6 starts (Jason, 2026-10-26). Sallie's folder may call only its generation, cost-check and job-status tools. A cost check (`get_cost`) before every paid job. A daily credit budget. Its publishing and website tools denied (section 8) |
+| **OpenRouter** (API key, in the Keychain) | pictures (one zero-retention model and provider, pinned, as designed on 2026-10-25). Pictures only for now (Jason, 2026-10-26). Later, each on its own yes after H3: b-roll through its video API (Veo 3.1, Seedance, Wan, Sora 2 Pro, Kling; some listed as alpha), and "eyes": a Gemini model watching a small proxy, to judge energy or find visual moments | a prompt; for "eyes", a low-resolution proxy | prompts: any kind but a session. "Eyes": public-bound videos only, after a yes | the key's own guardrail (model and provider allowlists, zero retention, daily budget). The key is read by `edit.js` from the Keychain, never by Claude |
+| **A music library** (one subscription; her outside editor's, if they use one) | music beds: Sallie picks 5 to 10 tracks into `Assets/Music/`, and Claude places them and lowers them under her voice (Jason, 2026-10-26) | nothing: a person downloads the tracks | any kind | check that its licence covers YouTube, Instagram and LinkedIn for a business before subscribing |
 | **OpusClip** (connected now) | clip ideas from a published video's YouTube link | a public link | published videos only | posting tools denied, as today |
 | **Canva** | Sallie's own pictures, dropped into `Assets/` | nothing from the system | — | — |
 | **Claude** (Anthropic) | every decision | transcripts, contact sheets, frames | as today: a session's words only when she asks for its teachings, with training off | — |
 
-**Every generated or bought asset gets a manifest line:** service, model, prompt, cost, date, licence, and whether it is realistic synthetic media. The hand-off carries that last flag, so Sallie knows when YouTube's disclosure question should be answered yes. (Disclosure applies to realistic altered or synthetic content. Check YouTube's own help page before relying on this.)
+**No generated people who could pass as real, and never a generated Sallie, face or voice** (Jason, 2026-10-26). B-roll shows objects, places and abstract scenes.
+
+**Every generated or bought asset gets a manifest line** (Jason, 2026-10-26): service, model, prompt, cost, date, licence, and whether it is realistic synthetic media. The hand-off carries that last flag, so Sallie knows when YouTube's disclosure question should be answered yes. (Disclosure applies to realistic altered or synthetic content. Check YouTube's own help page before relying on this.)
 
 **Generation is always a choice.** Claude makes two or three options, shows their stills or a contact sheet, and Sallie picks one. Nothing generated goes into a finished file without being in a preview she watched.
 
@@ -268,7 +270,7 @@ What Sallie says, and what happens:
 | "A card that says 'Three pricing mistakes' before the first one" | `graphic add title-card` | HyperFrames |
 | "Show the three steps as I say them" | `graphic add list-card`, each line on its words | HyperFrames |
 | "A picture of a messy desk while I talk about overwhelm" | `picture make` (prompt), then the `picture` component | OpenRouter, then HyperFrames |
-| "B-roll of a calculator at 4:10" | `broll make`: cost first, options, she picks | Higgsfield or OpenRouter |
+| "B-roll of a calculator at 4:10" | `broll make`: cost first, options, she picks | Higgsfield |
 | "Cut the bit about my sister" | `cut remove` on those words | edit record |
 | "Make it moody" | `look moody` | ffmpeg |
 | "Quiet music under it" | `music add`, ducked under her voice | ffmpeg |
@@ -364,7 +366,8 @@ It is opened with `open -a "Final Cut Pro"` into the library in `~/BRIMM Video W
 **Licences.**
 
 - Every asset's licence is in its manifest line.
-- Typefaces must be licensed for the way the renderer uses them: HTML in a browser engine on the Mac, not only desktop apps. Check this when buying Sweet Sans Pro and Sinthya.
+- **Sweet Sans Pro** comes through Adobe Fonts (Jason, 2026-10-26), whose page for it lists video and broadcast use. It needs a Creative Cloud plan with Adobe Fonts, signed in on each Mac that edits or renders. Adobe Fonts gives no font file, so H0 checks that the renderer can use the installed font.
+- **Sinthya** is not on Adobe Fonts. It is sold by Sronstudio on Creative Market ($25 a seat, two seats), and its licence does not name video: ask its maker to confirm video use before buying. Varela stands in until then.
 
 ## 9. What stays from today's tool, and what changes
 
@@ -384,13 +387,13 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 
 | Step | What | Done when |
 |---|---|---|
-| **H0. Render test** (by hand, scratch folder, never a watched one) | Install HyperFrames in a scratch folder. Render a lower third and a title card as transparent ProRes. Lay them over a test recording with ffmpeg. Render one 60-second Reel as a full composition. | Jason judges the frames: navy still navy, the font right, timing to the frame. Times measured on the Mac Studio and on an M4 |
+| **H0. Render test** (by hand, scratch folder, never a watched one; Mac Studio only, Jason 2026-10-26) | Install HyperFrames in a scratch folder: version pinned, telemetry off, its Claude skills skipped. Render a lower third and a title card as transparent ProRes, with Sweet Sans Pro from Adobe Fonts. Lay them over a test recording with ffmpeg. Render one 60-second Reel as a full composition. | Jason judges the frames: navy still navy, Sweet Sans Pro drawn and not a stand-in, timing to the frame. Times measured on the Mac Studio. The same test on Sallie's laptop once H0 passes, when Jason says yes to installing it there |
 | **H1. Edit record and render planner** | The record's format, the move from today's record, and the planner that turns a record into ffmpeg and HyperFrames jobs (pure JavaScript) | planner output matches the FCPXML writer frame for frame on fixtures |
 | **H2. Brand kit** | tokens, motion presets, the first components (`lower-third`, `title-card`, `list-card`, `logo-bug`, `end-card`) with their settings lists | stored reference frames match on both Macs |
 | **H3. Path A** | `render` (preview, that part), `finish` (final), the checks, Claude's frame check | a test recording goes from drop to Finished with no Final Cut |
 | **H4. Reels** | Reel composition, crops from faces, the four caption styles | Jason's test Reel judged by eye |
 | **H5. Final Cut bridge** | graphics clips in FCPXML, pull back and compare | a hand edit in Final Cut comes back as a version |
-| **H6. Outside media** | `picture make` (OpenRouter, as designed), then `broll make` (Higgsfield or OpenRouter), the asset manifest, budgets, the denied tools | stand-in services in tests; one real job of each on Jason's key |
+| **H6. Outside media** | `picture make` (OpenRouter, as designed), then `broll make` (Higgsfield, on its smallest paid plan), the asset manifest and its synthetic-media flag, budgets, the denied tools | stand-in services in tests; one real job of each on Jason's key |
 | **H7. Claude exports from Final Cut** | the computer-use export, in Jason's sessions first | three exports in a row with no help |
 | **H8. Optional extras** | "eyes", music and sound effects | each on its own yes |
 
@@ -398,22 +401,25 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 
 - **HyperFrames moves fast.** It is at version 0.8.206, released 2026-10-26, with several releases a day. Pin a version, and upgrade only on purpose after the reference-frame test.
 - **Colour.** Graphics are drawn in sRGB and the video is BT.709. The overlay must convert with the right matrix, or the navy shifts. H0 checks it.
-- **Speed on the laptop.** A headless browser plus the encoder on 16 GB. H0 measures it.
+- **Speed on the laptop.** A headless browser plus the encoder on 16 GB. Measured by H0's repeat on the laptop.
+- **Adobe Fonts and the renderer.** Adobe Fonts gives no font file. If HyperFrames' Chrome cannot see the installed font, the fallback is to buy Sweet Sans Pro's files after all, for the renderer.
 - **Computer use.** It is a research preview. A Final Cut update can move a menu, and it takes over the screen while it runs. Keep the one-click Share as the fallback.
 - **Generated b-roll.** It can look fake next to a real person on a business show. Prefer objects, places and abstract shots over generated people. Label it in the manifest.
 - **Pages not opened.** openrouter.ai and higgsfield.ai could not be opened from this session. Their lines in this document come from search summaries of their pages. Check them before H6.
 
-## 11. Decisions for Jason
+## 11. Jason's decisions
 
-1. **The architecture itself.** One edit record as the truth, HyperFrames for graphics in place of the planned Swift drawer, and path A as the default.
-2. **Installing HyperFrames** (an npm package, with its own Chrome for rendering) on the Mac Studio, and later on Sallie's laptop. Installing needs your yes.
-3. **Footage leaving the Mac. Answered on 2026-10-26: yes, as proposed** (Jason: "two earlier rules can change"). The 2026-10-22 rule ("no video or sound leaves the Mac") stays the default. The one exception: a public-bound video may be sent to one named tool after a yes for that video, for example a Higgsfield upscale or OpenRouter "eyes". A client or group session never leaves the Mac.
-4. **Higgsfield.** Which plan. Whether its training terms are acceptable even for prompts. Which of its tools her folder may call.
-5. **OpenRouter beyond pictures.** Video generation and "eyes".
-6. **Claude driving Final Cut's screen. Answered on 2026-10-26: yes, as proposed** (the same answer). It replaces the no of 2026-10-22. It is an option for exporting and for Final Cut-only tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
-7. **Typeface licences** that cover rendering in a browser engine on the Mac.
-8. **Music.** ElevenLabs, a music library subscription, or Sallie's own picks.
-9. **Labelling generated media** in the hand-off, so Sallie can answer YouTube's disclosure question.
+All answered on 2026-10-26, except buying Sinthya (7). Numbers 3 and 6 in his words ("two earlier rules can change"); the rest picked on answer cards after a walk-through of each.
+
+1. **The architecture itself: yes, with H0 as the gate.** One edit record as the truth, HyperFrames for graphics, and path A as the default. If H0 fails (colour, font, timing or speed), the Swift drawer of 2026-10-22 comes back. Each phase is still its own pull request.
+2. **Installing HyperFrames: on the Mac Studio, for H0.** In a scratch folder, with the version pinned, telemetry off and its Claude skills skipped. Sallie's laptop only after H0 passes, and with Jason's yes then.
+3. **Footage leaving the Mac: yes, as proposed.** The 2026-10-22 rule ("no video or sound leaves the Mac") stays the default. The one exception: a public-bound video may be sent to one named tool after a yes for that video, for example a Higgsfield upscale or OpenRouter "eyes". A client or group session never leaves the Mac.
+4. **Higgsfield: the smallest paid plan, bought when H6 starts.** It is the one source of generated b-roll. Its training terms are acceptable for prompts. Sallie's folder may call only its generation, cost-check and job-status tools. Background removal is done on the Mac by HyperFrames instead.
+5. **OpenRouter: pictures only for now.** Video generation and "eyes" are looked at again after H3, each on its own yes.
+6. **Claude driving Final Cut's screen: yes, as proposed.** It replaces the no of 2026-10-22. It is an option for exporting and for Final Cut-only tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
+7. **Typefaces: Sweet Sans Pro through Adobe Fonts.** H0 checks that the renderer can use it. **Still open: Sinthya**, which is not on Adobe Fonts. The proposal is two seats on Creative Market ($50), once its maker confirms video use.
+8. **Music: a library subscription, with Sallie picking the tracks.** Her outside editor's library, if they use one. Its licence is checked for YouTube, Instagram and LinkedIn first.
+9. **Labelling: yes, and no fake people.** A synthetic-media flag on every asset and a line in the hand-off. No generated people who could pass as real, and never a generated Sallie, face or voice.
 
 ## Sources
 
@@ -436,7 +442,12 @@ All read on 2026-10-26. A vendor's page is its own claim, not a measurement.
 - **Final Cut Pro:** [release notes](https://support.apple.com/102825), from a search summary: 12.0 of 2026-01-28 with FCPXML 1.14 and Beat Detection; 12.3 with Generate Captions; 12.4 of 2026-09-29.
 - **CommandPost:** [command line tool](https://commandpost.fcp.cafe/scripting/command-line-interface/) and [batch export](https://commandpost.fcp.cafe/final-cut-pro/batch-export-active-timeline/), from search summaries.
 - **YouTube disclosure of synthetic media:** secondary coverage only, for example [this summary](https://minimatters.com/youtube-altered-or-synthetic-content-disclosure/). Check YouTube's own help page.
-- **ElevenLabs music licensing:** secondary coverage only, and it disagrees on which plans allow commercial use. Check ElevenLabs' terms.
+- **ElevenLabs music licensing:** secondary coverage only, and it disagrees on which plans allow commercial use. One reason a music library was chosen instead.
+- **For the answers in section 11** (read 2026-10-26):
+  - **HyperFrames' docs** at the same commit: `packages/cli.mdx` (`telemetry`, on until turned off with `HYPERFRAMES_NO_TELEMETRY=1`; `browser`, which downloads and caches its Chrome; `init --skip-skills`) and `guides/remove-background.mdx` (the basic cut-out runs on the computer, with no upload).
+  - **Higgsfield's prices:** [a competitor's summary](https://creatify.ai/blog/higgsfield-pricing-(2026)-plans-and-what-you-ll-actually-pay), from a search summary: Starter about $19 a month billed yearly, commercial use on paid plans, monthly credits that expire. Check Higgsfield's own page at H6.
+  - **Sweet Sans Pro on Adobe Fonts:** [its page](https://fonts.adobe.com/fonts/sweet-sans-pro), from a search summary; MVB's other Adobe Fonts pages list video and broadcast use.
+  - **Sinthya:** [Sronstudio on Creative Market](https://creativemarket.com/Sronstudio/3897399-Sinthya-Casual-Script-Font); no Adobe Fonts listing found. The preset research (`docs/research/2026-10-13-video-presets/brand-guide.md`) has its licence and price.
 - **This repo:**
   - `docs/requirements.md`: the workflows of 2026-10-22 and Jason's answers;
   - `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`: section 4, rendering;

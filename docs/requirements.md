@@ -24,7 +24,15 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
 - **Two rules of 2026-10-22 changed (2026-10-26).** The proposed architecture of 2026-10-26 (`docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`, section 11, decisions 3 and 6) asked about two of the rules below. Jason answered, word for word: "two earlier rules can change". So, as that design proposed:
   - **Footage may leave the Mac, one video at a time.** A video meant for posting may be sent to one named outside tool after a yes for that video, for example Higgsfield to upscale it, or a model on OpenRouter to watch a small copy of it. By default nothing but a prompt Claude wrote leaves the Mac. A client or group session never does.
   - **Claude may drive Final Cut's screen** (Claude Code's computer use), to export finished files and to use Final Cut's own tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
-  - The rest of that design waits on his yes. Nothing of it is built.
+- **The architecture of 2026-10-26: yes, with the render test (H0) as its gate.** After a walk-through of its other open decisions, each with a recommendation, Jason picked on answer cards. Its section 11 holds them in full. In short:
+  - **The design:** one edit record per part as the truth, graphics made with HyperFrames, and renders made by brimm-video as the default. If H0 fails, the Swift drawer of the 2026-10-22 design comes back.
+  - **HyperFrames** is installed on the Mac Studio for H0, in a scratch folder. Sallie's laptop gets it only after H0 passes, on Jason's yes then.
+  - **Higgsfield** is the one source of generated b-roll: its smallest paid plan, bought when that phase starts. Sallie's folder may call only its generation, cost-check and job-status tools.
+  - **OpenRouter** stays for pictures only for now.
+  - **Typefaces:** Sweet Sans Pro through Adobe Fonts. Sinthya is not on Adobe Fonts, so buying it is still open.
+  - **Music:** a library subscription, with Sallie picking the tracks.
+  - **Generated media** is labelled for YouTube's disclosure question. No generated people who could pass as real, and never a generated Sallie, face or voice.
+  - Nothing of it is built.
 
 ## The workflows (2026-10-22)
 
@@ -50,7 +58,7 @@ Jason's answers to the design's questions, the same evening:
 - **Fine edits by chat are a must:** "if sallie can't do fine edits via chat, then she won't use this." Nobody finishes her raw videos in Final Cut.
 - **Sending:** "option b is not sending. sending is ok when needed." Posting and publishing stay forbidden. Jason tests OpusClip with an existing clip's YouTube link.
 - **A session first handed off as another kind:** the page redacts the earlier words in place.
-- **Reels of a finished video** are made both in brimm-video and in OpusClip. Graphics Claude makes are text cards. Jason adds the logos to the Assets folder himself.
+- **Reels of a finished video** are made both in brimm-video and in OpusClip. Graphics Claude makes are text cards (widened on 2026-10-26: see "Decisions"). Jason adds the logos to the Assets folder himself.
 - **The question card** asks a second question ("a private session with a client or a group?") for every video; a finished video's hand-off is written once the spellings are answered; a caption track goes in the final video, and an iPhone clip gets captions drawn on it only when she asks.
 - **Jason's MacBook** gets a drop folder of its own once `BRIMM VIDEO Transfer` retires.
 
@@ -110,3 +118,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.
 - 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed. The same evening, Jason's answers to the design's questions, recorded under that section.
 - 2026-10-26: recorded Jason's answer to two questions of the proposed architecture of the same day, `docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`: "two earlier rules can change". A line under "Decisions" says what changed: a video meant for posting may go to one named outside tool after a yes for that video, and Claude may drive Final Cut's screen. The two lines of 2026-10-22 they change point to it.
+- 2026-10-26: recorded Jason's answers to the architecture's other decisions, picked on answer cards the same day: a line under "Decisions" says what he chose, and the 2026-10-22 answer on text cards points to it. Sinthya's purchase is still open.
