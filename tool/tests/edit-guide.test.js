@@ -3,10 +3,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { writeGuideNotes } from "../guide-note.js";
-import { NOT_SET_UP } from "../guide.js";
+import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
 import { writeStatus } from "../importing.js";
 import { progressFolder } from "../progress.js";
 import { setup, episodeAs, otherMac } from "./episodes.js";
@@ -244,6 +244,63 @@ describe("guide, from the drop folders", () => {
       '  Video of 20 Oct, 12:00 (Mac Studio): Its import did not finish. Say "try it again".',
       '  Video of 20 Oct, 13:00 (Mac Studio): Its import did not finish. Say "try it again".'
     ]);
+    t.done();
+  });
+});
+
+describe("guide opens a folder, the page, or a file's place in Finder", () => {
+  it("opens this Mac's drop folder in Finder and says its Finder words, or why not", async () => {
+    const t = setup();
+    assert.deepEqual(await on(light(t), "guide", "drop"), { code: 1, said: ["Your drop folder is not there: ask Jason."] });
+    mkdirSync(join(t.root, "Drop", "Mac Studio"), { recursive: true });
+    assert.deepEqual(await on(light(t), "guide", "drop"), { code: 0, said: ["Opened your drop folder in Finder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio."] });
+    assert.deepEqual(t.opened, [["Finder", join(t.root, "Drop", "Mac Studio")]]);
+    const broken = light(t, { openApp: () => { throw new Error("Finder could not be opened (/x/y)"); } });
+    assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder: ask Jason."] });
+    t.done();
+  });
+  it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {
+    const t = setup();
+    assert.deepEqual(await on(light(t), "guide", "drop", "zoom"), { code: 1, said: ["Zoom Video Transfer is not on this Mac: ask Jason."] });
+    const zoom = join(dirname(t.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer");
+    mkdirSync(zoom, { recursive: true });
+    assert.deepEqual(await on(light(t), "guide", "drop", "zoom"), { code: 0, said: ["Opened Zoom Video Transfer in Finder: Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer."] });
+    assert.deepEqual(t.opened, [["Finder", zoom]]);
+    t.done();
+  });
+  it("opens the BRIMM Ops page, a constant, in the default browser, or says to ask Jason", async () => {
+    const t = setup();
+    assert.deepEqual(await on(light(t), "guide", "page"), { code: 0, said: ["Opened the BRIMM Ops page in your browser."] });
+    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: [OPS_PAGE] }]);
+    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened: ask Jason."] });
+    t.done();
+  });
+  it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of brimm-video's", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    assert.deepEqual(await on(light(t), "guide", "Launch talk", "show"), { code: 0, said: ["Shown in Finder: the hand-off of Launch talk (a1a1a1)."] });
+    writeGuideNotes(t.home, { version: 1, handoffs: { [h.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+    writeFileSync(join(h.folder, "Talk.mp4"), "the video she dropped");
+    assert.deepEqual(await on(light(t), "guide", "Launch talk", "show"), { code: 0, said: ["Shown in Finder: the video of Launch talk (a1a1a1), to post."] });
+    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(h.folder, "final", "Launch talk.brimm-ops.json")] }, { cmd: "/usr/bin/open", args: ["-R", join(h.folder, "Talk.mp4")] }]);
+    const raw = handedOff(t, { id: "e-20261020-a3a3a3", name: "2026-10-20 Raw talk (Mac Studio)", text: "Raw talk", kind: "raw" });
+    writeGuideNotes(t.home, { version: 1, handoffs: { [raw.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+    assert.deepEqual(await on(light(t), "guide", "Raw talk", "show"), { code: 1, said: ["The video of Raw talk (a3a3a3) is not on this Mac: ask Jason."] });
+    writeFileSync(join(raw.folder, "final", "Raw talk.mov"), "its Share");
+    assert.equal((await on(light(t), "guide", "Raw talk", "show")).code, 0);
+    assert.deepEqual(t.calls.at(-1), { cmd: "/usr/bin/open", args: ["-R", join(raw.folder, "final", "Raw talk.mov")] });
+    episodeAs(t, VIDEOS.read);
+    assert.deepEqual(await on(light(t), "guide", "Pricing talk", "show"), { code: 1, said: ["There is nothing to show in Finder for Pricing talk (bbbbbb) now."] });
+    t.done();
+  });
+  // Not in the plan's tests: a raw hand-off read from the record names no Share, and final/ itself is never shown in its place.
+  it("says the video to post is not on this Mac when its hand-off names none", async () => {
+    const t = setup();
+    const raw = handedOff(t, { id: "e-20261020-a3a3a3", name: "2026-10-20 Raw talk (Mac Studio)", text: "Raw talk", kind: "raw" });
+    writeFileSync(join(raw.folder, "final/Raw talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: raw.record.id, kind: "film", name: "Raw talk" } }));
+    writeGuideNotes(t.home, { version: 1, handoffs: { [raw.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+    assert.deepEqual(await on(light(t), "guide", "Raw talk", "show"), { code: 1, said: ["The video of Raw talk (a3a3a3) is not on this Mac: ask Jason."] });
+    assert.deepEqual(t.calls, []);
     t.done();
   });
 });

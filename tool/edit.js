@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, dropWords, nextFor, ordered, findIn, overviewLines, videoLines } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, dropWords, nextFor, ordered, findIn, overviewLines, videoLines } from "./guide.js";
 import { readGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -5411,14 +5411,59 @@ function guideItems(ctx) {
   return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old };
 }
 
-/** `guide ["<video>"]`: the guide, on a Mac that does the light import. On any other, every form says only to ask Jason
-    (NOT_SET_UP), since there Claude reads every video as it lands. With no words, the overview: this Mac's drop folder in Finder's
-    words, each video under way with its one next step, and how many videos from before the switch it does not guide. With a
-    video, by its name, its label or its id, its next step, and for a step on the BRIMM Ops page the one after it. Words that fit
-    no video, or more than one, are refused, and never said again: they may hold a client's name. */
+/** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
+    One not on this Mac is refused with `missing`. One Finder could not open is refused too, and why is never said: it may hold
+    a path. */
+function openFolder(ctx, folder, what, words, missing) {
+  if (!ctx.stat(folder)) return refuse(ctx, missing);
+  try {
+    ctx.openApp("Finder", folder);
+  } catch (e) {
+    return refuse(ctx, `Finder could not open ${what}: ask Jason.`);
+  }
+  ctx.say(`Opened ${what} in Finder: ${words}.`);
+  return 0;
+}
+
+/** `guide page`: the BRIMM Ops page (OPS_PAGE), opened in her default browser through this Mac's program runner. */
+async function openPage(ctx) {
+  const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", [OPS_PAGE]);
+  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened: ask Jason.");
+  ctx.say("Opened the BRIMM Ops page in your browser.");
+  return 0;
+}
+
+/** `guide "<video>" show`: what the video's next step on the BRIMM Ops page needs, shown in Finder (showInFinder). For `posted`
+    it is the video to post: a raw episode's Share in final/, which its hand-off names, and any other's the copy of the video she
+    dropped. For any other step it is the hand-off. The chat is told only what it is, never its file's name, which may be a
+    client's. A step that is not the page's has nothing to show; a file not on this Mac, or one its hand-off does not name, is
+    refused. */
+async function showForStep(ctx, { facts, next, folder, record }) {
+  if (next.done || next.stage !== "ops") return refuse(ctx, `There is nothing to show in Finder for ${facts.name} now.`);
+  const video = next.step === "posted";
+  const where = !video ? [record.finished.handoff] : facts.handoff.kind === "raw" ? ["final", facts.handoff.file] : [record.video.file];
+  const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
+  const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
+  if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
+  await showInFinder(ctx, path);
+  ctx.say(`Shown in Finder: ${what}${video ? ", to post" : ""}.`);
+  return 0;
+}
+
+/** `guide ["<video>" [show]]`, `guide drop [zoom]` and `guide page`: the guide, on a Mac that does the light import. On any
+    other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every video as it lands. With no words, the
+    overview: this Mac's drop folder in Finder's words, each video under way with its one next step, and how many videos from
+    before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and `drop zoom` Zoom Video Transfer,
+    beside BRIMM Video; `page` opens the BRIMM Ops page. With a video, by its name, its label or its id, its next step, and for a
+    step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder. Words that fit no video, or more
+    than one, are refused, and never said again: they may hold a client's name. */
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
-  if (rest.length > 1) {
+  const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
+  if (is("drop")) return openFolder(ctx, dropFolder(ctx.root, ctx.machine, ctx.settings.drop), "your drop folder", dropWords(ctx.settings.drop, ctx.machine), "Your drop folder is not there: ask Jason.");
+  if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
+  if (is("page")) return openPage(ctx);
+  if (rest.length > 2 || (rest.length === 2 && rest[1] !== "show")) {
     ctx.say(HELP);
     return 2;
   }
@@ -5429,6 +5474,7 @@ export async function guideCommand(ctx, rest) {
   }
   const found = findIn(items, rest[0]);
   if (found.why) return refuse(ctx, found.why);
+  if (rest.length === 2) return showForStep(ctx, found.item);
   for (const line of videoLines(found.item)) ctx.say(line);
   return 0;
 }
