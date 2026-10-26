@@ -24,7 +24,8 @@
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
-// commands run, and every other is refused before it reads a word.
+// commands run, and every other is refused before it reads a word. A command that says a session's words, under Claude Code, marks
+// the chat first (held.js); on an open-lock Mac it says them into a file only that chat may read, and tells the chat the file.
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
@@ -36,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
-import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -67,6 +68,9 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
+import { afterAllNoted, clearOldWords, markChat, noteAfterAll, writeWords } from "./held.js";
+import { SESSION_ID } from "./scan.js";
+import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
@@ -215,6 +219,9 @@ export function contextFor(deps = {}) {
   const { settings } = got;
   // The names of a gated video that a command has found (findEpisode, hideNames), which no line it says after may hold.
   const hidden = { names: [], keep: [] };
+  // A session's words the command says, once the chat is marked (holdWords): on an open-lock Mac every line from then on is kept
+  // in `lines`, for editMain to write into the chat's words file (handOverWords), and none is said.
+  const words = { marked: false, lines: null, session: null, label: "" };
   const say = deps.say || ((line) => process.stdout.write(`${line}\n`));
   return {
     settings,
@@ -223,8 +230,13 @@ export function contextFor(deps = {}) {
     episodes: episodesFolder(settings.root),
     home,
     // Only the names are taken out: any other path in a line stays readable.
-    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line),
+    say: (line) => {
+      const shown = hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line;
+      if (words.lines) words.lines.push(shown);
+      else say(shown);
+    },
     hidden,
+    words,
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
     stat: deps.stat || ((path) => statSync(path, { throwIfNoEntry: false })),
@@ -330,6 +342,7 @@ function episodeAt(ctx, name, links = null) {
   const copies = past ? conflictedCopies(folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(folder, c))) : [];
   const records = (read.record ? [read.record] : past ? [inForce, ...copies] : []).filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
   const newer = read.newer ? read.record : past && past.newer ? past.record : null;
+  noteSessionsAfterAll(ctx, records);
   let held;
   return {
     name, folder, read, inForce, records, newer,
@@ -341,6 +354,23 @@ function episodeAt(ctx, name, links = null) {
       return held;
     }
   };
+}
+
+/** Note each of `records` that is a session after all (its `session.emptyRevision` is set: it was read as another kind, and answered
+    a session since) the first time this Mac reads it at that revision, with the time it is read (held.js noteAfterAll; design
+    2026-10-26, R9): every chat begun before then may hold its words, and is held. episodeAt reads every record so, for `episodes`,
+    `status`, `guide`, `behind`'s lists and findEpisode alike, so the other Mac notes it at the start of her next chat. A note that
+    cannot be written now is tried again at the next read, which notes a later time and so holds more chats, not fewer. */
+function noteSessionsAfterAll(ctx, records) {
+  for (const r of records) {
+    const revision = r.session !== null && typeof r.session === "object" && !Array.isArray(r.session) ? r.session.emptyRevision : undefined;
+    if (revision === undefined || revision === null || afterAllNoted(ctx.home, r.id, revision)) continue;
+    try {
+      noteAfterAll({ home: ctx.home, id: r.id, revision, at: new Date(ctx.now()).toISOString() });
+    } catch (e) {
+      // Tried again at the next read.
+    }
+  }
 }
 
 /** Whether an episode is gated (gate.js): any record it is known by is a video not yet answered or a session not cleared, so
@@ -445,6 +475,65 @@ function notRead(ctx, found, said = found.name) {
   return `${capital(shown)}: ${clean(found.read.why)}.`;
 }
 
+/** What a command ends with when the chat it runs in cannot be marked as holding a session's words, or, on an open-lock Mac, when
+    the chat's id is not one a words file can be named by: the words are shown nowhere. */
+export const MARK_FAILED = "This chat could not be marked as holding a session's words, so they are not shown here: ask Jason.";
+
+/** The one line a chat is told on an open-lock Mac in place of a session's words: the video's label, and the file they are in. */
+export const wordsLine = (label, path) => `${label}: a session's words are in a file for this chat alone: ${path}`;
+
+/** The commands that say a session's words (design 2026-10-26, R8): those a session runs once the training gate is on, beyond
+    those it runs with the gate off (gate.js SESSION_TAUGHT beyond SESSION): `teachings`, `principles`, `ideas`, `finish`, `reel`
+    and `render`. Not `read`, the reading's own detached run, which prints to no chat. */
+const SAYS_WORDS = SESSION_TAUGHT.filter((command) => !SESSION_COMMANDS.includes(command) && command !== "read");
+
+/** Once the gate lets a command run for the episode `e`: when the command is one that says a session's words (SAYS_WORDS), a record
+    of `e` is a session not cleared, it runs under Claude Code (CLAUDECODE=1 in deps.env, else this process's) and her folder is on
+    this Mac, mark the chat first (held.js markChat: its id, and the claude above this process in `ps`'s table, deps.ps and
+    deps.pid being a test's), on a strict Mac as on an open one (R7). A detached run is not under Claude Code (spawnDetached), so it
+    is never marked; nothing is decided by the word `--now`. Then, only where the lock in effect is open, every line the command
+    says from here on is kept for the chat's words file (ctx.words; handOverWords). { why: MARK_FAILED } ends the command when the
+    mark cannot be written, or, on an open-lock Mac, when the chat's id is not a chat's; null lets it go on. A command marks once. */
+function holdWords(ctx, e) {
+  if (!ctx.asked || !ctx.words || ctx.words.marked || !SAYS_WORDS.includes(ctx.asked.command)) return null;
+  const session = e.records.filter(recordShaped).find(sessionNotCleared);
+  if (!session) return null;
+  const env = ctx.deps.env || process.env;
+  if (env.CLAUDECODE !== "1" || !existsSync(studioFolder(ctx.home))) return null;
+  try {
+    const table = processTable((ctx.deps.ps || readProcesses)());
+    markChat({ home: ctx.home, env, table, pid: ctx.deps.pid !== undefined ? ctx.deps.pid : process.pid, now: ctx.now() });
+  } catch (err) {
+    return { why: MARK_FAILED };
+  }
+  ctx.words.marked = true;
+  if (lockFor(ctx.settings, ctx.deps) !== "open") return null;
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  if (typeof id !== "string" || !SESSION_ID.test(id)) return { why: MARK_FAILED };
+  Object.assign(ctx.words, { lines: [], session: id, label: shownName(session) });
+  return null;
+}
+
+/** At the end of a command whose lines were kept for the chat's words file (holdWords): write them into a file of the chat's own
+    (held.js writeWords, named for the command), and tell the chat its label and the file, and nothing else. A file that cannot
+    be written ends the command with MARK_FAILED, the lines shown nowhere. Gives the command's code. */
+function handOverWords(ctx, code) {
+  const { words } = ctx;
+  if (!words || !words.lines) return code;
+  const lines = words.lines;
+  words.lines = null;
+  if (!lines.length) return code;
+  let path;
+  try {
+    path = writeWords({ home: ctx.home, sessionId: words.session, label: words.label, what: ctx.asked.command, text: `${lines.join("\n")}\n`, now: ctx.now() });
+  } catch (e) {
+    ctx.say(MARK_FAILED);
+    return 1;
+  }
+  ctx.say(wordsLine(words.label, path));
+  return code;
+}
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name; and a gated one by its label (shownName), the whole of it, whatever its case and spacing, so that a
     label numbered " (2)" fits that video alone and the bare label the first, or by the label and short id its lists give it,
@@ -485,7 +574,7 @@ export function findEpisode(ctx, said) {
     // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
     // foresaw names none of it (editMain).
     if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
-    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
+    return gateOf(ctx, e, known(e), said, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
@@ -4435,6 +4524,16 @@ async function answerKind(ctx, found, plan, began) {
   }
   if (aside) forgetComing(ctx, found);
   if (stored === "session") {
+    // A video read as another kind, answered now as a session, is a session after all: every chat begun before now may have been
+    // shown its words, and is held (held.js; design 2026-10-26, R9). Noted with the time after the write; one that cannot be
+    // written is noted at the next read of the record (noteSessionsAfterAll), later.
+    if (next.session.emptyRevision !== undefined) {
+      try {
+        noteAfterAll({ home: ctx.home, id: next.id, revision: next.session.emptyRevision, at: new Date(ctx.now()).toISOString() });
+      } catch (e) {
+        // Noted at the next read.
+      }
+    }
     // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
     // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
     hideNames(ctx, episodeAt(ctx, found.name));
@@ -5777,8 +5876,11 @@ export async function editMain(argv, deps = {}) {
   // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
   // before the command goes on: the folder a detached run is given by `--now` is found by it too.
   const ctx = { ...made, asked: { command, words: rest } };
+  // Under Claude Code, each command first takes away the words files a day old (held.js clearOldWords).
+  if ((ctx.deps.env || process.env).CLAUDECODE === "1") clearOldWords(ctx.home, ctx.now());
+  let code;
   try {
-    return await run(ctx, rest);
+    code = await run(ctx, rest);
   } catch (e) {
     // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
     // any command on a Mac that does the light import, where any video's file may be named for a client: its error may name the
@@ -5786,8 +5888,10 @@ export async function editMain(argv, deps = {}) {
     // is thrown as it always was.
     if (!ctx.hidden.names.length && !ctx.hidden.switched && !lightImport(ctx.settings)) throw e;
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
-    return 1;
+    code = 1;
   }
+  // A session's words the command said on an open-lock Mac go into the chat's words file, and the chat is told the file.
+  return handOverWords(ctx, code);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
