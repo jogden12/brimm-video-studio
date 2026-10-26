@@ -23,6 +23,7 @@ import { fileSafe } from "./names.js";
 import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
+import { cantOpen, revealed } from "./reveal.js";
 import { commitOf } from "./filing.js";
 import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
@@ -955,8 +956,9 @@ export async function finishNow(ctx, found, deps = {}) {
       failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}.${listWhatFinalHolds()} Say finish again.`);
     }
 
-    // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish.
-    if (written) await my.run("/usr/bin/open", ["-R", join(finalDir, handoffName)]);
+    // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish. On an
+    // open-lock Mac a copy of it is shown (reveal.js), and one that cannot be made is not shown, which is said.
+    if (written && !(await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: my.run, record: nextRecord, label: shownName(nextRecord), path: join(finalDir, handoffName) }))) next.push(cantOpen(shownName(nextRecord)));
 
     // The late check, at least 15 minutes after the last copy. Only when it finds every copy whole, and the record says what
     // was finished, are the files this finish took from From Final Cut deleted there; and only those still as they were
@@ -1235,15 +1237,17 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off.
+  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off: on an open-lock Mac a
+  // copy of it (reveal.js), and `shown` is false when that copy could not be made.
+  let shown = true;
   if (!same) {
     try {
-      await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", join(folder, handoffRel)]);
+      shown = await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: ctx.deps.run || runProgram, record, label: shownName(record), path: join(folder, handoffRel) });
     } catch (e) {
       // The hand-off is in final/ all the same.
     }
   }
-  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same };
+  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same, shown };
 }
 
 // --- A client or group session's own hand-off (spec 2026-10-22, sections 3 and 8) ---
@@ -1407,12 +1411,14 @@ export async function finishSession(ctx, found, { host } = {}) {
       // It stays in final/ beside the new one, which is the higher revision, as the page takes it.
     }
   }
-  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off.
+  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off: on an open-lock Mac a
+  // copy of it (reveal.js), and `shown` is false when that copy could not be made.
+  let shown = true;
   try {
-    await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", to]);
+    shown = await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: ctx.deps.run || runProgram, record, label: who, path: to });
   } catch (e) {
     // The hand-off is in final/ all the same.
   }
   const counts = Object.fromEntries(Object.entries(approved.session).map(([key, items_]) => [key, items_.length]));
-  return { ok: true, revision: target.revision, handoff: handoffRel, counts, dropped: approved.dropped };
+  return { ok: true, revision: target.revision, handoff: handoffRel, counts, dropped: approved.dropped, shown };
 }
