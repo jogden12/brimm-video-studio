@@ -46,7 +46,7 @@ import { SESSION_ID } from "./scan.js";
 import { HELD_NARROWED, HELD_REFUSED, chatHeld, wordsFolder } from "./held.js";
 import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
-import { effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
+import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
 import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
 import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 
@@ -60,8 +60,8 @@ export const RUN_ALONE = "Run brimm-video's commands on their own, exactly as he
 /** The tools left to Claude Code's own rules (step 9): its card, its list of what it is doing and ToolSearch, which only loads a
     tool that then meets this guard. The card must stay so: an answer of the guard's would answer it without her. */
 const LEFT_TO_CLAUDE_CODE = new Set(["AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"]);
-/** The tools with a rule of their own, which no `tool` entry of the allowlist speaks for. */
-const OWN_RULES = new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SendUserFile", "WebFetch", "WebSearch", ...LEFT_TO_CLAUDE_CODE]);
+/** The tools with a rule of their own, which no `tool` entry of the allowlist speaks for (settings.js refuses such an entry too). */
+const OWN_RULES = new Set([...TOOLS_WITH_RULES, ...LEFT_TO_CLAUDE_CODE]);
 
 /** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`. */
 export const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
