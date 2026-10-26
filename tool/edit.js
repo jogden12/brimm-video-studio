@@ -3634,6 +3634,40 @@ async function text(ctx, rest) {
   return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: [...texts, layer] })), `Name title ${id} on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}: "${lines.join('", "')}". ${SHOW_IT}`);
 }
 
+/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"): each idea of the plan's
+    `claude.graphics` on a phrase of the plan, numbered in the order their words are said (Claude's order for two on one
+    phrase), so that no cut, version or Reel changes a number; one that names no phrase of the plan is left out. Each is
+    { n, idea, phrase, outside, at, for, start, end }: `outside` when the timeline is a Reel whose stretch does not hold its
+    words; `at`, the second of the recording its kept words start at, and `for`, how long they take on the timeline now, `at`
+    null when its words are cut now; `start` and `end`, its times on the clock she is reading (`read.on`), null when its words
+    are not on that version (kept again since it was made). `read` is clockFor's. */
+function graphicIdeas(read) {
+  const phrases = new Map((read.plan.phrases || []).map((p) => [p.id, p]));
+  const listed = ((read.plan.claude && read.plan.claude.graphics) || []).map((g, i) => ({ idea: g.idea, phrase: phrases.get(g.id), i })).filter(({ phrase }) => phrase);
+  return listed.sort((a, b) => a.phrase.start - b.phrase.start || a.i - b.i).map(({ idea, phrase }, k) => {
+    const n = k + 1;
+    if (read.span && !(phrase.end > read.span.from && phrase.start < read.span.to)) return { n, idea, phrase, outside: true, at: null };
+    const kept = read.pieces.filter((r) => phrase.end > r.start && phrase.start < r.end);
+    if (!kept.length) return { n, idea, phrase, at: null };
+    const at = Math.max(phrase.start, kept[0].start);
+    const to = Math.min(phrase.end, kept[kept.length - 1].end);
+    const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(to, r.end) - Math.max(at, r.start)), 0);
+    const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, to)];
+    const on = start !== null && end !== null;
+    return { n, idea, phrase, at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+  });
+}
+/** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or "not on main v0 (kept again
+    since)". */
+const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
+/** An idea's words as a sentence: with a full stop, unless they end in one already. */
+const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
+/** What is said of a finished video's or an iPhone clip's ideas for graphics: Claude gives none (Jason, 22 Oct: "Reel suggestions
+    and spellings, nothing more"). */
+const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"}.`;
+/** What the list of ideas says last, when one of them can be put up. */
+const IDEAS_ASK = 'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".';
+
 /** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>") [--for <seconds>]
     [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
     [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). */
@@ -3645,13 +3679,21 @@ async function graphic(ctx, rest) {
   if (start.code !== undefined) return start.code;
   const { found, part, target } = start;
   const graphics = target.graphics || [];
+  if (verb === "ideas" && !hasFinalCut(found.record)) {
+    ctx.say(noIdeas(found.record));
+    return 0;
+  }
   if (verb === "ideas") {
     const read = clockFor(found, part, ctx);
     if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
     sayElsewhere(ctx, read);
-    const ideas = ((read.plan.claude && read.plan.claude.graphics) || []).map((idea) => ({ idea: idea.idea, phrase: read.plan.phrases.find((p) => p.id === idea.id) }))
-      .filter(({ phrase }) => phrase && read.pieces.some((r) => phrase.end > r.start && phrase.start < r.end));
-    ctx.say(ideas.length ? ideas.map(({ idea, phrase }) => `${idea}: at ${clockText(timelineAt(read.clock, Math.max(phrase.start, read.pieces.find((r) => phrase.end > r.start && phrase.start < r.end).start)) ?? 0)} on ${read.on}, "${phrase.text}"`).join("\n") : `Claude gave no ideas for graphics on what ${partLabel(part)} keeps.`);
+    const ideas = graphicIdeas(read).filter((i) => !i.outside);
+    if (!ideas.length) {
+      ctx.say(`Claude gave no ideas for graphics on ${partLabel(part)}.`);
+      return 0;
+    }
+    const head = `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
+    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(ideas.some((i) => i.at !== null) ? [IDEAS_ASK] : [])].join("\n"));
     return 0;
   }
   if (!takes) {

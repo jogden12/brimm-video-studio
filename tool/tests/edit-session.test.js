@@ -483,9 +483,13 @@ describe("graphic", () => {
     assert.match((await on(t.ctx.deps, "graphic", FOLDER, "add", "chart.png", "reel", "2", "--at", "0:01")).text, /only about 32% of it shows: say --place lower to show it whole\./);
     t.done();
   });
-  it("offers Claude's ideas for graphics as places on the timeline", async () => {
+  it("offers Claude's ideas for graphics as places on the timeline, numbered, each with its start and end", async () => {
     const { t } = episode();
-    assert.equal((await on(t.ctx.deps, "graphic", FOLDER, "ideas")).text, 'A chart of what it costs to run the business: at 0:04 on the main video as it is now, "So the first thing you need to do is know your costs."');
+    assert.equal((await on(t.ctx.deps, "graphic", FOLDER, "ideas")).text, [
+      "Claude's ideas for graphics on the main video: 1, with times on the main video as it is now.",
+      'Idea 1, 0:04 to 0:07: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
+      'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".'
+    ].join("\n"));
     t.done();
   });
 });
