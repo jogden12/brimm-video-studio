@@ -248,15 +248,26 @@ function videoNext(facts, notes, now) {
   return facts.v2 ? toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.') : toDo("waits-v2", WAITS_V2);
 }
 
+/** Whether a session after all still owes the BRIMM Ops page its withdrawal: its empty revision is still to be written, or its
+    hand-off's next step is the withdrawal. Until then the page keeps the session's words. */
+const withdrawalOwed = (facts, notes) => {
+  if (facts.session && facts.session.emptyOwed) return true;
+  const handoff = facts.handoff;
+  if (!handoff || !Number.isInteger(handoff.emptyAt)) return false;
+  const next = opsNext(handoff, notes.handoffs[handoff.id]);
+  return Boolean(next) && next.step === "withdrawn";
+};
+
 /** The one next step for a video, from what edit.js read of it, her notes on this Mac, and the time now (ms). A file in a drop
-    folder first; then a video she said was finished, which is done; then what holds any video up (a conflict, her answer, a
-    version that was a session after all); then a session's steps, or any other video's. */
+    folder first; then what holds any video up (a conflict, her answer, a version that was a session after all); then a video she
+    said was finished, which is done, unless it is a session after all whose withdrawal is still owed, which nothing noted can
+    skip; then a session's steps, or any other video's. */
 export function nextFor(facts, notes, now) {
   if (facts.drop) return dropNext(facts.drop, facts.mac);
-  if (notes.finished[facts.id]) return { done: true };
   if (facts.conflicted) return toDo("conflicted", 'Dropbox kept two copies of a change to it. Say "sort out the conflict".');
   if (facts.waiting) return facts.elsewhere ? toDo("answering-elsewhere", `It is being answered on ${spokenMac(facts.mac)}. Carry on there.`) : toDo("waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.');
   if (facts.heldAsSession) return toDo("held-session", 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.');
+  if (notes.finished[facts.id] && !withdrawalOwed(facts, notes)) return { done: true };
   return facts.kind === "session" ? sessionNext(facts, notes, now) : videoNext(facts, notes, now);
 }
 

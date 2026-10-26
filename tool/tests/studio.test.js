@@ -520,12 +520,20 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "`guide drop zoom`", "`guide drop`", "`guide wait`", "`guide page`", '`guide "<video>"`', '`guide "<video>" show`',
       "held in her drop folder: `guide drop zoom`",
       '"Done?": "Done", "Not yet", "Something\'s different"', '`guide "<video>" done <step>`', '`guide "<video>" finished`',
-      '"I posted it"', '"I\'ve done that"', '"guide me"',
+      '"I posted it"', '"I\'ve done that"', '"guide me"', '"That one is all done"', '"Forget that one"',
       'tell her to choose "Client or group session" and "Yes"',
       "Claude cannot see or press anything on the BRIMM Ops page",
       "isn't set up for the guide yet"
     ]) assert.ok(guide.includes(words), words);
     assert.doesNotMatch(guide, /https?:|claude\.ai/);
+    // Her word that she is done with a video ends its guidance, and nothing she says brings it back: Claude asks first, on its own
+    // words, never those of the release ("I'm done with it for now"), which hands the episode to the other Mac.
+    const finished = guide.split("\n").find((line) => line.includes('`guide "<video>" finished`'));
+    const asked = finished.indexOf('ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No"');
+    assert.ok(asked >= 0 && finished.indexOf('Only on "Yes"') > asked && finished.indexOf("`guide") > asked, finished);
+    assert.ok(finished.includes("the guide will no longer bring it up"), finished);
+    assert.ok(!guide.includes("I'm done with it"), guide);
+    assert.ok(rowOf(`"Hand it to Jason" / "I'm done with it for now"`).includes('`release "<episode>"`'));
   });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);

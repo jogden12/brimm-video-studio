@@ -2,7 +2,7 @@
 // openApp and run are stand-ins, and nothing opens.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
@@ -382,6 +382,33 @@ describe("guide notes her word", () => {
     assert.deepEqual((await on(light(t), "guide", "Pricing talk")).said, ["Pricing talk (bbbbbb) is done: nothing is left to do for it."]);
     dropIn(t, "Mac Studio", "Client Jane.mov");
     assert.deepEqual(await on(light(t), "guide", "A video of 5 bytes", "finished"), { code: 1, said: ["A video of 5 bytes is not imported yet: there is nothing to set aside."] });
+    t.done();
+  });
+  it("refuses her word that she is done with a session after all before its withdrawal, and a word noted before does not hide it", async () => {
+    const t = setup();
+    const rel = "final/Session, 2026-10-20.brimm-ops.json";
+    const found = episodeAs(t, { ...VIDEOS.session, record: { ...VIDEOS.session.record, session: { ...MARK, emptyRevision: 2 }, finished: { revision: 2, at: "2026-10-20T13:30:00-05:00", on: "Mac Studio", handoff: rel, parts: {} } } });
+    mkdirSync(join(found.folder, "final"), { recursive: true });
+    writeFileSync(join(found.folder, rel), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 2, video: { id: found.record.id, kind: "session", name: "Session, 2026-10-20" } }));
+    writeGuideNotes(t.home, { version: 1, handoffs: { [found.record.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-19T14:00:00-05:00" } }, finished: {} });
+    const before = readFileSync(guideFile(t.home), "utf8");
+    const WITHDRAW = 'On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.';
+    assert.deepEqual(await on(light(t), "guide", "Video of 20 Oct, 10:00 (Mac Studio)", "finished"), { code: 1, said: [`Not noted: Session, 2026-10-20 (dddddd) cannot be set aside until this is done. ${WITHDRAW}`] });
+    assert.equal(readFileSync(guideFile(t.home), "utf8"), before);
+    // Her word noted before it was a session after all: the withdrawal is still under way, and its step still said.
+    writeGuideNotes(t.home, { ...readGuideNotes(t.home), finished: { [found.record.id]: "2026-10-20T12:00:00-05:00" } });
+    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", `  Session, 2026-10-20 (dddddd): ${WITHDRAW}`]);
+    assert.equal((await on(light(t), "guide", "Session, 2026-10-20")).said.at(-1), "Step: withdrawn");
+    // Once the withdrawal is noted, her word holds again.
+    assert.equal((await on(light(t), "guide", "Session, 2026-10-20", "done", "withdrawn")).code, 0);
+    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Nothing is under way. To start, put the video in your drop folder."]);
+    t.done();
+  });
+  it("refuses her word that she is done with a video waiting for her answer, and notes nothing", async () => {
+    const t = setup();
+    episodeAs(t, VIDEOS.waiting);
+    assert.deepEqual(await on(light(t), "guide", "Video of 20 Oct, 09:00 (Mac Studio)", "finished"), { code: 1, said: ['Not noted: Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa) cannot be set aside until this is done. It is waiting for your answer. Say "what\'s waiting?" to see its card.'] });
+    assert.ok(!existsSync(guideFile(t.home)));
     t.done();
   });
   // Not in the plan's tests: a step is needed after "done", and nothing more after it or after "finished".

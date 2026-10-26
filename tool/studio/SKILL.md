@@ -58,7 +58,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - Any other next step: say it in one or two sentences, offer to do the brimm-video part ("Shall I show it in Final Cut?"), and run it only on her yes, as the table below says.
 - A step on the BRIMM Ops page: `guide page` the first time in a session, then `guide "<video>"`, and say its step. Offer to show what it needs in Finder: `guide "<video>" show`. Then ask on one `AskUserQuestion`: "Done?": "Done", "Not yet", "Something's different". Done: `guide "<video>" done <step>`, with the word its Step line gives, and say the next step it prints. Something's different: ask what she sees; if it is not in the walkthrough, tell her to ask Jason.
 - "I posted it" / "I've done that": `guide "<video>"` for the video she means (`guide` first, and ask which, if that is unclear); say what is left of its step (such as ticking "Posted"), then ask "Done?" as above.
-- "I'm done with it" / "Forget that one": `guide "<video>" finished`.
+- "That one is all done" / "Forget that one": tell her the guide will no longer bring it up, then ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No". Only on "Yes", `guide "<video>" finished`; if it says a step must be done first, say that step.
 - Claude cannot see or press anything on the BRIMM Ops page: take her word for each step, and never note a step she has not said is done.
 - If it says this Mac isn't set up for the guide yet, tell her so, and to ask Jason; then go on as the rest of this skill says.
 

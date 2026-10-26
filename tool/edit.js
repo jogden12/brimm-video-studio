@@ -5481,10 +5481,15 @@ function noteDone(ctx, { facts, next }, step) {
 }
 
 /** `guide "<video>" finished`: her word that she is done with an answered video, noted on this Mac by its record's id, so that it
-    is no longer under way. A video still in a drop folder has no record to note it by. */
+    is no longer under way. A video still in a drop folder has no record to note it by. A step that nothing noted can skip (guide.js
+    nextFor: a conflict, her answer, a version held as a session, a session after all's withdrawal) is said instead, and nothing is
+    noted. */
 function noteFinished(ctx, { facts }) {
   if (facts.id === "") return refuse(ctx, `${facts.name} is not imported yet: there is nothing to set aside.`);
   const at = localStamp(new Date(ctx.now()));
+  const notes = readGuideNotes(ctx.home);
+  const then = nextFor(facts, { ...notes, finished: { ...notes.finished, [facts.id]: at } }, ctx.now());
+  if (!then.done) return refuse(ctx, `Not noted: ${facts.name} cannot be set aside until this is done. ${then.text}`);
   if (noteGuide(ctx, (notes) => ({ ...notes, finished: { ...notes.finished, [facts.id]: at } })) !== 0) return 1;
   ctx.say(`${facts.name} is no longer under way.`);
   return 0;

@@ -181,6 +181,24 @@ describe("the next step for a video", () => {
     ]) assert.deepEqual(nextFor({ ...BASE, ...over }, notes, now), { done: true }, JSON.stringify(over));
     assert.equal(nextFor({ ...BASE, handoff: OPS_HANDOFF }, NONE, sixty).done, false);
   });
+  it("is a step that nothing noted can skip, though she said the video was finished: a conflict, her answer, a version held as a session, a session's empty revision, its withdrawal", () => {
+    const FINISHED = { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } };
+    const EMPTY = { ...OPS_HANDOFF, revision: 2, kind: "session", emptyAt: 2, file: "" };
+    const WITHDRAW = { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` };
+    for (const [over, want] of [
+      [{ conflicted: true }, { stage: "conflicted", text: 'Dropbox kept two copies of a change to it. Say "sort out the conflict".' }],
+      [{ kind: null, waiting: true }, { stage: "waiting", text: 'It is waiting for your answer. Say "what\'s waiting?" to see its card.' }],
+      [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, { stage: "answering-elsewhere", text: "It is being answered on the Mac Studio. Carry on there." }],
+      [{ heldAsSession: true }, { stage: "held-session", text: 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.' }],
+      [SESSION({ emptyOwed: true }), { stage: "session-empty-owed", text: 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.' }],
+      [{ ...SESSION(), handoff: EMPTY }, WITHDRAW],
+      [{ ...SESSION({ choice: "transcript only" }), handoff: { ...EMPTY, revision: 3 } }, WITHDRAW]
+    ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over }, FINISHED, NOW)), want, JSON.stringify(over));
+    // Once the withdrawal is noted, her word that the video is finished holds again, as it does for any other step.
+    const withdrawn = { ...FINISHED, handoffs: { [EMPTY.id]: { kind: "session", step: "withdrawn", revision: 2, at: "2026-10-24T10:00:00-05:00" } } };
+    assert.deepEqual(nextFor({ ...BASE, ...SESSION({ choice: null }), handoff: EMPTY }, withdrawn, NOW), { done: true });
+    assert.deepEqual(nextFor({ ...BASE, ...SESSION(), handoff: { ...EMPTY, revision: 3 } }, withdrawn, NOW), { done: true });
+  });
   it("for a session after all: the withdrawal first, whatever was noted or chosen and however old; then its own steps; then its own hand-off's", () => {
     const EMPTY = { id: "e-20261020-3fa9c1", revision: 2, kind: "session", emptyAt: 2, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "" };
     const OWN = { ...EMPTY, revision: 3 };
