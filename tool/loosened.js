@@ -17,7 +17,7 @@
 //   hooks, since those run outside the sandbox (C16, C22).
 // Under Claude Code the session's folder is then judged by where its transcript is kept, not by the folder its commands run in (R30).
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
@@ -444,19 +444,50 @@ function foldersIn(dir) {
 /** Whether a name is one folder's name, and nothing that leads elsewhere. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !name.includes("/");
 
-/** The folders Claude Code may load the skill `name` from (R22), those that are there: her folder's own skills, the user's, each
-    plugin's in the cache (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
-    (~/.claude/plugins/synced/<account>/<plugin>/skills). */
-export function skillFolders({ home, folder, name }) {
-  if (!plainName(name)) return [];
+/** The folders in `dir` and the links in it to folders, by their paths: none when it is not there or cannot be read. */
+function foldersThrough(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() || (e.isSymbolicLink() && isFolder(join(dir, e.name)))).map((e) => join(dir, e.name)).sort();
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Whether `path` is a folder, or a link to one. */
+function isFolder(path) {
+  try {
+    return Boolean(statSync(path, { throwIfNoEntry: false })?.isDirectory());
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Whether `path` is a link. */
+function isLink(path) {
+  try {
+    return Boolean(lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink());
+  } catch (e) {
+    return false;
+  }
+}
+
+/** The folders Claude Code may load skills from (R22): her folder's own skills, the user's, each plugin's in the cache
+    (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
+    (~/.claude/plugins/synced/<account>/<plugin>/skills), the plugins' as `list` finds the folders in a folder. */
+function skillRoots({ home, folder }, list) {
   const plugins = join(home, ".claude", "plugins");
-  const roots = [
+  return [
     join(folder, ".claude", "skills"),
     join(home, ".claude", "skills"),
-    ...foldersIn(join(plugins, "cache")).flatMap(foldersIn).flatMap(foldersIn).map((dir) => join(dir, "skills")),
-    ...foldersIn(join(plugins, "synced")).flatMap(foldersIn).map((dir) => join(dir, "skills")),
+    ...list(join(plugins, "cache")).flatMap(list).flatMap(list).map((dir) => join(dir, "skills")),
+    ...list(join(plugins, "synced")).flatMap(list).map((dir) => join(dir, "skills")),
   ];
-  return roots.map((root) => join(root, name)).filter((dir) => {
+}
+
+/** The folders Claude Code may load the skill `name` from (R22, skillRoots), those that are there, no link taken. */
+export function skillFolders({ home, folder, name }) {
+  if (!plainName(name)) return [];
+  return skillRoots({ home, folder }, foldersIn).map((root) => join(root, name)).filter((dir) => {
     try {
       return lstatSync(dir).isDirectory();
     } catch (e) {
@@ -475,10 +506,21 @@ function carriesHooks(dir) {
   return manifest === null || Object.hasOwn(manifest, "hooks") || Object.hasOwn(manifest, "mods");
 }
 
+/** The links in `dir`, by their paths: none when it is not there or cannot be read. */
+function linksIn(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isSymbolicLink()).map((e) => join(dir, e.name)).sort();
+  } catch (e) {
+    return [];
+  }
+}
+
 /** What plugins on this Mac could loosen the open lock, as the lines for Jason (R21): each enabled plugin that carries hooks or a mod,
     since they run outside the sandbox (C16). A plugin is enabled when any of `settingsList` (the settings sources, each an object or
     null) says `enabledPlugins["<plugin>@<marketplace>"]` is true, and is then looked for in the cache, in every version kept there;
-    every plugin synced from her account (~/.claude/plugins/synced/<account>/<plugin>) is enabled. */
+    every plugin synced from her account (~/.claude/plugins/synced/<account>/<plugin>) is enabled. A plugin that is enabled but has no
+    version in the cache, and a version or a synced plugin or account that is a link, which is not followed, are said too, since then
+    whether it carries hooks or a mod is not known. */
 export function pluginsWhy({ home, settingsList }) {
   const plugins = join(home, ".claude", "plugins");
   const enabled = new Set();
@@ -487,28 +529,38 @@ export function pluginsWhy({ home, settingsList }) {
     for (const [key, on] of Object.entries(set.enabledPlugins)) if (on === true) enabled.add(key);
   }
   const why = [];
+  const unknown = "so whether it carries hooks or a mod, which run outside the sandbox, is not known";
   for (const key of [...enabled].sort()) {
     const at = key.lastIndexOf("@");
     const [name, marketplace] = [key.slice(0, at), key.slice(at + 1)];
     if (at < 0 || !plainName(name) || !plainName(marketplace)) continue;
-    if (foldersIn(join(plugins, "cache", marketplace, name)).some(carriesHooks)) why.push(`(Jason: the plugin ${key} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+    const dir = join(plugins, "cache", marketplace, name);
+    const versions = foldersIn(dir);
+    if (versions.some(carriesHooks)) why.push(`(Jason: the plugin ${key} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+    if (linksIn(dir).length) why.push(`(Jason: the plugin ${key} is kept through a link, ${unknown}. Turn it off for her account.)`);
+    else if (!versions.length) why.push(`(Jason: the plugin ${key} is turned on but is not in the plugins cache, ${unknown}. Turn it off for her account.)`);
   }
-  for (const dir of foldersIn(join(plugins, "synced")).flatMap(foldersIn)) {
+  const accounts = foldersIn(join(plugins, "synced"));
+  for (const dir of accounts.flatMap(foldersIn)) {
     if (carriesHooks(dir)) why.push(`(Jason: the plugin ${basename(dir)} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
   }
+  if ([join(plugins, "synced"), ...accounts].some((dir) => linksIn(dir).length)) why.push(`(Jason: a plugin synced from her account is kept through a link, ${unknown}.)`);
   return why;
 }
 
 /** What skills her folder allows could loosen the open lock, as the lines for Jason: each skill of `allow` (its `skill` entries) whose
-    SKILL.md, in any folder it may be loaded from (skillFolders), registers hooks: a `hooks:` line in its front matter (C22). */
+    SKILL.md, in any folder it may be loaded from (skillRoots, through links to plugins' folders), registers hooks: a `hooks:` line in
+    its front matter (C22); and each that is a link in one of those folders, since then whether it registers hooks is not known. */
 export function skillsWhy({ home, folder, allow }) {
   const names = [...new Set((Array.isArray(allow) ? allow : []).filter((entry) => isObject(entry) && entry.type === "skill").map((entry) => entry.name))];
   const why = [];
-  for (const name of names) {
-    const hooked = skillFolders({ home, folder, name }).some((dir) => {
+  for (const name of names.filter(plainName)) {
+    const places = skillRoots({ home, folder }, foldersThrough).map((root) => join(root, name));
+    const hooked = places.filter((dir) => !isLink(dir) && isFolder(dir)).some((dir) => {
       let text;
       try {
-        text = readFileSync(join(dir, "SKILL.md"), "utf8");
+        // A byte-order mark before the front matter is not let hide it.
+        text = readFileSync(join(dir, "SKILL.md"), "utf8").replace(/^\uFEFF/, "");
       } catch (e) {
         return false;
       }
@@ -516,6 +568,7 @@ export function skillsWhy({ home, folder, allow }) {
       return Boolean(front) && /^\s*hooks\s*:/m.test(front[1]);
     });
     if (hooked) why.push(`(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`);
+    if (places.some(isLink)) why.push(`(Jason: the skill ${name}, which her folder allows, is kept through a link, so whether it registers hooks is not known.)`);
   }
   return why;
 }

@@ -294,6 +294,10 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
 describe("behind, with the open lock: plugins, named skills and SessionStart hooks", () => {
   const pluginLine = (name) => `(Jason: the plugin ${name} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`;
   const skillLine = (name) => `(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`;
+  const missingLine = (name) => `(Jason: the plugin ${name} is turned on but is not in the plugins cache, so whether it carries hooks or a mod, which run outside the sandbox, is not known. Turn it off for her account.)`;
+  const linkedLine = (name) => `(Jason: the plugin ${name} is kept through a link, so whether it carries hooks or a mod, which run outside the sandbox, is not known. Turn it off for her account.)`;
+  const SYNCED_LINKED = "(Jason: a plugin synced from her account is kept through a link, so whether it carries hooks or a mod, which run outside the sandbox, is not known.)";
+  const skillLinkedLine = (name) => `(Jason: the skill ${name}, which her folder allows, is kept through a link, so whether it registers hooks is not known.)`;
   /** A plugin's folder at `dir`, carrying `what`: "hooks" (hooks/hooks.json), "hooks key" or "mods key" (in .claude-plugin/plugin.json), or "neither". */
   function plugin(dir, what) {
     mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
@@ -326,9 +330,37 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
     plugin(cache(w, "a-market", "plain"), "neither");
     plugin(synced(w, "plain-synced"), "neither");
     plugin(cache(w, "b-market", "unnamed"), "hooks");
-    const r = await behindOn(w, put(w, "user", { enabledPlugins: { "hooky@a-market": false, "plain@a-market": true, "missing@a-market": true } }));
+    const r = await behindOn(w, put(w, "user", { enabledPlugins: { "hooky@a-market": false, "plain@a-market": true } }));
     assert.deepEqual([r.code, r.text], [0, NEWEST]);
     w.done();
+  });
+  it("refuses for an enabled plugin that is not in the cache, since then whether it carries hooks is not known", async () => {
+    const w = openWorld();
+    plugin(cache(w, "a-market", "plain"), "neither");
+    // An empty plugin folder, with no version in it, is not there either.
+    mkdirSync(join(w.home, ".claude", "plugins", "cache", "a-market", "empty"), { recursive: true });
+    const r = await behindOn(w, put(w, "user", { enabledPlugins: { "plain@a-market": true, "missing@a-market": true, "empty@a-market": true } }));
+    for (const name of ["missing@a-market", "empty@a-market"]) refusedFor(r, missingLine(name), name);
+    assert.ok(!r.text.includes("plain@a-market"), r.text);
+    w.done();
+  });
+  it("refuses for a plugin kept through a link, in the cache or synced from her account, whatever it carries", async () => {
+    // A version folder that is a link, of an enabled plugin, carrying neither hooks nor a mod where it leads.
+    const w = openWorld();
+    plugin(join(w.dir, "elsewhere", "linked"), "neither");
+    mkdirSync(join(cache(w, "a-market", "linked"), ".."), { recursive: true });
+    symlinkSync(join(w.dir, "elsewhere", "linked"), cache(w, "a-market", "linked"));
+    refusedFor(await behindOn(w, put(w, "user", { enabledPlugins: { "linked@a-market": true } })), linkedLine("linked@a-market"), "a version folder");
+    w.done();
+    // A synced plugin that is a link, and an account folder that is one.
+    for (const [what, link] of [["a synced plugin", (v) => synced(v, "linked")], ["an account", (v) => join(v.home, ".claude", "plugins", "synced", "acct_0002")]]) {
+      const v = openWorld();
+      plugin(join(v.dir, "elsewhere", "linked"), "neither");
+      mkdirSync(join(link(v), ".."), { recursive: true });
+      symlinkSync(join(v.dir, "elsewhere", what === "an account" ? "" : "linked"), link(v));
+      refusedFor(await behindOn(v), SYNCED_LINKED, what);
+      v.done();
+    }
   });
   it("refuses for a named skill whose SKILL.md registers hooks, wherever it is kept, and goes on for one that does not, or is not there", async () => {
     const withHooks = `---\nname: frontend-design\ndescription: ${SECRET}\nhooks:\n  PreToolUse: []\n---\n\n# A skill\n`;
@@ -363,6 +395,42 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
     const r = await behindOn(w);
     assert.deepEqual([r.code, r.text], [0, NEWEST]);
     w.done();
+  });
+  it("refuses for a named skill kept through a link, wherever it would be kept, whatever its SKILL.md says", async () => {
+    const plain = `---\nname: frontend-design\ndescription: ${SECRET}\n---\n\n# A skill\n`;
+    const places = {
+      "her folder": (w) => join(w.folder, ".claude", "skills", "frontend-design"),
+      "the user's skills": (w) => join(w.home, ".claude", "skills", "frontend-design"),
+      "a plugin in the cache": (w) => join(cache(w, "a-market", "design"), "skills", "frontend-design"),
+      "a plugin synced from her account": (w) => join(synced(w, "design"), "skills", "frontend-design"),
+    };
+    for (const [where, at] of Object.entries(places)) {
+      const w = openWorld();
+      mkdirSync(join(w.dir, "elsewhere", "frontend-design"), { recursive: true });
+      writeFileSync(join(w.dir, "elsewhere", "frontend-design", "SKILL.md"), plain);
+      mkdirSync(join(at(w), ".."), { recursive: true });
+      symlinkSync(join(w.dir, "elsewhere", "frontend-design"), at(w));
+      // skillFolders, which the guard's reads rest on, still takes no link.
+      assert.deepEqual(skillFolders({ home: w.home, folder: w.folder, name: "frontend-design" }), [], where);
+      refusedFor(await behindOn(w), skillLinkedLine("frontend-design"), where);
+      w.done();
+    }
+  });
+  it("reads a named skill's SKILL.md in a plugin reached through a link, and one beginning with a byte-order mark", async () => {
+    const withHooks = `---\nname: frontend-design\ndescription: ${SECRET}\nhooks:\n  PreToolUse: []\n---\n\n# A skill\n`;
+    const w = openWorld();
+    const elsewhere = join(w.dir, "elsewhere", "b-market");
+    mkdirSync(join(elsewhere, "design", "1.0.0", "skills", "frontend-design"), { recursive: true });
+    writeFileSync(join(elsewhere, "design", "1.0.0", "skills", "frontend-design", "SKILL.md"), withHooks);
+    mkdirSync(join(w.home, ".claude", "plugins", "cache"), { recursive: true });
+    symlinkSync(elsewhere, join(w.home, ".claude", "plugins", "cache", "b-market"));
+    refusedFor(await behindOn(w), skillLine("frontend-design"), "a marketplace through a link");
+    w.done();
+    const v = openWorld();
+    mkdirSync(join(v.home, ".claude", "skills", "frontend-design"), { recursive: true });
+    writeFileSync(join(v.home, ".claude", "skills", "frontend-design", "SKILL.md"), `\uFEFF${withHooks}`);
+    refusedFor(await behindOn(v), skillLine("frontend-design"), "a byte-order mark");
+    v.done();
   });
   it("refuses for a SessionStart hook in the user, managed or --settings settings, and goes on for her folder's own guard and receipt hooks", async () => {
     for (const where of ["user", "managed", "app"]) {
