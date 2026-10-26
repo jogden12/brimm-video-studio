@@ -1,6 +1,6 @@
 # K0 findings: the lock design's claims, checked (2026-10-26)
 
-For `docs/superpowers/specs/2026-10-26-brimm-video-lock-loosened-design.md` (the design), phase K0 (its section 9). **Nothing was built and no code changed.** This note says, for each claim checked, whether it held, then what the design must change and what is left for Jason by hand.
+For `docs/superpowers/specs/2026-10-26-brimm-video-lock-loosened-design.md` (the design), phase K0 (its section 9). **Nothing was built and no code changed.** The design has since been revised to match; its "What K0 changed" says where each change below went. This note says, for each claim checked, whether it held, then what the design must change and what is left for Jason by hand.
 
 ## How K0 was run
 
@@ -138,6 +138,7 @@ For `docs/superpowers/specs/2026-10-26-brimm-video-lock-loosened-design.md` (the
 9. **The app's whole environment reaches every sandboxed command.**
    - It includes `CLAUDE_CODE_USER_EMAIL`, the account and organization ids, `CLAUDE_CODE_MESSAGING_SOCKET` and its token, `SSH_AUTH_SOCK` and the proxy's per-session login (network, R8).
    - The sockets were blocked from the sandbox ("Operation not permitted").
+   - Restated after the design's revision (from the 2.1.308 binary, not a lab run): "the proxy's per-session login" is the sandbox's own network proxy's, in `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and their kin (`<…>:<token>@localhost:<port>`). `sandbox.credentials.envVars` entries with `mode: "deny"` unset a variable for sandboxed commands, but on macOS the proxy variables are set after them (`env -u … HTTP_PROXY=… … sandbox-exec …`), so no setting removes the login. The other variables above can be unset that way; that is untested.
 10. **Any chat of her folder can read another's command output** under the narrow `allowRead` of her folder's temp subfolder, while the output file is on disk. In `-p` the files were deleted after each command; a long Code-tab chat's background tasks may keep theirs. Untested (reads).
 
 ## Did not hold
