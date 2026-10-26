@@ -13,11 +13,15 @@ import { basename, join } from "node:path";
 /** The arguments `ps` is run with: every process, lines as long as they are, and its id, its parent's, its start and its arguments. */
 export const PS_ARGS = ["-A", "-ww", "-o", "pid=,ppid=,lstart=,args="];
 
+/** How much `ps` may print: its table with one process with about 1 MB of arguments is over spawn's default of 1 MiB, which ends
+    it with ENOBUFS, so that the table is unreadable and every chat is loosened. */
+const PS_MAX_BUFFER = 64 * 1024 * 1024;
+
 /** What `/bin/ps` prints of every process, or null when it cannot be run, is refused, or ends with anything but 0. `spawn` is a
     test's stand-in. */
 export function readProcesses(spawn = spawnSync) {
   try {
-    const ran = spawn("/bin/ps", PS_ARGS, { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
+    const ran = spawn("/bin/ps", PS_ARGS, { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000, maxBuffer: PS_MAX_BUFFER });
     if (!ran || ran.error || ran.status !== 0 || typeof ran.stdout !== "string") return null;
     return ran.stdout;
   } catch (e) {

@@ -289,10 +289,14 @@ const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 const MANAGED_PREFS = "/Library/Managed Preferences";
 const PREFS_FILE = "com.anthropic.claudecode.plist";
 
-/** The entries of `dir`, by their paths; none when it cannot be listed. */
-function entriesOf(dir) {
+/** The entries of `dir` and of every folder inside it, by their paths, a link listed and never followed; none when it cannot be
+    listed. A file added or changed in a folder inside moves that folder's own time, not `dir`'s, so each is looked at. */
+function treeOf(dir) {
   try {
-    return readdirSync(dir).map((name) => join(dir, name));
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      return entry.isDirectory() ? [path, ...treeOf(path)] : [path];
+    });
   } catch (e) {
     return [];
   }
@@ -319,10 +323,19 @@ function stamp(path) {
 }
 
 /** The folders in `dir` and the links in it to folders, by their paths, since the lock check reads skills through a link to a
-    plugin's folder (loosened.js skillsWhy); none when it cannot be listed. */
+    plugin's folder (loosened.js skillsWhy); none when it cannot be listed. Each entry is judged by itself: a link that cannot be
+    looked at (one to itself, or to a place that may not be searched) is not a folder, and hides no other entry. */
 function foldersOf(dir) {
+  const folder = (entry) => {
+    if (entry.isDirectory()) return true;
+    if (!entry.isSymbolicLink()) return false;
+    try {
+      return Boolean(statSync(join(dir, entry.name), { throwIfNoEntry: false })?.isDirectory());
+    } catch (e) {
+      return false;
+    }
+  };
   try {
-    const folder = (entry) => entry.isDirectory() || (entry.isSymbolicLink() && Boolean(statSync(join(dir, entry.name), { throwIfNoEntry: false })?.isDirectory()));
     return readdirSync(dir, { withFileTypes: true }).filter(folder).map((entry) => join(dir, entry.name));
   } catch (e) {
     return [];
@@ -359,8 +372,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     join(home, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
     join(plugins, "synced"), ...foldersOf(join(plugins, "synced")),
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
-    // The agent definitions Claude Code would load, one named as a built-in agent among them, each file by itself.
-    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...entriesOf(dir)]),
+    // The agent definitions Claude Code would load (loosened.js agentsWhy), each folder and file inside the agents folders by itself.
+    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...treeOf(dir)]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
     prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),

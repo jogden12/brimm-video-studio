@@ -338,6 +338,28 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
     w.done();
   });
+  it("refuses for a name macOS takes as one of those, as .mcp.jſon with a long s, at the top of the workshop or in a folder of it", async () => {
+    const line = "(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)";
+    const makers = {
+      ".mcp.jſon at the top": (dir) => writeFileSync(join(dir, ".mcp.j\u017Fon"), SECRET),
+      ".mcp.jſon in a folder": (dir) => {
+        mkdirSync(join(dir, "a", "b"), { recursive: true });
+        writeFileSync(join(dir, "a", "b", ".mcp.j\u017Fon"), SECRET);
+      },
+      ".MCP.JſON": (dir) => writeFileSync(join(dir, ".MCP.J\u017FON"), SECRET),
+    };
+    for (const [what, make] of Object.entries(makers)) {
+      const w = openWorld();
+      make(w.workshop);
+      refusedFor(await behindOn(w), line, what);
+      w.done();
+    }
+    const w = openWorld();
+    writeFileSync(join(w.workshop, "notes.json"), SECRET);
+    writeFileSync(join(w.workshop, ".mcp.jſon.txt"), SECRET);
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
   it("refuses when the workshop holds more than it looks through, or a folder in it cannot be looked through", async () => {
     const w = openWorld();
     for (let i = 0; i < 6; i++) writeFileSync(join(w.workshop, `picture ${i}.svg`), SECRET);
@@ -520,6 +542,152 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
       refusedFor(await behindOn(w), ownLine("a hook beside the guard and the receipt"), what);
       w.done();
     }
+  });
+});
+
+describe("behind, with the open lock: agent definitions that replace Claude Code's own agents or ask for more", () => {
+  const NAMED = "(Jason: an agent definition on this Mac has the name of one of Claude Code's own agents, which it would replace. Its contents are not shown here.)";
+  const ASKS = "(Jason: an agent definition on this Mac asks for its own isolation, hooks, MCP servers or permission mode. Its contents are not shown here.)";
+  const UNKNOWN = "(Jason: an agent definition on this Mac could not be read, or is kept through a link, so whether it replaces one of Claude Code's own agents or asks for its own isolation, hooks, MCP servers or permission mode is not known. Its contents are not shown here.)";
+  /** The folders Claude Code loads agent definitions from, one for each source: the user's, $CLAUDE_CONFIG_DIR's (the world's `config`),
+      her folder's, a plugin's in the cache and one synced from her account. */
+  const CONFIG = "$CLAUDE_CONFIG_DIR's agents";
+  const places = {
+    "the user's agents": (w) => join(w.home, ".claude", "agents"),
+    [CONFIG]: (w) => join(w.dir, "config", "agents"),
+    "her folder's agents": (w) => join(w.folder, ".claude", "agents"),
+    "a plugin's agents in the cache": (w) => join(w.home, ".claude", "plugins", "cache", "a-market", "team", "1.0.0", "agents"),
+    "a plugin's agents synced from her account": (w) => join(w.home, ".claude", "plugins", "synced", "acct_0001", "team", "agents"),
+  };
+  /** `behind` in the world `w`, for the source `where`: with $CLAUDE_CONFIG_DIR naming the world's `config` folder (and the chat's
+      transcript where it is kept in ~/.claude) when that is where the definitions are. */
+  const behindIn = (w, where) => (where === CONFIG ? behindOn(w, { env: { ...CHAT_ENV, CLAUDE_CONFIG_DIR: join(w.dir, "config") }, transcript: join(w.home, ".claude", "projects", claudeDirName(w.folder), `${SESSION}.jsonl`) }) : behindOn(w));
+  /** A definition written as `name` in the folder `dir`, holding `text`. */
+  function define(dir, name, text) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), text);
+  }
+  const front = (lines, body = `Body of a ${SECRET}.\n`) => `---\n${lines.join("\n")}\n---\n\n${body}`;
+
+  it("refuses for a definition whose file name, or whose name:, is one of Claude Code's own agents, wherever it would be loaded from", async () => {
+    for (const [where, at] of Object.entries(places)) {
+      for (const [what, name, text] of [
+        ["file name", "Explore.md", front(["name: reviewer", `description: ${SECRET}`])],
+        ["name:", "mine.md", front(["name: Plan", `description: ${SECRET}`, "tools: Read"])],
+        ["a quoted name:", "mine.md", front(['name: "general-purpose"', `description: ${SECRET}`])],
+        ["a name: with a comment", "mine.md", front(["name: 'Explore' # replaces it"])],
+        ["a file name in other letters", "PLAN.MD", front(["name: reviewer"])],
+        ["a full-width file name", "\uFF25\uFF38\uFF30\uFF2C\uFF2F\uFF32\uFF25.md", front(["name: reviewer"])],
+        ["a name: in other letters", "mine.md", front(["Name: GENERAL-purpose"])],
+        ["a file name with no front matter", "general-purpose.md", `Body of a ${SECRET}.\n`],
+      ]) {
+        const w = openWorld();
+        define(at(w), name, text);
+        const r = await behindIn(w, where);
+        refusedFor(r, NAMED, `${where}, ${what}`);
+        assert.ok(!r.text.split("\n").includes(ASKS), `${where}, ${what}`);
+        w.done();
+      }
+    }
+  });
+  it("refuses for a definition whose front matter has an isolation, hooks, mcpServers or permissionMode key, wherever it would be loaded from", async () => {
+    for (const [where, at] of Object.entries(places)) {
+      for (const key of ["isolation", "hooks", "mcpServers", "permissionMode"]) {
+        for (const [what, text] of [
+          ["a key", front(["name: reviewer", `${key}: ${SECRET}`, "tools: Read"])],
+          ["a key with a block under it", front(["name: reviewer", `${key}:`, `  ${SECRET}: []`])],
+          ["a quoted key", front(["name: reviewer", `"${key}": ${SECRET}`])],
+          ["an indented key", front(["name: reviewer", `  ${key} : ${SECRET}`])],
+          ["lines ending in CRLF", `---\r\nname: reviewer\r\n${key}: ${SECRET}\r\n---\r\nBody\r\n`],
+          ["a byte-order mark", `\uFEFF${front(["name: reviewer", `${key}: ${SECRET}`])}`],
+          ["a front matter never closed", `---\nname: reviewer\n${key}: ${SECRET}\n`],
+          ["a flow mapping", front([`{ name: reviewer, ${key}: ${SECRET} }`])],
+        ]) {
+          const w = openWorld();
+          define(at(w), "reviewer.md", text);
+          const r = await behindIn(w, where);
+          refusedFor(r, ASKS, `${where}, ${key}, ${what}`);
+          assert.ok(!r.text.split("\n").includes(NAMED), `${where}, ${key}, ${what}`);
+          w.done();
+        }
+      }
+    }
+  });
+  it("says both lines when one definition has an own agent's name and asks for more, one line for each kind however many there are", async () => {
+    const w = openWorld();
+    define(places["the user's agents"](w), "Explore.md", front(["name: Explore", "isolation: remote"]));
+    define(places["her folder's agents"](w), "Plan.md", front(["name: Plan", "permissionMode: bypassPermissions"]));
+    define(places["a plugin's agents in the cache"](w), "x.md", front(["name: x", "hooks:", "  Stop: []"]));
+    const r = await behindOn(w);
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.text.split("\n").slice(1), [NAMED, ASKS]);
+    w.done();
+  });
+  it("finds a definition in a folder inside an agents folder, and goes on for ordinary definitions", async () => {
+    const w = openWorld();
+    define(join(places["the user's agents"](w), "team", "deep"), "Explore.md", front(["name: Explore"]));
+    refusedFor(await behindOn(w), NAMED, "a folder inside");
+    w.done();
+    // reviewer.md with only name, description and tools; the words of the keys in the body, in another file type, or in a name only
+    // holding an own agent's name, are not the keys or the names.
+    const v = openWorld();
+    for (const [, at] of Object.entries(places).filter(([where]) => where !== CONFIG)) {
+      define(at(v), "reviewer.md", front(["name: reviewer", `description: Reviews work. Never asks for isolation or hooks. ${SECRET}`, "tools: Read, Grep"], "isolation: remote\nhooks:\nname: Explore\n"));
+      define(at(v), "explorer.md", front(["name: explorer-two"]));
+      define(at(v), "Explore.txt", "isolation: remote\n");
+      define(at(v), ".DS_Store", "x");
+      define(join(at(v), "team"), "planner.md", front(["name: planner"]));
+    }
+    const r = await behindOn(v);
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    // No agents folder anywhere, and an empty one, are nothing to say.
+    mkdirSync(join(v.home, ".claude", "plugins", "synced", "acct_0002", "empty", "agents"), { recursive: true });
+    assert.deepEqual(Object.values(await behindOn(v)).slice(0, 2), [0, NEWEST]);
+    v.done();
+  });
+  it("refuses, since it is not known, for a definition that cannot be read or is a link, and for an agents folder that is a link", async () => {
+    for (const [where, at] of Object.entries(places)) {
+      const shut = openWorld();
+      define(at(shut), "reviewer.md", front(["name: reviewer"]));
+      chmodSync(join(at(shut), "reviewer.md"), 0o000);
+      const r = await behindIn(shut, where);
+      refusedFor(r, UNKNOWN, `${where}, a file that cannot be read`);
+      assert.ok(!r.text.split("\n").includes(NAMED) && !r.text.split("\n").includes(ASKS), where);
+      chmodSync(join(at(shut), "reviewer.md"), 0o600);
+      shut.done();
+      const file = openWorld();
+      define(join(file.dir, "elsewhere"), "reviewer.md", front(["name: reviewer"]));
+      mkdirSync(at(file), { recursive: true });
+      symlinkSync(join(file.dir, "elsewhere", "reviewer.md"), join(at(file), "reviewer.md"));
+      refusedFor(await behindIn(file, where), UNKNOWN, `${where}, a link to a file`);
+      file.done();
+      const dangling = openWorld();
+      mkdirSync(at(dangling), { recursive: true });
+      symlinkSync(join(dangling.dir, "nowhere.md"), join(at(dangling), "reviewer.md"));
+      refusedFor(await behindIn(dangling, where), UNKNOWN, `${where}, a link to nowhere`);
+      dangling.done();
+      const folder = openWorld();
+      define(join(folder.dir, "elsewhere"), "reviewer.md", front(["name: reviewer"]));
+      mkdirSync(join(at(folder), ".."), { recursive: true });
+      symlinkSync(join(folder.dir, "elsewhere"), at(folder));
+      refusedFor(await behindIn(folder, where), UNKNOWN, `${where}, a link to a folder`);
+      folder.done();
+      const inside = openWorld();
+      define(join(inside.dir, "elsewhere"), "reviewer.md", front(["name: reviewer"]));
+      mkdirSync(at(inside), { recursive: true });
+      symlinkSync(join(inside.dir, "elsewhere"), join(at(inside), "team"));
+      refusedFor(await behindIn(inside, where), UNKNOWN, `${where}, a link to a folder inside`);
+      inside.done();
+    }
+  });
+  it("looks at agent definitions on an open-lock Mac only", async () => {
+    const w = openWorld();
+    writeSettings(w.home, { lock: "strict" });
+    writeStudio(w.home, { checkout: w.checkout, node: NODE });
+    define(places["the user's agents"](w), "Explore.md", front(["name: Explore", "isolation: remote"]));
+    const r = await behindOn(w, { ps: () => { throw new Error("ps was run"); } });
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    w.done();
   });
 });
 

@@ -330,6 +330,14 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
         writeFileSync(join(w.home, ".claude", "plugins", "cache", "market", "hooky", "1.0.0", "hooks", "hooks.json"), "{}");
       }, {}],
       ["no claude above", () => {}, { ps: () => psText([[1, 0, "/sbin/launchd"], [800, 1, "/bin/sh"], [900, 800, "node guard.mjs"]]) }],
+      ["an agent definition named as one of Claude Code's own", (w) => {
+        mkdirSync(join(w.home, ".claude", "agents"), { recursive: true });
+        writeFileSync(join(w.home, ".claude", "agents", "Explore.md"), "---\nname: Explore\n---\n");
+      }, {}],
+      ["an agent definition asking for its own hooks", (w) => {
+        mkdirSync(join(w.folder, ".claude", "agents"), { recursive: true });
+        writeFileSync(join(w.folder, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\nhooks:\n  Stop: []\n---\n");
+      }, {}],
     ];
     for (const [what, make, more] of loosen) {
       const w = chat();
@@ -556,16 +564,19 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     mkdirSync(join(w.home, ".claude", "agents"), { recursive: true });
     assert.equal((await ask()).decision, "allow");
     assert.equal(looks, agents + 1);
-    writeFileSync(join(w.home, ".claude", "agents", "Explore.md"), "---\nname: Explore\n---\n");
+    writeFileSync(join(w.home, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: x\ntools: Read\n---\n");
     assert.equal((await ask()).decision, "allow");
     assert.equal(looks, agents + 2);
     mkdirSync(join(w.folder, ".claude", "agents"), { recursive: true });
-    writeFileSync(join(w.folder, ".claude", "agents", "Plan.md"), "---\nname: Plan\n---\n");
+    writeFileSync(join(w.folder, ".claude", "agents", "planner.md"), "---\nname: planner\n---\n");
     assert.equal((await ask()).decision, "allow");
     assert.equal(looks, agents + 3);
-    writeFileSync(join(w.folder, ".claude", "agents", "Plan.md"), "---\nname: Plan\nisolation: remote\n---\n");
-    assert.equal((await ask()).decision, "allow");
+    writeFileSync(join(w.folder, ".claude", "agents", "planner.md"), "---\nname: Plan\nisolation: remote\n---\n");
+    assert.deepEqual(await ask(), CHANGED, "a definition changed in place");
     assert.equal(looks, agents + 4);
+    writeFileSync(join(w.folder, ".claude", "agents", "planner.md"), "---\nname: planner\n---\n");
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, agents + 5);
     const before = looks;
     appendFileSync(w.transcript, `${JSON.stringify({ type: "user", uuid: "u-2", timestamp: AT })}\n`);
     assert.equal((await ask()).decision, "allow");
@@ -573,6 +584,51 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     appendFileSync(w.transcript, `${JSON.stringify({ type: "attachment", attachment: { type: "environment", snapshot: { additionalWorkingDirectories: [join(w.home, "Documents")] } } })}\n`);
     assert.deepEqual(await ask(), CHANGED, "a folder added in that line is still seen");
     assert.equal(looks, before);
+    w.done();
+  });
+  it("still sees a plugin gain hooks while a link in the plugins cache cannot be looked through", async () => {
+    const w = chat();
+    const cache = join(w.home, ".claude", "plugins", "cache");
+    const plugin = join(cache, "market", "hooky", "1.0.0");
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "hooky" }));
+    writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "hooky@market": true } }));
+    // A link to itself cannot be looked at (ELOOP), and must not hide the real marketplace beside it.
+    symlinkSync("loop", join(cache, "loop"));
+    assert.equal((await date(w)).decision, "allow");
+    mkdirSync(join(plugin, "hooks"));
+    writeFileSync(join(plugin, "hooks", "hooks.json"), "{}");
+    assert.deepEqual(await date(w), CHANGED, "the next call, with no waiting out the cache");
+    w.done();
+  });
+  it("sees an agent definition that replaces one of Claude Code's own appear or change on the next call, wherever Claude Code would load it from", async () => {
+    const w = chat();
+    const ask = () => date(w);
+    const plain = "---\nname: reviewer\ndescription: x\ntools: Read\n---\n";
+    const replaces = "---\nname: Explore\nisolation: remote\n---\n";
+    assert.equal((await ask()).decision, "allow");
+    // A folder inside the user's agents folder, with a definition in it that is then changed in place.
+    const deep = join(w.home, ".claude", "agents", "team", "deep");
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, "reviewer.md"), plain);
+    assert.equal((await ask()).decision, "allow");
+    writeFileSync(join(deep, "reviewer.md"), replaces);
+    assert.deepEqual(await ask(), CHANGED, "changed in place, two folders down");
+    rmSync(join(w.home, ".claude", "agents"), { recursive: true });
+    assert.equal((await ask()).decision, "allow");
+    // Her folder's agents folder, and a plugin's in the cache, each appearing whole after a clean answer.
+    mkdirSync(join(w.folder, ".claude", "agents"));
+    writeFileSync(join(w.folder, ".claude", "agents", "Explore.md"), plain);
+    assert.deepEqual(await ask(), CHANGED, "in her folder");
+    rmSync(join(w.folder, ".claude", "agents"), { recursive: true });
+    assert.equal((await ask()).decision, "allow");
+    const plugin = join(w.home, ".claude", "plugins", "cache", "market", "team", "1.0.0");
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "team" }));
+    assert.equal((await ask()).decision, "allow");
+    mkdirSync(join(plugin, "agents"));
+    writeFileSync(join(plugin, "agents", "Plan.md"), plain);
+    assert.deepEqual(await ask(), CHANGED, "in a plugin's folder");
     w.done();
   });
   it("looks again when a value the check reads in the environment changes, or the app's notes folder becomes a link", async () => {

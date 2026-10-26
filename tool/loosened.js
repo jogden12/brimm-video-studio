@@ -15,7 +15,9 @@
 //   with `ps` (chain.js), and the folders added to the chat while it ran, read from its transcript a little at a time (scan.js);
 // - the chat's environment, by its names alone; anything listening on her folder's proxy port; a .claude, CLAUDE.md, CLAUDE.local.md
 //   or .mcp.json in the workshop; and an enabled plugin carrying hooks or a mod, or a skill her folder allows whose SKILL.md registers
-//   hooks, since those run outside the sandbox (C16, C22).
+//   hooks, since those run outside the sandbox (C16, C22);
+// - an agent definition where Claude Code would load one, named as one of its own agents, which it would replace (and the never list
+//   lets through by that name), or asking in its front matter for its own isolation, hooks, MCP servers or permission mode.
 // Under Claude Code the session's folder is then judged by where its transcript is kept, not by the folder its commands run in (R30).
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -24,7 +26,8 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, gatedReadRules, lockBroken, studioFolder, workshopFolder } from "./studio.js";
 import { effectiveLock, factsOf, proxyPortOf, readSettings, studioAllowOf, studioNodeOf } from "./settings.js";
 import { appVersionOf, argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
-import { claudeDirName, realOf } from "./places.js";
+import { claudeDirName, fold, realOf } from "./places.js";
+import { BUILT_IN_AGENTS } from "./never.js";
 import { SESSION_ID, scanTranscript } from "./scan.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
@@ -192,6 +195,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   if (underClaude) why.push(...addedWhy({ home, sessionId, transcriptPath: transcript }));
   why.push(...pluginsWhy({ home, settingsList: [user, ...managed.map(([, set]) => set), app] }));
   if (folder) why.push(...skillsWhy({ home, folder, allow: [...ALLOW_DEFAULT, ...studioAllowOf(settings)] }));
+  why.push(...agentsWhy({ home, folder, env: deps.env || process.env }));
   why.push(...environmentWhy(deps.env || process.env));
   const port = proxyPortOf(settings);
   if (port !== null) {
@@ -401,7 +405,8 @@ export function listeners(port, spawn = spawnSync) {
 /** How many entries of the workshop are looked through, at most. */
 const WORKSHOP_LIMIT = 20000;
 
-/** The names, in any letter case, that a session started in a folder takes as its own settings, instructions or servers. */
+/** The names, in any letter case, that a session started in a folder takes as its own settings, instructions or servers. A name is
+    judged folded (places.js fold), since macOS keeps .mcp.jſon (a long s) for the very file .mcp.json. */
 const SESSION_OWN = [".claude", "claude.md", "claude.local.md", ".mcp.json"];
 
 /** What in the workshop, `workshop`, could loosen the open lock, as one line for Jason, or none: anything named as SESSION_OWN is,
@@ -420,7 +425,7 @@ export function workshopWhy(workshop, limit = WORKSHOP_LIMIT) {
       return ["(Jason: the workshop holds a folder that could not be looked through for a .claude folder or a CLAUDE.md.)"];
     }
     for (const entry of entries) {
-      if (SESSION_OWN.includes(entry.name.toLowerCase())) return ["(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)"];
+      if (SESSION_OWN.includes(fold(entry.name))) return ["(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)"];
       if (++seen > limit) return ["(Jason: the workshop holds too much to look through for a .claude folder or a CLAUDE.md.)"];
       if (entry.isDirectory()) folders.push(join(at, entry.name));
     }
@@ -526,17 +531,18 @@ function isLink(path) {
   }
 }
 
-/** The folders Claude Code may load skills from (R22): her folder's own skills, the user's, each plugin's in the cache
-    (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
-    (~/.claude/plugins/synced/<account>/<plugin>/skills), the plugins' as `list` finds the folders in a folder. */
-function skillRoots({ home, folder }, list) {
+/** The folders of the plugins on this Mac, as `list` finds the folders in a folder: each in the cache
+    (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>), and each synced from her account
+    (~/.claude/plugins/synced/<account>/<plugin>). */
+function pluginFolders(home, list) {
   const plugins = join(home, ".claude", "plugins");
-  return [
-    join(folder, ".claude", "skills"),
-    join(home, ".claude", "skills"),
-    ...list(join(plugins, "cache")).flatMap(list).flatMap(list).map((dir) => join(dir, "skills")),
-    ...list(join(plugins, "synced")).flatMap(list).map((dir) => join(dir, "skills")),
-  ];
+  return [...list(join(plugins, "cache")).flatMap(list).flatMap(list), ...list(join(plugins, "synced")).flatMap(list)];
+}
+
+/** The folders Claude Code may load skills from (R22): her folder's own skills, the user's, and each plugin's (pluginFolders), the
+    plugins' as `list` finds the folders in a folder. */
+function skillRoots({ home, folder }, list) {
+  return [join(folder, ".claude", "skills"), join(home, ".claude", "skills"), ...pluginFolders(home, list).map((dir) => join(dir, "skills"))];
 }
 
 /** The folders Claude Code may load the skill `name` from (R22, skillRoots), those that are there, no link taken. */
@@ -625,6 +631,86 @@ export function skillsWhy({ home, folder, allow }) {
     if (hooked) why.push(`(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`);
     if (places.some(isLink)) why.push(`(Jason: the skill ${name}, which her folder allows, is kept through a link, so whether it registers hooks is not known.)`);
   }
+  return why;
+}
+
+/** The agent definitions in the folder `dir` and the folders inside it, as `seen` takes them: `seen.named` and `seen.asks` are set
+    for a definition that has an own agent's name or asks for more (agentWhy); `seen.unknown` for one that cannot be read, a link
+    (which is not followed), or a folder that cannot be looked through. A folder that is not there holds none. */
+function agentsIn(dir, seen) {
+  let own;
+  try {
+    own = lstatSync(dir);
+  } catch (e) {
+    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") seen.unknown = true;
+    return;
+  }
+  if (own.isSymbolicLink()) seen.unknown = true;
+  if (!own.isDirectory()) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    seen.unknown = true;
+    return;
+  }
+  for (const entry of entries) {
+    const at = join(dir, entry.name);
+    if (entry.isSymbolicLink()) seen.unknown = true;
+    else if (entry.isDirectory()) agentsIn(at, seen);
+    else if (entry.isFile() && fold(entry.name).endsWith(".md")) agentWhy(at, entry.name.slice(0, -3), seen);
+  }
+}
+
+/** The keys of an agent definition's front matter that give it more than the tools it names (Claude Code's own: it runs somewhere
+    else, registers hooks, brings MCP servers, or sets its own permission mode). */
+const AGENT_KEYS = ["isolation", "hooks", "mcpServers", "permissionMode"];
+
+/** What the agent definition in the file `file`, whose file name without .md is `base`, is, as `seen` takes it (agentsIn). Its front
+    matter is the block between the --- lines at the top, a byte-order mark before it let through, and one never closed taken to run
+    to the end of the file; it is read by lines, a key at the start of a line (indented or quoted too) followed by a colon, and a
+    key of a flow mapping ({ a: 1, b: 2 }) too. */
+function agentWhy(file, base, seen) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  } catch (e) {
+    seen.unknown = true;
+    return;
+  }
+  const own = new Set(BUILT_IN_AGENTS.map(fold));
+  if (own.has(fold(base))) seen.named = true;
+  const front = /^---[ \t]*\r?\n([\s\S]*?)(?:\r?\n---|$)/.exec(text);
+  if (!front) return;
+  const keys = AGENT_KEYS.join("|");
+  if (new RegExp(`^[ \\t]*["']?(?:${keys})["']?[ \\t]*:`, "im").test(front[1]) || new RegExp(`[{,][ \\t]*["']?(?:${keys})["']?[ \\t]*:`, "i").test(front[1])) seen.asks = true;
+  for (const line of front[1].split(/\r?\n/)) {
+    const named = /^[ \t]*["']?name["']?[ \t]*:[ \t]*(.*?)[ \t]*$/i.exec(line);
+    if (named && own.has(fold(named[1].replace(/\s+#.*$/, "").replace(/^(["'])(.*)\1$/, "$2").trim()))) seen.named = true;
+  }
+}
+
+/** What agent definitions on this Mac could loosen the open lock, as the lines for Jason (none holding a file's name or words): Claude
+    Code loads definitions by name from ~/.claude/agents, $CLAUDE_CONFIG_DIR/agents (`env`), her folder's .claude/agents, and each
+    plugin's agents folder (pluginFolders), in any folder inside them, and one named like a built-in agent (BUILT_IN_AGENTS, which the
+    never list lets the subagent tool name) replaces it, by its file name without .md or its front matter's `name:`, in any letter
+    case (fold); and its front matter can ask for isolation, hooks, MCP servers or a permission mode of its own (AGENT_KEYS). One
+    line for each kind of finding. A definition that cannot be read, a link, in a folder or as one, which is not followed, and an
+    agents folder that cannot be looked through are said too, since then it is not known. `folder` is her folder's real path, or null. */
+export function agentsWhy({ home, folder, env = {} }) {
+  const config = env.CLAUDE_CONFIG_DIR;
+  const roots = [
+    join(home, ".claude", "agents"),
+    ...(typeof config === "string" && config !== "" ? [join(config, "agents")] : []),
+    ...(folder ? [join(folder, ".claude", "agents")] : []),
+    ...pluginFolders(home, foldersThrough).map((dir) => join(dir, "agents")),
+  ];
+  const seen = { named: false, asks: false, unknown: false };
+  for (const root of [...new Set(roots)]) agentsIn(root, seen);
+  const why = [];
+  if (seen.named) why.push("(Jason: an agent definition on this Mac has the name of one of Claude Code's own agents, which it would replace. Its contents are not shown here.)");
+  if (seen.asks) why.push("(Jason: an agent definition on this Mac asks for its own isolation, hooks, MCP servers or permission mode. Its contents are not shown here.)");
+  if (seen.unknown) why.push("(Jason: an agent definition on this Mac could not be read, or is kept through a link, so whether it replaces one of Claude Code's own agents or asks for its own isolation, hooks, MCP servers or permission mode is not known. Its contents are not shown here.)");
   return why;
 }
 
