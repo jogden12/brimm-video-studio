@@ -55,10 +55,14 @@ export const chatChain = ({ claude = 700, args }) => psText([
   [900, 800, `${NODE} /x/tool/edit.js episodes`],
 ]);
 
+/** Where the Claude app keeps its own copy of Claude Code `version` in `home`, as it does on the Mac Studio:
+    claude-code/<version>/<12 hex letters>/claude.app/Contents/MacOS/claude. */
+export const appCopy = (home, version = MINIMUM) => join(home, "Library", "Application Support", "Claude", "claude-code", version, "a93ded4b1b47", "claude.app", "Contents", "MacOS", "claude");
+
 /** The arguments the Claude app starts a chat in her folder with: its own copy of Claude Code, the flags of RECORD, and the app's
     notes folder added. */
 export const APP_ARGS = (folder, home) => [
-  `${join(home, "Library", "Application Support", "Claude", "claude-code", MINIMUM, "claude")}`,
+  appCopy(home),
   "--output-format stream-json",
   "--input-format stream-json",
   "--verbose",

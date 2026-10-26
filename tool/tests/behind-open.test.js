@@ -11,7 +11,7 @@ import { settingsFile, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { SECRET_WORDS, UNTRUSTED, environmentWhy, skillFolders } from "../loosened.js";
 import { claudeDirName } from "../places.js";
-import { openWorld, openDeps, psText, chatChain, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, CHAT_ENV, transcript } from "./open-world.js";
+import { openWorld, openDeps, psText, chatChain, appCopy, APP_ARGS, RECORD, MINIMUM, NODE, SESSION, CHAT_ENV, transcript } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
 const SECRET = "SECRET-WORDS-OF-A-FILE";
@@ -583,8 +583,8 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
   });
   it("refuses for a Claude Code older than the one the open lock was checked on, and for one whose version cannot be read while one is named", async () => {
     const w = openWorld();
-    const copy = (version) => join(w.home, "Library", "Application Support", "Claude", "claude-code", version, "claude");
-    const app = join(w.home, "Library", "Application Support", "Claude", "claude-code", MINIMUM, "claude");
+    const copy = (version) => appCopy(w.home, version);
+    const app = appCopy(w.home);
     for (const version of ["2.1.300", "2.1.30", "2.0.999", "1.9.400"]) {
       refusedFor(await behindOn(w, started(argsWith(w, app, copy(version)))), `(Jason: this chat runs Claude Code ${version}, older than the ${MINIMUM} her folder's open lock was checked on.)`, version);
     }
@@ -593,6 +593,31 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
       refusedFor(await behindOn(w, started(argsWith(w, app, exe))), `(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${MINIMUM} her folder's open lock was checked on.)`, exe);
     }
     w.done();
+  });
+  it("reads a version only from the app's own copy in her home, by its real path, and never from a claude-code folder elsewhere", async () => {
+    const NOT_APP = `(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${MINIMUM} her folder's open lock was checked on.)`;
+    const w = openWorld();
+    const claudeCode = join(w.home, "Library", "Application Support", "Claude", "claude-code");
+    const tail = ["a93ded4b1b47", "claude.app", "Contents", "MacOS", "claude"];
+    const cases = {
+      "the workshop": join(w.workshop, "claude-code", "9.9.9", ...tail),
+      "the workshop, the copy's old shape": join(w.workshop, "claude-code", "9.9.9", "claude"),
+      "another home": appCopy(join(w.dir, "someone else"), "9.9.9"),
+      "her home, the copy's old shape": join(claudeCode, "9.9.9", "claude"),
+      "a folder between": join(claudeCode, "9.9.9", "x", ...tail),
+      "a name that is not 12 hex letters": join(claudeCode, "9.9.9", "A93DED4B1B47", ...tail.slice(1)),
+      "a version that is not one": join(claudeCode, "latest", ...tail),
+    };
+    for (const [what, exe] of Object.entries(cases)) refusedFor(await behindOn(w, started(argsWith(w, appCopy(w.home), exe))), NOT_APP, what);
+    w.done();
+    // Her copy's path, through a link to the workshop on the way.
+    const v = openWorld();
+    mkdirSync(join(v.workshop, "Claude", "claude-code", "9.9.9", "a93ded4b1b47", "claude.app", "Contents", "MacOS"), { recursive: true });
+    writeFileSync(join(v.workshop, "Claude", "claude-code", "9.9.9", "a93ded4b1b47", "claude.app", "Contents", "MacOS", "claude"), SECRET);
+    mkdirSync(join(v.home, "Library", "Application Support"), { recursive: true });
+    symlinkSync(join(v.workshop, "Claude"), join(v.home, "Library", "Application Support", "Claude"));
+    refusedFor(await behindOn(v, started(argsWith(v, appCopy(v.home), appCopy(v.home, "9.9.9")))), NOT_APP, "a link on the way");
+    v.done();
   });
   it("says nothing of the app's flags for Jason's own run, with no claude above it and not under Claude Code", async () => {
     const w = openWorld();

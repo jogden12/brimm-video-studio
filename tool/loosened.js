@@ -273,7 +273,7 @@ function appSettingsOf(value) {
     (studio/app-flags.json, which the by-hand round makes); --project-config-root other than her folder, `folder`, by its real path;
     --setting-sources other than user,project,local; an --allowedTools rule that is not a connector's tool; a --settings that cannot
     be read; any --add-dir but the app's notes folder (isNotes); and, while `minimum` is named, a version older than it, or none that
-    can be read from the executable's path. */
+    can be read from the executable's path, which must be her app's own copy in `home` (chain.js appVersionOf), by its real path. */
 export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
   if (!claude) return { lines: underClaude ? ["(Jason: the Claude Code above this check could not be found, so its flags and version are not known.)"] : [], settings: null };
   const { exe, flags } = argsOf(claude.args);
@@ -295,7 +295,8 @@ export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
   }
   if (values("--add-dir").some((dir) => !isNotes(dir, home))) lines.push("(Jason: this chat has a folder added to it by the Claude app (--add-dir), which its commands could write and whose skills it would load.)");
   if (minimum) {
-    const version = appVersionOf(exe);
+    // Her app's own copy, by its real path: no link on the way to it.
+    const version = realOf(exe) === exe ? appVersionOf(exe, home) : null;
     if (version === null) lines.push(`(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${minimum} her folder's open lock was checked on.)`);
     else if (older(version, minimum)) lines.push(`(Jason: this chat runs Claude Code ${version}, older than the ${minimum} her folder's open lock was checked on.)`);
   }

@@ -60,10 +60,13 @@ describe("the process chain", () => {
     assert.deepEqual(argsOf(`${APP} --verbose --model x`).flags, [{ name: "--verbose", value: null }, { name: "--model", value: "x" }]);
     assert.deepEqual(argsOf("/opt/homebrew/bin/claude"), { exe: "/opt/homebrew/bin/claude", flags: [] });
   });
-  it("reads the app's copy's version from its path, and none from another claude", () => {
-    assert.equal(appVersionOf(APP), "2.1.308");
-    assert.equal(appVersionOf("/Users/s/Library/Application Support/Claude/claude-code/2.1.310/claude"), "2.1.310");
-    for (const exe of ["/opt/homebrew/bin/claude", "/Users/s/.local/share/claude/versions/2.1.308", "/Users/s/.local/bin/claude", "claude", "/x/claude-code/claude", "/x/claude-code/latest/claude"]) assert.equal(appVersionOf(exe), null, exe);
+  it("reads the app's copy's version from its path in her home, and none from another claude", () => {
+    // The app's copy, as on the Mac Studio: <home>/Library/Application Support/Claude/claude-code/<version>/<12 hex letters>/claude.app/Contents/MacOS/claude
+    const copy = (version, home = "/Users/s") => `${home}/Library/Application Support/Claude/claude-code/${version}/a93ded4b1b47/claude.app/Contents/MacOS/claude`;
+    assert.equal(appVersionOf(copy("2.1.308"), "/Users/s"), "2.1.308");
+    assert.equal(appVersionOf(copy("2.1.310"), "/Users/s"), "2.1.310");
+    assert.equal(appVersionOf(copy("2.1.308"), "/Users/s/"), "2.1.308");
+    for (const exe of ["/opt/homebrew/bin/claude", "/Users/s/.local/share/claude/versions/2.1.308", "/Users/s/.local/bin/claude", "claude", "/x/claude-code/claude", "/x/claude-code/latest/claude", APP, copy("2.1.308", "/Users/t"), copy("2.1.308", "/Users/s/BRIMM Video Workshop"), copy("latest"), copy("2.1.308").replace("a93ded4b1b47", "a93ded4b1b4"), copy("2.1.308").replace("a93ded4b1b47", "A93DED4B1B47"), copy("2.1.308").replace("a93ded4b1b47", "a93ded4b1b47/x"), `${copy("2.1.308")}/x`, copy("2.1.308").replace("/Users/s/", "/Users/s/x/../")]) assert.equal(appVersionOf(exe, "/Users/s"), null, exe);
   });
   it("stops at a loop and at a process ps does not list", () => {
     const loop = processTable(psText([[700, 900, "a"], [800, 700, "b"], [900, 800, "c"]]));
