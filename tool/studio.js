@@ -7,7 +7,7 @@
 // 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
 // settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
 // off. What a settings file in her folder, or the user's or the managed settings, can change of that is not for this file but for
-// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when the session
+// `behind` (loosened.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when the session
 // does not run in her folder itself (Claude Code reads these settings only from the session's own folder, but her CLAUDE.md and
 // skill from the folders above it too, so a session in Pictures/ looks like hers and has no lock), when her folder has
 // a .claude/settings.local.json, when its own .claude/settings.json no longer holds the lock (lockBroken, here), or when the user
@@ -141,7 +141,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
     true: absent, as main's studio.js wrote the folder, or false, it turns no hook off), "guard" (no entry with the guard
     hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
     node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
-    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date".
+    hold. `behind` refuses on any of them (loosened.js lockLoosened); every other difference from what is written is only "out of date".
     With the open lock, the whole of it is compared (openBroken, below). */
 export function lockBroken(settings, { checkout, folder, lock = "strict", facts, node }) {
   if (lock === "open") return openBroken(settings, { checkout, folder, facts, node });

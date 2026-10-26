@@ -482,7 +482,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
   it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
     const head = source("studio.js").split("\n").filter((line) => line.startsWith("//")).join("\n");
     for (const words of ["`behind`", "lockLoosened", ".claude/settings.local.json", "turn hooks off"]) assert.ok(head.includes(words), words);
-    assert.match(source("edit.js"), /\nfunction lockLoosened\(/);
+    assert.match(source("loosened.js"), /\nexport function lockLoosened\(/);
   });
   it("tells her never to rate, report or share a chat about a session, in the skill and in her CLAUDE.md", () => {
     for (const text of [skill, files["CLAUDE.md"]]) assert.match(text, /Never rate, report or share a chat about a session/);
