@@ -517,6 +517,20 @@ if [[ -n "$machine" ]]; then
   fi
   say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)"
   say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there"
+  # That copy: the app keeps each in a folder named for its version, and runs the newest. It is only said; the Terminal's version
+  # above decides whether her folder is written, and /status in the Code tab says which copy runs.
+  app_newest=""
+  for v in "$HOME/Library/Application Support/Claude/claude-code/"*(N/:t); do
+    [[ "$v" =~ '^[0-9]+(\.[0-9]+)+$' ]] || continue
+    if [[ -z "$app_newest" ]] || is-at-least "$app_newest" "$v"; then app_newest="$v"; fi
+  done
+  if [[ -z "$app_newest" ]]; then
+    say "  The Claude app's own Claude Code:  no copy found here (in ~/Library/Application Support/Claude/claude-code), so only /status in the Code tab can say its version"
+  elif ! is-at-least "$GUARD_CLAUDE" "$app_newest"; then
+    say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here, older than the $GUARD_CLAUDE her folder's guard needs: on it the guard could let a call through. In the app, choose Claude > Check for Updates, then check /status in the Code tab"
+  else
+    say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here (her folder's guard needs $GUARD_CLAUDE or later; /status in the Code tab says which copy runs)"
+  fi
   [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove its sign-in is seen there"
   say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
 fi

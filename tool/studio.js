@@ -7,7 +7,9 @@
 // 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
 // settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
 // off. What a settings file in her folder, or the user's or the managed settings, can change of that is not for this file but for
-// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when her folder has
+// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when the session
+// does not run in her folder itself (Claude Code reads these settings only from the session's own folder, but her CLAUDE.md and
+// skill from the folders above it too, so a session in Pictures/ looks like hers and has no lock), when her folder has
 // a .claude/settings.local.json, when its own .claude/settings.json no longer holds the lock (lockBroken, here), or when the user
 // settings or the managed settings turn hooks off. Claude Code's own read block (blockReadsOutsideWorkingDirectories) is not used: it takes
 // edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
