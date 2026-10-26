@@ -54,7 +54,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { handoffText, handoffFault } from "./handoff.js";
-import { buildHandoffV2, handoffFaultV2 } from "./handoff-v2.js";
+import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
@@ -67,11 +67,25 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
+import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
                                         Mac's libraries
+  node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
+                                        answer first, then the newest; this Mac's drop folder in Finder's words; and how
+                                        many videos from before the switch are not guided. With a video, its next step,
+                                        and for a step on the BRIMM Ops page the step after it. Only on a Mac that does
+                                        the light import: on any other, every form says to ask Jason
+  node edit.js guide drop [zoom] | page | wait
+                                        open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
+                                        BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
+                                        what the guide says
+  node edit.js guide "<video>" done <step> | finished | show
+                                        note on this Mac that she did its step on the BRIMM Ops page (only the step that
+                                        comes next), that she is done with the video, or show in Finder what its step needs
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -2440,7 +2454,7 @@ function recordDifferences(a, b) {
   return said.length || sameRecord(a, b) ? said : [["The rest of the record", "as A holds it", "as B holds it"]];
 }
 
-/** A record file read as it is, or null when it is not there or cannot be read. */
+/** A record file, or any other JSON file (a hand-off), read as it is, or null when it is not there or cannot be read. */
 function recordAt(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -2515,14 +2529,14 @@ async function resolveIn(ctx, found, keep) {
     }
   })();
   const copies = conflictedCopies(found.folder);
-  const ordered = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
-  if (!ordered.length) {
+  const inOrder = [...copies.filter((c) => c.startsWith("record/")), ...copies.filter((c) => !c.startsWith("record/"))];
+  if (!inOrder.length) {
     rmSync(shownFile, { force: true });
     if (keep && pin) return refuse(ctx, `The version shown was sorted out meanwhile, on this Mac or the other, so nothing was kept here. There is no conflict in ${name} now: say "open ${name}" to see it as it is.`);
     ctx.say(`There is no conflict in ${name}.`);
     return 0;
   }
-  const copy = ordered[0];
+  const copy = inOrder[0];
   const at = (rel) => join(found.folder, rel);
   const isRecord = copy.startsWith("record/");
   let of = conflictedOf(copy);
@@ -2574,7 +2588,7 @@ async function resolveIn(ctx, found, keep) {
     }
     if (blocked) ctx.say(blocked);
     else {
-      const more = ordered.length - 1;
+      const more = inOrder.length - 1;
       ctx.say(`Say which to keep: A or B.${more ? ` ${more} more conflicted cop${more === 1 ? "y" : "ies"} after this one.` : ""}`);
     }
     // What was shown is noted only when a side can be kept from it.
@@ -5211,9 +5225,336 @@ async function finishSessionCommand(ctx, found) {
   return 0;
 }
 
+// The guide (spec 2026-10-25): the one next step for each video under way, in her words. guide.js says the steps, from what is
+// read here of each video, as `episodes` and `status` read it.
+
+/** A video's newest hand-off, as the guide reads it (guide.js, as opsNext takes it): { id, revision, kind, emptyAt, at, file }, or
+    null while none is written. It is read from the file its finish wrote (`finished.handoff`), and only when that is whole on this
+    Mac (`ctx.isWhole`), since Dropbox would otherwise have to bring it. One that is not, cannot be read, or names no id, revision
+    or kind that brimm-video gives is read from the record: under the id its versions lead to when it is handed off as version 2
+    (`v2`, finish.js linksOf firstOf), its own otherwise, at the revision and of the kind the record says. A version 1 hand-off
+    says "episode" of a raw one. `emptyAt` is the empty revision of a video that was a session after all, for a session's hand-off: it stays on the
+    record when the session's own hand-off, a later revision, is written, since finish.js does not change it. */
+function guideHandoff(ctx, e, r, links, v2) {
+  const done = r.finished;
+  if (done === null || typeof done !== "object") return null;
+  const file = typeof done.handoff === "string" && done.handoff !== "" ? join(e.folder, done.handoff) : "";
+  const h = file && ctx.isWhole(file) ? recordAt(file) : null;
+  const id = handoffIdIn(h);
+  const kind = !id ? null : h.version === VERSION_2 ? h.video.kind : h.episode.kind === "episode" ? "raw" : h.episode.kind;
+  const read = ["finished", "raw", "short video", "session"].includes(kind) && Number.isInteger(h.revision)
+    ? { id, revision: h.revision, kind, file: h.main && typeof h.main.file === "string" ? h.main.file : "" }
+    : { id: v2 ? links.firstOf(r, e.folder) : r.id, revision: done.revision, kind: recordKind(r), file: "" };
+  const empty = r.session !== null && typeof r.session === "object" ? r.session.emptyRevision : undefined;
+  return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
+}
+
+/** Where Claude's reading of a video has got, for the guide: { reading, readsAt }. "done" once the reading that counts is in the
+    record (currentReading; a session's, sessionReading); "running" while this Mac's detached reading is at work on it (`running`,
+    the command runningCommand says); "failed" when the reading this Mac last ran of it since her answer (a session's, since its
+    teachings were asked for) did not end well; "later" for a raw video whose reading waits for the import's late check, at the
+    time it is due on this Mac's clock (`readsAt`); and "none" otherwise. A result's `started` is in milliseconds and the record's
+    times are text: each is read as a time before they are compared. */
+function guideReading(ctx, e, r, kind, running) {
+  if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
+  if (running === "read") return { reading: "running" };
+  const result = readResult(ctx.home, e.name, "read");
+  const since = Date.parse(kind === "session" ? r.session && r.session.asked : r.answer.at);
+  if (result && result.ok === false && result.started >= since) return { reading: "failed" };
+  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  return due === null ? { reading: "none" } : { reading: "later", readsAt: clockAt(due) };
+}
+
+/** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
+    read teachings now, how many of its items she has still to keep, drop or change, and whether its empty revision is still owed
+    (revisionOwed). Its items are counted from its teachings file, read only when it is whole on this Mac: one that is not, or that
+    cannot be read, counts as one undecided, so that the guide never says every item is decided of what it could not see. */
+function guideSession(ctx, e, r) {
+  const mark = r.session !== null && typeof r.session === "object" ? r.session : {};
+  const got = readTeachings(e.folder, r, ctx.isWhole);
+  const items = itemsOf(got.teachings, r.session);
+  const undecided = got.coming !== undefined || got.why !== undefined ? 1 : ITEM_LISTS.reduce((n, [key]) => n + items[key].filter((item) => typeof item.approved !== "boolean").length, 0);
+  return { choice: mark.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided, emptyOwed: revisionOwed(r) };
+}
+
+/** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
+    what this Mac holds of it. A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
+    given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
+function guideFacts(ctx, e, links) {
+  const r = e.inForce;
+  const kind = recordKind(r);
+  const hidden = isGated(e);
+  const away = heldElsewhere(r, ctx.machine);
+  const v2 = writesV2For(ctx.settings, e.folder, r);
+  const running = runningCommand(ctx.home, e.name, ctx.alive);
+  const pushed = r.main.pushed;
+  return {
+    name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
+    id: r.id,
+    aliases: [typeof r.label === "string" ? r.label : "", r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [r.name.text, e.name])].filter(Boolean),
+    at: Date.parse(r.imported.at),
+    mac: away ? away.by : "",
+    drop: null,
+    conflicted: e.read.code === "CONFLICTED",
+    kind,
+    waiting: kind === null && r.answer.state === "needs your answer",
+    heldAsSession: e.held && !gated(r),
+    elsewhere: Boolean(away),
+    readingsOff: ctx.settings.readings === false,
+    ...guideReading(ctx, e, r, kind, running),
+    offersAnswered: answerOf(r) !== null,
+    v2,
+    placeholder: r.name.placeholder === true,
+    shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
+    finishRunning: running === "finish",
+    shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    session: kind === "session" ? guideSession(ctx, e, r) : null,
+    handoff: guideHandoff(ctx, e, r, links, v2)
+  };
+}
+
+/** The runs this Mac's progress panel shows now (progress.js): each run's file in the panel's folder, whose process is alive. One
+    being written, or that cannot be read, is passed over, as `status` passes it over. */
+function panelRuns(ctx) {
+  let names = [];
+  try {
+    names = readdirSync(progressFolder(ctx.home)).filter((n) => /^\d+\.json$/.test(n)).sort();
+  } catch (e) {
+    return [];
+  }
+  return names.flatMap((name) => {
+    try {
+      const run = JSON.parse(readFileSync(join(progressFolder(ctx.home), name), "utf8"));
+      return run !== null && typeof run === "object" && ctx.alive(run.pid) ? [run] : [];
+    } catch (e) {
+      return [];
+    }
+  });
+}
+
+/** The videos in the drop folders of the Macs (dropFolders), as the guide reads them: guide.js VideoFacts, with `drop`, `id` ""
+    and `kind` null. How far a video has got is read from the statuses of its Mac's imports of it, a running import and a hold
+    only at the video's size, as heldBy takes them: one dropped again under the same name is another recording. Its import did
+    not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
+    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
+    imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
+    label, else by what it is and its size, never by its file's name, which may be a client's. It came when this Mac's import
+    first saw it (seen.json), as `episodes` says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's
+    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. */
+function guideDrops(ctx) {
+  const now = ctx.now();
+  const statuses = readStatuses(ctx.root, now);
+  const seen = readSeen(ctx.home);
+  const runs = panelRuns(ctx);
+  const videos = [];
+  for (const { mac, folder } of dropFolders(ctx)) {
+    let names = [];
+    try {
+      names = readdirSync(folder).filter(isMedia).sort();
+    } catch (e) {
+      continue;
+    }
+    for (const video of names) {
+      const found = ctx.stat(join(folder, video));
+      if (!found) continue;
+      const mine = statuses.filter(({ status }) => status && status.video === video && status.machine === mac && (!["running", "held"].includes(importState(status, now)) || status.bytes === found.size));
+      const states = mine.map(({ status }) => importState(status, now));
+      const running = mine.find(({ status }) => importState(status, now) === "running");
+      const state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      if (state !== "retry") {
+        const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
+        if (holding && !holding.unknown) continue;
+      }
+      const here = mac === ctx.machine;
+      const label = labelIn(mine, video, mac);
+      const run = here && label ? runs.find((r) => r.video === label) : undefined;
+      const noted = here ? seen[seenKey(video, found)] : undefined;
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null };
+      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
+    }
+  }
+  return videos;
+}
+
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
+    video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
+    (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
+    and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
+    Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
+    hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
+    is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
+    again since its finish) stays. Her notes and the versions of every video are read once. */
+function guideItems(ctx) {
+  const notes = readGuideNotes(ctx.home);
+  const links = linksOf(ctx.root);
+  const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
+  let old = 0;
+  for (const name of folders(ctx)) {
+    const e = episodeAt(ctx, name, links);
+    const r = e.inForce;
+    if (!r || e.newer || r.archived || leftAlone(r)) continue;
+    if (r.answer === null || typeof r.answer !== "object") {
+      old += 1;
+      continue;
+    }
+    const facts = guideFacts(ctx, e, links);
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
+  }
+  const newest = new Map();
+  for (const item of items) {
+    const h = item.facts.handoff;
+    const best = h ? newest.get(h.id) : undefined;
+    if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
+  }
+  const own = (item) => !item.next.done && item.next.stage !== "ops";
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old };
+}
+
+/** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
+    One not on this Mac is refused with `missing`. One Finder could not open is refused too, and why is never said: it may hold
+    a path. */
+function openFolder(ctx, folder, what, words, missing) {
+  if (!ctx.stat(folder)) return refuse(ctx, missing);
+  try {
+    ctx.openApp("Finder", folder);
+  } catch (e) {
+    return refuse(ctx, `Finder could not open ${what}: ask Jason.`);
+  }
+  ctx.say(`Opened ${what} in Finder: ${words}.`);
+  return 0;
+}
+
+/** `guide page`: the BRIMM Ops page (OPS_PAGE), opened in her default browser through this Mac's program runner. */
+async function openPage(ctx) {
+  const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", [OPS_PAGE]);
+  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened: ask Jason.");
+  ctx.say("Opened the BRIMM Ops page in your browser.");
+  return 0;
+}
+
+/** `guide "<video>" show`: what the video's next step on the BRIMM Ops page needs, shown in Finder (showInFinder). For `posted`
+    it is the video to post: a raw episode's Share in final/, which its hand-off names, and any other's the copy of the video she
+    dropped. For any other step it is the hand-off. The chat is told only what it is, never its file's name, which may be a
+    client's. A step that is not the page's has nothing to show; a file not on this Mac, or one its hand-off does not name, is
+    refused. */
+async function showForStep(ctx, { facts, next, folder, record }) {
+  if (next.done || next.stage !== "ops") return refuse(ctx, `There is nothing to show in Finder for ${facts.name} now.`);
+  const video = next.step === "posted";
+  const where = !video ? [record.finished.handoff] : facts.handoff.kind === "raw" ? ["final", facts.handoff.file] : [record.video.file];
+  const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
+  const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
+  if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
+  await showInFinder(ctx, path);
+  ctx.say(`Shown in Finder: ${what}${video ? ", to post" : ""}.`);
+  return 0;
+}
+
+/** Her notes on this Mac (guide-note.js), with `change` made to them, written whole: 0, or 1 when they could not be written, which
+    is said by the error's code alone. */
+function noteGuide(ctx, change) {
+  try {
+    writeGuideNotes(ctx.home, change(readGuideNotes(ctx.home)));
+  } catch (e) {
+    return refuse(ctx, `Not noted: this Mac's note could not be written (${(e && e.code) || "an error"}). Ask Jason.`);
+  }
+  return 0;
+}
+
+/** `guide "<video>" done <step>`: her word that she did the video's next step on the BRIMM Ops page, noted on this Mac by its
+    hand-off's id (noteAfter). Only the step that comes next is taken: a video that is done, one whose next step is brimm-video's
+    or hers, or another step is refused with the step that comes next, and her word is never said again. Once it is noted, the
+    video is read again, and its next step said. */
+function noteDone(ctx, { facts, next }, step) {
+  if (next.done) return refuse(ctx, `Not noted: ${facts.name} is done: nothing is left to do for it.`);
+  if (next.stage !== "ops") return refuse(ctx, `Not noted: ${facts.name} has no step on the BRIMM Ops page now. ${next.text}`);
+  if (step !== next.step) return refuse(ctx, `Not noted: the next step for ${facts.name} is ${next.step}. ${next.text}`);
+  const handoff = facts.handoff;
+  const at = localStamp(new Date(ctx.now()));
+  if (noteGuide(ctx, (notes) => ({ ...notes, handoffs: { ...notes.handoffs, [handoff.id]: noteAfter(handoff, notes.handoffs[handoff.id], step, at) } })) !== 0) return 1;
+  ctx.say(`Noted: ${facts.name}, ${step}.`);
+  // The version she noted has the newest hand-off under its id, and is read again; only a newer one come in since would take its
+  // place, and then nothing more is said.
+  const again = guideItems(ctx).items.find((item) => item.facts.id === facts.id);
+  for (const line of again ? videoLines(again) : []) ctx.say(line);
+  return 0;
+}
+
+/** `guide "<video>" finished`: her word that she is done with an answered video, noted on this Mac by its record's id, so that it
+    is no longer under way. A video still in a drop folder has no record to note it by. A step that nothing noted can skip (guide.js
+    nextFor: a conflict, her answer, a version held as a session, a session after all's withdrawal) is said instead, and nothing is
+    noted. */
+function noteFinished(ctx, { facts }) {
+  if (facts.id === "") return refuse(ctx, `${facts.name} is not imported yet: there is nothing to set aside.`);
+  const at = localStamp(new Date(ctx.now()));
+  const notes = readGuideNotes(ctx.home);
+  const then = nextFor(facts, { ...notes, finished: { ...notes.finished, [facts.id]: at } }, ctx.now());
+  if (!then.done) return refuse(ctx, `Not noted: ${facts.name} cannot be set aside until this is done. ${then.text}`);
+  if (noteGuide(ctx, (notes) => ({ ...notes, finished: { ...notes.finished, [facts.id]: at } })) !== 0) return 1;
+  ctx.say(`${facts.name} is no longer under way.`);
+  return 0;
+}
+
+/** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
+    step, and how many videos from before the switch it does not guide. */
+function sayOverview(ctx, { items, old }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
+  return 0;
+}
+
+/** `guide wait`: what the guide says is read again every POLL_MS, for up to WAIT_MS, until it changes (signatureOf: a video come
+    or gone, a stage passed, an import's next step), and then the overview is said. With no change in that time it says so, then
+    the overview all the same. The time left, or a file still coming in, is no change. */
+async function waitForChange(ctx) {
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const start = ctx.now();
+  let read = guideItems(ctx);
+  const was = signatureOf(read.items);
+  while (ctx.now() - start < WAIT_MS) {
+    await wait(Math.min(POLL_MS, WAIT_MS - (ctx.now() - start)));
+    read = guideItems(ctx);
+    if (signatureOf(read.items) !== was) return sayOverview(ctx, read);
+  }
+  ctx.say(`Nothing has changed in ${WAIT_MS / 1000} seconds.`);
+  return sayOverview(ctx, read);
+}
+
+/** `guide ["<video>" [show | finished | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+    that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
+    video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
+    next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
+    `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
+    change in what the guide says, then says the overview. With a video, by its name, its label or its id, its next step, and for
+    a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
+    she did that step, the one that comes next; with `finished`, her note that she is done with it. Words that fit no video, or
+    more than one, are refused, and never said again: they may hold a client's name. */
+export async function guideCommand(ctx, rest) {
+  if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
+  const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
+  if (is("drop")) return openFolder(ctx, dropFolder(ctx.root, ctx.machine, ctx.settings.drop), "your drop folder", dropWords(ctx.settings.drop, ctx.machine), "Your drop folder is not there: ask Jason.");
+  if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
+  if (is("page")) return openPage(ctx);
+  if (is("wait")) return waitForChange(ctx);
+  // The form, after a video: "" for its next step, "show", "finished", or "done" with the step.
+  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
+  if (form === null) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const { items, old } = guideItems(ctx);
+  if (!rest.length) return sayOverview(ctx, { items, old });
+  const found = findIn(items, rest[0]);
+  if (found.why) return refuse(ctx, found.why);
+  if (form === "show") return showForStep(ctx, found.item);
+  if (form === "done") return noteDone(ctx, found.item, rest[2]);
+  if (form === "finished") return noteFinished(ctx, found.item);
+  for (const line of videoLines(found.item)) ctx.say(line);
+  return 0;
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and is in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

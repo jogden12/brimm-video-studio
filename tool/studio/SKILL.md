@@ -1,6 +1,6 @@
 ---
 name: brimm-edit
-description: Use for anything about The BRIMM's videos and episodes: what is waiting, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode or taking it over from the other Mac, its name and title, Reels, showing it in Final Cut, finishing it, handing it over, conflicts, and how far something has got.
+description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode or taking it over from the other Mac, its name and title, Reels, showing it in Final Cut, finishing it, handing it over, conflicts, and how far something has got.
 ---
 
 # brimm-edit
@@ -45,6 +45,22 @@ Run `kind` only with both answers, and only when they agree: "Client or group se
 When she answered anything but "Client or group session", and the Came line says it came as a Zoom download or as sound alone, or `kind` says to ask first whether it is a client or group session, ask her on one `AskUserQuestion`: "It came from Zoom (or: it is sound alone), which is often a client or group session. Which is it?", or, when no Came line says either, "It may be a Zoom download or sound alone, which is often a client or group session. Which is it?", with the answers "It is a client or group session", "It is not a session". A bare yes or no in the chat is unclear: ask again. Only on "It is not a session", run the same `kind` with `--not-a-session` added, as `kind "<label>" finished --private no --not-a-session`; on "It is a client or group session", `kind "<label>" session --private yes`.
 
 Then tell her what `kind` says, in plain words: when Claude reads it, or that a notice will come. When it says what Claude made, go on as for "What did Claude find?". When it says a raw video is not on this Mac yet, ask her on one `AskUserQuestion`, with its size: "Read it here", "Leave it for the Mac Studio" (or the Mac it names), and run nothing until she answers.
+
+## Guide her
+
+When she says she has a video, or asks what to do, what's next, where she was, or for help, or says "guide me": run `guide`. Say only the one next step it gives, then ask; never read the list out.
+
+- Which first: A video waiting for her answer comes first, whatever she said. Then, when she said she has a new video, that one: say in one line how many others are under way, and that "what's next?" picks them up. When she asked what's next or where she was, the newest under way, and the others in one line.
+- A new video: ask on one `AskUserQuestion`: "Is this video a private session with a client or a group?": "Yes", "No", "It is a Zoom download". Yes: if its file's name holds the client's name, she renames it first. Then, for Yes or No, `guide drop`: tell her her drop folder is open in Finder, in the words it gives, and to drag the video in.
+- A Zoom download, before she drops it or held in her drop folder: `guide drop zoom`, and tell her to drag it there.
+- "I've dropped it" / "Is it ready?": `guide wait`, and tell her where it is in one line.
+- A video waiting for her answer: the card, as above. If she said "Yes" to the first question in this chat, tell her to choose "Client or group session" and "Yes".
+- Any other next step: say it in one or two sentences, offer to do the brimm-video part ("Shall I show it in Final Cut?"), and run it only on her yes, as the table below says.
+- A step on the BRIMM Ops page: `guide page` the first time in a session, then `guide "<video>"`, and say its step. Offer to show what it needs in Finder: `guide "<video>" show`. Then ask on one `AskUserQuestion`: "Done?": "Done", "Not yet", "Something's different". Done: `guide "<video>" done <step>`, with the word its Step line gives, and say the next step it prints. Something's different: ask what she sees; if it is not in the walkthrough, tell her to ask Jason.
+- "I posted it" / "I've done that": `guide "<video>"` for the video she means (`guide` first, and ask which, if that is unclear); say what is left of its step (such as ticking "Posted"), then ask "Done?" as above.
+- "That one is all done" / "Forget that one": tell her the guide will no longer bring it up, then ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No". Only on "Yes", `guide "<video>" finished`; if it says a step must be done first, say that step.
+- Claude cannot see or press anything on the BRIMM Ops page: take her word for each step, and never note a step she has not said is done.
+- If it says this Mac isn't set up for the guide yet, tell her so, and to ask Jason; then go on as the rest of this skill says.
 
 ## What she says, and what to run
 

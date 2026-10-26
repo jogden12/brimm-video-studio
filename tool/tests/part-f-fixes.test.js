@@ -454,7 +454,7 @@ describe("a session mark follows the video's other versions: each is held as a s
   it("lets run for a video held as a session only what runs for a video not yet answered, and the commands that name none", () => {
     assert.equal(HELD_WORDS, HELD);
     for (const name of COMMAND_NAMES) assert.equal(heldGateFor(name), [...UNSCOPED, ...UNANSWERED].includes(name) ? "" : HELD, name);
-    assert.deepEqual(COMMAND_NAMES.filter((name) => !heldGateFor(name)).sort(), ["behind", "episodes", "kind", "leave", "release", "resolve", "retry", "show", "status", "which"]);
+    assert.deepEqual(COMMAND_NAMES.filter((name) => !heldGateFor(name)).sort(), ["behind", "episodes", "guide", "kind", "leave", "release", "resolve", "retry", "show", "status", "which"]);
   });
   it("B marked while A is handed off: names A to answer too, writes nothing into A's folder, and holds A as a session", async () => {
     const t = setup();
