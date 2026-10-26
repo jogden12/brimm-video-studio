@@ -95,6 +95,18 @@ describe("show and which, by id", () => {
     t.done();
   });
 
+  it("leaves the copies Finder showed when which opens the video on an open-lock Mac", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    assert.equal((await on(light(t, "open"), "guide", "Launch talk", "show")).code, 0);
+    const copy = join(byId(t, h.record.id), "Launch talk.brimm-ops.json");
+    writeFileSync(join(h.folder, "Talk.mp4"), "the video");
+    const r = await on(light(t, "open"), "which", "Launch talk");
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.equal(existsSync(copy), true);
+    t.done();
+  });
+
   it("has behind clear the copies in both places", async () => {
     const t = setup();
     episodeFor(t, { record: WAITING, files: FILES });
@@ -157,6 +169,36 @@ describe("Finder reveals, by id", () => {
       assert.equal(readFileSync(copy, "utf8"), readFileSync(join(found.folder, done.handoff), "utf8"));
       t.done();
     }
+  });
+
+  it("says no line that it was shown in Finder when the copy could not be made", async () => {
+    const t = setup();
+    const H2 = JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: ID } });
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, label: LABEL, editing: null, finished: { revision: 1, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} } }, files: { "Pricing talk.mp4": "the raw video", "final/Pricing talk.brimm-ops.json": H2 } });
+    // Its folder by id is a link elsewhere: no copy is made there.
+    mkdirSync(join(workFolder(t.home), "shown"), { recursive: true });
+    mkdirSync(join(t.dir, "elsewhere"));
+    symlinkSync(join(t.dir, "elsewhere"), byId(t));
+    const r = await on(open(t, { handoffVersion: 2 }), "kind", "Pricing talk", "session", "--private", "yes", "--again");
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.deepEqual(revealedIn(t), []);
+    assert.ok(!r.said.some((line) => /shown in Finder/i.test(line)), r.said.join("\n"));
+    const label = r.said[0].slice(0, r.said[0].indexOf(":"));
+    assert.ok(r.said.includes(cantOpen(label)), r.said.join("\n"));
+    assert.ok(r.said.some((line) => line.startsWith(`The empty session revision of ${label} is written as revision 2.`)), r.said.join("\n"));
+    assert.deepEqual(readdirSync(join(t.dir, "elsewhere")), []);
+    t.done();
+  });
+
+  it("has Dropbox bring the video to post when it is not whole on an open-lock Mac, and shows nothing until it is", async () => {
+    const t = setup();
+    const h = handedOff(t);
+    writeGuideNotes(t.home, { version: 1, handoffs: { [h.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+    writeFileSync(join(h.folder, "Talk.mp4"), "online-only");
+    const r = await on(light(t, "open", { isWhole: (path) => !path.endsWith("Talk.mp4") }), "guide", "Launch talk", "show");
+    assert.deepEqual([r.code, r.said, revealedIn(t)], [1, ["Dropbox is still bringing it over; say it again when it is done."], []]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(-4)), [["bring", "--now", h.name, "Talk.mp4"]]);
+    t.done();
   });
 
   it("reveals a copy of the video to post too", async () => {
@@ -233,6 +275,17 @@ describe("Finder reveals, by id", () => {
     }
     assert.deepEqual(readdirSync(elsewhere), []);
     assert.equal(existsSync(join(home, "BRIMM Video Work", "Episodes")), false);
+    // A label that starts with a dot gives a copy Finder shows all the same.
+    assert.equal(await revealed({ home, settings, minimum: MINIMUM, run, record, label: "..hidden", path: handoff }), true);
+    assert.deepEqual(calls.at(-1), ["/usr/bin/open", "-R", join(folder, "hidden.brimm-ops.json")]);
+    // No folder is made through a link at shown/ itself.
+    const other = join(dir, "other home");
+    const away = join(dir, "away");
+    mkdirSync(join(other, "BRIMM Video Work"), { recursive: true });
+    mkdirSync(away);
+    symlinkSync(away, join(other, "BRIMM Video Work", "shown"));
+    assert.equal(await revealed({ home: other, settings, minimum: MINIMUM, run, record, label: "Talk", path: handoff }), false);
+    assert.deepEqual(readdirSync(away), []);
     // freeShownName is reveal.js's now, as show and which use it.
     assert.equal(freeShownName(folder, "Talk", ".mov"), "Talk 2.mov");
     rmSync(dir, { recursive: true, force: true });

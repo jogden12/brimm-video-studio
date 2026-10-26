@@ -7,7 +7,7 @@
 // opens and reveals as it always did. Every copy is listed by its folder's marker before it is made, and `behind` takes away what
 // the markers list (clearShownIn), in the episodes' own shown/ folders and in these.
 import { chmodSync, constants as fsConstants, copyFileSync, lstatSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
-import { extname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { effectiveLock, workFolder } from "./settings.js";
 import { fileSafe } from "./names.js";
 
@@ -27,8 +27,15 @@ export function shownByIdFolder(home, id) {
 /** Make the folder `dir` of shownByIdFolder, and check it, and the shown/ folder it is in, are folders and not links: a copy is never
     put through a link. Throws when either is not. */
 export function madeShownByIdFolder(dir) {
-  mkdirSync(dir, { recursive: true });
-  for (const at of [join(dir, ".."), dir]) {
+  const shown = dirname(dir);
+  mkdirSync(dirname(shown), { recursive: true });
+  // Each is made only once the one above it is known to be a folder, so that nothing is made through a link either.
+  for (const at of [shown, dir]) {
+    try {
+      mkdirSync(at);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
     if (!lstatSync(at).isDirectory()) throw Object.assign(new Error("its folder is not one"), { code: "ENOTDIR" });
   }
 }
@@ -110,7 +117,8 @@ const HANDOFF = ".brimm-ops.json";
     program runner). Strict (the lock in effect, from this Mac's `settings` and `minimum`, settings.js effectiveLock): `open -R` of
     the file itself, as always. Open: it is copied into shownByIdFolder, named by the label as `show` and `which` name theirs (a
     hand-off "<label>.brimm-ops.json", anything else "<label><its ending>"; a default label holds a ":" and a label may hold a "/",
-    which fileSafe takes out, and a name taken is never written over), listed by the folder's marker first, a video by `clone` (a
+    which fileSafe takes out, a dot it starts with is left out, and a name taken is never written over), listed by the folder's
+    marker first, a video by `clone` (a
     clone takes no room) and anything else as a read-only copy; and that copy is shown. True when it was shown; false when the copy
     could not be made, and nothing was shown: the caller then says cantOpen(label). */
 export async function revealed({ home, settings, minimum, run, record, label, path, clone }) {
@@ -122,7 +130,8 @@ export async function revealed({ home, settings, minimum, run, record, label, pa
   try {
     const dir = shownByIdFolder(home, record && record.id);
     madeShownByIdFolder(dir);
-    const name = freeShownName(dir, fileSafe(label), path.endsWith(HANDOFF) ? HANDOFF : extname(path));
+    // A name that starts with a dot is one Finder hides, which she could not drag.
+    const name = freeShownName(dir, fileSafe(label).replace(/^\.+/, "") || "video", path.endsWith(HANDOFF) ? HANDOFF : extname(path));
     addShown(dir, name);
     copy = join(dir, name);
     if (clone) clone(path, copy);

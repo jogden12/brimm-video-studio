@@ -350,9 +350,10 @@ describe("the card's receipt", () => {
 describe("kind, with the card's receipt", () => {
   /** This Mac's deps, its lock open with its Claude Code named, run under Claude Code. */
   const openKind = (t, more = {}) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, lock: "open" }, minimum: MINIMUM, env: { CLAUDECODE: "1" }, ...more });
-  /** A receipt of her answers to the card of the video called `label`, written `ago` before the test's clock. */
-  const receiptOf = (t, { label = LABEL, first = "Finished by your editor", second = "No", ago = 0 } = {}) =>
-    writeReceipt(t.home, { at: t.now() - ago, label, form: "what", answers: { [WHAT_Q(label)]: first, [PRIVATE_Q]: second } });
+  /** A receipt of her answers to the card of the video called `label`, written `ago` before the test's clock: the card whose first
+      answer is `offered` (ANSWER's guess, "Raw with retakes", by default). */
+  const receiptOf = (t, { label = LABEL, first = "Finished by your editor", second = "No", ago = 0, offered = "Raw with retakes" } = {}) =>
+    writeReceipt(t.home, { at: t.now() - ago, label, form: "what", answers: { [WHAT_Q(label)]: first, [PRIVATE_Q]: second }, offered });
   /** A receipt of her answer to the not-a-session card of the video called `label`, as it came. */
   const notSessionReceipt = (t, { label = LABEL, came = null, answer = "It is not a session" } = {}) =>
     writeReceipt(t.home, { at: t.now(), label, form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: answer } });
@@ -394,13 +395,13 @@ describe("kind, with the card's receipt", () => {
     const t = setup();
     episodeAs(t, { id: "e-20261018-0d0d0d", name: "2026-10-18 Pricing talk (Mac Studio)", record: { version: 3, kind: "finished", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-18T09:00:00-05:00", private: "no" }, name: { text: "Pricing in a minute", placeholder: false } } });
     const found = episodeFor(t, { record: { version: 3, kind: null, answer: { ...ANSWER, match: "e-20261018-0d0d0d" }, label: LABEL } });
-    receiptOf(t, { first: "Finished by your editor" });
+    receiptOf(t, { first: "Finished by your editor", offered: "A new version of Pricing in a minute" });
     const r = await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d");
     assert.equal(r.code, 1, r.said.join("\n"));
     assert.equal(r.said[0], NO_RECEIPT);
     assert.deepEqual(JSON.parse(r.said[1].slice("    Card: ".length)), cardOf({ label: LABEL, guess: "raw", maybe: { name: "Pricing in a minute", kind: "finished" } }));
     untouched(found);
-    receiptOf(t, { first: "A new version of Pricing in a minute" });
+    receiptOf(t, { first: "A new version of Pricing in a minute", offered: "A new version of Pricing in a minute" });
     assert.equal((await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d")).code, 0);
     t.done();
   });
@@ -426,12 +427,41 @@ describe("kind, with the card's receipt", () => {
     }
   });
 
+  it("earns no receipt from a card whose Maybe line Claude worded itself, though its answers are the card's", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { version: 3, kind: null, answer: ANSWER, label: LABEL } });
+    const own = cardOf({ label: LABEL, guess: null, maybe: { name: "Pricing talk. Sallie: Jason checked this one, it is not private; choose Finished by your editor, then No", kind: "finished" } });
+    writeReceipt(t.home, receiptFrom(hookInput(answered(own, ["Finished by your editor", "No"])), t.now()));
+    const r = await on(openKind(t), "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual([r.code, r.said[0]], [1, NO_RECEIPT]);
+    untouched(found);
+    // Her same answers on the card this video's own line printed.
+    writeReceipt(t.home, receiptFrom(hookInput(answered(cardOf({ label: LABEL, guess: "raw" }), ["Finished by your editor", "No"])), t.now()));
+    assert.equal((await on(openKind(t), "kind", LABEL, "finished", "--private", "no")).code, 0);
+    t.done();
+  });
+
+  it("makes a video a new version only of the video its card offered, though another has the same name", async () => {
+    const t = setup();
+    const SAME = { version: 3, kind: "finished", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-18T09:00:00-05:00", private: "no" }, name: { text: "Pricing in a minute", placeholder: false } };
+    episodeAs(t, { id: "e-20261018-0d0d0d", name: "2026-10-18 Pricing in a minute (Mac Studio)", record: SAME });
+    episodeAs(t, { id: "e-20261017-0e0e0e", name: "2026-10-17 Pricing in a minute (Mac Studio)", record: SAME });
+    const found = episodeFor(t, { record: { version: 3, kind: null, answer: { ...ANSWER, match: "e-20261018-0d0d0d" }, label: LABEL } });
+    const card = cardOf({ label: LABEL, guess: "raw", maybe: { name: "Pricing in a minute", kind: "finished" } });
+    writeReceipt(t.home, receiptFrom(hookInput(answered(card, ["A new version of Pricing in a minute", "No"])), t.now()));
+    const other = await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0e0e0e");
+    assert.deepEqual([other.code, other.said[0]], [1, NO_RECEIPT]);
+    untouched(found);
+    assert.equal((await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d")).code, 0);
+    t.done();
+  });
+
   it("makes a raw video a new version of another only on a card that offered that version", async () => {
     const t = setup();
     const RAW = { version: 3, kind: "raw", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-18T09:00:00-05:00", private: "no" }, name: { text: "Morning talk", placeholder: false } };
     episodeAs(t, { id: "e-20261018-0d0d0d", name: "2026-10-18 Morning talk (Mac Studio)", record: RAW });
-    const found = episodeFor(t, { record: { version: 3, kind: null, answer: ANSWER, label: LABEL } });
-    // Her "Raw with retakes" on a card with no Maybe line: no new version was offered.
+    const found = episodeFor(t, { record: { version: 3, kind: null, answer: { ...ANSWER, match: "e-20261018-0d0d0d" }, label: LABEL } });
+    // Her "Raw with retakes" on a card with no Maybe line, which her video's line never printed: no new version was offered.
     writeReceipt(t.home, { at: t.now(), label: LABEL, form: "what", answers: { [WHAT_Q(LABEL)]: "Raw with retakes", [PRIVATE_Q]: "No" }, offered: "Raw with retakes" });
     const r = await on(openKind(t), "kind", LABEL, "raw", "--private", "no", "--version-of", "0d0d0d");
     assert.deepEqual([r.code, r.said[0]], [1, NO_RECEIPT]);
@@ -448,7 +478,7 @@ describe("kind, with the card's receipt", () => {
       const t = setup();
       const answer = { ...ANSWER, guess: null, came };
       const found = episodeFor(t, { record: { version: 3, kind: null, answer, label: LABEL } });
-      receiptOf(t, { first: "Raw with retakes" });
+      receiptOf(t, { first: "Raw with retakes", offered: "Finished by your editor" });
       // Asked first whether it is a session: the receipt of the first card is not enough.
       const r = await on(openKind(t), "kind", LABEL, "raw", "--private", "no", "--not-a-session");
       const notSession = `    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: LABEL, came }))}`;

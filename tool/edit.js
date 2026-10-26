@@ -629,6 +629,15 @@ function maybeOf(named, others, links) {
   return null;
 }
 
+/** Her card for the video with no kind whose record is `named`, called `label` (receipts.js cardOf): by its Guess line, and the Maybe
+    line cardLines says. */
+function cardFor(named, label, others, links) {
+  const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
+  const found = maybeOf(named, others, links);
+  const maybe = !found ? null : found.session ? { session: true } : { name: shownName(found.record), kind: recordKind(found.record) };
+  return cardOf({ label, guess: Object.hasOwn(GUESS_WORDS, answer.guess) ? answer.guess : null, maybe });
+}
+
 /** The card's own lines for the video with no kind whose record is `named`, called `label` (R10): "    Card: <JSON>", the card her
     skill asks with AskUserQuestion as it is (receipts.js cardOf, by its Guess line and the Maybe line cardLines says), and, when it
     came as a Zoom download or as sound alone, or `notASession` asks for it, "    Card if not a session: <JSON>" (notSessionCardOf,
@@ -636,10 +645,7 @@ function maybeOf(named, others, links) {
     first. `others` and `links` are as cardLines has them. */
 export function cardLinesFor(named, label, others, links, { notASession = false } = {}) {
   const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
-  const found = maybeOf(named, others, links);
-  const maybe = !found ? null : found.session ? { session: true } : { name: shownName(found.record), kind: recordKind(found.record) };
-  const guess = Object.hasOwn(GUESS_WORDS, answer.guess) ? answer.guess : null;
-  const lines = [`    Card: ${JSON.stringify(cardOf({ label, guess, maybe }))}`];
+  const lines = [`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`];
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
   if (came || notASession) lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came }))}`);
   return lines;
@@ -3219,7 +3225,7 @@ function notInFinalCut(ctx, found, record) {
   if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.`;
   return `${name} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
 }
-const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
+const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.` : `The hand-off is written as revision ${revision}.`);
 /** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
     her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
 const hasFinalCut = (record) => {
@@ -3282,7 +3288,8 @@ async function importHandoff(ctx, found, record, done) {
   if (wrote.why) return refuse(ctx, wrote.why);
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
   else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.`);
-  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision)}`);
+  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}`);
+  // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
   if (wrote.shown === false) ctx.say(cantOpen(shownName(record)));
   return 0;
 }
@@ -3899,18 +3906,24 @@ function receiptHeld(ctx, record, plan, name) {
   const answer = record.answer !== null && typeof record.answer === "object" ? record.answer : {};
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
   const target = plan.target ? plan.target.record : null;
+  const links = linksOf(ctx.root);
+  const others = listedEpisodes(ctx, links);
+  // The receipt is of the card this video's line prints, its first answer among it (Claude may word no part of it), and a new version
+  // is only of the video its Maybe line offered, by its id: two videos may have one name, and the chat sees neither's (below).
+  const card = cardFor(record, name, others, links);
+  const maybe = maybeOf(record, others, links);
+  const offeredTarget = !target || (maybe && maybe.record && maybe.record.id === target.id);
   // Her card names the video as `episodes` printed it, or as this command prints it, without the names of the video it found (ctx.say).
   const said = (text) => (ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
   const now = ctx.now();
-  for (const spell of [(text) => text, said]) {
+  for (const spell of offeredTarget ? [(text) => text, said] : []) {
     const label = spell(name);
-    const expected = expectedAnswers({ label, stored: plan.stored, maybeName: target ? spell(shownName(target)) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came });
+    const expected = expectedAnswers({ label, stored: plan.stored, maybeName: target ? spell(shownName(target)) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came, offered: spell(card.questions[0].options[0].label) });
     if (receiptWhy({ home: ctx.home, expected, now }) === "") return true;
     if (plan.stored === "session" && receiptWhy({ home: ctx.home, expected: sessionByFollowUp({ label, came }), now }) === "") return true;
   }
   ctx.say(NO_RECEIPT);
-  const links = linksOf(ctx.root);
-  for (const line of cardLinesFor(record, name, listedEpisodes(ctx, links), links, { notASession: plan.notASession })) ctx.say(line);
+  for (const line of cardLinesFor(record, name, others, links, { notASession: plan.notASession })) ctx.say(line);
   return false;
 }
 
@@ -4427,7 +4440,7 @@ async function answerKind(ctx, found, plan, began) {
     hideNames(ctx, episodeAt(ctx, found.name));
     const shown = !(empty && empty.handoff) || (await showInFinder(ctx, { record: next, label: next.name.text, path: join(found.folder, empty.handoff.rel) }));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
-    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
+    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
     if (!shown) say(cantOpen(next.name.text));
     if (owed.length) say(owedWords(next.name.text));
     sayVersionsToMark(ctx, found, next);
@@ -4522,7 +4535,9 @@ const OUT_OF_SHARED = "Its files are out of the shared folder.";
 /** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
     for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
     held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
-const emptyWritten = (label, n, gone = true) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`;
+const emptyWritten = (label, n, gone = true, shown = true) => (shown
+  ? `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`
+  : `The empty session revision of ${label} is written as revision ${n}.${gone ? ` ${WORDS_GONE}` : ""}`);
 const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
 const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
 const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
@@ -4793,14 +4808,15 @@ function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
   const fault = handoffFaultV2(made);
   if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
   const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
-  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone) };
+  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone), unshown: emptyWritten(label, target.revision, gone, false) };
 }
 
 /** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
     its words, and when it was not written, that its files are out of the shared folder, unless some stayed in final/, which are
     said, by what they are. */
-function sayEmpty(ctx, label, empty, stayed) {
-  ctx.say(empty.handoff || stayed.length ? empty.words : `${empty.words} ${OUT_OF_SHARED}`);
+function sayEmpty(ctx, label, empty, stayed, shown = true) {
+  const words = shown ? empty.words : empty.unshown;
+  ctx.say(empty.handoff || stayed.length ? words : `${words} ${OUT_OF_SHARED}`);
   if (stayed.length) ctx.say(stayedWords(label, whatsInFinal(stayed)));
 }
 
@@ -4836,7 +4852,7 @@ async function emptyRevisionAgain(ctx, found, record) {
   if (wrote.code !== 0) return 1;
   forgetComing(ctx, found);
   const shown = !handoff || (await showInFinder(ctx, { record: next, label, path: join(found.folder, empty.handoff.rel) }));
-  if (empty) sayEmpty(ctx, label, empty, wrote.stayed);
+  if (empty) sayEmpty(ctx, label, empty, wrote.stayed, shown);
   else {
     ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
     if (wrote.stayed.length) ctx.say(stayedWords(label, whatsInFinal(wrote.stayed)));
@@ -4994,8 +5010,9 @@ export async function whichCommand(ctx, rest) {
   let opened = "";
   if (here) {
     try {
-      // The clone `which` made before goes first; the copies `show` made stay.
-      clearShownIn(madeShownDir(ctx, found, record), (listed) => !listed.endsWith(".txt"));
+      // The clone `which` made before goes first; the copies `show` made stay. On an open-lock Mac the copies Finder showed are in
+      // the same folder, for her to drag: nothing in it is taken away until `behind`.
+      if (lockFor(ctx.settings, ctx.deps) !== "open") clearShownIn(madeShownDir(ctx, found, record), (listed) => !listed.endsWith(".txt"));
       const dir = madeShownDir(ctx, found, record);
       const named = freeShownName(dir, fileSafe(name), extname(record.video.file));
       addShown(dir, named);
@@ -5329,7 +5346,8 @@ async function finishSessionCommand(ctx, found) {
   }
   for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);
   const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
-  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film. It is shown in Finder: drop it on the BRIMM Ops page.`);
+  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film.${done.shown === false ? "" : " It is shown in Finder: drop it on the BRIMM Ops page."}`);
+  // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
   if (done.shown === false) ctx.say(cantOpen(name));
   return 0;
 }
@@ -5578,7 +5596,13 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
   const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
   if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
-  // On an open-lock Mac the video to post is shown as a clone of it, made only of one whole on this Mac (cloneWhole, as `which`).
+  // On an open-lock Mac the video to post is shown as a clone of it, made only of one whole on this Mac (cloneWhole, as `which`):
+  // one that is not, Dropbox is had bring over first, as `show` does.
+  if (video && lockFor(ctx.settings, ctx.deps) === "open" && !ctx.isWhole(path)) {
+    const name = basename(folder);
+    if (runningCommand(ctx.home, name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: name, args: [where.join("/")] });
+    return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
+  }
   const clone = video ? (from, to) => {
     if (!ctx.isWhole(from)) throw new Error("it is not whole on this Mac");
     cloneWhole(ctx, from, to);

@@ -207,13 +207,15 @@ function whatAnswer({ stored, maybeName, maybeKind }) {
 
 /** The answers `kind` needs a receipt of, for the video called `label` answered as `stored`: her card's, and with `notASession` the
     not-a-session card's too, worded for how it came (`came`, zoom, sound, or null when the record does not say), each as { form,
-    answers }, and `offered`, the first answer the card must have offered, where her answer alone does not say which video it is a
-    new version of. A kind no card offers is expected as an answer no card has, which no receipt holds. */
-export function expectedAnswers({ label, stored, maybeName = null, maybeKind = null, notASession = false, came = null }) {
-  const first = whatAnswer({ stored, maybeName, maybeKind });
-  const expected = [{ form: "what", answers: { [WHAT_Q(label)]: first === null ? "" : first, [PRIVATE_Q]: stored === "session" ? "Yes" : "No" } }];
+    answers }, and `offered`, the first answer her card must have offered: the one given (the card the video's line prints, whose
+    other answers follow from it), and for a raw new version of a raw video the version itself, where her answer alone does not say
+    which video it is a new version of. A kind no card offers is expected as an answer no card has, which no receipt holds. */
+export function expectedAnswers({ label, stored, maybeName = null, maybeKind = null, notASession = false, came = null, offered }) {
   // "Raw with retakes" makes a raw video a new version of another raw one only on the card that offered that version first.
-  if (stored === "raw" && typeof maybeName === "string" && maybeKind === "raw") expected[0].offered = versionOf({ name: maybeName, kind: "raw" });
+  const must = stored === "raw" && typeof maybeName === "string" && maybeKind === "raw" ? versionOf({ name: maybeName, kind: "raw" }) : undefined;
+  const first = must !== undefined && offered !== undefined && must !== offered ? null : whatAnswer({ stored, maybeName, maybeKind });
+  const expected = [{ form: "what", answers: { [WHAT_Q(label)]: first === null ? "" : first, [PRIVATE_Q]: stored === "session" ? "Yes" : "No" } }];
+  if (offered !== undefined || must !== undefined) expected[0].offered = offered !== undefined ? offered : must;
   if (notASession) expected.push({ form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: NOT_SESSION } });
   return expected;
 }
