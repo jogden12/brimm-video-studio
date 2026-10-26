@@ -119,9 +119,9 @@ const V1 = "Its hand-off is written once this Mac hands off version 2: ask Jason
 const STAGE_ROWS = [
   [DROP(), "arriving", 'It is coming into your drop folder. Wait for the "Ready" notice.'],
   [{ ...DROP({ here: false }), mac: "Mac Studio" }, "arriving", 'It is in the drop folder of the Mac Studio. Wait for the "Ready" notice on that Mac.'],
-  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360 }), "importing", 'It is being imported, at Writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'],
-  [DROP({ state: "importing", step: "Writing the transcript", left: 180 }), "importing", 'It is being imported, at Writing the transcript, about 3 minutes left of this step. Wait for the "Ready" notice.'],
-  [{ ...DROP({ here: false, state: "importing", step: "Writing the transcript" }), mac: "Mac Studio" }, "importing", 'It is being imported on the Mac Studio, at Writing the transcript. Wait for the "Ready" notice on that Mac.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360 }), "importing", 'It is being imported, at writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180 }), "importing", 'It is being imported, at writing the transcript, about 3 minutes left of this step. Wait for the "Ready" notice.'],
+  [{ ...DROP({ here: false, state: "importing", step: "Writing the transcript" }), mac: "Mac Studio" }, "importing", 'It is being imported on the Mac Studio, at writing the transcript. Wait for the "Ready" notice on that Mac.'],
   [DROP({ state: "retry" }), "retry", 'Its import did not finish. Say "try it again".'],
   [{ ...DROP({ here: false, state: "retry" }), mac: "Sallie's laptop" }, "retry", "Its import did not finish on Sallie's laptop. Say \"try it again\" on that Mac."],
   [DROP({ state: "zoom" }), "zoom", "It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder."],

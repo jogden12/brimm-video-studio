@@ -169,6 +169,9 @@ const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, 
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
 
+/** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case. */
+const midSentence = (step) => step[0].toLowerCase() + step.slice(1);
+
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {
   const on = drop.here ? "" : ` on ${spokenMac(mac)}`;
@@ -177,7 +180,7 @@ function dropNext(drop, mac) {
   if (drop.state === "arriving") return toDo("arriving", `${drop.here ? "It is coming into your drop folder." : `It is in the drop folder of ${spokenMac(mac)}.`} ${ready}`);
   if (drop.state === "importing") {
     const left = drop.total != null ? `${aboutLeft(drop.total)} left in all` : drop.left != null ? `${aboutLeft(drop.left)} left of this step` : "";
-    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${drop.step}` : ""}${left ? `, ${left}` : ""}. ${ready}`);
+    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${midSentence(drop.step)}` : ""}${left ? `, ${left}` : ""}. ${ready}`);
   }
   if (drop.state === "retry") return toDo("retry", `Its import did not finish${on}. Say "try it again"${there}.`);
   // A Zoom download. On the other Mac the place it goes is a sentence of its own, to keep each under 25 words.

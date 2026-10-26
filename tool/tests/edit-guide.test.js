@@ -202,7 +202,7 @@ describe("guide, from the drop folders", () => {
       '  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.',
       "  GMT20261020-140000_Recording: It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder.",
       '  Video of 20 Oct, 14:00 (Mac Studio): Its import did not finish. Say "try it again".',
-      '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at Writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'
+      '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'
     ]);
     assert.doesNotMatch(r.said.join("\n"), /Jane|Client|Second|Third|Other|Filed|\.mov|\.mp4/);
     t.done();
@@ -220,7 +220,7 @@ describe("guide, from the drop folders", () => {
     assert.equal(r.code, 0);
     assert.deepEqual(r.said.slice(2).sort(), [
       "  Video of 20 Oct, 14:40 (Sallie's laptop): Its import did not finish on Sallie's laptop. Say \"try it again\" on that Mac.",
-      "  Video of 20 Oct, 14:50 (Sallie's laptop): It is being imported on Sallie's laptop, at Writing the transcript. Wait for the \"Ready\" notice on that Mac."
+      "  Video of 20 Oct, 14:50 (Sallie's laptop): It is being imported on Sallie's laptop, at writing the transcript. Wait for the \"Ready\" notice on that Mac."
     ]);
     assert.doesNotMatch(r.said.join("\n"), /Other|Another|\.mov|minute/);
     t.done();
@@ -321,7 +321,7 @@ describe("guide wait", () => {
     dropIn(t, "Mac Studio", "Client Jane.mov");
     const wait = onWait(t, 2, () => statusOf(t, { import: "b1", video: "Client Jane.mov", label: "Video of 20 Oct, 15:00 (Mac Studio)", at: "2026-10-20T15:00:10-05:00" }));
     const r = await on(light(t, { wait }), "guide", "wait");
-    assert.deepEqual(r, { code: 0, said: [DROP_LINE, "Under way:", '  Video of 20 Oct, 15:00 (Mac Studio): It is being imported, at Reading the sound. Wait for the "Ready" notice.'] });
+    assert.deepEqual(r, { code: 0, said: [DROP_LINE, "Under way:", '  Video of 20 Oct, 15:00 (Mac Studio): It is being imported, at reading the sound. Wait for the "Ready" notice.'] });
     assert.deepEqual(t.waits, [5000, 5000]);
     t.done();
   });
