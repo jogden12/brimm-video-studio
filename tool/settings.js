@@ -93,20 +93,23 @@ function teachingsWhole(t) {
 
 /** Whether `entry` is one her folder may allow besides the default (design 2026-10-26, section 2, "The allowlist is data"):
     typed, and exact. A skill by its name; a claude.ai connector's tool by its exact name, never a local extension's, never a
-    family (`*`), and never one the never list's words catch; or a tool that is not an MCP tool and that the never list does not
-    hold (the Cron tools and Workflow may be named, R16). */
+    family (`*`), and never one the never list's words catch; or a tool by its bare name (no rule such as `Read(~/.ssh/id)`), not an
+    MCP tool, that the never list does not hold (the Cron tools and Workflow may be named, R16). */
 function allowedEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.name !== "string") return false;
   const { type, name } = entry;
   if (type === "skill") return /^[a-z0-9][a-z0-9-]*$/.test(name);
   if (type === "mcp-tool") return isConnector(name) && !name.includes("*") && !neverCaught(name);
-  if (type === "tool") return name !== "" && !name.startsWith("mcp__") && !name.includes("*") && !neverCaught(name);
+  if (type === "tool") return /^[A-Z][A-Za-z0-9]*$/.test(name) && !neverCaught(name);
   return false;
 }
 
+/** Whether a setting of her folder's lock is set: there, and not null, which is taken as not set, as sessionTeachings' is. */
+const isSet = (value) => value !== undefined && value !== null;
+
 /** What is wrong with this Mac's settings, in plain words: "" when nothing is. The settings of the switch (import, readings,
     handoffVersion, drop and sessionTeachings) and of her folder's lock (lock, web, zoomFolder, proxyPort, studioNode and
-    studioAllow) need not be there, and are checked when they are. */
+    studioAllow) need not be there, and are checked when they are; one of the lock's that is null is not set. */
 export function settingsFault(s) {
   if (!s || typeof s !== "object" || Array.isArray(s) || s.version !== 1) return "they are not version 1 of brimm-video's settings";
   const fault = machineFault(s.machine);
@@ -120,14 +123,14 @@ export function settingsFault(s) {
   if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && s.sessionTeachings !== false && !teachingsWhole(s.sessionTeachings)) {
     return "the setting for teachings from sessions is neither off (null or false) nor what node settings.js sessions --teachings on writes";
   }
-  if (s.lock !== undefined && s.lock !== "strict" && s.lock !== "open") return 'the lock must be "strict" or "open"';
-  if (s.web !== undefined && s.web !== "held" && s.web !== "open") return 'the web tools must be "held" or "open"';
-  if (s.zoomFolder !== undefined && (typeof s.zoomFolder !== "string" || !isAbsolute(s.zoomFolder))) return "the Zoom folder is not a whole path";
-  if (s.proxyPort !== undefined && !(Number.isInteger(s.proxyPort) && s.proxyPort >= 1024 && s.proxyPort <= 65535)) {
+  if (isSet(s.lock) && s.lock !== "strict" && s.lock !== "open") return 'the lock must be "strict" or "open"';
+  if (isSet(s.web) && s.web !== "held" && s.web !== "open") return 'the web tools must be "held" or "open"';
+  if (isSet(s.zoomFolder) && (typeof s.zoomFolder !== "string" || !isAbsolute(s.zoomFolder))) return "the Zoom folder is not a whole path";
+  if (isSet(s.proxyPort) && !(Number.isInteger(s.proxyPort) && s.proxyPort >= 1024 && s.proxyPort <= 65535)) {
     return "the proxy port must be a whole number from 1024 to 65535";
   }
-  if (s.studioNode !== undefined && (typeof s.studioNode !== "string" || !isAbsolute(s.studioNode))) return "the node her folder was written with is not a whole path";
-  if (s.studioAllow !== undefined && !(Array.isArray(s.studioAllow) && s.studioAllow.every(allowedEntry))) {
+  if (isSet(s.studioNode) && (typeof s.studioNode !== "string" || !isAbsolute(s.studioNode))) return "the node her folder was written with is not a whole path";
+  if (isSet(s.studioAllow) && !(Array.isArray(s.studioAllow) && s.studioAllow.every(allowedEntry))) {
     return "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
   }
   return "";
@@ -619,13 +622,17 @@ function show(home, say, now) {
   if (s.sessionTeachings) {
     say(`  Teachings from sessions:  ${teachingsOn(s, now) ? "on" : teachingsLapsed(s, now) ? "lapsed" : "off"}, turned on ${s.sessionTeachings.at} (the claude command: (not shown); the Code tab: (not shown))`);
   }
-  if (s.lock !== undefined) say(`  Her folder's lock:  ${s.lock}`);
-  if (s.web !== undefined) say(`  The web tools:  ${s.web}`);
-  if (s.zoomFolder !== undefined) say(`  Zoom's recordings:  ${s.zoomFolder}`);
-  if (s.studioAllow !== undefined) say(`  Also allowed in her folder:  ${s.studioAllow.length ? s.studioAllow.map(({ type, name }) => `${type} ${name}`).join(", ") : "nothing more"}`);
-  if (s.proxyPort !== undefined) say(`  Her folder's proxy port:  ${s.proxyPort}`);
+  if (isSet(s.lock)) say(`  Her folder's lock:  ${s.lock}`);
+  if (isSet(s.web)) say(`  The web tools:  ${s.web}`);
+  if (isSet(s.zoomFolder)) say(`  Zoom's recordings:  ${s.zoomFolder}`);
+  if (isSet(s.studioAllow)) say(`  Also allowed in her folder:  ${s.studioAllow.length ? s.studioAllow.map(({ type, name }) => `${type} ${name}`).join(", ") : "nothing more"}`);
+  if (isSet(s.proxyPort)) say(`  Her folder's proxy port:  ${s.proxyPort}`);
   return 0;
 }
+
+/** The proxy port `studio --print` shows when this Mac's settings store none: it picks none to print, since the port it would
+    pick is not the one a later write stores. */
+const NO_PORT = "<port>";
 
 /** What `studio` says, and does, when told --lock open while no Claude Code is named for the open lock (OPEN_LOCK_CLAUDE). */
 const NOT_YET = 'Not changed: the open lock waits for the checks by hand in the Code tab (the design\'s "By hand before K1 ships"). Her folder keeps the strict lock.';
@@ -676,9 +683,10 @@ function freeLocalPort() {
     open only when the settings say so and `openMinimum` (OPEN_LOCK_CLAUDE) is named, never from what the settings say alone. With
     the open lock in effect it also records the node (studioNode: the lock check compares her folder with what this checkout
     writes for it, R17) and, the first time, a proxy port `freePort` picks. --lock open is refused, with nothing written, while
-    `openMinimum` is null. --print says the settings her folder would get, as JSON, and writes nothing at all: for the lock the
-    settings would say, whatever `openMinimum` is, so that the open shape can be tried by hand before it is named. Gives the number
-    it ends with, or a promise of it while a port is picked. */
+    `openMinimum` is null. --print says the settings her folder would get, as JSON, and writes nothing at all: for the lock in
+    effect, or for the lock --lock names, whatever `openMinimum` is, so that the open shape can be tried by hand before it is
+    named; with the port this Mac's settings store, or NO_PORT, never one picked for it. Gives the number it ends with, or a
+    promise of it while a port is picked. */
 function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
   const told = studioToldBy(rest);
   if (!told) {
@@ -705,13 +713,14 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
     say(`Not written: ${fault}.`);
     return 1;
   }
-  const lock = told.print ? lockOf(would) : effectiveLock(would, openMinimum);
+  const lock = told.print ? (told.lock ?? effectiveLock(would, openMinimum)) : effectiveLock(would, openMinimum);
   const open = lock === "open";
   const write = (port) => {
     const changes = open ? { ...given, studioNode: told.node, proxyPort: port } : given;
     const facts = open ? factsOf(home, { ...would, ...changes }, { tmp, uid }) : undefined;
     if (told.print) {
-      say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts })[".claude/settings.json"].trimEnd());
+      const shown = facts && facts.port === null ? { ...facts, port: NO_PORT } : facts;
+      say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts: shown })[".claude/settings.json"].trimEnd());
       return 0;
     }
     try {
@@ -729,7 +738,7 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
       return 1;
     }
   };
-  const port = open ? proxyPortOf(would) ?? freePort() : null;
+  const port = open ? proxyPortOf(would) ?? (told.print ? null : freePort()) : null;
   if (port && typeof port.then === "function") {
     return port.then(write, (e) => {
       say(`The folder for Claude could not be written (no free port was found: ${(e && e.code) || "an error"}).`);

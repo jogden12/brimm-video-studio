@@ -304,9 +304,23 @@ describe("this Mac's lock settings (the open lock, K1)", () => {
     const WHY = "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
     const id = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
     for (const ok of [{ type: "skill", name: "theme-factory" }, { type: "mcp-tool", name: id + "list_designs" }, { type: "tool", name: "CronCreate" }]) assert.equal(settingsFault({ ...good, studioAllow: [ok] }), "");
-    for (const bad of [{ type: "skill", name: "../x" }, { type: "mcp-tool", name: "mcp__PDF_Tools__fill_pdf" }, { type: "mcp-tool", name: id + "*" }, { type: "mcp-tool", name: id + "send_invoice" }, { type: "tool", name: "Monitor" }, { type: "tool", name: "NotebookEdit" }, { type: "tool", name: "Artifact" }, { type: "plugin", name: "x" }, "brimm-edit"])
+    for (const bad of [{ type: "skill", name: "../x" }, { type: "mcp-tool", name: "mcp__PDF_Tools__fill_pdf" }, { type: "mcp-tool", name: id + "*" }, { type: "mcp-tool", name: id + "send_invoice" }, { type: "tool", name: "Monitor" }, { type: "tool", name: "NotebookEdit" }, { type: "tool", name: "Artifact" }, { type: "tool", name: "Read(~/.ssh/id)" }, { type: "tool", name: "Read" + "(x)" }, { type: "tool", name: "cronCreate" }, { type: "tool", name: "Cron Create" }, { type: "plugin", name: "x" }, "brimm-edit"])
       assert.equal(settingsFault({ ...good, studioAllow: [bad] }), WHY, JSON.stringify(bad));
     assert.equal(settingsFault({ ...good, studioAllow: { type: "skill", name: "theme-factory" } }), WHY);
+  });
+  it("takes a lock, web, Zoom folder, proxy port, node or allowed list of null as not set, and shows none of them", () => {
+    const unset = { lock: null, web: null, zoomFolder: null, proxyPort: null, studioNode: null, studioAllow: null };
+    assert.equal(settingsFault({ ...good, ...unset }), "");
+    assert.deepEqual([lockOf(unset), webOf(unset), zoomFolderOf(unset, "/Users/sallie"), studioAllowOf(unset), proxyPortOf(unset), studioNodeOf(unset)], ["strict", "held", "/Users/sallie/Documents/Zoom", [], null, null]);
+    const t = setup();
+    writeSettings(t.home, t.given);
+    assert.equal(t.asked("show"), 0);
+    const today = [...t.said];
+    t.said.length = 0;
+    writeSettings(t.home, unset);
+    assert.equal(t.asked("show"), 0);
+    assert.deepEqual(t.said, today);
+    t.done();
   });
   it("shows the lock, the web tools, Zoom's folder, the entries allowed and the proxy port, each only when it is set", () => {
     const t = setup();
@@ -376,7 +390,7 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     const t = studioWorld();
     writeSettings(t.home, { lock: "open" });
     const before = readFileSync(settingsFile(t.home), "utf8");
-    assert.equal(t.asked("studio", "--node", NODE), 0);
+    assert.equal(t.run(null, "studio", "--node", NODE), 0);
     assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
     assert.equal(t.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder() })[".claude/settings.json"]);
     assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
@@ -387,7 +401,7 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
   it("refuses the open lock, writing nothing, until the Claude Code it was checked on is named", () => {
     const t = studioWorld();
     const before = readFileSync(settingsFile(t.home), "utf8");
-    assert.equal(t.asked("studio", "--node", NODE, "--lock", "open", "--web", "open", "--zoom", join(t.home, "Zoom")), 1);
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--web", "open", "--zoom", join(t.home, "Zoom")), 1);
     assert.equal(t.said.at(-1), NOT_YET);
     const s = readSettings(t.home).settings;
     assert.deepEqual([s.lock, s.web, s.zoomFolder, s.studioNode], [undefined, undefined, undefined, undefined]);
@@ -446,13 +460,33 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     const folder = realOf(studioFolder(t.home));
     assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
     assert.equal(t.said.length, 1);
-    const facts = factsOf(t.home, { ...t.settings(), lock: "open", proxyPort: 47123 }, { tmp: t.tmp, uid: 502 });
+    const facts = { ...factsOf(t.home, { ...t.settings(), lock: "open" }, { tmp: t.tmp, uid: 502 }), port: "<port>" };
     assert.deepEqual(JSON.parse(t.said[0]), openSettingsOf({ checkout: CHECKOUT, node: NODE, folder, facts }));
     assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--print"), 0);
     assert.deepEqual(JSON.parse(t.said[0]), JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder })[".claude/settings.json"]));
     assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
     assert.equal(existsSync(studioFolder(t.home)), false);
     assert.equal(existsSync(workshopFolder(t.home)), false);
+    t.done();
+  });
+  it("prints, with no --lock, the lock her folder would really get, and never picks a port to print", () => {
+    const t = studioWorld();
+    writeSettings(t.home, { lock: "open" });
+    const folder = realOf(studioFolder(t.home));
+    const strict = JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder })[".claude/settings.json"]);
+    assert.equal(t.run(null, "studio", "--node", NODE, "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), strict);
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]).sandbox.network, { deniedDomains: ["*"], httpProxyPort: "<port>", socksProxyPort: "<port>" });
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--print"), 0);
+    assert.equal(JSON.parse(t.said[0]).sandbox.network.httpProxyPort, "<port>");
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "strict", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), strict);
+    writeSettings(t.home, { proxyPort: 47200 });
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]).sandbox.network, { deniedDomains: ["*"], httpProxyPort: 47200, socksProxyPort: 47200 });
+    assert.equal(t.ports(), 0);
+    assert.equal(existsSync(studioFolder(t.home)), false);
     t.done();
   });
   it("refuses a studio line that will not do", () => {
