@@ -133,7 +133,9 @@ function upward(path) {
   }
 }
 
-const fold = (path) => path.toLowerCase();
+/** A path or name as macOS compares names: letter case folded as Unicode folds it, wider than toLowerCase (a long s is an s, a
+    dotless i an i), and compatibility forms made plain. Stricter is closed: a name it folds that macOS keeps apart is held too. */
+export const fold = (path) => path.normalize("NFKC").toLowerCase().replace(/\u0131/g, "i");
 
 /** A path under one of macOS's dot-root folders, /.vol (a file by its device and inode), /.nofollow or /.resolve, which name a
     file by a way no folder along it shows: such a path is held, whatever it names. */

@@ -224,6 +224,9 @@ describe("paths by what they are", () => {
     assert.equal(ix.at(join(w.home, "documents", "ZOOM", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));
     assert.equal(ix.at(`/System/Volumes/Data${join(w.home, "Documents", "Zoom")}`)?.path, realOf(join(w.home, "Documents", "Zoom")));
     assert.equal(ix.at(join(w.home, "Documents", "Zoom recordings", "x.m4a")), null);
+    // A long s is an s to macOS, whose names fold letter case as Unicode does.
+    assert.equal(ix.at(join(w.home, "Document\u017f", "Zoom", "x.m4a"))?.path, realOf(join(w.home, "Documents", "Zoom")));
+    assert.equal(ix.at(join(w.home, "Movie\u017f", "Final Cut Backup\u017f", "x.fcpbundle"))?.path, realOf(join(w.home, "Movies", "Final Cut Backups")));
   });
   it("holds a path by macOS's dot-root spellings, /.vol, /.nofollow and /.resolve, and a search of them", () => {
     for (const p of ["/.vol", "/.vol/16777234/2", `/.nofollow${w.episode}`, `/.resolve/1${w.episode}`, `/.nofollow${w.notes}`]) assert.ok(ix.at(p), p);

@@ -223,6 +223,12 @@ describe("the open guard, II: paths and writes", () => {
     }
     assert.deepEqual(await decide("Write", { content: "x" }), NO_WRITE);
   });
+  it("never writes a .mcp.json spelled with a long s, which macOS takes as that name", async () => {
+    for (const path of [join(w.workshop, ".mcp.j\u017fon"), join(w.workshop, "sub", ".MCP.J\u017fON")]) {
+      assert.deepEqual(await write(path), NO_WRITE, path);
+      assert.deepEqual(await edit(path), NO_WRITE, path);
+    }
+  });
   it("refuses a write through a link from the workshop into her folder", async () => {
     assert.deepEqual(await write(join(w.workshop, "h", "CLAUDE.md")), NO_WRITE);
     assert.deepEqual(await write(join(w.workshop, "h", "notes.txt")), NO_WRITE);

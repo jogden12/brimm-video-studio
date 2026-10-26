@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
 import { fetchWhy } from "./fetchable.js";
-import { claudeDirName, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
+import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
 import { HELD_NARROWED, HELD_REFUSED, chatHeld, wordsFolder } from "./held.js";
 import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
@@ -73,7 +73,6 @@ const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
 const NEVER_WRITTEN = new Set(["claude.md", "claude.local.md", ".mcp.json"]);
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const fold = (text) => text.toLowerCase();
 
 /** `path` as the real path of the gated place `place` with the rest of it after, when it lies inside it; else `path` resolved; null
     when it is the place itself, which no carve-out opens whole. */
