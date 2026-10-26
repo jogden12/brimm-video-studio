@@ -730,7 +730,8 @@ if [[ -n "$machine" ]]; then
   fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
   # With --user-deny, her user settings' deny rules, added by settings.js, which refuses user settings it cannot read and then adds none.
-  if [[ -n "$user_deny" ]] && ! "$node" "$HERE/settings.js" user-deny; then user_deny_why="yes"; fi
+  # Only when her folder was written: with studio_why set it was not, and the rules are those of the places its open lock keeps.
+  if [[ -n "$user_deny" && -z "$studio_why" ]] && ! "$node" "$HERE/settings.js" user-deny; then user_deny_why="yes"; fi
 fi
 
 agent "$node" > "$AGENT_FILE"
