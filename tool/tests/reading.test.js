@@ -134,7 +134,10 @@ const renderOf = (t) => join(episodeWork(t.home, FOLDER), "renders", `${NAME} â€
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const SESSION_LATER = "A session is read only for its teachings, which come in a later step.";
 const NOTICE = `Claude has read ${NAME}: say "what did Claude find?"`;
-const NOT_MADE = (n) => `Reel ${n} is not made yet: say "make Reel ${n}" first.`;
+/** What every command that would need a Reel a reading suggested says of it: brimm-video cannot make one yet, so she cuts it in
+    OpusClip for now, and BRIMM Ops writes its post text (Sallie's walkthrough, 25 Oct). Never "make it first": nothing makes one. */
+const ELSEWHERE = (them, their) => `brimm-video cannot make Reels from this video yet: for now, cut ${them} in OpusClip. BRIMM Ops writes ${their} post text: on the episode's "Reels" card, press "New short video from a clip".`;
+const NOT_MADE = (n) => ELSEWHERE(`Reel ${n}`, "its");
 
 /** A crop-less stretch as a reading writes it, from `start` to `end` in seconds of the video, on the video's picture grid. */
 const stretchOf = (start, end) => stretchesOf(keptSpans([{ start, end, keep: true }], FACTS.fps));
@@ -280,6 +283,15 @@ describe("read, an iPhone clip", () => {
     assert.ok(!existsSync(join(found.folder, "Pricing talk.reel-suggestions.txt")));
     assert.deepEqual(record.reels, []);
     assert.deepEqual(notices, [NOTICE]);
+    t.done();
+  });
+  it("has no Reels, which the list of Reels says as pick and push say it, naming no file", async () => {
+    const { t, found } = reading("short video");
+    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "pick", FOLDER, "1"], ["push", FOLDER, "reel", "1"]]) {
+      const r = await on(t.ctx.deps, ...words);
+      assert.deepEqual([r.code, r.said], [1, ["A short video has no Reels."]], words.join(" "));
+    }
+    assert.equal(reread(found).rev, 1);
     t.done();
   });
 });
@@ -582,6 +594,62 @@ describe("a Reel with no crops yet, which every reader that needs crops refuses"
   it("previewSteps", () => {
     assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 }, n: 3 }), { message: NOT_MADE(3) });
   });
+  it("reel pick of several, naming each that cannot be made, and picking none", async () => {
+    const two = [{ n: 3, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }, { n: 4, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }];
+    const { t, found } = reading("finished", { over: { reels: two }, files: { ...LIGHT_FILES, "reels.json": JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED, { ...UNCROPPED, n: 4 }] })) } });
+    const r = await on(t.ctx.deps, "reel", "pick", FOLDER, "3", "4");
+    assert.deepEqual([r.code, r.said], [1, [ELSEWHERE("Reels 3 and 4", "their")]]);
+    assert.deepEqual([reread(found).rev, reread(found).reels.map((x) => x.status)], [1, ["candidate", "candidate"]]);
+    t.done();
+  });
+  it("captions, a title or a graphic on it, a style or a cut: never sent to pick it first, whatever the record says of it", async () => {
+    for (const status of ["candidate", "picked"]) {
+      const { t, found } = listed(status);
+      for (const words of [["captions", FOLDER, "reel", "3", "on"], ["text", FOLDER, "reel", "3"], ["graphic", FOLDER, "reel", "3"], ["preset", FOLDER, "reel", "3", "--look", "bright"], ["cut", FOLDER, "remove", "reel", "3", "--words", "welcome"], ["title", FOLDER, "reel", "3"], ["title", FOLDER, "reel", "3", "--words", "Say it again"]]) {
+        const r = await on(t.ctx.deps, ...words);
+        assert.deepEqual([r.code, r.said], [1, [NOT_MADE(3)]], `${status}: ${words.join(" ")}`);
+      }
+      assert.equal(reread(found).rev, 1);
+      t.done();
+    }
+  });
+  it("says nowhere to make it first", async () => {
+    const { t } = listed("candidate");
+    for (const words of [["reel", "pick", FOLDER, "3"], ["push", FOLDER, "reel", "3"], ["captions", FOLDER, "reel", "3", "on"]]) assert.doesNotMatch((await on(t.ctx.deps, ...words)).text, /make Reel \d|make it|first/);
+    t.done();
+  });
+});
+
+describe("the Reel suggestions of a video she has answered, which brimm-video cannot make yet", () => {
+  const list = JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED] }));
+  it("are listed, then where she makes them for now: OpusClip, and BRIMM Ops for their post text", async () => {
+    for (const kind of ["finished", "raw"]) {
+      const { t } = reading(kind, { over: { reels: [{ n: 3, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }] }, files: { ...LIGHT_FILES, "reels.json": list } });
+      const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /^Reel suggestions of /);
+      assert.equal(r.said[1], ELSEWHERE("them", "their"), kind);
+      assert.equal(r.said.length, 2, r.text);
+      t.done();
+    }
+  });
+  it("send her to OpusClip only for a suggestion she has not dropped", async () => {
+    const { t } = reading("finished", { over: { reels: [{ n: 3, status: "dropped", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }] }, files: { ...LIGHT_FILES, "reels.json": list } });
+    const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.said.length, 1, r.text);
+    assert.doesNotMatch(r.text, /OpusClip/);
+    t.done();
+  });
+  it("are never offered to a session for OpusClip: the gate refuses it before anything is listed", async () => {
+    const { t } = reading("finished", { over: { kind: "session", session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } }, files: { ...LIGHT_FILES, "reels.json": list } });
+    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "pick", FOLDER, "3"], ["push", FOLDER, "reel", "3"], ["captions", FOLDER, "reel", "3", "on"]]) {
+      const r = await on(t.ctx.deps, ...words);
+      assert.equal(r.code, 1, r.text);
+      assert.doesNotMatch(r.text, /OpusClip|Reel suggestions/, words.join(" "));
+    }
+    t.done();
+  });
 });
 
 // --- Fix round 1 (the reviews of F5) ---
@@ -874,7 +942,7 @@ describe("fix 10 and fix 11", () => {
     t.done();
   });
   it("refuses a preview of a candidate with no crops, numbered or not", () => {
-    assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 } }), { message: "This Reel is not made yet: make it first." });
+    assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 } }), { message: ELSEWHERE("them", "their") });
   });
   it("reads the account in the run's own empty folder, with no settings file read", async () => {
     const asks = [];

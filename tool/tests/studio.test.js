@@ -161,6 +161,16 @@ describe("her folder's settings", () => {
     assert.ok(skill.includes('| "Ask Claude again for Reels" | `ask "<episode>"`'), skill);
     assert.ok(!/Not ready yet[\s\S]*Showing the Reels/.test(skill), skill);
   });
+  it("have the skill say, where she would be sent to make a Reel brimm-video cannot make yet, that she cuts it in OpusClip and BRIMM Ops writes its post text (Sallie's walkthrough, 25 Oct)", () => {
+    // "Show me the Reels" listed them, "Finish Reels 1 and 3" said to make Reel 1 first, and nothing made one: a circle.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const row = (start) => skill.split("\n").find((line) => line.startsWith(start));
+    assert.match(row('| "Show me the Reels" |'), /When it says brimm-video cannot make Reels from this video yet, say so\. For now she cuts them in OpusClip; BRIMM Ops writes their post text \("New short video from a clip", on the episode's Reels card\)\. Never send a client or group session's Reels to OpusClip\. \|$/);
+    assert.match(row('| "Finish Reels 1 and 3" / "Drop 2" |'), /When it says brimm-video cannot make Reels from this video yet, say so, as for "Show me the Reels": never offer to make one/);
+    const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut"));
+    assert.ok(notReady.includes(`- A Reel from Claude's suggestions: say brimm-video can't make it yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.`), notReady);
+    assert.doesNotMatch(skill, /make Reel \d|make it first/);
+  });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const given = commandsIn(skill);
