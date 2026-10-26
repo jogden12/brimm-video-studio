@@ -12,7 +12,13 @@
     "SendMessage",
     "DesignSync",
     "NotebookEdit",
-    "Monitor"
+    "Monitor",
+    "ReadMcpResourceTool",
+    "ReadMcpResourceDirTool",
+    "ListMcpResourcesTool",
+    "ReadMcpResource",
+    "ReadMcpResourceDir",
+    "ListMcpResources"
   ],
   "servers": [
     "Claude_Browser",

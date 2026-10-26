@@ -1,7 +1,8 @@
 // The never list (design 2026-10-26, section 1, "The never list"): the tools her chat may never use under the open lock, whatever
 // a setting or a per-Mac entry says. It is in code, not in her folder's settings, so that nothing written there changes it.
 //
-// A tool is on it by name (studio/never.json's `tools`), by kind (every local extension's MCP tool, which runs outside the
+// A tool is on it by name (studio/never.json's `tools`, the tools that read an MCP server's resources among them, since the server
+// they name may be a local extension's), by kind (every local extension's MCP tool, which runs outside the
 // sandbox, and every tool of the app's own, `mcp__ccd_*`), or by word: any MCP tool whose own name (after `mcp__<server>__`)
 // holds one of NEVER_WORDS, so that a connector added later is caught too. The subagent tool, under either of its names, is on it
 // when sent elsewhere or given an agent other than Claude Code's built-in ones, and Bash when it asks to run outside the sandbox.
