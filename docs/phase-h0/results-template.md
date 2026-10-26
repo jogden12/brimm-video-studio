@@ -10,8 +10,6 @@ prints before the word "total". The pictures and videos stay in `out/`.
 - `ffmpeg -version | head -1`:
 - `which whisper-cli`:
 - The model file is there (yes / no):
-- `swift --version | head -1`:
-- Creative Cloud signed in, with Adobe Fonts (yes / no):
 - The test recording: what it is (camera, app, length), never one of Sallie's:
 
 ## Step 2. HyperFrames installed
@@ -20,13 +18,12 @@ prints before the word "total". The pictures and videos stay in `out/`.
 - `npx hyperframes telemetry status`:
 - What `npx hyperframes doctor` printed (its last lines, and any line that is not "ok"):
 
-## Step 3. Sweet Sans Pro
+## Step 3. The typeface
 
-- What `swift families.swift sweet` printed:
-- The family name used (FAMILY):
-- The font check says (FOUND / MISSING), for the family and for Varela:
-- Do Light, Regular and Medium look like three different weights? Do they look like the brand guide?
-- Second run, if the name differed:
+- Sweet Sans Pro, tried first on 2026-10-26: MISSING. It never became active on this Mac, not even in TextEdit, so Josefin Sans
+  replaced it.
+- The font check with Josefin Sans says (FOUND / MISSING), for Josefin Sans and for Varela:
+- Do Light, Regular and Medium look like three different weights?
 
 ## Step 4. The graphics
 

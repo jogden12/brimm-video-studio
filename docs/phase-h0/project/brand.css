@@ -1,8 +1,29 @@
 /* The BRIMM's brand guide, for the H0 render test only (docs/phase-h0/checklist.md). The colours are the guide's
-   (docs/research/2026-10-13-video-presets/presets.md). The typeface is a variable of each composition, "family": Sweet Sans Pro
-   from Adobe Fonts by default, or Varela, the guide's own alternate, from Google Fonts' file as Fontsource packs it for npm. A
-   family the renderer cannot find falls back to monospace on purpose, so a missing font looks like a typewriter and cannot pass
-   for the right one. */
+   (docs/research/2026-10-13-video-presets/presets.md). The typeface is a variable of each composition, "family": Josefin Sans by
+   default, which Jason picked on 2026-10-26 in place of Sweet Sans Pro, or Varela, the guide's own alternate. Both are Google
+   Fonts' files as Fontsource packs them for npm. A family the renderer cannot find falls back to monospace on purpose, so a
+   missing font looks like a typewriter and cannot pass for the right one. */
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-300-normal.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+}
 
 @font-face {
   font-family: "Varela";

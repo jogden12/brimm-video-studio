@@ -3,11 +3,11 @@
 For Jason, on the Mac Studio. It is the gate of the architecture of 2026-10-26 (`docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`, section 10, H0; section 11, decisions 1, 2 and 7). It answers four questions before anything is built:
 
 1. **Colour:** does the brand's navy come out as navy once a graphic is laid over a video?
-2. **Font:** can the renderer draw Sweet Sans Pro from Adobe Fonts?
+2. **Font:** does the renderer draw the brand typeface in its three weights? Sweet Sans Pro from Adobe Fonts was tried first and came back MISSING, so it is now Josefin Sans from Google Fonts (2026-10-26).
 3. **Timing:** does a graphic start and end on exactly the frame it should?
 4. **Speed:** how long do the renders take on this Mac?
 
-If colour, timing or speed fail, the Swift drawer of the 2026-10-22 design comes back (decision 1). A missing font does not fail H0: you decided on 2026-10-26 that a replacement from Adobe Fonts or Google Fonts is found if needed, and step 3 says which kind of replacement the renderer can use.
+If colour, timing or speed fail, the Swift drawer of the 2026-10-22 design comes back (decision 1).
 
 **Rules for this test.**
 
@@ -30,8 +30,6 @@ Not tested there, because they need this Mac:
 
 - the VideoToolbox encoder;
 - `whisper-cli`;
-- Adobe Fonts;
-- `swift families.swift`;
 - the 4K and Final Cut steps on macOS.
 
 ---
@@ -41,8 +39,7 @@ Not tested there, because they need this Mac:
 1. Choose the test recording: one of your own, at least 2 minutes long, with someone talking.
    - Best is one made with the OBSBOT camera the way Sallie's are, or a Zoom recording.
    - Not an iPhone clip in HDR. This test does not convert HDR colour.
-2. In Creative Cloud (the app, under Fonts, or fonts.adobe.com while signed in), activate **Sweet Sans Pro** in Light, Regular and Medium. You need a Creative Cloud plan that includes Adobe Fonts. Without one, skip this and say so in `results.md`; step 3 then tests Varela only.
-3. Open Terminal and check what is already on this Mac:
+2. Open Terminal and check what is already on this Mac:
 
    ```
    sw_vers -productVersion
@@ -50,7 +47,6 @@ Not tested there, because they need this Mac:
    ffmpeg -version | head -1
    which whisper-cli
    ls -l "$HOME/Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin"
-   swift --version | head -1
    ```
 
    - `node` must be 22 or later.
@@ -72,7 +68,7 @@ Keep one Terminal window open for the whole test. If you open a new one, run the
    P="$H0/project"
    REPO="$HOME/Claude Code/BRIMM video"
    REF=origin/claude/zealous-bell-esuqck
-   FAMILY="Sweet Sans Pro"
+   FAMILY="Josefin Sans"
    ```
 
    - **`REPO`** is the brimm-video folder the launch agent runs. Change it if yours is elsewhere.
@@ -90,7 +86,7 @@ Keep one Terminal window open for the whole test. If you open a new one, run the
    ```
 
    You should see the following:
-   - in `$H0`: `checklist.md`, `families.swift`, `out`, `project`, `results-template.md` and `results.md`;
+   - in `$H0`: `checklist.md`, `out`, `project`, `results-template.md` and `results.md`;
    - in `project`: `brand.css`, `compositions` and `index.html`;
    - in `compositions`: `colour-check.html`, `font-check.html`, `lower-third.html`, `reel.html` and `title-card.html`.
 
@@ -100,15 +96,16 @@ Keep one Terminal window open for the whole test. If you open a new one, run the
 
 ## Step 2. Install HyperFrames in the test folder (10 minutes)
 
-1. Install three packages, with their versions pinned, into `project/node_modules` (and nowhere else):
+1. Install four packages, with their versions pinned, into `project/node_modules` (and nowhere else):
    - HyperFrames 0.8.206;
    - GSAP 3.14.2, which the graphics use to move;
-   - Varela from Google Fonts, as Fontsource packs it. It is the brand guide's own alternate and the control in step 3.
+   - Josefin Sans from Google Fonts, as Fontsource packs it: the brand typeface since 2026-10-26;
+   - Varela from Google Fonts, the same way. It is the brand guide's own alternate and the control in step 3.
 
    ```
    cd "$P"
    npm init -y >/dev/null
-   npm install --save-exact --no-fund --no-audit hyperframes@0.8.206 gsap@3.14.2 @fontsource/varela@5.3.0
+   npm install --save-exact --no-fund --no-audit hyperframes@0.8.206 gsap@3.14.2 @fontsource/josefin-sans@5.3.0 @fontsource/varela@5.3.0
    npx hyperframes --version
    ```
 
@@ -140,20 +137,11 @@ Keep one Terminal window open for the whole test. If you open a new one, run the
 
 ---
 
-## Step 3. Can the renderer draw Sweet Sans Pro? (10 minutes)
+## Step 3. Does the renderer draw the brand typeface? (5 minutes)
 
-1. See the family as this Mac's apps see it:
+On 2026-10-26 this step first tried Sweet Sans Pro from Adobe Fonts, and the font check said MISSING: the font never became active on this Mac, not even in TextEdit. You replaced it with **Josefin Sans** from Google Fonts, picked from a sheet of five faces set in the guide's three roles. Step 2 installed its files.
 
-   ```
-   cd "$H0"
-   swift families.swift sweet
-   ```
-
-   It prints each family with "sweet" in its name, then each of its styles. You should see the three you activated.
-   - If the family name is not exactly `Sweet Sans Pro`, set it: `FAMILY="<the name it printed>"`.
-   - If it prints nothing, open TextEdit > Format > Font > Show Fonts and search for "Sweet". The name shown there is the family.
-
-2. Render the font check and look at it:
+1. Render the font check and look at it:
 
    ```
    cd "$P"
@@ -162,28 +150,14 @@ Keep one Terminal window open for the whole test. If you open a new one, run the
    open "$H0/out/font-check.png"
    ```
 
-   The top line says whether the family was found, and whether Varela, loaded from its file, was found too:
-   - green when both were found;
-   - red when either is missing.
+   - **The top line** should be green: "Josefin Sans: FOUND. Varela: FOUND."
+   - **Under it,** Light, Regular and Medium should look like three different weights of Josefin Sans.
+   - A family that was not found is drawn in a typewriter face on purpose, so it cannot pass for the right one.
 
-   Under it are three weights in the family, then Varela. A family that was not found is drawn in a typewriter face on purpose, so it cannot pass for the right one.
+**Record:** the top line, and whether the three weights look right.
+**What it changes:** FOUND means the brand typeface comes from files the project names, which the renderer finds on any Mac. Sinthya, the guide's script, still needs a replacement, picked by eye the same way, from Google Fonts too.
 
-3. Decide what the rest of the test uses:
-   - **FOUND**, and the three lines look like the brand guide's Sweet Sans Pro in three weights: keep `FAMILY` as it is.
-   - **MISSING:** set `FAMILY="Varela"` so the steps after this one still test everything else.
-
-**Record:**
-- what `families.swift` printed;
-- the `FAMILY` used;
-- FOUND or MISSING for each of the two;
-- whether the weights look right.
-
-**What it changes:**
-- **FOUND:** Sweet Sans Pro from Adobe Fonts works in renders, as it does in Final Cut.
-- **MISSING:** HyperFrames finds fonts in this Mac's fonts folders and in the files a project names. Adobe Fonts keeps its fonts elsewhere and gives no file, and Adobe says taking the files out breaks its terms. So on your 2026-10-26 answer, the renderer's replacement for Sweet Sans Pro comes from Google Fonts, a file it always finds, as Varela shows.
-- **Either way:** Sinthya is on neither Adobe Fonts nor Google Fonts, so its replacement script is picked by eye later. It would come from Google Fonts if this step says MISSING.
-
-**On the test machine:** "Sweet Sans Pro: MISSING. Varela: FOUND." (no Adobe Fonts there, as expected), and with `FAMILY="Varela"`, "Varela: FOUND. Varela: FOUND."
+**On the test machine:** "Josefin Sans: FOUND. Varela: FOUND.", with three distinct weights. With Sweet Sans Pro: "Sweet Sans Pro: MISSING. Varela: FOUND.", as on this Mac.
 
 ---
 
@@ -421,4 +395,4 @@ For the Final Cut path (architecture section 7), graphics would arrive in Final 
    - run `npx hyperframes browser clear` from the test folder before you delete it, or delete `~/.cache/hyperframes/` afterwards;
    - delete `~/.hyperframes/`, where HyperFrames keeps its settings.
 
-   Close the step 10 library in Final Cut first. Adobe Fonts can stay activated: Final Cut uses it either way.
+   Close the step 10 library in Final Cut first.

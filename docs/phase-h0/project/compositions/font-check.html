@@ -2,7 +2,7 @@
 <html
   lang="en"
   data-composition-variables='[
-    {"id":"family","type":"string","label":"Typeface","description":"The font family to look for.","default":"Sweet Sans Pro"}
+    {"id":"family","type":"string","label":"Typeface","description":"The font family to look for.","default":"Josefin Sans"}
   ]'
 >
   <head>
@@ -46,7 +46,7 @@
     </style>
   </head>
   <body>
-    <!-- Says whether the renderer can draw the family it is given (Sweet Sans Pro from Adobe Fonts, by default), by measuring
+    <!-- Says whether the renderer can draw the family it is given (Josefin Sans, by default), by measuring
          the same words in that family with two different fallbacks: if both measure as their fallbacks do, the family was not
          found. The three weights are drawn too, for an eye to judge, and Varela from its file as the control. -->
     <div
@@ -74,7 +74,7 @@
       window.__timelines = window.__timelines || {};
       (async () => {
         const vars = (window.__hyperframes && window.__hyperframes.getVariables && window.__hyperframes.getVariables()) || {};
-        const family = vars.family || "Sweet Sans Pro";
+        const family = vars.family || "Josefin Sans";
         await document.fonts.load('64px "Varela"');
         await document.fonts.ready;
         const words = "The BRIMM pricing 0123 mmmwwwlliiQ";

@@ -179,7 +179,7 @@ The brand kit is a HyperFrames project kept in the repo (`tool/brand/`, once bui
 
 - **Tokens**, in `brand.css`:
   - colours: navy `#1F2D42`, sand `#C1AD97`, mist `#E8E3DA`, and the rest of the brand guide;
-  - typefaces: Sweet Sans Pro through Adobe Fonts (Jason, 2026-10-26), used as a font installed on the Mac, so H0 checks that the renderer's Chrome can see it; for the script, a replacement for Sinthya from Adobe Fonts or Google Fonts, picked by eye (Sinthya is on neither);
+  - typefaces: Josefin Sans from Google Fonts in place of Sweet Sans Pro (Jason, 2026-10-26), in Light, Regular and Medium, loaded from its files with `@font-face`; for the script, a replacement for Sinthya from Adobe Fonts or Google Fonts, picked by eye (Sinthya is on neither);
   - spacing and safe areas: Meta's upright safe zone of top 14%, bottom 35% and sides 6% (preset research).
 - **Motion presets.** A few short entrances and exits, the same everywhere, so every graphic moves like the brand.
 - **Components.** Each is a small HTML composition with a list of settings that Claude fills in:
@@ -366,7 +366,7 @@ It is opened with `open -a "Final Cut Pro"` into the library in `~/BRIMM Video W
 **Licences.**
 
 - Every asset's licence is in its manifest line.
-- **Sweet Sans Pro** comes through Adobe Fonts (Jason, 2026-10-26), whose page for it lists video and broadcast use. It needs a Creative Cloud plan with Adobe Fonts, signed in on each Mac that edits or renders. Adobe Fonts gives no font file, so H0 checks that the renderer can use the installed font.
+- **Josefin Sans** replaces Sweet Sans Pro (Jason, 2026-10-26). It is free on Google Fonts under the SIL Open Font License, so its files go with the project and the renderer always finds them. Sweet Sans Pro through Adobe Fonts failed H0's font check on the Mac Studio: it never became active there, not even in TextEdit, and Adobe Fonts gives no file for the renderer to load.
 - **Fonts come from Adobe Fonts or Google Fonts** (Jason, 2026-10-26: "we will find a replacement font, available either through adobe or google fonts, if needed"). Sinthya is on neither (it is sold only by Sronstudio on Creative Market), so its replacement script is picked by eye. Varela, a Google Fonts face and the guide's own alternate, stands in until then.
 
 ## 9. What stays from today's tool, and what changes
@@ -387,7 +387,7 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 
 | Step | What | Done when |
 |---|---|---|
-| **H0. Render test** (by hand, scratch folder, never a watched one; Mac Studio only, Jason 2026-10-26) | Install HyperFrames in a scratch folder: version pinned, telemetry off, its Claude skills skipped. Render a lower third and a title card as transparent ProRes, with Sweet Sans Pro from Adobe Fonts. Lay them over a test recording with ffmpeg. Render one 60-second Reel as a full composition. | Checklist: `docs/phase-h0/checklist.md`. Jason judges the frames: navy still navy, Sweet Sans Pro drawn and not a stand-in, timing to the frame. Times measured on the Mac Studio. The same test on Sallie's laptop once H0 passes, when Jason says yes to installing it there |
+| **H0. Render test** (by hand, scratch folder, never a watched one; Mac Studio only, Jason 2026-10-26) | Install HyperFrames in a scratch folder: version pinned, telemetry off, its Claude skills skipped. Render a lower third and a title card as transparent ProRes, in the brand typeface (Josefin Sans, from 2026-10-26). Lay them over a test recording with ffmpeg. Render one 60-second Reel as a full composition. | Checklist: `docs/phase-h0/checklist.md`. Jason judges the frames: navy still navy, the typeface drawn and not a stand-in, timing to the frame. Times measured on the Mac Studio. The same test on Sallie's laptop once H0 passes, when Jason says yes to installing it there |
 | **H1. Edit record and render planner** | The record's format, the move from today's record, and the planner that turns a record into ffmpeg and HyperFrames jobs (pure JavaScript) | planner output matches the FCPXML writer frame for frame on fixtures |
 | **H2. Brand kit** | tokens, motion presets, the first components (`lower-third`, `title-card`, `list-card`, `logo-bug`, `end-card`) with their settings lists | stored reference frames match on both Macs |
 | **H3. Path A** | `render` (preview, that part), `finish` (final), the checks, Claude's frame check | a test recording goes from drop to Finished with no Final Cut |
@@ -402,7 +402,7 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 - **HyperFrames moves fast.** It is at version 0.8.206, released 2026-10-26, with several releases a day. Pin a version, and upgrade only on purpose after the reference-frame test.
 - **Colour.** Graphics are drawn in sRGB and the video is BT.709. The overlay must convert with the right matrix, or the navy shifts. H0 checks it.
 - **Speed on the laptop.** A headless browser plus the encoder on 16 GB. Measured by H0's repeat on the laptop.
-- **Adobe Fonts and the renderer.** Adobe Fonts gives no font file. If HyperFrames' Chrome cannot see the installed font, the replacement comes from Google Fonts, whose files the renderer always finds (Jason, 2026-10-26). HyperFrames' own source looks for installed fonts only in the Mac's fonts folders, and Adobe keeps its fonts elsewhere, so H0 may well say MISSING.
+- **Adobe Fonts and the renderer: settled.** H0's font check on the Mac Studio said MISSING for Sweet Sans Pro, and Jason replaced it with Josefin Sans from Google Fonts (2026-10-26). HyperFrames' own source looks for installed fonts only in the Mac's fonts folders, and Adobe keeps its fonts elsewhere, so any Adobe Fonts face would meet the same problem in renders.
 - **Computer use.** It is a research preview. A Final Cut update can move a menu, and it takes over the screen while it runs. Keep the one-click Share as the fallback.
 - **Generated b-roll.** It can look fake next to a real person on a business show. Prefer objects, places and abstract shots over generated people. Label it in the manifest.
 - **Pages not opened.** openrouter.ai and higgsfield.ai could not be opened from this session. Their lines in this document come from search summaries of their pages. Check them before H6.
@@ -417,7 +417,7 @@ All answered on 2026-10-26, except picking Sinthya's replacement (7). Numbers 3 
 4. **Higgsfield: the smallest paid plan, bought when H6 starts.** It is the one source of generated b-roll. Its training terms are acceptable for prompts. Sallie's folder may call only its generation, cost-check and job-status tools. Background removal is done on the Mac by HyperFrames instead.
 5. **OpenRouter: pictures only for now.** Video generation and "eyes" are looked at again after H3, each on its own yes.
 6. **Claude driving Final Cut's screen: yes, as proposed.** It replaces the no of 2026-10-22. It is an option for exporting and for Final Cut-only tools. It runs in Jason's sessions first, and is never needed on Sallie's path.
-7. **Typefaces: from Adobe Fonts or Google Fonts.** Sweet Sans Pro through Adobe Fonts; H0 checks that the renderer can use it. If a face is not available there, or the renderer cannot use it, a replacement is found on Adobe Fonts or Google Fonts (Jason: "we will find a replacement font, available either through adobe or google fonts, if needed"). **Still open: Sinthya's replacement.** Sinthya is on neither, so a script face from one of them is picked by eye. If H0 shows the renderer cannot use Adobe Fonts, the replacement comes from Google Fonts.
+7. **Typefaces: Josefin Sans, from Google Fonts, in place of Sweet Sans Pro.** Fonts come from Adobe Fonts or Google Fonts (Jason: "we will find a replacement font, available either through adobe or google fonts, if needed"). Sweet Sans Pro through Adobe Fonts was tried first in H0 and came back MISSING: it never became active on the Mac Studio, not even in TextEdit. Jason then picked Josefin Sans on an answer card from a sheet of five Google Fonts faces (Varela, Montserrat, Work Sans, Josefin Sans, Raleway), each set in the guide's three roles. **Still open: Sinthya's replacement**, a script face picked by eye the same way. It should come from Google Fonts too, since the renderer cannot use Adobe Fonts.
 8. **Music: a library subscription, with Sallie picking the tracks.** Her outside editor's library, if they use one. Its licence is checked for YouTube, Instagram and LinkedIn first.
 9. **Labelling: yes, and no fake people.** A synthetic-media flag on every asset and a line in the hand-off. No generated people who could pass as real, and never a generated Sallie, face or voice.
 
