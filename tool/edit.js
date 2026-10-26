@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -83,9 +83,12 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
                                         what the guide says: at once when no video is coming in, being imported or read
-  node edit.js guide "<video>" done <step> | finished | show
+  node edit.js guide "<video>" done <step> | finished | show | tell
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
-                                        comes next), that she is done with the video, or show in Finder what its step needs
+                                        comes next), that she is done with the video, or show in Finder what its step needs.
+                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, or an
+                                        import or reading that did not finish), then say it in one line. Her skill runs it
+                                        in the background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -5317,7 +5320,9 @@ function guideFacts(ctx, e, links, rates) {
     finishRunning: running === "finish",
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     session: kind === "session" ? guideSession(ctx, e, r) : null,
-    handoff: guideHandoff(ctx, e, r, links, v2)
+    handoff: guideHandoff(ctx, e, r, links, v2),
+    // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
+    source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };
 }
 
@@ -5380,7 +5385,8 @@ function guideDrops(ctx) {
       const run = here && label ? runs.find((r) => r.video === label) : undefined;
       const noted = here ? seen[seenKey(video, found)] : undefined;
       const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null, readyAt: run && readyIn(run) !== null ? clockAt(now + readyIn(run) * 1000) : "" };
-      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
+      // `source` is for `guide tell` alone, which follows the video by it: never said.
+      videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
   }
   return apart(videos, clockAt);
@@ -5535,15 +5541,38 @@ async function waitForChange(ctx) {
   return sayOverview(ctx, read);
 }
 
-/** `guide ["<video>" [show | finished | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+/** `guide "<video>" tell`: the video's next point (guide.js told), waited for in the background (her skill runs it with the Bash
+    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, or its import or its
+    reading did not finish. What the guide says is read again every TELL_POLL_MS, for up to TELL_MS, following the video from its
+    drop folder into Episodes (follow). A video with nothing on its way gets its next step at once, and one still on its way
+    after TELL_MS gets that said, with its next step. Nothing is said before the end, and no notice is posted: the import and the
+    reading post their own. */
+async function tellWhen(ctx, item) {
+  const wait = sleepOf(ctx);
+  const start = ctx.now();
+  let trail = trailOf(item.facts);
+  let seen = item;
+  let line = told(item, item, item);
+  while (line === null && ctx.now() - start < TELL_MS) {
+    await wait(Math.min(TELL_POLL_MS, TELL_MS - (ctx.now() - start)));
+    const found = follow(trail, guideItems(ctx).items);
+    line = told(item, seen, found ? found.item : null);
+    if (found) ({ trail, item: seen } = found);
+  }
+  ctx.say(line ?? stillLine(seen));
+  return 0;
+}
+
+/** `guide ["<video>" [show | finished | tell | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
     that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
     video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
     next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
     `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
     change in what the guide says, then says the overview: at once when no video is coming in, being imported or being read. With a video, by its name, its label or its id, its next step, and for
     a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
-    she did that step, the one that comes next; with `finished`, her note that she is done with it. Words that fit no video, or
-    more than one, are refused, and never said again: they may hold a client's name. */
+    she did that step, the one that comes next; with `finished`, her note that she is done with it; with `tell`, its next point,
+    waited for up to 60 minutes and said in one line. Words that fit no video, or more than one, are refused, and never said
+    again: they may hold a client's name. */
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
@@ -5551,8 +5580,8 @@ export async function guideCommand(ctx, rest) {
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
   if (is("page")) return openPage(ctx);
   if (is("wait")) return waitForChange(ctx);
-  // The form, after a video: "" for its next step, "show", "finished", or "done" with the step.
-  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
+  // The form, after a video: "" for its next step, "show", "finished", "tell", or "done" with the step.
+  const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished", "tell"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;
   if (form === null) {
     ctx.say(HELP);
     return 2;
@@ -5564,6 +5593,7 @@ export async function guideCommand(ctx, rest) {
   if (form === "show") return showForStep(ctx, found.item);
   if (form === "done") return noteDone(ctx, found.item, rest[2]);
   if (form === "finished") return noteFinished(ctx, found.item);
+  if (form === "tell") return tellWhen(ctx, found.item);
   for (const line of videoLines(found.item)) ctx.say(line);
   return 0;
 }
