@@ -2103,11 +2103,19 @@ async function show(ctx, rest) {
 const IDEAS_ELSEWHERE = 'Say "any ideas for graphics?" to see them, numbered, with their times on the version you are watching.';
 /** Claude's notes as her chat shows them (show, open): of a raw video she has answered, with their ideas for graphics, whose
     times are the recording's and not her timeline's, left out and IDEAS_ELSEWHERE in their place (spec 2026-10-22, section 3,
-    "Times"); any other video's as written. Each part of the notes is a heading and its lines, after an empty line (notes.js
-    notesText), and Claude's own notes in them hold no empty line. */
+    "Times"), and with each idea on words that are cut left out of what could not be used, and that heading too when nothing
+    else is under it; any other video's as written. Each part of the notes is a heading and its lines, after an empty line
+    (notes.js notesText), and Claude's own notes in them hold no empty line. */
 function notesForHer(text, record) {
   if (!(isAnswered(record) && recordKind(record) === "raw")) return text;
-  return text.split("\n\n").map((block) => (block.startsWith("Its ideas for graphics\n") ? `Its ideas for graphics\n${IDEAS_ELSEWHERE}` : block)).join("\n\n");
+  return text.split("\n\n").map((block) => {
+    if (block.startsWith("Its ideas for graphics\n")) return `Its ideas for graphics\n${IDEAS_ELSEWHERE}`;
+    if (!block.startsWith("What could not be used from its reply\n")) return block;
+    // An idea on words that are cut is listed by "any ideas for graphics?" (cut now, with its number), not at the recording's time.
+    const lines = block.split("\n").filter((line, i) => i === 0 || !line.startsWith("An idea for a graphic sits on words that are cut, at "));
+    // The notes end with a new line, so the last part's last line is empty: it is no line under the heading.
+    return lines.slice(1).some((line) => line.trim()) ? lines.join("\n") : null;
+  }).filter((block) => block !== null).join("\n\n");
 }
 
 /** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
@@ -3136,13 +3144,20 @@ function momentFrom(ctx, found, part, flags, { needed = true } = {}) {
 function timelineRead(ctx, found, part, flags) {
   const guard = guardOf(ctx, found, part, { noHandEdits: Boolean(flags["no-hand-edits"]), handEdits: Boolean(flags["hand-edits"]), withoutOther: Boolean(flags["without-other-macs-changes"]) }, "to go on");
   if (guard.why) return { code: refuse(ctx, guard.why) };
+  const got = clockRead(ctx, found, part);
+  if (got.code === undefined) sayElsewhere(ctx, got.read);
+  return got;
+}
+
+/** The clock she reads on a timeline (clockFor): { read } or { code }. A file Dropbox has not brought over yet is asked for
+    (`bring`, unless one is running), and she is told to say it again when it is here. */
+function clockRead(ctx, found, part) {
   const read = clockFor(found, part, ctx);
   if (read.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: read.bring });
     return { code: refuse(ctx, `Dropbox is still bringing ${read.coming} over to this Mac. Say it again when it is done.`) };
   }
   if (read.why) return { code: refuse(ctx, read.why) };
-  sayElsewhere(ctx, read);
   return { read };
 }
 
@@ -3676,14 +3691,15 @@ function graphicIdeas(read) {
 const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
-/** The place an idea says, when it says one: "corner" for the word corner, "lower" for a lower third; null otherwise. A "lower
-    price" is no place. */
-const ideaPlace = (idea) => (/\bcorner\b/i.test(idea) ? "corner" : /\blower[- ]third\b/i.test(idea) ? "lower" : null);
+/** The place an idea says, when it says one: "corner" for a corner of the screen ("in the corner", "at the top right
+    corner"), "lower" for a lower third; null otherwise. A corner the picture shows ("the street corner", "a corner shop") and a
+    "lower price" are no place: Claude is not asked for a place, so the word alone says what is in the picture. */
+const ideaPlace = (idea) => (/\b(?:in|into|at|to) (?:the |a )?(?:(?:top|bottom|upper|lower) )?(?:(?:left|right)(?:-hand)? )?corner\b/i.test(idea) ? "corner" : /\blower[- ]third\b/i.test(idea) ? "lower" : null);
 /** What is said of a finished video's or an iPhone clip's ideas for graphics: Claude gives none (Jason, 22 Oct: "Reel suggestions
     and spellings, nothing more"). */
 const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"}.`;
-/** What the list of ideas says last, when one of them can be put up. */
-const IDEAS_ASK = 'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".';
+/** What the list of ideas says last, when one of them can be put up: `n`, the first listed that can be, is its example. */
+const ideasAsk = (n) => `To put one up, say its number and a picture from your Pictures folder, as "put idea ${n} up with chart.png".`;
 
 /** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>) [--for <seconds>]
     [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
@@ -3701,17 +3717,19 @@ async function graphic(ctx, rest) {
     ctx.say(noIdeas(found.record));
     return 0;
   }
+  // The other Mac's newer render is not said here (sayElsewhere): the list's first line names the version its times are on.
   if (verb === "ideas") {
-    const read = clockFor(found, part, ctx);
-    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
-    sayElsewhere(ctx, read);
+    const got = clockRead(ctx, found, part);
+    if (got.code !== undefined) return got.code;
+    const { read } = got;
     const ideas = graphicIdeas(read).filter((i) => !i.outside);
     if (!ideas.length) {
       ctx.say(`Claude gave no ideas for graphics on ${partLabel(part)}.`);
       return 0;
     }
     const head = `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
-    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(ideas.some((i) => i.at !== null) ? [IDEAS_ASK] : [])].join("\n"));
+    const first = ideas.find((i) => i.at !== null);
+    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
     return 0;
   }
   if (!takes) {
@@ -3733,13 +3751,13 @@ async function graphic(ctx, rest) {
     if (flags.at || flags["at-words"]) return refuse(ctx, "Say when by the idea (--idea 2), or by a time or words (--at, --at-words), not both.");
     const n = /^[1-9]\d*$/.test(asked) ? Number(asked) : null;
     if (n === null) return refuse(ctx, "Say which idea by its number (--idea 2).");
-    const read = clockFor(found, part, ctx);
-    if (read.why || read.coming) return refuse(ctx, read.why || `Dropbox is still bringing ${read.coming} over to this Mac.`);
+    const got = clockRead(ctx, found, part);
+    if (got.code !== undefined) return got.code;
+    const { read } = got;
     chosen = graphicIdeas(read).find((i) => i.n === n);
     if (!chosen) return refuse(ctx, `There is no idea ${n} for graphics. Say "any ideas for graphics?" to see them.`);
     if (chosen.outside) return refuse(ctx, `Idea ${n} is outside Reel ${part.reel}'s stretch of the recording.`);
     if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.phrase.text)}" Keep them first, or pick another idea.`);
-    sayElsewhere(ctx, read);
     moment = { at: chosen.at, for: chosen.for, on: read.on, clock: read.clock, read };
   } else {
     moment = momentFrom(ctx, found, part, flags);

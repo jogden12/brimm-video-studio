@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
+import { notesText } from "../notes.js";
 import { studioFiles } from "../studio.js";
 import { EPISODE, episode } from "./phase4.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
@@ -53,7 +54,13 @@ const light = (kind) => {
   const found = episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: "Video of 14 Oct, 09:12 (Mac Studio)" }, files: LIGHT });
   return { t, found };
 };
-const ASK = 'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".';
+/** What the list says last, its example being the first idea listed that can be put up. */
+const ask = (n) => `To put one up, say its number and a picture from your Pictures folder, as "put idea ${n} up with chart.png".`;
+/** A raw video she has answered whose rough cut, version 0, opened on this Mac, and the other Mac's newer render, version 1. */
+const renderedThere = () => {
+  const there = { v: 1, how: "render", at: AT, on: "Sallie's laptop", file: "edit/main.v1.fcpxml", opened: AT };
+  return episode({ version: 3, kind: "raw", answer: ANSWERED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [ROUGH, there], base: null } }, {}, withIdeas(IDEAS));
+};
 
 // --- Task 1 ---
 
@@ -66,8 +73,24 @@ describe("graphic ideas", () => {
       `Idea 1, 0:00 to 0:01: The show's name in the lower third. Over "Welcome to the show."`,
       'Idea 2, 0:04 to 0:07: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
       'Idea 3, cut now: The word "important" in the corner. Over "It is very, very important."',
-      ASK
+      ask(1)
     ].join("\n")]);
+    t.done();
+  });
+  it("reads each idea's times on the version she watches: a cut not yet shown moves none, and once it is shown they are that version's", async () => {
+    const { t } = raw();
+    assert.equal((await on(t.ctx.deps, "cut", "Pricing", "remove", "--words", "Today we are going to talk about pricing")).code, 0);
+    assert.deepEqual((await on(t.ctx.deps, "graphic", "Pricing", "ideas")).text.split("\n").slice(0, 3), [
+      "Claude's ideas for graphics on the main video: 3, with times on main v0.",
+      `Idea 1, cut now: The show's name in the lower third. Over "Welcome to the show."`,
+      'Idea 2, 0:04 to 0:07: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."'
+    ]);
+    assert.equal((await on(t.ctx.deps, "push", "Pricing")).code, 0);
+    assert.deepEqual((await on(t.ctx.deps, "graphic", "Pricing", "ideas")).text.split("\n").slice(0, 3), [
+      "Claude's ideas for graphics on the main video: 3, with times on main v1.",
+      `Idea 1, cut now: The show's name in the lower third. Over "Welcome to the show."`,
+      'Idea 2, 0:00 to 0:03: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."'
+    ]);
     t.done();
   });
   it("keeps each idea's number on a Reel, and lists only those in its stretch, with their times on the Reel", async () => {
@@ -77,7 +100,7 @@ describe("graphic ideas", () => {
       "Claude's ideas for graphics on Reel 2: 2, with times on Reel 2 as it is now.",
       'Idea 2, 0:00 to 0:03: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
       'Idea 3, cut now: The word "important" in the corner. Over "It is very, very important."',
-      ASK
+      ask(2)
     ].join("\n")]);
     t.done();
   });
@@ -99,6 +122,42 @@ describe("graphic ideas", () => {
       t.done();
     }
   });
+  it("says nothing of a newer version the other Mac rendered, in the list or when one is put up: their first line names the version", async () => {
+    const { t } = renderedThere();
+    picture(t, "chart.png", 1600, 900);
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.deepEqual([r.code, r.text.split("\n")[0]], [0, "Claude's ideas for graphics on the main video: 3, with times on main v0."]);
+    assert.doesNotMatch(r.text, /other Mac/);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "2"), { code: 0, text: 'Graphic g1, chart.png, full, idea 2, on main v0 at 0:04, for 2.7 seconds. Say "show it in Final Cut" to see it.' });
+    t.done();
+  });
+  it("has Dropbox bring the version she watches when it is not on this Mac yet, for the list and to put one up, and writes nothing", async () => {
+    const { t, found } = raw();
+    picture(t, "chart.png", 1600, 900);
+    t.ctx.deps.isWhole = (path) => !path.endsWith("main.v0.fcpxml");
+    for (const argv of [["ideas"], ["add", "chart.png", "--idea", "1"]]) {
+      t.started.length = 0;
+      assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", ...argv), { code: 1, text: "Dropbox is still bringing edit/main.v0.fcpxml over to this Mac. Say it again when it is done." }, argv.join(" "));
+      assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "edit/main.v0.fcpxml"]], argv.join(" "));
+    }
+    assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+  it("are refused, listed or put up, for a video waiting for its answer and for a session, by the gate, before any words are read", async () => {
+    const WAITING = { version: 3, kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" };
+    const SESSION = { version: 3, kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } };
+    for (const [record, why] of [[WAITING, "This video is waiting for its answer: say what it is first."], [SESSION, "This is a client or group session: that is not done for one."]]) {
+      const { t, found } = episode(record, {}, withIdeas(IDEAS));
+      picture(t, "chart.png", 1600, 900);
+      for (const argv of [["ideas"], ["add", "chart.png", "--idea", "1"]]) {
+        const r = await on(t.ctx.deps, "graphic", FOLDER, ...argv);
+        assert.deepEqual([r.code, r.text], [1, why], `${record.label}: ${argv.join(" ")}`);
+        assert.doesNotMatch(r.text, /Pricing talk/);
+      }
+      assert.deepEqual([t.started, reread(found).rev], [[], 1], record.label);
+      t.done();
+    }
+  });
 });
 
 // --- Task 2 ---
@@ -117,6 +176,22 @@ describe("graphic add --idea", () => {
       { id: "g3", picture: "media/chart.png", at: 6.07, for: 6, place: "full" }
     ]);
     t.done();
+  });
+  it("takes the place from words that say where on the screen it goes, never from a corner in the picture", async () => {
+    for (const [idea, place] of [
+      ['The word "important" in the corner', "corner"],
+      ["The logo in the top right corner", "corner"],
+      ["The show's name in the lower third.", "lower"],
+      ["A cutaway of the street corner", "full"],
+      ["Corner-shop sign", "full"],
+      ["A lower price", "full"]
+    ]) {
+      const { t, found } = episode({}, {}, withIdeas([{ id: "p7", idea }]));
+      picture(t, "chart.png", 1600, 900);
+      assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "1")).code, 0, idea);
+      assert.equal(reread(found).main.graphics[0].place, place, idea);
+      t.done();
+    }
   });
   it("puts up an idea whose words were kept again since the version she watched, and says it is not on that version", async () => {
     const { t, found } = raw();
@@ -180,6 +255,23 @@ describe("Claude's notes of a raw video she has answered", () => {
       t.done();
     }
   });
+  it("leave out an idea on words that are cut as well, which the list has as cut now, in the notes as notes.js writes them", async () => {
+    const PROBLEM = "Clip 4 of its reply starts on no phrase of the plan.";
+    for (const problems of [[], [PROBLEM]]) {
+      const t = setup();
+      const found = episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, name: { text: "Pricing talk", placeholder: false } } });
+      const graphics = [{ id: "p7", idea: "A chart" }, { id: "p8", idea: "Important in the corner" }];
+      writeFileSync(join(found.folder, NOTES_FILE), notesText({ notes: "A tight talk.", graphics, problems }, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]), []));
+      const r = await on(t.ctx.deps, "show", FOLDER, "notes");
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /\nIts ideas for graphics\nSay "any ideas for graphics\?" to see them/);
+      assert.doesNotMatch(r.text, /An idea for a graphic sits on words that are cut/);
+      // The heading of what could not be used stays only while something else is under it.
+      if (problems.length) assert.ok(r.text.endsWith(`\n\nWhat could not be used from its reply\n${PROBLEM}`), r.text);
+      else assert.doesNotMatch(r.text, /What could not be used/);
+      t.done();
+    }
+  });
 });
 
 // --- Task 4 ---
@@ -189,9 +281,10 @@ describe("her skill, on ideas for graphics", () => {
   const rowOf = (start) => skill.split("\n").find((line) => line.startsWith(`| ${start} |`)) || "";
   it("lists a raw video's ideas at what Claude found, shows them as printed, and puts one up by its number, in its lines as they are", () => {
     const found = rowOf('"What did Claude find?"');
-    assert.ok(found.slice(0, found.indexOf("a session,")).includes('`graphic "<video>" ideas` (its ideas for graphics, each shown exactly as printed, with its number and times)'), found);
+    const raw = found.slice(0, found.indexOf("a session,"));
+    for (const words of ['`show "<video>" notes` (Claude\'s notes, without its line that says to ask for the ideas for graphics: they follow)', '`graphic "<video>" ideas` (its ideas for graphics, each shown exactly as printed, with its number and times)']) assert.ok(raw.includes(words), words);
     const graphics = rowOf('"Show the pricing chart when I say three numbers"');
-    for (const words of ['"Any ideas for graphics?": `graphic "<episode>" ideas`: show each idea exactly as printed, with its number and times, never restated without them.', '"Put idea 2 up with pricing.png": `graphic "<episode>" add "<picture>" --idea 2`']) assert.ok(graphics.includes(words), words);
+    for (const words of ['"Any ideas for graphics?": `graphic "<episode>" ideas`: show each idea exactly as printed, with its number and times, never restated without them.', '"Put idea 2 up with pricing.png": `graphic "<episode>" add "<picture>" --idea 2` (on a Reel, `graphic "<episode>" add "<picture>" reel 2 --idea 2`)']) assert.ok(graphics.includes(words), words);
     assert.ok(skill.includes("Ideas for graphics are shown as printed too, with their numbers and times."));
     assert.ok(skill.includes("To keep a cut found there, pass its words. To put up an idea for a graphic, pass its number (`--idea`)."));
   });
@@ -204,7 +297,7 @@ describe("the README on ideas for graphics", () => {
   it("gives graphic its --idea, says how ideas are numbered and timed, and that a raw video's notes leave them out", () => {
     const row = readme.split("\n").find((line) => line.startsWith('| `graphic "<episode>" add')) || "";
     assert.ok(row.includes('(--at <time> \\| --at-words "<words>" \\| --idea <n>)'), row);
-    for (const words of ["numbered in the order their words are said", "A finished video and an iPhone clip have none.", "so it asks no guard", "printed by `show` and `open` without their ideas for graphics"]) assert.ok(row.includes(words), words);
+    for (const words of ["numbered in the order their words are said", "A finished video and an iPhone clip have none.", "so it asks no guard", "printed by `show` and `open` without their ideas for graphics", "An idea on words that are cut is left out of the printed notes too"]) assert.ok(row.includes(words), words);
     assert.doesNotMatch(readme, /nothing reads them back yet/);
   });
 });
