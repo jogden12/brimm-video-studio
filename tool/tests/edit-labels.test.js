@@ -1233,7 +1233,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     teachings: [[label], [label, "--transcript-only"], []],
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
-    guide: [[], [label], [label, "show"], ["drop"], ["drop", "zoom"], ["page"]]
+    guide: [[], [label], [label, "show"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
-import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT } from "../guide.js";
+import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -246,5 +246,17 @@ describe("the guide's lists", () => {
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: true })), ["A (aaaaaa) is done: nothing is left to do for it."]);
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." })), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit"]);
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: C.", step: "cascade", after: "" })), ["A (aaaaaa): On the BRIMM Ops page: C.", "Then: that is the last step.", "Step: cascade"]);
+  });
+});
+
+describe("what counts as a change while the guide waits", () => {
+  it("is a video come or gone, a stage or an import's step, never the time left or a size", () => {
+    const at = (over, next = { done: false, stage: "importing", text: "x", step: "", after: "" }) => ({ facts: { ...BASE, id: "", name: "A video of 5 bytes", ...DROP({ state: "importing", step: "Reading the sound", left: 60, total: 300 }), ...over }, next, folder: null, record: null });
+    const base = signatureOf([at({})]);
+    assert.equal([WAIT_MS, POLL_MS].join(), "90000,5000");
+    assert.equal(signatureOf([at({ name: "A video of 1.2 GB", drop: { here: true, state: "importing", step: "Reading the sound", left: 10, total: 100 } })]), base);
+    assert.notEqual(signatureOf([at({ drop: { here: true, state: "importing", step: "Writing the transcript", left: 10, total: 100 } })]), base);
+    assert.notEqual(signatureOf([at({}), at({})]), base);
+    assert.notEqual(signatureOf([at({}, { done: false, stage: "arriving", text: "x", step: "", after: "" })]), base);
   });
 });

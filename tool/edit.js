@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, dropWords, nextFor, ordered, findIn, overviewLines, videoLines } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf } from "./guide.js";
 import { readGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -5450,28 +5450,51 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   return 0;
 }
 
-/** `guide ["<video>" [show]]`, `guide drop [zoom]` and `guide page`: the guide, on a Mac that does the light import. On any
-    other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every video as it lands. With no words, the
-    overview: this Mac's drop folder in Finder's words, each video under way with its one next step, and how many videos from
-    before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and `drop zoom` Zoom Video Transfer,
-    beside BRIMM Video; `page` opens the BRIMM Ops page. With a video, by its name, its label or its id, its next step, and for a
-    step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder. Words that fit no video, or more
-    than one, are refused, and never said again: they may hold a client's name. */
+/** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
+    step, and how many videos from before the switch it does not guide. */
+function sayOverview(ctx, { items, old }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
+  return 0;
+}
+
+/** `guide wait`: what the guide says is read again every POLL_MS, for up to WAIT_MS, until it changes (signatureOf: a video come
+    or gone, a stage passed, an import's next step), and then the overview is said. With no change in that time it says so, then
+    the overview all the same. The time left, or a file still coming in, is no change. */
+async function waitForChange(ctx) {
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const start = ctx.now();
+  let read = guideItems(ctx);
+  const was = signatureOf(read.items);
+  while (ctx.now() - start < WAIT_MS) {
+    await wait(Math.min(POLL_MS, WAIT_MS - (ctx.now() - start)));
+    read = guideItems(ctx);
+    if (signatureOf(read.items) !== was) return sayOverview(ctx, read);
+  }
+  ctx.say(`Nothing has changed in ${WAIT_MS / 1000} seconds.`);
+  return sayOverview(ctx, read);
+}
+
+/** `guide ["<video>" [show]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac that does the light
+    import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every video as it lands. With
+    no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one next step, and how many
+    videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and `drop zoom` Zoom Video
+    Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a change in what the guide
+    says, then says the overview. With a video, by its name, its label or its id, its next step, and for a step on the BRIMM Ops
+    page the one after it; with `show`, what that step needs, in Finder. Words that fit no video, or more than one, are refused,
+    and never said again: they may hold a client's name. */
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
   if (is("drop")) return openFolder(ctx, dropFolder(ctx.root, ctx.machine, ctx.settings.drop), "your drop folder", dropWords(ctx.settings.drop, ctx.machine), "Your drop folder is not there: ask Jason.");
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
   if (is("page")) return openPage(ctx);
+  if (is("wait")) return waitForChange(ctx);
   if (rest.length > 2 || (rest.length === 2 && rest[1] !== "show")) {
     ctx.say(HELP);
     return 2;
   }
   const { items, old } = guideItems(ctx);
-  if (!rest.length) {
-    for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
-    return 0;
-  }
+  if (!rest.length) return sayOverview(ctx, { items, old });
   const found = findIn(items, rest[0]);
   if (found.why) return refuse(ctx, found.why);
   if (rest.length === 2) return showForStep(ctx, found.item);

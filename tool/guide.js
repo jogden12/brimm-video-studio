@@ -298,3 +298,14 @@ export function videoLines({ facts, next }) {
   const lines = [`${facts.name}: ${next.text}`];
   return next.stage === "ops" ? [...lines, `Then: ${next.after || "that is the last step."}`, `Step: ${next.step}`] : lines;
 }
+
+/** How long `guide wait` waits at most for a change in what the guide says, under the Code tab's two minutes, and how often it
+    looks again in that time. */
+export const WAIT_MS = 90000;
+export const POLL_MS = 5000;
+
+/** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
+    come or gone, a stage passed or an import's next step changes it; a name, which holds the size of a file still coming in, and
+    the time left do not. Each is kept as JSON and the list sorted, so the order the videos were read in is no change. */
+export const signatureOf = (items) =>
+  JSON.stringify(items.filter(({ next }) => !next.done).map(({ facts, next }) => JSON.stringify([facts.id, next.stage, facts.drop ? facts.drop.step : ""])).sort());

@@ -304,3 +304,35 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     t.done();
   });
 });
+
+describe("guide wait", () => {
+  /** Have the clock's wait stand-in do `then` once, on the `n`th wait. */
+  const onWait = (t, n, then) => {
+    let count = 0;
+    const wait = t.ctx.deps.wait;
+    return async (ms) => {
+      await wait(ms);
+      if (++count === n) then();
+    };
+  };
+  it("waits in steps of 5 seconds until what the guide says changes, then says it", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    const wait = onWait(t, 2, () => statusOf(t, { import: "b1", video: "Client Jane.mov", label: "Video of 20 Oct, 15:00 (Mac Studio)", at: "2026-10-20T15:00:10-05:00" }));
+    const r = await on(light(t, { wait }), "guide", "wait");
+    assert.deepEqual(r, { code: 0, said: [DROP_LINE, "Under way:", '  Video of 20 Oct, 15:00 (Mac Studio): It is being imported, at Reading the sound. Wait for the "Ready" notice.'] });
+    assert.deepEqual(t.waits, [5000, 5000]);
+    t.done();
+  });
+  it("gives up after 90 seconds, says nothing changed, and says the guide's lines; the time left or a growing file is no change", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    const wait = onWait(t, 3, () => writeFileSync(join(t.root, "Drop", "Mac Studio", "Client Jane.mov"), "a video, still copying in"));
+    const r = await on(light(t, { wait }), "guide", "wait");
+    assert.equal(r.code, 0);
+    assert.equal(r.said[0], "Nothing has changed in 90 seconds.");
+    assert.deepEqual(r.said.slice(1, 3), [DROP_LINE, "Under way:"]);
+    assert.deepEqual(t.waits, Array(18).fill(5000));
+    t.done();
+  });
+});
