@@ -7,7 +7,7 @@
 // 2026-10-22, section 7), and the guard refuses everything else in any mode. So the mode rests on the hook, and the
 // settings say `disableAllHooks: false`, which keeps a "hooks off" in the settings they are shared with from turning it
 // off. What a settings file in her folder, or the user's or the managed settings, can change of that is not for this file but for
-// `behind` (edit.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when the session
+// `behind` (loosened.js, lockLoosened): it runs at every session start, and refuses to go on, saying to ask Jason, when the session
 // does not run in her folder itself (Claude Code reads these settings only from the session's own folder, but her CLAUDE.md and
 // skill from the folders above it too, so a session in Pictures/ looks like hers and has no lock), when her folder has
 // a .claude/settings.local.json, when its own .claude/settings.json no longer holds the lock (lockBroken, here), or when the user
@@ -15,12 +15,44 @@
 // edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+//
+// That is the strict lock, and it stays as it is. The open lock (design 2026-10-26, section 7) is the other shape her folder can be
+// written in (openSettingsOf): Claude Code's sandbox on, with edit.js the one command outside it and no network; the never list
+// (never.js) and the gated places (places.js) denied, by their real paths in both spellings; sandboxed commands writing only in
+// the workshop, ~/BRIMM Video Workshop, where Claude's own file tools do not act; the app's secrets taken from sandboxed commands;
+// Claude Code's memory off; and, beside the guard, a hook after every card she answers (the receipt). It is written only where
+// this Mac's settings say open and OPEN_LOCK_CLAUDE is set
+// (settings.js effectiveLock), so while that is null every Mac keeps the strict lock. What it rests on that the by-hand round
+// records is data here (studio/allow.json, environment.json, app-flags.json), and starts so that the open lock fails closed.
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { neverDenyRules } from "./never.js";
+import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
 /** Her folder for Claude, in the home folder. */
 export const studioFolder = (home) => join(home, "BRIMM Video Studio");
+/** The workshop, in the home folder, on this Mac's own disk: the one folder the sandbox lets commands write into under the open
+    lock. Claude makes and reads files there with commands, never with its own file tools. */
+export const workshopFolder = (home) => join(home, "BRIMM Video Workshop");
+
+/** The Claude Code version the by-hand round in the Code tab passed the open lock on (R2). While it is null, the lock in effect is
+    strict on every Mac whatever its settings say, and `settings.js studio --lock open` refuses. It is set, on Jason's yes, after
+    that round. */
+export const OPEN_LOCK_CLAUDE = null;
+
+/** A data file in tool/studio/, as the object it holds. */
+const data = (name) => JSON.parse(readFileSync(new URL(`./studio/${name}`, import.meta.url), "utf8"));
+/** What her folder allows under the open lock on every Mac, each entry typed and exact (design section 2, "The allowlist is data");
+    this Mac's settings may add to it (studioAllow). */
+export const ALLOW_DEFAULT = data("allow.json");
+/** The names in the Claude app's environment: `deny`, those taken from every sandboxed command (C27: the app's own, and the binary's
+    own list of secrets), and `harmless`, those the guard lets be, which the by-hand round records. Names only, never values. */
+export const ENVIRONMENT = data("environment.json");
+/** The record of the flags the Claude app starts her chats with, which the by-hand round makes. Empty until then, so that every
+    flag is outside it and every chat is loosened (R3). */
+export const APP_FLAGS = data("app-flags.json");
 
 /** A template in tool/studio/, with the checkout's path and node's put in. */
 const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${name}`, import.meta.url), "utf8").split("{{CHECKOUT}}").join(checkout).split("{{NODE}}").join(node);
@@ -44,13 +76,89 @@ function settingsOf({ checkout, node, folder }) {
   };
 }
 
-/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on,
-    against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is true: absent, as main's studio.js wrote
-    the folder, or false, it turns no hook off), "guard" (no entry with the guard
+/** The `Read()` deny rules of the gated places on the Mac `facts` describes (places.js), by their real paths in both spellings, each
+    spelt with `//` as Claude Code takes an absolute path, and the rules for a .env file (R20): what her folder's open settings deny
+    Claude's Read, and what `settings.js user-deny` adds to her user settings, so that every Claude Code session on this Mac takes
+    them (question 5, R24). */
+export function gatedReadRules(facts) {
+  const read = (path, kind) => bothSpellings(path).map((p) => (kind === "file" ? `Read(/${p})` : `Read(/${p}/**)`));
+  return [...gatedPlaces(facts).flatMap((place) => place.readRules.flatMap((rule) => read(rule, place.kind))), "Read(**/.env)", "Read(**/.env.*)"];
+}
+
+/** The folder's settings for Claude Code under the open lock, for the Mac `facts` describes (settings.js factsOf: its home,
+    BRIMM Video, its uid, Claude Code's temp folder, Zoom's folder, the proxy port, the web tools and what it allows). Each path a
+    rule names is a real path, in both spellings (places.js); `Read()` and `Edit()` rules spell an absolute path with `//`, the
+    sandbox's own lists plainly. What it denies:
+    - to Claude's own tools: the never list; Read of each gated place's read rules, and of a .env file in her folder (R20); Write
+      and Edit in her folder, the checkout, BRIMM Video and every place only brimm-video writes, the app's data, LaunchAgents,
+      ~/.claude and ~/.ssh. And, to every tool, the names a session started in the workshop would take as its own (a CLAUDE.md,
+      CLAUDE.local.md, .mcp.json or .claude anywhere in it): an Edit() deny rule, which Claude Code merges into the sandbox's
+      denyWrite, so that even a sandboxed command cannot write them;
+    - to sandboxed commands: reading any gated place but Assets and the three places Bash needs (readAllowed), writing anywhere
+      but the workshop, the network (with both proxy ports set to one nothing listens on, so no proxy login is made: C38), and the
+      app's secret names.
+    It allows edit.js (outside the sandbox: its one excluded command), and the web tools only once this Mac's settings open them.
+    No allow rule names the workshop, and no Edit() or Read() deny rule names it whole (only the four names above): Claude Code
+    merges an Edit() deny rule into the sandbox's denyWrite and a Read() one into its denyRead (C3), which would stop sandboxed
+    commands making and reading files there, and commands are how a file is made or read in the workshop. The guard refuses
+    Claude's own Write, Edit, Read, SendUserFile, Glob and Grep there (open-lock.js), and a call it let through would ask a card.
+    No folder is added to the session. */
+export function openSettingsOf({ checkout, node, folder, facts }) {
+  const { home } = facts;
+  const AS = join(home, "Library", "Application Support");
+  const BV = realOf(facts.root);
+  const W = realOf(workshopFolder(home));
+  const places = gatedPlaces(facts);
+  const both = (path) => bothSpellings(realOf(path));
+  const edit = (path) => both(path).map((p) => `Edit(/${p}/**)`);
+  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(AS, "Claude"), join(home, "Library", "LaunchAgents"), join(home, ".claude"), join(home, ".ssh")];
+  return {
+    permissions: {
+      defaultMode: "default",
+      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
+      deny: [
+        ...neverDenyRules(facts.allow),
+        ...gatedReadRules(facts),
+        ...onlyBrimmVideo.flatMap(edit),
+        ...bothSpellings(W).flatMap((w) => [".claude/**", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json"].map((inner) => `Edit(/${w}/**/${inner})`))
+      ],
+      disableBypassPermissionsMode: "disable",
+      disableAutoMode: "disable"
+    },
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      excludedCommands: [`${node} "${checkout}/tool/edit.js" *`],
+      network: { deniedDomains: ["*"], httpProxyPort: facts.port, socksProxyPort: facts.port },
+      filesystem: {
+        allowWrite: [W],
+        denyWrite: [...both(folder), ...both(join(AS, "Claude"))],
+        denyRead: places.flatMap((place) => bothSpellings(place.path)),
+        allowRead: readAllowed({ ...facts, folder })
+      },
+      credentials: { envVars: ENVIRONMENT.deny.map((name) => ({ name, mode: "deny" })) }
+    },
+    autoMemoryEnabled: false,
+    autoDreamEnabled: false,
+    disableSkillShellExecution: true,
+    disableAllHooks: false,
+    hooks: {
+      PreToolUse: settingsOf({ checkout, node, folder }).hooks.PreToolUse,
+      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }]
+    }
+  };
+}
+
+/** What is no longer so in her folder's settings, `settings` (the object read from its .claude/settings.json), that the lock rests on.
+    With the strict lock (`lock` "strict"), against what settingsOf writes for `checkout` and `folder`: "hooks" (disableAllHooks is
+    true: absent, as main's studio.js wrote the folder, or false, it turns no hook off), "guard" (no entry with the guard
     hook: the matcher, the kind of hook, /bin/sh, the guard script of this checkout and the folder it is given, and onFailure "block";
     node, args[1], is not looked at), "bypass" and "auto" (disableBypassPermissionsMode, disableAutoMode not "disable"). [] when all
-    hold. `behind` refuses on any of them (edit.js lockLoosened); every other difference from what is written is only "out of date". */
-export function lockBroken(settings, { checkout, folder }) {
+    hold. `behind` refuses on any of them (loosened.js lockLoosened); every other difference from what is written is only "out of date".
+    With the open lock, the whole of it is compared (openBroken, below). */
+export function lockBroken(settings, { checkout, folder, lock = "strict", facts, node }) {
+  if (lock === "open") return openBroken(settings, { checkout, folder, facts, node });
   const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
   const want = settingsOf({ checkout, node: "", folder });
   const entry = want.hooks.PreToolUse[0];
@@ -67,22 +175,69 @@ export function lockBroken(settings, { checkout, folder }) {
   return broken;
 }
 
-/** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. */
-export function studioFiles({ checkout, node, folder }) {
+/** What is changed in her folder's settings under the open lock (R17): the whole of `settings` is compared, as an object, with what
+    openSettingsOf writes for this checkout, her folder, this Mac's facts and `node`, the node this Mac's settings recorded her folder
+    was written with (studioNode), never the node the file names. Any difference is changed, not out of date, and each part that
+    differs is named: "hooks", "guard", "bypass" and "auto" as for the strict lock (the guard's entry compared whole, its node among
+    it); "sandbox" (the sandbox's settings, whole); "permissions" (allow, deny, the modes and anything added, such as a folder);
+    "memory" (autoMemoryEnabled or autoDreamEnabled not false); "skill-shell" (disableSkillShellExecution not true); "receipt" (no
+    entry with the receipt hook after a card); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
+    guard's and the receipt's); and "other" (any other key, such as env, statusLine, enabledPlugins or apiKeyHelper, or
+    disableAllHooks not false). ["node"] alone when this Mac's settings name no node, so that nothing can be compared. */
+function openBroken(settings, { checkout, folder, facts, node }) {
+  if (!node) return ["node"];
+  const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const s = object(settings) ? settings : {};
+  const want = openSettingsOf({ checkout, node, folder, facts });
+  const hooks = object(s.hooks) ? s.hooks : {};
+  const entries = (event) => (Array.isArray(hooks[event]) ? hooks[event] : []);
+  const holds = (event) => entries(event).some((entry) => isDeepStrictEqual(entry, want.hooks[event][0]));
+  const count = (event) => entries(event).reduce((n, entry) => n + (object(entry) && Array.isArray(entry.hooks) ? entry.hooks.length : 1), 0);
+  const permissions = object(s.permissions) ? s.permissions : {};
+  const broken = [];
+  if (s.disableAllHooks === true) broken.push("hooks");
+  if (!holds("PreToolUse")) broken.push("guard");
+  if (permissions.disableBypassPermissionsMode !== want.permissions.disableBypassPermissionsMode) broken.push("bypass");
+  if (permissions.disableAutoMode !== want.permissions.disableAutoMode) broken.push("auto");
+  if (!isDeepStrictEqual(s.sandbox, want.sandbox)) broken.push("sandbox");
+  if (!isDeepStrictEqual(s.permissions, want.permissions)) broken.push("permissions");
+  if (s.autoMemoryEnabled !== false || s.autoDreamEnabled !== false) broken.push("memory");
+  if (s.disableSkillShellExecution !== true) broken.push("skill-shell");
+  if (!holds("PostToolUse")) broken.push("receipt");
+  // A hook of another event, or more than the one each, is another hook; and so is any other difference in the hooks that the
+  // guard's and the receipt's do not already name.
+  const otherEvent = Object.keys(hooks).some((event) => !Object.hasOwn(want.hooks, event));
+  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt");
+  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > 1 || unnamed) broken.push("other-hooks");
+  if (Object.keys(s).some((key) => !Object.hasOwn(want, key)) || (s.disableAllHooks !== false && s.disableAllHooks !== true)) broken.push("other");
+  return broken;
+}
+
+/** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. With the
+    strict lock, today's; with the open lock, its settings (for the Mac `facts` describes), its own CLAUDE.md, and its own skill,
+    which asks the card exactly as `episodes` prints it and reads a session's words from the file `edit.js` names. The strict lock's
+    CLAUDE.md and skill are kept as they are, so that a Mac with the strict lock keeps today's folder. */
+export function studioFiles({ checkout, node, folder, lock = "strict", facts }) {
+  const open = lock === "open";
   return {
-    "CLAUDE.md": filled("CLAUDE.md", { checkout, node }),
-    ".claude/settings.json": JSON.stringify(settingsOf({ checkout, node, folder }), null, 2) + "\n",
-    ".claude/skills/brimm-edit/SKILL.md": filled("SKILL.md", { checkout, node })
+    "CLAUDE.md": filled(open ? "CLAUDE-open.md" : "CLAUDE.md", { checkout, node }),
+    ".claude/settings.json": JSON.stringify(open ? openSettingsOf({ checkout, node, folder, facts }) : settingsOf({ checkout, node, folder }), null, 2) + "\n",
+    ".claude/skills/brimm-edit/SKILL.md": filled(open ? "SKILL-open.md" : "SKILL.md", { checkout, node })
   };
 }
 
 /** Write her folder in `home`: its three files, written over the ones there, and Pictures/. Nothing else in it is touched.
     It is on this Mac's own disk, so the files are written in place. The hook is given the folder as the disk spells it,
-    which is the folder Claude Code runs in, even when it was made by hand in another case. Gives back the folder. */
-export function writeStudio(home, { checkout, node }) {
+    which is the folder Claude Code runs in, even when it was made by hand in another case. With the open lock it also makes
+    the workshop, readable by her alone. Gives back the folder. */
+export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
+  if (lock === "open") {
+    mkdirSync(workshopFolder(home), { recursive: true, mode: 0o700 });
+    chmodSync(workshopFolder(home), 0o700);
+  }
   mkdirSync(studioFolder(home), { recursive: true });
   const folder = realpathSync.native(studioFolder(home));
-  for (const [name, text] of Object.entries(studioFiles({ checkout, node, folder }))) {
+  for (const [name, text] of Object.entries(studioFiles({ checkout, node, folder, lock, facts }))) {
     mkdirSync(dirname(join(folder, name)), { recursive: true });
     writeFileSync(join(folder, name), text);
   }
@@ -141,7 +296,7 @@ function readable(input, folder, tmp, uid) {
 const SKILL = "brimm-edit";
 
 /** A text as a regular expression matches it, letter for letter. */
-const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** One word after edit.js: a plain word of letters, digits and _ . , : + = @ % / - (not starting with =); a word in double
     quotes holding no double quote, $, backtick, backslash or line break; or a word in single quotes holding no single quote
@@ -156,7 +311,7 @@ const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     app's 2.1.295 is /(\d?&?>+[ \t]*)nul(?=\s|$|[|&;)\n])/ with nul in any case. So the title Profit > nul margin, in
     either kind of quotes, reaches edit.js as Profit > /dev/null margin, still one word inside its quotes, and nothing else
     runs. The guard is given the command as written, before the rewrite. */
-const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
+export const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
 
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run with node (the word node, or the node the installer found)

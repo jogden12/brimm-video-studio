@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-10-22.
+- **Last updated:** 2026-10-26.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -13,6 +13,12 @@ Said on 2026-10-14, word for word:
 
 > video editing should be a separate app/service from BRIMM Operations. open to your suggestions, but I think video editing should be run via Claude code or claude chat. in order for Sallie to be able to do it on her laptop, we will probably have to buy video editing software for it; her laptop does not have final cut pro. it seems like davinci resolve studio would be the best option
 
+## Jason's decisions of 2026-10-25
+
+Said on 2026-10-25, after Sallie's first walkthrough and her notes on it, word for word:
+
+> loosen the lock. the session asks if it is a client session upfront and treats those videos appropriately. the connection to open router is acceptable. this cannot be fully self contained and on machine and still achieve all of the functionality that she wants included.
+
 ## Sallie's laptop
 
 A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not have Final Cut Pro on 2026-10-14; it gets it, as decided below.
@@ -21,6 +27,7 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
 
 - **Which editor Sallie's laptop gets: Final Cut Pro, as on the Mac Studio.** Jason decided it on 2026-10-14 ("Let's stick with final cut pro for now.") and installs it on her laptop, so both Macs use Final Cut Pro. The design's "What this rests on" records the decision; setting her laptop up is `docs/setup/sallies-laptop.md`.
 - **The workflows of 2026-10-22.** After his MacBook test stopped at step 2.5 of the test guide, Jason walked through every kind of video with the BRIMM Ops session "Write up the video workflows, user steps marked", and decided the shape below (BRIMM Ops memory, `video-workflow-redesign-2026-10-22`). The design is `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`, which supersedes the design of 2026-10-14 where they differ. Nothing of it is built.
+- **Her folder's lock, loosened (2026-10-25).** Jason's decisions of 2026-10-25, above, loosen the lock on her folder for Claude. The design is `docs/superpowers/specs/2026-10-26-brimm-video-lock-loosened-design.md`, which replaces section 7 of the design of 2026-10-22 ("Her folder's lock, as an adjustable allowlist") and its phase K. Its phase K1, the open lock, is built behind a per-Mac setting that stays strict on both Macs until Jason opens it after the checks by hand in the Code tab.
 
 ## The workflows (2026-10-22)
 
@@ -36,7 +43,7 @@ What brimm-video must do, as Jason decided it on 2026-10-22. The design says how
 - **Times in the chat** are on the rough cut's timeline, then on the newest version's. "Show me the transcript" shows the rough cut's transcript with its times.
 - **Assets:** a `BRIMM Video/Assets` folder with the brand's logos (never the "with Sallie Holder" marks) and graphics made as needed, by Sallie in Canva or elsewhere, or by Claude in the chat.
 - **Zoom:** recordings from Zoom are taken by the same drop, through phase T; `BRIMM VIDEO Transfer` retires after two weeks of both running side by side.
-- **Her folder's lock** is an allowlist that can be changed as her work changes, and can admit a connector later. OpusClip's posting tools stay denied. brimm-video never uploads video: OpusClip takes an episode's YouTube link. Option b (her folder sending that link to OpusClip) comes after a test in the Code tab.
+- **Her folder's lock** is an allowlist that can be changed as her work changes, and can admit a connector later. brimm-video never uploads video: OpusClip takes an episode's YouTube link. Option b (her folder sending that link to OpusClip) comes after a test in the Code tab. On her laptop it is to be open (built in K1, off on both Macs until Jason opens it after the checks by hand), but for a fixed never list (2026-10-25): Claude may help with graphics, other programs and named design skills, and with the web once a check in the Code tab shows the app's secrets stay out of her commands. Kept locked: the code and the episode records change only through brimm-video; a session's words never come into her chat but as its approved teachings, and a chat that has them runs brimm-video only; nothing is posted or published. OpusClip's posting tools stay denied.
 - **The hand-off, version 2,** shared with BRIMM Ops: kinds for a finished video and a session, no episode title (titles live only on the page), a session's approved principles. A Reel's words on the picture still travel in it.
 - **Kept:** the tool drafts and never posts, sends or publishes; no video or sound leaves the Mac.
 
@@ -105,3 +112,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-14: built phase 1a of the design: episodes on the Mac Studio alone. A video dropped in `BRIMM Video/Unedited Video/Mac Studio/` is imported into its own folder in `BRIMM Video/Episodes/`, every file put into Dropbox as a clone and checked again 15 minutes later, and `tool/edit.js` lists, opens and shows episodes in Final Cut Pro. Described in the README, under "Episodes".
 - 2026-10-15: closed the decision on Sallie's editor, as Jason made it on 2026-10-14: Final Cut Pro on both Macs. "Open decisions" is now "Decisions", and "Sallie's laptop" says it had no Final Cut Pro on 2026-10-14 and gets it.
 - 2026-10-22: recorded Jason's workflows of 2026-10-22, decided after his MacBook test and the walkthrough with the BRIMM Ops session "Write up the video workflows, user steps marked": a new section, "The workflows (2026-10-22)", and a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-22-brimm-video-light-import-and-fork-design.md`. Nothing is built. L5 below describes the tool as it was built and has not been changed. The same evening, Jason's answers to the design's questions, recorded under that section.
+- 2026-10-26: recorded Jason's decisions of 2026-10-25, word for word, under a heading of their own; a line under "Decisions" naming the design that carries them, `docs/superpowers/specs/2026-10-26-brimm-video-lock-loosened-design.md`; and, in the lock's line of "The workflows (2026-10-22)", what opens on her laptop and what stays locked. Its phase K1, the open lock, is built and stays off on both Macs until Jason opens it on her laptop after the checks by hand. Pictures from OpenRouter, and what brimm-video then sends, are recorded with the phase that builds them.

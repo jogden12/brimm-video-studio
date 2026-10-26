@@ -18,6 +18,7 @@ import { writePending } from "../filing.js";
 import { writeStatus } from "../importing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
+import { notSessionCardOf } from "../receipts.js";
 import { setup, episodeFor, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -201,7 +202,7 @@ describe("kind: an answered video, and the wrong answer for how it came", () => 
       const found = waiting(t, { answer: { ...ANSWER, guess: null, came } });
       for (const word of ["raw", "finished", "clip"]) {
         const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
-        assert.deepEqual([r.code, r.said], [1, [ZOOM]], `${came} ${word}`);
+        assert.deepEqual([r.code, r.said], [1, [ZOOM, `    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: LABEL, came }))}`]], `${came} ${word}`);
       }
       untouched(t, found);
       const given = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--not-a-session");
@@ -1270,7 +1271,7 @@ describe("kind: the version it is of, and how it came (fix round 1, 4 to 6)", ()
     const found = episodeFor(t, { record: { video: { file: "GMT20261013-142933_Recording_1280x720.mp4", bytes: 1, seconds: 23, recorded: "2026-10-14", recordedFrom: "video" }, files: {}, name: { text: "Coaching", placeholder: false } } });
     for (const word of ["raw", "finished", "clip"]) {
       const r = await on(t.ctx.deps, "kind", "Coaching", word, "--private", "no", "--again");
-      assert.deepEqual([r.code, r.said], [1, [ZOOM]], word);
+      assert.deepEqual([r.code, r.said], [1, [ZOOM, `    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: "Coaching", came: null }))}`]], word);
     }
     untouched(t, found);
     const given = await on(t.ctx.deps, "kind", "Coaching", "raw", "--private", "no", "--again", "--not-a-session");
@@ -1281,7 +1282,7 @@ describe("kind: the version it is of, and how it came (fix round 1, 4 to 6)", ()
     const t = setup();
     const found = waiting(t, { answer: { ...ANSWER, came: null, guess: null, seen: "" } });
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
-    assert.deepEqual([r.code, r.said], [1, [ZOOM]]);
+    assert.deepEqual([r.code, r.said], [1, [ZOOM, `    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: LABEL, came: null }))}`]]);
     untouched(t, found);
     assert.equal((await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--not-a-session")).code, 0);
     // Answered, it is not asked again: she was asked.
