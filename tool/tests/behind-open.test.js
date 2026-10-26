@@ -498,6 +498,19 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     goesOn(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --allowedTools mcp__a__b mcp__c__d,mcp__e__f`)), "connectors' tools");
     w.done();
   });
+  it("names a flag outside the record only when it is one of Claude Code's own, so that no word of a value is said", async () => {
+    // A value holding " --": `--add-dir=/x/Smith --final` splits into --add-dir and a "flag" --final, which is a word of a path.
+    const UNNAMED = "(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)";
+    const w = openWorld();
+    for (const [what, extra] of [["a word of a value", `--add-dir=/x/${SECRET} --final`], ["a word that is no flag's shape", `--settings {} --{"${SECRET}":1}`], ["a flag-shaped word", `--allowedTools mcp__a__b --Smith-and-Jones`]]) {
+      const r = await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} ${extra}`));
+      refusedFor(r, UNNAMED, what);
+      for (const word of ["--final", "final", "Smith", "Jones"]) assert.ok(!r.text.includes(word), `${what}: ${word}: ${r.text}`);
+    }
+    // One of Claude Code's own option names is still said.
+    refusedFor(await behindOn(w, started(`${APP_ARGS(w.folder, w.home)} --agents {"a":"${SECRET}"}`)), "(Jason: the Claude app started this chat with --agents, which is not among the flags recorded for her chats.)", "--agents");
+    w.done();
+  });
   it("reads the app's --settings, as JSON or as a file, for every loosening key, allowUnsandboxedCommands false among them", async () => {
     const w = openWorld();
     const loose = { sandbox: { allowUnsandboxedCommands: false }, permissions: { allow: [`Edit(/${SECRET}/**)`] }, hooks: { SessionStart: [{ hooks: [{ type: "command", command: SECRET }] }] }, disableAllHooks: true, env: { A: SECRET } };

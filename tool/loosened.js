@@ -209,8 +209,34 @@ function isNotes(dir, home) {
   return realOf(dir) === dir;
 }
 
-/** The flags as they are named: two dashes, then letters, digits and dashes. Anything else after a " --" is said without its words. */
-const FLAG = /^--[A-Za-z0-9][A-Za-z0-9-]*$/;
+/** Claude Code's own option names, as its 2.1.308 binary lists the options of `claude` itself. A flag outside the record is named in
+    the lines for Jason only when it is one of these: anything else after a " --" may be a word of a flag's value, as `--final` in
+    `--add-dir=/x/Smith --final`, and is said without its words. */
+export const KNOWN_FLAGS = [
+  "--add-dir", "--advisor", "--agent", "--agent-color", "--agent-id", "--agent-name", "--agent-type", "--agents",
+  "--allow-dangerously-skip-permissions", "--allow-other-models", "--allowed-tools", "--allowedTools",
+  "--append-subagent-system-prompt", "--append-subagent-system-prompt-file", "--append-system-prompt", "--append-system-prompt-file",
+  "--attach-serve", "--autocompact", "--await-claim", "--await-initialize", "--ax-screen-reader", "--background", "--bare",
+  "--betas", "--bg", "--brief", "--channels", "--chrome", "--client-data-url", "--cloud", "--continue", "--correlation-id",
+  "--dangerously-load-development-channels", "--dangerously-skip-permissions", "--debug", "--debug-file", "--debug-to-stderr",
+  "--deep-link-cwd-b64", "--deep-link-last-fetch", "--deep-link-origin", "--deep-link-repo", "--desktop", "--disable-slash-commands",
+  "--disallowed-tools", "--disallowedTools", "--effort", "--enable-auth-status", "--enable-auto-mode", "--environment",
+  "--exclude-dynamic-system-prompt-sections", "--exec", "--fallback-model", "--fast-mode", "--file", "--fork-session",
+  "--forward-home-settings", "--forward-subagent-text", "--from-pr", "--handle-uri", "--hard-fail", "--help",
+  "--host-auth-is-org-sign-in", "--ide", "--include-hook-events", "--include-partial-messages", "--include-unsupported-models",
+  "--inherit-permission-mode", "--init", "--init-only", "--input-format", "--json-schema", "--maintenance", "--managed-settings",
+  "--max-budget-usd", "--max-thinking-tokens", "--max-turns", "--mcp-config", "--messaging-socket-path", "--model", "--name",
+  "--no-chrome", "--no-session-persistence", "--on-branch", "--output-format", "--parent-session-id", "--permission-mode",
+  "--permission-prompt-tool", "--permission-prompts", "--plan-mode-instructions", "--plan-mode-required", "--plugin-dir",
+  "--plugin-dir-no-mcp", "--plugin-url", "--pool", "--prefill", "--prefill-b64", "--print", "--proactivity", "--project",
+  "--project-config-root", "--prompt-suggestions", "--rc", "--ref", "--remote", "--remote-control",
+  "--remote-control-session-name-prefix", "--replay-user-messages", "--reply-on-resume", "--restricted", "--resume",
+  "--resume-drops-turn", "--resume-session-at", "--rewind-files", "--routine", "--runner-declares", "--safe-mode", "--sdk-url",
+  "--session-id", "--session-mirror", "--setting-sources", "--settings", "--strict-mcp-config", "--system-prompt",
+  "--system-prompt-file", "--system-prompt-snapshot", "--task-budget", "--team-name", "--teammate-mode", "--teleport", "--thinking",
+  "--thinking-display", "--tmux", "--tools", "--verbose", "--version", "--watch-artifact", "--watch-artifact-no-autoreact",
+  "--workload", "--worktree"
+];
 
 /** Whether the Claude Code version `version` is older than `minimum`, part by part. */
 function older(version, minimum) {
@@ -252,8 +278,8 @@ export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
   const lines = [];
   const recorded = new Set(isObject(record) && Array.isArray(record.flags) ? record.flags : []);
   const unrecorded = [...new Set(flags.map((flag) => flag.name).filter((name) => !recorded.has(name)))];
-  for (const name of unrecorded.filter((name) => FLAG.test(name))) lines.push(`(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`);
-  if (unrecorded.some((name) => !FLAG.test(name))) lines.push("(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)");
+  for (const name of unrecorded.filter((name) => KNOWN_FLAGS.includes(name))) lines.push(`(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`);
+  if (unrecorded.some((name) => !KNOWN_FLAGS.includes(name))) lines.push("(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)");
   const values = (name) => flags.filter((flag) => flag.name === name).map((flag) => flag.value);
   if (values("--project-config-root").some((value) => !folder || value !== folder)) lines.push("(Jason: the Claude app reads this chat's project settings from another folder (--project-config-root).)");
   if (values("--setting-sources").some((value) => value !== "user,project,local")) lines.push("(Jason: the Claude app starts this chat with other setting sources (--setting-sources).)");
