@@ -98,7 +98,8 @@ export function settingsObject(file) {
     process, against deps.appFlags, else APP_FLAGS), its --settings among them, which deps.appSettings stands in for when given; and,
     under Claude Code (CLAUDECODE=1), the folders added to the chat while it ran (addedWhy, from deps.transcript, else the transcript
     of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's id, the session runs
-    in her folder when that transcript is there (R30); otherwise, and on a strict Mac, when the folder it runs in is hers. */
+    in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30); otherwise, and on a strict
+    Mac, when the folder it runs in is hers. */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
@@ -122,8 +123,11 @@ export function lockLoosened({ home, checkout, deps = {} }) {
       // A folder not there any more is not hers.
     }
     // Under Claude Code on an open-lock Mac, a sandboxed `cd` may have moved the folder its commands run in (R30): the session is hers
-    // when its transcript is kept in her folder's own projects folder.
-    const hers = open && underClaude && sessionId !== undefined ? isFile(transcript) : cwd === folder;
+    // when its transcript is kept in her folder's own projects folder and its commands run in her folder or a folder inside it. Both,
+    // since a projects folder's name folds every letter but A-Z, a-z and 0-9 into "-" (claudeDirName): a chat started in
+    // ~/BRIMM-Video-Studio keeps its transcript there too, with no guard and no sandbox.
+    const inside = cwd !== null && (cwd === folder || cwd.startsWith(folder + "/"));
+    const hers = open && underClaude && sessionId !== undefined ? isFile(transcript) && inside : cwd === folder;
     if (!hers) {
       const where = cwd && cwd.startsWith(folder + "/") ? "a folder inside her folder for Claude, not in the folder itself," : "a folder other than her folder for Claude,";
       why.push(`(Jason: this session runs in ${where} and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)`);

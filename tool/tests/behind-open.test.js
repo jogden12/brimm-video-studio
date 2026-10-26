@@ -541,6 +541,20 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     refusedFor(await behindOn(w, { cwd: pictures }), INSIDE_WHY, "Jason's run in Pictures");
     w.done();
   });
+  it("refuses a chat started in a folder whose name differs from hers only in its punctuation, though its transcript is kept in her projects folder", async () => {
+    // Claude Code names a projects folder by the folder's path with every letter but A-Z, a-z and 0-9 made "-" (claudeDirName), so
+    // ~/BRIMM-Video-Studio, ~/BRIMM_Video_Studio and ~/BRIMM Video/Studio keep their chats' transcripts beside hers, with no guard.
+    const OTHER_WHY = "(Jason: this session runs in a folder other than her folder for Claude, and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)";
+    for (const name of ["BRIMM-Video-Studio", "BRIMM_Video_Studio", join("BRIMM Video", "Studio")]) {
+      const w = openWorld();
+      const other = join(w.home, name);
+      mkdirSync(other, { recursive: true });
+      assert.equal(claudeDirName(other), claudeDirName(w.folder), name);
+      chatTranscript(w, [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
+      refusedFor(await behindOn(w, { cwd: other, env: UNDER }), OTHER_WHY, name);
+      w.done();
+    }
+  });
   it("says the folder is not trusted yet, from ~/.claude.json, and still goes on; a parent folder's trust counts", async () => {
     // r.code 0; r.text includes UNTRUSTED once, not LOCK_CHANGED
     assert.equal(UNTRUSTED, "Claude Code has not trusted this folder yet: open it once and choose to trust it.");
