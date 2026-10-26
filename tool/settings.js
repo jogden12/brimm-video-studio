@@ -24,7 +24,7 @@
 //   node settings.js marker "<drop folder>" "<this Mac>"
 //   node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]
 //                           [--allow skill|mcp-tool|tool <name>]… [--print]
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -32,7 +32,8 @@ import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
-import { realOf } from "./places.js";
+import { claudeDirName, realOf } from "./places.js";
+import { untiedMark } from "./held.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -676,6 +677,37 @@ function freeLocalPort() {
   });
 }
 
+/** Whether her folder for Claude has the open lock already: its settings are there and have the sandbox, which only the open shape
+    writes. A folder that is not there, or whose settings cannot be read, has not. */
+function openAlready(home) {
+  try {
+    const written = JSON.parse(readFileSync(join(studioFolder(home), ".claude", "settings.json"), "utf8"));
+    return Boolean(written) && typeof written === "object" && Object.hasOwn(written, "sandbox");
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Take away the command output her folder's chats left in Claude Code's temp folder (`tmp`, by its real path), every
+    `claude-<uid>/<her folder's name>/<a chat>/tasks/<a task>.output`, which every chat under the open lock may read (R7). Folders that are links
+    are not followed; one that is not there is nothing to take away. Throws when one cannot be read or a file taken away. */
+function clearChatOutput(tmp, uid, folder) {
+  const own = join(tmp, `claude-${uid}`, claudeDirName(folder));
+  const folders = (dir) => {
+    try {
+      return readdirSync(dir).filter((name) => lstatSync(join(dir, name)).isDirectory());
+    } catch (e) {
+      if (e.code === "ENOENT") return [];
+      throw e;
+    }
+  };
+  for (const chat of folders(own)) {
+    if (!folders(join(own, chat)).includes("tasks")) continue;
+    const tasks = join(own, chat, "tasks");
+    for (const name of readdirSync(tasks)) if (name.endsWith(".output") && !lstatSync(join(tasks, name)).isDirectory()) rmSync(join(tasks, name));
+  }
+}
+
 /** `studio`: write the folder for Claude from this Mac's settings, with the node the installer found. That node is named,
     and is not the one running this: with Homebrew that is a versioned path that the next upgrade of node takes away. The options
     it is told are written into this Mac's settings first, by writeSettings, so a value that will not do writes nothing; an entry
@@ -687,7 +719,7 @@ function freeLocalPort() {
     effect, or for the lock --lock names, whatever `openMinimum` is, so that the open shape can be tried by hand before it is
     named; with the port this Mac's settings store, or NO_PORT, never one picked for it. Gives the number it ends with, or a
     promise of it while a port is picked. */
-function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
+function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
   const told = studioToldBy(rest);
   if (!told) {
     say(HELP);
@@ -722,6 +754,15 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid }) {
       const shown = facts && facts.port === null ? { ...facts, port: NO_PORT } : facts;
       say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts: shown })[".claude/settings.json"].trimEnd());
       return 0;
+    }
+    if (open && !openAlready(home)) {
+      try {
+        untiedMark({ home, now });
+        clearChatOutput(facts.tmp, facts.uid, realOf(studioFolder(home)));
+      } catch (e) {
+        say(`The folder for Claude could not be written (the chats before the open lock could not be marked: ${e.code || "an error"}).`);
+        return 1;
+      }
     }
     try {
       if (Object.keys(changes).length) writeSettings(home, changes);
@@ -799,7 +840,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   if (command === "sessions") return sessions(home, rest, say, now);
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone);
-  if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid });
+  if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
   say(HELP);
   return 2;
 }

@@ -9,7 +9,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAULT } from "../studio.js";
-import { realOf } from "../places.js";
+import { claudeDirName, realOf } from "../places.js";
+import { chatHeld } from "../held.js";
+import { heldFolder } from "../scan.js";
 import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
@@ -428,6 +430,47 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     // Another node is recorded as the one her folder was written with.
     assert.equal(t.run(MINIMUM, "studio", "--node", "/usr/local/bin/node"), 0);
     assert.equal(t.settings().studioNode, "/usr/local/bin/node");
+    t.done();
+  });
+  it("writes an untied mark and takes away old command output when it first writes the open lock, and neither when the folder is open already", () => {
+    const t = studioWorld();
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    const own = join(t.tmp, "claude-502", claudeDirName(t.folder()));
+    const chat = "11111111-2222-4333-8444-555555555555";
+    const output = join(own, chat, "tasks", "a.output");
+    const elsewhere = join(t.tmp, "claude-502", "-another-folder", chat, "tasks", "b.output");
+    for (const file of [output, elsewhere, join(own, chat, "tasks", "keep.txt")]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "x");
+    }
+    const marks = () => (existsSync(heldFolder(t.home)) ? readdirSync(heldFolder(t.home)).filter((n) => n.startsWith("mark-")) : []);
+    assert.deepEqual(marks(), []);
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.equal(marks().length, 1);
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(t.home), marks()[0]), "utf8")), { at: JSON.parse(readFileSync(join(heldFolder(t.home), marks()[0]), "utf8")).at, session: null, claude: null, tied: false });
+    assert.deepEqual([existsSync(output), existsSync(elsewhere), existsSync(join(own, chat, "tasks", "keep.txt"))], [false, true, true]);
+    const projects = join(t.home, ".claude", "projects", claudeDirName(t.folder()));
+    mkdirSync(projects, { recursive: true });
+    writeFileSync(join(projects, `${chat}.jsonl`), `${JSON.stringify({ type: "user", uuid: "u-1", timestamp: "2026-01-01T00:00:00.000Z" })}\n`);
+    assert.equal(chatHeld({ home: t.home, sessionId: chat, transcriptPath: join(projects, `${chat}.jsonl`), claude: null }), true);
+    writeFileSync(output, "x");
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.equal(marks().length, 1);
+    assert.equal(existsSync(output), true);
+    t.done();
+  });
+  it("writes the open lock first on a Mac with no folder for Claude with an untied mark too, and not at all when it cannot write one", () => {
+    const t = studioWorld();
+    mkdirSync(dirname(heldFolder(t.home)), { recursive: true });
+    writeFileSync(heldFolder(t.home), "a file where the folder goes");
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 1);
+    assert.match(t.said.at(-1), /^The folder for Claude could not be written \(the chats before the open lock could not be marked: /);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    assert.equal(t.settings().lock, undefined);
+    rmSync(heldFolder(t.home));
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.equal(readdirSync(heldFolder(t.home)).filter((n) => n.startsWith("mark-")).length, 1);
     t.done();
   });
   it("keeps the web tools held until told --web open, and adds an allowed entry once, by its type and exact name", () => {
