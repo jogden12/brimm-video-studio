@@ -4,12 +4,13 @@
 // SECRET in every value, which no line may hold.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { settingsFile, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
-import { openWorld, openDeps, NODE } from "./open-world.js";
+import { SECRET_WORDS, environmentWhy } from "../loosened.js";
+import { openWorld, openDeps, NODE, SESSION } from "./open-world.js";
 
 /** Words that must never be said: what a settings file holds. */
 const SECRET = "SECRET-WORDS-OF-A-FILE";
@@ -183,6 +184,103 @@ describe("behind, with the open lock", () => {
     assert.equal(stale.code, 0);
     assert.ok(stale.text.split("\n")[1].startsWith(STALE), stale.text);
     open.done();
+    w.done();
+  });
+});
+
+describe("behind, with the open lock: the chat's environment, the proxy port and the workshop", () => {
+  const secretLine = (name) => `(Jason: this chat's environment has ${name}, which looks like a secret and is not on brimm-video's list. Its value is not shown here.)`;
+  it("refuses for a secret-shaped name not on the list, naming it and never its value", async () => {
+    for (const name of ["GITHUB_TOKEN", "MY_API_KEY", "DB_PASSWORD", "OPENROUTER_KEY", "npm_config__auth", "Apple_PubSub_Socket_Render", "GIT_ASKPASS_PASSWD", "SESSION_COOKIE", "AWS_CREDENTIALS_FILE", "BILLING_EMAIL", "ACCOUNT_ID", "ORGANIZATION_ID", "A_SECRET"]) {
+      const w = openWorld();
+      refusedFor(await behindOn(w, { env: { PATH: "/usr/bin", [name]: SECRET } }), secretLine(name), name);
+      w.done();
+    }
+    assert.deepEqual(SECRET_WORDS, ["TOKEN","SECRET","PASSWORD","PASSWD","KEY","AUTH","COOKIE","CREDENTIAL","EMAIL","ACCOUNT","ORGANIZATION","SOCK"]);
+  });
+  it("goes on with only listed and harmless names, the chat's id and pid among them", async () => {
+    // env { PATH, HOME, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_PID: "700", CLAUDE_CODE_MESSAGING_TOKEN: SECRET, SSH_AUTH_SOCK: SECRET }
+    const w = openWorld();
+    const env = { PATH: "/usr/bin", HOME: w.home, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700", CLAUDE_CODE_MESSAGING_TOKEN: SECRET, SSH_AUTH_SOCK: SECRET };
+    assert.deepEqual(environmentWhy(env), []);
+    const r = await behindOn(w, { env });
+    assert.deepEqual([r.code, r.text], [0, NEWEST]);
+    // A name the by-hand round finds harmless is let be; one on neither list is not.
+    assert.deepEqual(environmentWhy({ ...env, XPC_SERVICE_NAME_TOKEN: SECRET }, { deny: [], harmless: ["XPC_SERVICE_NAME_TOKEN", "CLAUDE_CODE_MESSAGING_TOKEN", "SSH_AUTH_SOCK"] }), []);
+    assert.deepEqual(environmentWhy({ ...env, XPC_SERVICE_NAME_TOKEN: SECRET }, { deny: [], harmless: [] }), ["CLAUDE_CODE_MESSAGING_TOKEN", "SSH_AUTH_SOCK", "XPC_SERVICE_NAME_TOKEN"].map(secretLine));
+    w.done();
+  });
+  it("refuses when the environment turns memory on, or holds the memory server's names, and goes on for CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", async () => {
+    const server = (name) => `(Jason: this chat's environment has ${name}, which sends Claude Code's memory to a server. Its value is not shown here.)`;
+    const on = "(Jason: this chat's environment turns Claude Code's memory on (CLAUDE_CODE_DISABLE_AUTO_MEMORY). Its value is not shown here.)";
+    for (const [env, line] of [[{ CLAUDE_CODE_POST_TURN_MEMORY: SECRET }, server("CLAUDE_CODE_POST_TURN_MEMORY")], [{ CLAUDE_CODE_MEMORY_API_TOKEN: SECRET }, server("CLAUDE_CODE_MEMORY_API_TOKEN")], ...["0", "false", "Off", "no", ""].map((value) => [{ CLAUDE_CODE_DISABLE_AUTO_MEMORY: value }, on])]) {
+      const w = openWorld();
+      const r = await behindOn(w, { env });
+      refusedFor(r, line, JSON.stringify(env));
+      // The memory server's token is said once, as that, and not again as a secret.
+      assert.deepEqual(r.text.split("\n").slice(1), [line], JSON.stringify(env));
+      w.done();
+    }
+    const w = openWorld();
+    assert.deepEqual(Object.values(await behindOn(w, { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } })).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
+  it("refuses when something listens on the proxy port, or that cannot be checked", async () => {
+    const asked = [];
+    const w = openWorld();
+    const listening = await behindOn(w, { lsof: (port) => (asked.push(port), "node    4242 sallie   21u  IPv4 0x1      0t0  TCP 127.0.0.1:47123 (LISTEN)\n") });
+    refusedFor(listening, `(Jason: something on this Mac listens on her folder's proxy port, ${w.port}.)`, "listening");
+    assert.deepEqual(asked, [w.port]);
+    refusedFor(await behindOn(w, { lsof: () => null }), `(Jason: whether anything listens on her folder's proxy port, ${w.port}, could not be checked.)`, "not checked");
+    assert.deepEqual(Object.values(await behindOn(w, { lsof: () => "\n" })).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
+  it("refuses for a .claude, CLAUDE.md, CLAUDE.local.md or .mcp.json anywhere in the workshop, in any letter case", async () => {
+    const line = "(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)";
+    const makers = {
+      ".claude": (dir) => mkdirSync(join(dir, ".claude")),
+      ".Claude": (dir) => mkdirSync(join(dir, ".Claude")),
+      "CLAUDE.md": (dir) => writeFileSync(join(dir, "CLAUDE.md"), SECRET),
+      "claude.md": (dir) => writeFileSync(join(dir, "claude.md"), SECRET),
+      "Claude.Local.MD": (dir) => writeFileSync(join(dir, "Claude.Local.MD"), SECRET),
+      ".mcp.json": (dir) => writeFileSync(join(dir, ".mcp.json"), SECRET),
+      ".MCP.JSON": (dir) => writeFileSync(join(dir, ".MCP.JSON"), SECRET),
+      "a link named CLAUDE.md, to nowhere": (dir) => symlinkSync(join(dir, "nowhere"), join(dir, "CLAUDE.md")),
+      "deep inside": (dir) => {
+        mkdirSync(join(dir, "a", "b", "c"), { recursive: true });
+        writeFileSync(join(dir, "a", "b", "c", "CLAUDE.md"), SECRET);
+      },
+    };
+    for (const [what, make] of Object.entries(makers)) {
+      const w = openWorld();
+      make(w.workshop);
+      refusedFor(await behindOn(w), line, what);
+      w.done();
+    }
+    // Names that only hold those words are left alone, and a link is not followed into what it leads to.
+    const w = openWorld();
+    writeFileSync(join(w.workshop, "notes on CLAUDE.md.txt"), SECRET);
+    mkdirSync(join(w.dir, "elsewhere", ".claude"), { recursive: true });
+    symlinkSync(join(w.dir, "elsewhere"), join(w.workshop, "a link"));
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
+  it("refuses when the workshop holds more than it looks through, or a folder in it cannot be looked through", async () => {
+    const w = openWorld();
+    for (let i = 0; i < 6; i++) writeFileSync(join(w.workshop, `picture ${i}.svg`), SECRET);
+    assert.deepEqual(Object.values(await behindOn(w, { workshopLimit: 6 })).slice(0, 2), [0, NEWEST]);
+    refusedFor(await behindOn(w, { workshopLimit: 5 }), "(Jason: the workshop holds too much to look through for a .claude folder or a CLAUDE.md.)", "too much");
+    mkdirSync(join(w.workshop, "shut"));
+    chmodSync(join(w.workshop, "shut"), 0o000);
+    refusedFor(await behindOn(w), "(Jason: the workshop holds a folder that could not be looked through for a .claude folder or a CLAUDE.md.)", "shut");
+    chmodSync(join(w.workshop, "shut"), 0o700);
+    w.done();
+  });
+  it("leaves alone the .claude/.cc-writes folder Claude Code makes in her folder", async () => {
+    const w = openWorld();
+    mkdirSync(join(w.folder, ".claude", ".cc-writes"), { recursive: true });
+    writeFileSync(join(w.folder, ".claude", ".cc-writes", "a write"), SECRET);
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
     w.done();
   });
 });

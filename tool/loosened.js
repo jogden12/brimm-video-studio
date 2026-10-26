@@ -8,13 +8,15 @@
 // else could loosen the open lock (design section 1, "Modes, and the settings that could loosen it"): her folder's own settings
 // compared whole with what this checkout writes for this Mac (studio.js lockBroken, R17), and in every settings source beside them
 // (the user's, the managed ones, and the Claude app's --settings for this chat) any sandbox key but the few that only narrow, an
-// Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, and folders added to every session.
+// Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, and folders added to every session; the chat's environment, by
+// its names alone; anything listening on her folder's proxy port; and a .claude, CLAUDE.md, CLAUDE.local.md or .mcp.json in the
+// workshop, which a session started there would take as its own.
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { OPEN_LOCK_CLAUDE, lockBroken, studioFolder } from "./studio.js";
-import { effectiveLock, factsOf, readSettings, studioNodeOf } from "./settings.js";
+import { ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
+import { effectiveLock, factsOf, proxyPortOf, readSettings, studioNodeOf } from "./settings.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -81,7 +83,9 @@ export function settingsObject(file) {
     With the open lock in effect on this Mac (lockFor: this Mac's settings, deps.settings or else read, and deps.minimum, else
     OPEN_LOCK_CLAUDE), her folder's own settings are compared whole (lockBroken, for this Mac's facts and the node its settings
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
-    and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off. */
+    and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
+    chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
+    the workshop (workshopWhy, deps.workshopLimit entries at most). */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
@@ -136,7 +140,80 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     if (app.disableAllHooks === true) why.push(`(Jason: ${APP_LABEL} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     why.push(...sourceWhy(APP_LABEL, app));
   }
+  why.push(...environmentWhy(deps.env || process.env));
+  const port = proxyPortOf(settings);
+  if (port !== null) {
+    const listening = (deps.lsof || listeners)(port);
+    if (listening === null) why.push(`(Jason: whether anything listens on her folder's proxy port, ${port}, could not be checked.)`);
+    else if (listening.trim()) why.push(`(Jason: something on this Mac listens on her folder's proxy port, ${port}.)`);
+  }
+  why.push(...workshopWhy(workshopFolder(home), deps.workshopLimit || WORKSHOP_LIMIT));
   return why;
+}
+
+/** The words that mark a name in the chat's environment as a secret's. */
+export const SECRET_WORDS = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "KEY", "AUTH", "COOKIE", "CREDENTIAL", "EMAIL", "ACCOUNT", "ORGANIZATION", "SOCK"];
+
+/** The names in the chat's environment that send Claude Code's memory to a server (design section 1, "Claude Code's memory"). */
+const MEMORY_SERVER = ["CLAUDE_CODE_POST_TURN_MEMORY", "CLAUDE_CODE_MEMORY_API_TOKEN"];
+
+/** What in the chat's environment, `env`, could loosen the open lock, as the lines for Jason, by names alone: no value is read into
+    any of them. The memory server's names; CLAUDE_CODE_DISABLE_AUTO_MEMORY set to a value that turns memory on; and each name
+    holding a SECRET_WORDS word, in any letter case, that is on neither of `list`'s lists (studio/environment.json: `deny`, the names
+    taken from every sandboxed command, and `harmless`, those the by-hand round let be). */
+export function environmentWhy(env, list = ENVIRONMENT) {
+  const why = [];
+  const names = Object.keys(env || {}).sort();
+  for (const name of MEMORY_SERVER) if (names.includes(name)) why.push(`(Jason: this chat's environment has ${name}, which sends Claude Code's memory to a server. Its value is not shown here.)`);
+  if (names.includes("CLAUDE_CODE_DISABLE_AUTO_MEMORY") && FALSE_WORDS.includes(String(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).trim().toLowerCase())) why.push("(Jason: this chat's environment turns Claude Code's memory on (CLAUDE_CODE_DISABLE_AUTO_MEMORY). Its value is not shown here.)");
+  const listed = new Set([...(list.deny || []), ...(list.harmless || []), ...MEMORY_SERVER]);
+  for (const name of names) {
+    if (!listed.has(name) && SECRET_WORDS.some((word) => name.toUpperCase().includes(word))) why.push(`(Jason: this chat's environment has ${name}, which looks like a secret and is not on brimm-video's list. Its value is not shown here.)`);
+  }
+  return why;
+}
+
+/** What `lsof` prints of whatever listens on this Mac's TCP `port`: "" when nothing does (lsof then ends with 1 and prints nothing),
+    or null when it cannot be run, is refused, or ends otherwise. */
+function listeners(port) {
+  try {
+    const ran = spawnSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
+    if (ran.error) return null;
+    if (ran.status === 0) return ran.stdout;
+    return ran.status === 1 && !ran.stdout && !ran.stderr ? "" : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** How many entries of the workshop are looked through, at most. */
+const WORKSHOP_LIMIT = 20000;
+
+/** The names, in any letter case, that a session started in a folder takes as its own settings, instructions or servers. */
+const SESSION_OWN = [".claude", "claude.md", "claude.local.md", ".mcp.json"];
+
+/** What in the workshop, `workshop`, could loosen the open lock, as one line for Jason, or none: anything named as SESSION_OWN is,
+    anywhere in it, a link among them (links are not followed); and so is more than `limit` entries, or a folder in it that cannot be
+    looked through, since then it is not known that there is none. No workshop, nothing. */
+export function workshopWhy(workshop, limit = WORKSHOP_LIMIT) {
+  let seen = 0;
+  const folders = [workshop];
+  while (folders.length) {
+    const at = folders.pop();
+    let entries;
+    try {
+      entries = readdirSync(at, { withFileTypes: true });
+    } catch (e) {
+      if (at === workshop && e.code === "ENOENT") return [];
+      return ["(Jason: the workshop holds a folder that could not be looked through for a .claude folder or a CLAUDE.md.)"];
+    }
+    for (const entry of entries) {
+      if (SESSION_OWN.includes(entry.name.toLowerCase())) return ["(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)"];
+      if (++seen > limit) return ["(Jason: the workshop holds too much to look through for a .claude folder or a CLAUDE.md.)"];
+      if (entry.isDirectory()) folders.push(join(at, entry.name));
+    }
+  }
+  return [];
 }
 
 /** The Claude Code version the open lock was checked on, for a check given `deps`: a test's own (deps.minimum, null among them), else
