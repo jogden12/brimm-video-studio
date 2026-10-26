@@ -817,3 +817,4 @@ Section 11 gives each reason.
 - Her own Terminal panel runs whatever she types, outside every lock.
 - A chat in any other folder, or one the app starts without her folder's settings, has no guard and no sandbox (held in part by question 5).
 - Plugins and skills her account syncs in by themselves are seen only at the next lock check.
+- `tool/tests/fixtures/code-tab-tools.json` and `tool/studio/never.json` hold the names of Jason's own connectors and tools, as seen on his Mac. They stay in the repo as they are, and are replaced, in this form or another, by what the by-hand check's item 9 (the tool list in the Code tab) finds, before the open lock is opened. They are not trimmed now.
