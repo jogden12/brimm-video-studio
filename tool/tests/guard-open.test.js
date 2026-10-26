@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
 import { LOCK_CHANGED } from "../loosened.js";
-import { HELD_NARROWED, HELD_REFUSED, markChat, untiedMark } from "../held.js";
+import { HELD_NARROWED, HELD_REFUSED, clearStrictSeen, markChat, noteStrictSeen, untiedMark } from "../held.js";
 import { processTable } from "../chain.js";
 import { settingsFile, settingsMain, writeSettings } from "../settings.js";
 import { heldFolder } from "../scan.js";
@@ -629,6 +629,26 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     mkdirSync(join(plugin, "agents"));
     writeFileSync(join(plugin, "agents", "Plan.md"), plain);
     assert.deepEqual(await ask(), CHANGED, "in a plugin's folder");
+    w.done();
+  });
+  it("looks again when a time her folder kept the open shape under the strict lock is noted or taken away, or CLAUDE_CONFIG_DIR's folder comes to be another folder than ~/.claude", async () => {
+    const w = chat();
+    const ask = (more) => date(w, { more });
+    assert.equal((await ask()).decision, "allow");
+    noteStrictSeen(w.home, Date.parse("2026-10-26T10:30:00.000Z"));
+    assert.deepEqual(await ask(), CHANGED, "noted after a clean answer");
+    clearStrictSeen(w.home);
+    assert.equal((await ask()).decision, "allow", "taken away");
+    // A name for ~/.claude through a link, which is then pointed at another folder.
+    const config = join(w.home, "claude link");
+    symlinkSync(join(w.home, ".claude"), config);
+    const env = { CLAUDE_CONFIG_DIR: config };
+    assert.equal((await ask({ env })).decision, "allow", "a link to ~/.claude");
+    rmSync(config);
+    mkdirSync(join(w.home, "elsewhere", "projects"), { recursive: true });
+    symlinkSync(join(w.home, "elsewhere"), config);
+    assert.deepEqual(await ask({ env }), CHANGED, "the link pointed at another folder");
+    assert.equal((await ask()).decision, "allow", "and none given again");
     w.done();
   });
   it("looks again when a value the check reads in the environment changes, or the app's notes folder becomes a link", async () => {

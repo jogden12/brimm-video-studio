@@ -17,7 +17,10 @@
 //   or .mcp.json in the workshop; and an enabled plugin carrying hooks or a mod, or a skill her folder allows whose SKILL.md registers
 //   hooks, since those run outside the sandbox (C16, C22);
 // - an agent definition where Claude Code would load one, named as one of its own agents, which it would replace (and the never list
-//   lets through by that name), or asking in its front matter for its own isolation, hooks, MCP servers or permission mode.
+//   lets through by that name), or asking in its front matter for its own isolation, hooks, MCP servers or permission mode;
+// - Claude Code keeping its settings and chats somewhere other than ~/.claude (CLAUDE_CONFIG_DIR), where no gated place holds them;
+//   and a time her folder kept the open shape under the strict lock (held.js strictSeen), whose chats may have left a session's words
+//   in command output, until settings.js studio writes the open lock again.
 // Under Claude Code the session's folder is then judged by where its transcript is kept, not by the folder its commands run in (R30).
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -29,6 +32,7 @@ import { appVersionOf, argsOf, chainUp, claudeAbove, processTable, readProcesses
 import { claudeDirName, fold, realOf } from "./places.js";
 import { BUILT_IN_AGENTS } from "./never.js";
 import { SESSION_ID, scanTranscript } from "./scan.js";
+import { strictSeen } from "./held.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -110,11 +114,12 @@ export function settingsObject(file) {
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
     the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); the skills her folder allows
-    (skillsWhy); the Claude app's flags on this chat (appWhy, from deps.ps, else `ps` itself, walked up from deps.pid, else this
+    (skillsWhy); agent definitions (agentsWhy); the Claude app's flags on this chat (appWhy, from deps.ps, else `ps` itself, walked up from deps.pid, else this
     process, against deps.appFlags, else APP_FLAGS), its --settings among them, which deps.appSettings stands in for when given; and,
     under Claude Code (CLAUDECODE=1, or a claude above), the folders added to the chat while it ran (addedWhy, from deps.transcript,
-    else the transcript of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's
-    id, the session runs in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30);
+    else the transcript of CLAUDE_CODE_SESSION_ID in her folder's projects folder); and, last, Claude Code keeping its settings and
+    chats outside ~/.claude, and a time her folder kept the open shape under the strict lock (beyondWhy). On an open-lock Mac, under
+    Claude Code with a chat's id, the session runs in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30);
     otherwise, and on a strict Mac, when the folder it runs in is hers. */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
@@ -204,6 +209,35 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     else if (listening.trim()) why.push(`(Jason: something on this Mac listens on her folder's proxy port, ${port}.)`);
   }
   why.push(...workshopWhy(workshopFolder(home), deps.workshopLimit || WORKSHOP_LIMIT));
+  why.push(...beyondWhy({ env, home }));
+  return why;
+}
+
+/** Whether `config`, CLAUDE_CONFIG_DIR, is the very folder ~/.claude is: an absolute path, both there, and one by their identity
+    (device and inode). Names are never compared: one that folds to .claude (fold) may be a folder macOS keeps apart. */
+function homeClaude(config, home) {
+  if (!isAbsolute(config)) return false;
+  try {
+    const given = statSync(config, { bigint: true });
+    const own = statSync(join(home, ".claude"), { bigint: true });
+    return given.dev === own.dev && given.ino === own.ino;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** What loosens the open lock beyond the checks above, as lines for Jason: Claude Code keeping this chat's settings and transcripts
+    somewhere other than ~/.claude (CLAUDE_CONFIG_DIR in `env`), which no gated place holds, a folder that is not there, or ~/.claude
+    itself not there, among them; and a time her folder kept the open shape under the strict lock (held.js noteStrictSeen), whose
+    chats may have left a session's words in command output, until settings.js studio writes the open lock again. The environment's
+    value is never said. */
+export function beyondWhy({ env, home }) {
+  const why = [];
+  const config = (env || {}).CLAUDE_CONFIG_DIR;
+  if (config && !homeClaude(config, home)) {
+    why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
+  }
+  if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");
   return why;
 }
 
