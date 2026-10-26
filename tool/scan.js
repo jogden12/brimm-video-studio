@@ -14,7 +14,8 @@
 // one has changed, it reads the transcript again from 0, so a fork looked at before the chat it was forked from was held is found at
 // its next look. Found once, a fork stays found. While a uuids file cannot be read, a look is unread and keeps nothing, so the chat
 // is held for that look alone. The scan also counts the times the transcript was compacted (a `compact_boundary` line), so that
-// held.js keeps a held chat's uuids again after each: a fork made after carries only the lines from there on.
+// held.js keeps a held chat's uuids again after each: a fork made after carries only the lines from there on. A transcript whose
+// first message is a compaction's was made that way, from a chat it cannot tell, and is taken as forked too.
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -184,7 +185,7 @@ export function scanTranscript({ home, sessionId, transcriptPath }) {
     if (!files) return none;
     const was = kept(file);
     const same = was && was.ino === ino && was.offset <= size && allChecked(was.checked, files);
-    const state = same ? { ...was, forked: Boolean(was.forked) } : { ino, offset: 0, start: null, added: null, forked: Boolean(was && was.forked), compactions: 0 };
+    const state = same ? { ...was, forked: Boolean(was.forked) } : { ino, offset: 0, start: null, added: null, forked: Boolean(was && was.forked), compactions: 0, messages: false };
     state.compactions = Number.isSafeInteger(state.compactions) ? state.compactions : 0;
     let uuids;
     const isHeld = (uuid) => {
@@ -199,7 +200,12 @@ export function scanTranscript({ home, sessionId, transcriptPath }) {
         // Folders it cannot read as a list are taken as one folder added, which is not the app's own.
         state.added = Array.isArray(dirs) ? dirs.map((dir) => (typeof dir === "string" ? dir : "")) : dirs === undefined ? [] : [""];
       }
-      if (entry.type === "system" && entry.subtype === "compact_boundary") state.compactions += 1;
+      const boundary = entry.type === "system" && entry.subtype === "compact_boundary";
+      if (boundary) state.compactions += 1;
+      if (typeof entry.uuid === "string" && !state.messages) {
+        state.messages = true;
+        if (boundary) state.forked = true;
+      }
       if (!state.forked && files.length && typeof entry.uuid === "string" && isHeld(entry.uuid)) state.forked = true;
     });
     state.size = size;

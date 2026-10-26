@@ -133,7 +133,7 @@ export function afterAllTimes(home) {
 }
 
 /** What the held folder says: the marks, the times that hold every chat begun at or before them (an untied mark's, a session after
-    all's), and whether any held chat's uuids are kept; or null when the folder, a mark or a note cannot be read. */
+    all's), and the held chats whose uuids are kept, by id; or null when the folder, a mark or a note cannot be read. */
 function heldState(home) {
   const names = heldNames(home);
   if (!names) return null;
@@ -151,7 +151,8 @@ function heldState(home) {
       times.push(note.at);
     }
   }
-  return { marks, times, uuids: names.some((name) => name.endsWith(".uuids.json")) };
+  const kept = names.map((name) => /^(.+)\.uuids\.json$/.exec(name)).filter((found) => found && isChat(found[1])).map((found) => found[1]);
+  return { marks, times, uuids: names.some((name) => name.endsWith(".uuids.json")), kept };
 }
 
 /** The uuids kept for a held chat, { uuids, compactions }, or null when none are kept, or they cannot be read. */
@@ -197,8 +198,9 @@ function keepUuids(home, sessionId, transcriptPath, compactions = 0) {
 /** Whether the chat `sessionId`, whose transcript is `transcriptPath` and whose claude process is `claude` ({ pid, start }, or null),
     holds a session's words: a mark's id is its id; a mark's claude is its claude; an untied mark's or a session after all's time is
     at or after its transcript's start (the least timestamp of any line; none at all, while such a time exists, holds it); or its
-    transcript holds a held chat's message uuid (a fork). When it holds a chat it keeps that chat's uuids, and it keeps those of
-    each marked chat whose transcript lies beside this one, so that a fork made before the marked chat is asked again is held too.
+    transcript holds a held chat's message uuid, or begins with a compaction's (a fork). When it holds a chat it keeps that chat's
+    uuids, and it keeps those of each marked or held chat whose transcript lies beside this one, again after each compaction, so
+    that a fork made before that chat is asked again is held too.
     It fails closed: an id that is not a chat's, a held folder, a mark or a note that cannot be read, or a transcript that cannot be
     read while any mark or note exists, holds the chat; with none, it lets the chat go without reading its transcript. */
 export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
@@ -213,8 +215,16 @@ export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
   if (marks.some((mark) => mark.session === sessionId)) return hold();
   if (isObject(claude) && marks.some((mark) => mark.claude && mark.claude.pid === claude.pid && mark.claude.start === claude.start)) return hold();
   if (!marks.length && !times.length && !state.uuids) return false;
+  // The uuids of each marked chat, and of each held chat, whose transcript lies beside this one, kept again when it has been compacted
+  // since: a fork made after its compaction may come before its own next call.
   if (typeof transcriptPath === "string") {
-    for (const mark of marks) if (isChat(mark.session)) keepUuids(home, mark.session, join(dirname(transcriptPath), `${mark.session}.jsonl`));
+    const others = new Set([...marks.map((mark) => mark.session).filter(isChat), ...state.kept]);
+    others.delete(sessionId);
+    for (const other of others) {
+      const beside = join(dirname(transcriptPath), `${other}.jsonl`);
+      const look = scanTranscript({ home, sessionId: other, transcriptPath: beside });
+      if (!look.unread) keepUuids(home, other, beside, look.compactions);
+    }
   }
   const scan = scanTranscript({ home, sessionId, transcriptPath });
   if (scan.unread) return true;

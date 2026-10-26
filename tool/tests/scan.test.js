@@ -133,6 +133,18 @@ describe("a transcript's scan", () => {
     assert.deepEqual(w.look(), { start: null, added: null, unread: false, forked: false, compactions: 0 });
     w.done();
   });
+  it("takes a transcript whose first message is a compaction's as forked: made from another chat after it was compacted", () => {
+    const w = world();
+    w.write([{ type: "mode" }, { type: "system", subtype: "compact_boundary", uuid: "cb-1" }, { type: "user", uuid: "u-1" }]);
+    assert.equal(w.look().forked, true);
+    const v = world();
+    v.write([{ type: "user", uuid: "u-1" }, { type: "system", subtype: "compact_boundary", uuid: "cb-1" }]);
+    assert.equal(v.look().forked, false);
+    v.append([{ type: "user", uuid: "u-2" }]);
+    assert.equal(v.look().forked, false);
+    w.done();
+    v.done();
+  });
   it("counts the times a transcript was compacted", () => {
     const w = world();
     w.write([{ type: "user", uuid: "u-1" }]);

@@ -186,6 +186,29 @@ describe("chats that hold a session's words", () => {
     assert.equal(w.held(OTHER), true);
     w.done();
   });
+  it("holds a fork made after a held chat was compacted, though that chat has made no call since", () => {
+    const w = world();
+    const boundary = { type: "system", subtype: "compact_boundary", uuid: "cb-1", timestamp: "2026-10-26T11:00:00.000Z" };
+    w.talk(SESSION, [line("a-1"), line("a-2")]);
+    markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: table(APP_ARGS(w.folder, w.home)), pid: 900, now: at("2026-10-26T10:30:00.000Z") });
+    assert.equal(w.held(SESSION), true);
+    w.more(SESSION, [boundary, line("sum-1", "2026-10-26T11:00:01.000Z")]);
+    w.talk(OTHER, [boundary, line("sum-1", "2026-10-26T11:00:01.000Z"), line("f-1", "2026-10-26T12:00:00.000Z")]);
+    assert.equal(w.held(OTHER), true);
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(w.home), `${SESSION}.uuids.json`), "utf8")), { uuids: ["a-1", "a-2", "cb-1", "sum-1"], compactions: 1 }, "the held chat's uuids kept again from the fork's call");
+    w.done();
+  });
+  it("holds a fork made after compaction of a chat held only by a time, whose uuids were never kept", () => {
+    const w = world();
+    const boundary = { type: "system", subtype: "compact_boundary", uuid: "cb-1", timestamp: "2026-10-26T11:00:00.000Z" };
+    untiedMark({ home: w.home, now: at("2026-10-26T10:00:00.000Z") });
+    w.talk(SESSION, [line("a-1", "2026-10-26T09:00:00.000Z"), boundary, line("sum-1", "2026-10-26T11:00:01.000Z")]);
+    w.talk(OTHER, [{ type: "mode", mode: "default" }, boundary, line("sum-1", "2026-10-26T11:00:01.000Z"), line("f-1", "2026-10-26T12:00:00.000Z")]);
+    assert.equal(w.held(OTHER), true, "its first message is a compaction's: it was forked after one");
+    w.talk(THIRD, [line("c-1", "2026-10-26T11:30:00.000Z"), { ...boundary, uuid: "cb-3", timestamp: "2026-10-26T12:00:00.000Z" }, line("c-2", "2026-10-26T12:00:01.000Z")]);
+    assert.equal(w.held(THIRD), false, "a chat compacted after its own first message is not a fork");
+    w.done();
+  });
   it("holds a fork made before the teaching too", () => {
     const w = world();
     w.talk(SESSION, [line("a-1")]);
