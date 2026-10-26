@@ -38,26 +38,26 @@ describe("a transcript's scan", () => {
     const w = world();
     const first = [{ type: "mode", mode: "default" }, { type: "user", timestamp: "2026-10-26T10:00:01.000Z" }, environment(["/a"]), "{not json", { type: "assistant", timestamp: "2026-10-26T09:59:59.000Z" }];
     w.write([...first, JSON.stringify(environment(["/b"])).slice(0, 30)], "");
-    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/a"], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/a"], unread: false, forked: false, compactions: 0 });
     const complete = Buffer.byteLength(first.map((line) => (typeof line === "string" ? line : JSON.stringify(line))).join("\n") + "\n");
     assert.equal(w.stored().offset, complete);
     // The line still being written is finished: now it is read.
     w.write([...first, environment(["/b"])]);
-    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/b"], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/b"], unread: false, forked: false, compactions: 0 });
     // A second look reads only what was added: what lies before the offset is not read again, even when it has changed in place.
     const size = readFileSync(w.transcriptPath).length;
     const text = readFileSync(w.transcriptPath, "utf8").replace('"/b"', '"/c"');
     writeFileSync(w.transcriptPath, text + JSON.stringify({ type: "user", timestamp: "2026-10-26T10:01:00.000Z" }) + "\n");
-    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/b"], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T09:59:59.000Z", added: ["/b"], unread: false, forked: false, compactions: 0 });
     assert.ok(w.stored().offset > size);
     // A shorter file is read again from 0.
     w.write([{ type: "user", timestamp: "2026-10-26T11:00:00.000Z" }]);
-    assert.deepEqual(w.look(), { start: "2026-10-26T11:00:00.000Z", added: null, unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T11:00:00.000Z", added: null, unread: false, forked: false, compactions: 0 });
     // So is another file put in its place, though it is longer.
     const other = `${w.transcriptPath}.new`;
     writeFileSync(other, [{ type: "user", timestamp: "2026-10-26T12:00:00.000Z" }, environment([]), { type: "user", timestamp: "2026-10-26T12:00:01.000Z" }].map((line) => JSON.stringify(line)).join("\n") + "\n");
     renameSync(other, w.transcriptPath);
-    assert.deepEqual(w.look(), { start: "2026-10-26T12:00:00.000Z", added: [], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T12:00:00.000Z", added: [], unread: false, forked: false, compactions: 0 });
     w.done();
   });
   it("keeps the latest snapshot and the least start across looks", () => {
@@ -65,40 +65,40 @@ describe("a transcript's scan", () => {
     w.write([{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }, environment(["/a"])]);
     assert.deepEqual(w.look().added, ["/a"]);
     w.append([{ type: "user", timestamp: "2026-10-26T10:05:00.000Z" }]);
-    assert.deepEqual(w.look(), { start: "2026-10-26T10:00:00.000Z", added: ["/a"], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T10:00:00.000Z", added: ["/a"], unread: false, forked: false, compactions: 0 });
     w.append([environment([])]);
-    assert.deepEqual(w.look(), { start: "2026-10-26T10:00:00.000Z", added: [], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T10:00:00.000Z", added: [], unread: false, forked: false, compactions: 0 });
     w.done();
   });
   it("reads a line longer than it reads at once, and words of more than one byte across the reads", () => {
     const w = world();
     const long = { type: "assistant", timestamp: "2026-10-26T09:00:00.000Z", text: "é".repeat(1_500_000) };
     w.write([environment(["/a"]), long, environment(["/b"]), { type: "user", timestamp: "2026-10-26T10:00:00.000Z", text: "ü".repeat(700_000) }]);
-    assert.deepEqual(w.look(), { start: "2026-10-26T09:00:00.000Z", added: ["/b"], unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: "2026-10-26T09:00:00.000Z", added: ["/b"], unread: false, forked: false, compactions: 0 });
     assert.equal(w.stored().offset, readFileSync(w.transcriptPath).length);
     w.done();
   });
   it("has no start for a transcript with no timestamp, and no snapshot until one is written", () => {
     const w = world();
     w.write([{ type: "mode", mode: "default" }, { type: "custom-title", title: "x" }]);
-    assert.deepEqual(w.look(), { start: null, added: null, unread: false, forked: false });
+    assert.deepEqual(w.look(), { start: null, added: null, unread: false, forked: false, compactions: 0 });
     w.done();
   });
   it("says it is unread when the transcript is not there or cannot be read, and takes a scan file that is not JSON as none", () => {
     const w = world();
-    assert.deepEqual(w.look(), { start: null, added: null, unread: true, forked: false });
+    assert.deepEqual(w.look(), { start: null, added: null, unread: true, forked: false, compactions: 0 });
     w.write([environment(["/a"])]);
     w.look();
     writeFileSync(join(heldFolder(w.home), `scan-${SESSION}.json`), "{half");
-    assert.deepEqual(w.look(), { start: null, added: ["/a"], unread: false, forked: false });
-    assert.deepEqual(scanTranscript({ home: w.home, sessionId: SESSION, transcriptPath: join(w.home, "not there.jsonl") }), { start: null, added: null, unread: true, forked: false });
+    assert.deepEqual(w.look(), { start: null, added: ["/a"], unread: false, forked: false, compactions: 0 });
+    assert.deepEqual(scanTranscript({ home: w.home, sessionId: SESSION, transcriptPath: join(w.home, "not there.jsonl") }), { start: null, added: null, unread: true, forked: false, compactions: 0 });
     w.done();
   });
   it("reads nothing and writes nothing for a chat's id that is not one", () => {
     const w = world();
     w.write([environment(["/a"])]);
     for (const id of ["s", "../../x", `${SESSION}/..`, "ABCDEF12-2222-4333-8444-555555555555", "", null, undefined]) {
-      assert.deepEqual(scanTranscript({ home: w.home, sessionId: id, transcriptPath: w.transcriptPath }), { start: null, added: null, unread: true, forked: false }, String(id));
+      assert.deepEqual(scanTranscript({ home: w.home, sessionId: id, transcriptPath: w.transcriptPath }), { start: null, added: null, unread: true, forked: false, compactions: 0 }, String(id));
     }
     assert.ok(!existsSync(heldFolder(w.home)));
     assert.ok(SESSION_ID.test(SESSION));
@@ -123,12 +123,25 @@ describe("a transcript's scan", () => {
     assert.equal(uuidsFile(w.home, "../x"), null);
     w.done();
   });
-  it("takes a held chat's uuids that cannot be read as found", () => {
+  it("says a look is unread while a held chat's uuids cannot be read, and keeps nothing of it", () => {
     const w = world();
     w.write([{ type: "user", uuid: "u-1" }]);
     mkdirSync(heldFolder(w.home), { recursive: true });
     writeFileSync(uuidsFile(w.home, OTHER), "{not json");
-    assert.equal(w.look().forked, true);
+    assert.deepEqual(w.look(), { start: null, added: null, unread: true, forked: false, compactions: 0 });
+    writeFileSync(uuidsFile(w.home, OTHER), JSON.stringify({ uuids: ["x-1"] }));
+    assert.deepEqual(w.look(), { start: null, added: null, unread: false, forked: false, compactions: 0 });
+    w.done();
+  });
+  it("counts the times a transcript was compacted", () => {
+    const w = world();
+    w.write([{ type: "user", uuid: "u-1" }]);
+    assert.equal(w.look().compactions, 0);
+    w.append([{ type: "system", subtype: "compact_boundary", uuid: "cb-1" }, { type: "user", uuid: "u-2" }]);
+    assert.equal(w.look().compactions, 1);
+    w.append([{ type: "system", subtype: "compact_boundary", uuid: "cb-2" }]);
+    assert.equal(w.look().compactions, 2);
+    assert.equal(w.look().compactions, 2);
     w.done();
   });
   it("gives every message uuid of a transcript's complete lines, and null for one that cannot be read", () => {

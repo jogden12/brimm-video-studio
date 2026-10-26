@@ -457,6 +457,12 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
     assert.equal(marks().length, 1);
     assert.equal(existsSync(output), true);
+    // Strict again while no Claude Code is named for the open lock, then open again: chats of the strict time are held too.
+    assert.equal(t.run(null, "studio", "--node", NODE), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.equal(marks().length, 2);
+    assert.equal(existsSync(output), false);
     t.done();
   });
   it("writes the open lock first on a Mac with no folder for Claude with an untied mark too, and not at all when it cannot write one", () => {

@@ -101,7 +101,7 @@ describe("chats that hold a session's words", () => {
     assert.equal(w.held(OTHER, { claude: { pid: 700, start: "Mon Oct 26 09:00:01 2026" } }), false);
     assert.equal(w.held(OTHER, { claude: { pid: 701, start: LSTART } }), false);
     assert.equal(w.held(OTHER, { claude: { pid: 700, start: LSTART } }), true);
-    assert.equal(w.held(OTHER, { claude: { pid: 701, start: LSTART } }), true, "held once, by its claude, it stays held, as a resumed chat");
+    assert.equal(w.held(OTHER, { claude: { pid: 701, start: LSTART } }), true, "held once, its own uuids, kept then, hold it after");
     untiedMark({ home: w.home, now: at("2026-10-26T12:00:00.000Z") });
     assert.deepEqual([w.held(OTHER), w.held(THIRD)], [true, false]);
     w.talk(SESSION.replace("1111", "4444"), [line("d-1", "2026-10-26T11:59:59.000Z")]);
@@ -148,13 +148,42 @@ describe("chats that hold a session's words", () => {
     w.talk(SESSION, [line("a-1"), line("a-2")]);
     markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: table(APP_ARGS(w.folder, w.home)), pid: 900, now: at("2026-10-26T10:30:00.000Z") });
     assert.equal(w.held(SESSION), true);
-    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(w.home), `${SESSION}.uuids.json`), "utf8")), { uuids: ["a-1", "a-2"] });
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(w.home), `${SESSION}.uuids.json`), "utf8")), { uuids: ["a-1", "a-2"], compactions: 0 });
     w.more(SESSION, [line("a-3", "2026-10-27T09:00:00.000Z")]);
     assert.equal(w.held(SESSION), true, "resumed, with its id");
     w.talk(OTHER, [{ type: "mode", mode: "default" }, line("a-1"), line("a-2"), line("b-1", "2026-10-27T10:00:00.000Z")]);
     assert.equal(w.held(OTHER), true, "a fork");
     w.talk(THIRD, [line("c-1", "2026-10-27T10:00:00.000Z")]);
     assert.equal(w.held(THIRD), false);
+    w.done();
+  });
+  it("holds a fork of a chat whose uuids could not be kept when it was first held, once it has some", () => {
+    const w = world();
+    untiedMark({ home: w.home, now: at("2026-10-26T10:00:00.000Z") });
+    w.talk(SESSION, [{ type: "mode", mode: "default" }]);
+    assert.equal(w.held(SESSION), true, "no time yet, while an untied mark exists");
+    assert.equal(existsSync(join(heldFolder(w.home), `${SESSION}.uuids.json`)), false, "no uuids kept, none being there");
+    w.more(SESSION, [line("x-1", "2026-10-26T11:00:00.000Z"), line("x-2", "2026-10-26T11:01:00.000Z")]);
+    assert.equal(w.held(SESSION), false);
+    markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: table(APP_ARGS(w.folder, w.home)), pid: 900, now: at("2026-10-26T12:00:00.000Z") });
+    assert.equal(w.held(SESSION), true);
+    w.talk(OTHER, [line("x-1", "2026-10-26T11:00:00.000Z"), line("x-2", "2026-10-26T11:01:00.000Z"), line("f-1", "2026-10-26T13:00:00.000Z")]);
+    assert.equal(w.held(OTHER), true);
+    w.done();
+  });
+  it("keeps a held chat's uuids again when it is compacted, so a fork made after holds the lines from there on", () => {
+    const w = world();
+    w.talk(SESSION, [line("x-1"), line("x-2")]);
+    markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_PID: "700" }, table: table(APP_ARGS(w.folder, w.home)), pid: 900, now: at("2026-10-26T10:30:00.000Z") });
+    assert.equal(w.held(SESSION), true);
+    w.more(SESSION, [line("x-3", "2026-10-26T11:00:00.000Z")]);
+    assert.equal(w.held(SESSION), true);
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(w.home), `${SESSION}.uuids.json`), "utf8")).uuids, ["x-1", "x-2"], "kept again only when compacted");
+    w.more(SESSION, [{ type: "system", subtype: "compact_boundary", uuid: "cb-1", timestamp: "2026-10-26T12:00:00.000Z" }, line("x-4", "2026-10-26T12:00:01.000Z")]);
+    assert.equal(w.held(SESSION), true);
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(w.home), `${SESSION}.uuids.json`), "utf8")).uuids, ["x-1", "x-2", "x-3", "cb-1", "x-4"]);
+    w.talk(OTHER, [{ type: "system", subtype: "compact_boundary", uuid: "cb-1", timestamp: "2026-10-26T12:00:00.000Z" }, line("x-4", "2026-10-26T12:00:01.000Z"), line("f-1", "2026-10-26T13:00:00.000Z")]);
+    assert.equal(w.held(OTHER), true);
     w.done();
   });
   it("holds a fork made before the teaching too", () => {

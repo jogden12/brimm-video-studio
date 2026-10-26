@@ -67,20 +67,24 @@ export function isGlobalUnicast(address) {
   return (g[0] & 0xe000) === 0x2000 && !(g[0] === 0x2001 && g[1] === 0x0db8);
 }
 
-/** The addresses a look-up gives `host`, or null when it fails or gives none. */
+/** The look-up's errors that say there is no such name, or no address for it: for the `www.` form, no answer, not a refusal. */
+const NO_SUCH_NAME = new Set(["ENOTFOUND", "ENODATA"]);
+
+/** What a look-up of `host` gives: { addresses } (none when it gives none), or { error } with the look-up's code. */
 async function answers(host, resolve) {
   try {
     const got = await resolve(host);
-    return Array.isArray(got) && got.length ? got : null;
-  } catch {
-    return null;
+    return { addresses: Array.isArray(got) ? got : [] };
+  } catch (e) {
+    return { error: (e && e.code) || "failed" };
   }
 }
 
 /** Why a WebFetch of `url` is refused, or "" when it may be fetched. `resolve` looks a host up, giving its addresses. A URL that
     does not parse, or whose host cannot be looked up, is UNCHECKED_ADDRESS; a numeric host, a local name, or a name that, with or
-    without its `www.`, answers with any address that is not global unicast, is LOCAL_ADDRESS. The `www.` form is asked too, and
-    when it is not found it gives no answer, which is no refusal. */
+    without its `www.`, answers with any address that is not global unicast, is LOCAL_ADDRESS. The `www.` form is asked too: when
+    there is no such name it gives no answer, which is no refusal; when its look-up fails for any other reason (a time-out, a
+    server's failure, which whoever answers for the name can cause), the address is not checked. */
 export async function fetchWhy(url, resolve) {
   let host;
   try {
@@ -89,10 +93,11 @@ export async function fetchWhy(url, resolve) {
     return UNCHECKED_ADDRESS;
   }
   if (host.startsWith("[") || isIP(host)) return LOCAL_ADDRESS;
-  const name = host.endsWith(".") ? host.slice(0, -1) : host;
+  const name = host.replace(/\.+$/, "");
   if (!name.includes(".") || LOCAL_ENDINGS.some((end) => name === end || name.endsWith(`.${end}`))) return LOCAL_ADDRESS;
   const own = await answers(name, resolve);
-  if (!own) return UNCHECKED_ADDRESS;
+  if (own.error || !own.addresses.length) return UNCHECKED_ADDRESS;
   const other = await answers(name.startsWith("www.") ? name.slice(4) : `www.${name}`, resolve);
-  return [...own, ...(other || [])].every(isGlobalUnicast) ? "" : LOCAL_ADDRESS;
+  if (other.error && !NO_SUCH_NAME.has(other.error)) return UNCHECKED_ADDRESS;
+  return [...own.addresses, ...(other.addresses || [])].every(isGlobalUnicast) ? "" : LOCAL_ADDRESS;
 }

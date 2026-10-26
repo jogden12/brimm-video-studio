@@ -38,11 +38,19 @@ describe("WebFetch's addresses", () => {
     assert.equal(await fetchWhy("https://example.com/", resolver({ "example.com": ["93.184.215.14", "2606:2800:21f:cb07:6820:80da:af6b:8b2c"] })), "");
     assert.equal(await fetchWhy("https://www.example.com/", resolver({ "www.example.com": ["93.184.215.14"] })), "");
   });
+  it("refuses a name whose www. form cannot be looked up for any reason but that there is no such name", async () => {
+    const failing = (code) => async (host) => {
+      if (host === "example.com") return ["93.184.215.14"];
+      throw Object.assign(new Error(host), { code });
+    };
+    for (const code of ["EAI_AGAIN", "ESERVFAIL", "ETIMEOUT", undefined]) assert.equal(await fetchWhy("https://example.com/", failing(code)), UNCHECKED_ADDRESS, String(code));
+    for (const code of ["ENOTFOUND", "ENODATA"]) assert.equal(await fetchWhy("https://example.com/", failing(code)), "", code);
+  });
   it("refuses a name with one address among many that is not global unicast", async () => {
     assert.equal(await fetchWhy("https://example.com/", resolver({ "example.com": ["93.184.215.14", "fd00::1"] })), LOCAL_ADDRESS);
   });
   it("refuses any numeric address, a public one too, and the local names with a trailing dot or in capitals", async () => {
-    for (const url of ["http://93.184.215.14/", "http://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/", "http://LOCALHOST./", "http://Printer.Local./", "http://router./", "http://box.internal/", "http://nas.home.arpa/", "http://x.localhost/", "file:///etc/hosts"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
+    for (const url of ["http://93.184.215.14/", "http://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/", "http://LOCALHOST./", "http://Printer.Local./", "http://router./", "http://localhost../", "http://router../", "http://printer.local../", "http://box.internal/", "http://nas.home.arpa/", "http://x.localhost/", "file:///etc/hosts"]) assert.equal(await fetchWhy(url, never), LOCAL_ADDRESS, url);
   });
   it("knows a global unicast address from every other kind", () => {
     for (const a of ["93.184.215.14", "8.8.8.8", "1.1.1.1", "2606:2800:21f:cb07:6820:80da:af6b:8b2c", "2a00:1450:4009:81f::200e", "::ffff:8.8.8.8", "64:ff9b::808:808"]) assert.equal(isGlobalUnicast(a), true, a);

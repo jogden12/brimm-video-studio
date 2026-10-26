@@ -10,7 +10,7 @@
 // On an open-lock Mac, the words themselves never go into command output (which every chat of her folder may read): edit.js writes
 // them into a file of the chat's own (writeWords), in BRIMM Video Words/<the chat's id>/, which only that chat's Read reaches (the
 // guard's carve-out), and takes such files away a day later (clearOldWords).
-import { linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { chainUp, claudeAbove } from "./chain.js";
@@ -154,21 +154,41 @@ function heldState(home) {
   return { marks, times, uuids: names.some((name) => name.endsWith(".uuids.json")) };
 }
 
-/** Keep the message uuids of the held chat `sessionId`, from its transcript so far, unless they are kept already: a fork of it is
-    then held (scan.js). One whose transcript cannot be read is left; the next call tries again. */
-function keepUuids(home, sessionId, transcriptPath) {
+/** The uuids kept for a held chat, { uuids, compactions }, or null when none are kept, or they cannot be read. */
+function keptUuids(file) {
+  try {
+    const kept = JSON.parse(readFileSync(file, "utf8"));
+    return isObject(kept) && Array.isArray(kept.uuids) ? { uuids: kept.uuids, compactions: Number.isSafeInteger(kept.compactions) ? kept.compactions : 0 } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Keep the message uuids of the held chat `sessionId`, from its transcript so far, so that a fork of it is held (scan.js): when
+    none are kept yet, and again, all of them with those kept before, when the transcript has been compacted more times
+    (`compactions`, from its scan) than when they were kept, since a fork made after carries only the lines from there on. A
+    transcript with no uuid yet keeps nothing, and the next call tries again; so does one that cannot be read. */
+function keepUuids(home, sessionId, transcriptPath, compactions = 0) {
   const file = uuidsFile(home, sessionId);
   if (!file || typeof transcriptPath !== "string") return;
-  try {
-    lstatSync(file);
-    return;
-  } catch (e) {
-    if (e.code !== "ENOENT") return;
-  }
+  const kept = keptUuids(file);
+  if (kept && kept.uuids.length && compactions <= kept.compactions) return;
   const uuids = uuidsOf(transcriptPath);
-  if (!uuids) return;
+  if (!uuids || !uuids.length) return;
+  const all = kept ? [...kept.uuids, ...uuids.filter((uuid) => !kept.uuids.includes(uuid))] : uuids;
+  const value = { uuids: all, compactions: Math.max(compactions, kept ? kept.compactions : 0) };
   try {
-    writeNew(home, `${sessionId}.uuids.json`, { uuids });
+    if (!kept) {
+      writeNew(home, `${sessionId}.uuids.json`, value);
+      return;
+    }
+    const temporary = join(heldFolder(home), `.${sessionId}.uuids.json.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+    try {
+      writeFileSync(temporary, `${JSON.stringify(value)}\n`, { flag: "wx", mode: 0o600 });
+      renameSync(temporary, file);
+    } finally {
+      rmSync(temporary, { force: true });
+    }
   } catch (e) {
     // Another call kept them first, or the folder cannot be written: the next call tries again.
   }
@@ -186,8 +206,8 @@ export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
   const state = heldState(home);
   if (!state) return true;
   const { marks, times } = state;
-  const hold = () => {
-    keepUuids(home, sessionId, transcriptPath);
+  const hold = (scan = scanTranscript({ home, sessionId, transcriptPath })) => {
+    keepUuids(home, sessionId, transcriptPath, scan.compactions);
     return true;
   };
   if (marks.some((mark) => mark.session === sessionId)) return hold();
@@ -198,8 +218,8 @@ export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
   }
   const scan = scanTranscript({ home, sessionId, transcriptPath });
   if (scan.unread) return true;
-  if (scan.forked) return hold();
-  if (times.length && (scan.start === null || times.some((at) => Date.parse(at) >= Date.parse(scan.start)))) return hold();
+  if (scan.forked) return hold(scan);
+  if (times.length && (scan.start === null || times.some((at) => Date.parse(at) >= Date.parse(scan.start)))) return hold(scan);
   return false;
 }
 
