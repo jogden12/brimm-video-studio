@@ -3899,10 +3899,15 @@ function receiptHeld(ctx, record, plan, name) {
   const answer = record.answer !== null && typeof record.answer === "object" ? record.answer : {};
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
   const target = plan.target ? plan.target.record : null;
-  const expected = expectedAnswers({ label: name, stored: plan.stored, maybeName: target ? shownName(target) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came });
+  // Her card names the video as `episodes` printed it, or as this command prints it, without the names of the video it found (ctx.say).
+  const said = (text) => (ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
   const now = ctx.now();
-  if (receiptWhy({ home: ctx.home, expected, now }) === "") return true;
-  if (plan.stored === "session" && receiptWhy({ home: ctx.home, expected: sessionByFollowUp({ label: name, came }), now }) === "") return true;
+  for (const spell of [(text) => text, said]) {
+    const label = spell(name);
+    const expected = expectedAnswers({ label, stored: plan.stored, maybeName: target ? spell(shownName(target)) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came });
+    if (receiptWhy({ home: ctx.home, expected, now }) === "") return true;
+    if (plan.stored === "session" && receiptWhy({ home: ctx.home, expected: sessionByFollowUp({ label, came }), now }) === "") return true;
+  }
   ctx.say(NO_RECEIPT);
   const links = linksOf(ctx.root);
   for (const line of cardLinesFor(record, name, listedEpisodes(ctx, links), links, { notASession: plan.notASession })) ctx.say(line);

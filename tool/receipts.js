@@ -9,7 +9,7 @@
 // answers are taken from the tool's result, never from what Claude asked with, and a card that resolved itself while she was idle
 // (afkTimeoutMs), or that she followed up in words (followUp), earns none. `kind`, under Claude Code on a Mac whose lock in effect
 // is open, answers a video with no kind only when a receipt of the last hour holds its label and her very answers (edit.js).
-import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
@@ -41,7 +41,11 @@ const NOT_SESSION_Q = {
 };
 const CAMES = ["zoom", "sound", "unknown"];
 
-const question = (text, labels) => ({ question: text, options: labels.map((label) => ({ label })) });
+/** Each question's header, the short title AskUserQuestion shows above it. Like every word of the card, fixed: no answer has a
+    description beside it, and she gives one answer at a time. */
+const HEADER = { what: "What it is", private: "Private", notSession: "Session" };
+
+const question = (text, header, labels) => ({ question: text, header, multiSelect: false, options: labels.map((label) => ({ label, description: "" })) });
 
 /** The answers to "What is <label>?", in order: a Maybe line wins over a Guess line. */
 function whatAnswers({ guess, maybe }) {
@@ -55,18 +59,17 @@ function whatAnswers({ guess, maybe }) {
     were found in, as the Maybe line says it: null, `{ session: true }` for a version of a session not cleared, or `{ name, kind }`,
     its name as shownName gives it and its kind as the record keeps it. As AskUserQuestion's questions: { questions }. */
 export function cardOf({ label, guess = null, maybe = null }) {
-  return { questions: [question(WHAT_Q(label), whatAnswers({ guess, maybe })), question(PRIVATE_Q, ["Yes", "No"])] };
+  return { questions: [question(WHAT_Q(label), HEADER.what, whatAnswers({ guess, maybe })), question(PRIVATE_Q, HEADER.private, ["Yes", "No"])] };
 }
 
 /** The card that asks whether the video called `label` is a session after all, when she answered anything but a session and it
     came as a Zoom download or as sound alone (`came`), or the record does not say how it came (any other `came`). */
 export function notSessionCardOf({ label, came = null }) {
   const how = came === "zoom" || came === "sound" ? came : "unknown";
-  return { questions: [question(NOT_SESSION_Q[how](label), [IS_SESSION, NOT_SESSION])] };
+  return { questions: [question(NOT_SESSION_Q[how](label), HEADER.notSession, [IS_SESSION, NOT_SESSION])] };
 }
 
-/** `questions` as texts and option labels, in order, or null when they are not questions of that shape. Anything else a question or
-    an option holds (a header, a description) is not the card's wording, and is left out. */
+/** `questions` as texts and option labels, in order, or null when they are not questions of that shape. */
 function shapeOf(questions) {
   if (!Array.isArray(questions)) return null;
   const shaped = [];
@@ -84,9 +87,23 @@ function shapeOf(questions) {
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+/** The keys a question, and an answer, of the card may hold. */
+const QUESTION_KEYS = ["question", "header", "multiSelect", "options"];
+const OPTION_KEYS = ["label", "description"];
+
+/** Whether `questions` are the card `card` makes, every text she sees in it: the same questions and answers, in order, and nothing
+    beside them but the card's own header, multiSelect and descriptions, each of which a result may leave out. */
+function fits(questions, card) {
+  const want = card.questions;
+  if (!same(shapeOf(questions), shapeOf(want))) return false;
+  return questions.every((q, i) => Object.keys(q).every((key) => QUESTION_KEYS.includes(key))
+    && (q.header === undefined || q.header === want[i].header) && (q.multiSelect === undefined || q.multiSelect === want[i].multiSelect)
+    && q.options.every((o, j) => Object.keys(o).every((key) => OPTION_KEYS.includes(key)) && (o.description === undefined || o.description === want[i].options[j].description)));
+}
+
 /** Which fixed card `questions` are, and of which video: { label, form: "what" } for her card, { label, form: "not-a-session" } for
     the follow-up, when their texts and option labels, in order, are exactly a card cardOf or notSessionCardOf makes for that label,
-    with some guess, Maybe line and way it came; else null. */
+    with some guess, Maybe line and way it came, and nothing beside them but that card's own (fits); else null. */
 export function formOf(questions) {
   const asked = shapeOf(questions);
   if (!asked) return null;
@@ -99,7 +116,7 @@ export function formOf(questions) {
     if (typeof first === "string") {
       for (const [start, kind] of [["A new version of ", "finished"], ["A finished version of ", "raw"]]) if (first.startsWith(start)) maybes.push({ name: first.slice(start.length), kind });
     }
-    for (const maybe of maybes) for (const guess of [null, ...Object.keys(GUESSED)]) if (same(asked, shapeOf(cardOf({ label, guess, maybe }).questions))) return { label, form: "what" };
+    for (const maybe of maybes) for (const guess of [null, ...Object.keys(GUESSED)]) if (fits(questions, cardOf({ label, guess, maybe }))) return { label, form: "what" };
     return null;
   }
   if (asked.length === 1) {
@@ -108,7 +125,7 @@ export function formOf(questions) {
       const text = asked[0][0];
       if (text.length <= after.length || !text.endsWith(after)) continue;
       const label = text.slice(0, -after.length);
-      if (same(asked, shapeOf(notSessionCardOf({ label, came: how }).questions))) return { label, form: "not-a-session" };
+      if (fits(questions, notSessionCardOf({ label, came: how }))) return { label, form: "not-a-session" };
     }
   }
   return null;
@@ -127,7 +144,8 @@ const RECEIPT_NAME = /^receipt-\d+-[0-9a-f]{6}\.json$/;
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 /** The receipt of the card answered in the hook's input `input` (PostToolUse on AskUserQuestion), at `now` (ms): { at, label, form,
-    answers }, `answers` her answer to each question by its text; or null. None for any other event or tool, for a result that holds
+    answers }, `answers` her answer to each question by its text, and for her card `offered`, its first answer, which names the video
+    its Maybe line offered a new version of; or null. None for any other event or tool, for a result that holds
     afkTimeoutMs or followUp, for a card in no fixed form (formOf), and for a question with no answer in the result or one that is not
     one of its options (her own words, in Other). Only the result, `tool_response`, is read: never what Claude asked with. */
 export function receiptFrom(input, now) {
@@ -142,12 +160,16 @@ export function receiptFrom(input, now) {
     if (typeof answer !== "string" || !q.options.some((o) => o.label === answer)) return null;
     answers[q.question] = answer;
   }
-  return { at: now, label: form.label, form: form.form, answers };
+  return { at: now, label: form.label, form: form.form, answers, ...(form.form === "what" ? { offered: result.questions[0].options[0].label } : {}) };
 }
+
+/** The time a receipt's file name says it was written (ms), or NaN for a name that is not a receipt's. */
+const nameTime = (name) => (RECEIPT_NAME.test(name) ? Number(name.slice("receipt-".length, name.lastIndexOf("-"))) : NaN);
 
 /** Write `receipt` into this Mac's receipts folder (receiptsFolder), as a file of its own named by its time and six random hex
     letters, never by its label, and never over a file there (`wx`): its path, or null when it could not be written, the folder being
-    a link, or each name tried being taken. `hex` is a test's stand-in for the random letters. */
+    a link, or each name tried being taken. The receipts there whose names say they are older than an hour before it are taken
+    away first: none answers anything now. `hex` is a test's stand-in for the random letters. */
 export function writeReceipt(home, receipt, { hex = () => randomBytes(3).toString("hex") } = {}) {
   const folder = receiptsFolder(home);
   try {
@@ -155,6 +177,11 @@ export function writeReceipt(home, receipt, { hex = () => randomBytes(3).toStrin
     if (!lstatSync(folder).isDirectory()) return null;
   } catch (e) {
     return null;
+  }
+  try {
+    for (const name of readdirSync(folder)) if (nameTime(name) < receipt.at - RECEIPT_MS) rmSync(join(folder, name), { force: true });
+  } catch (e) {
+    // An old receipt left there answers nothing.
   }
   for (let i = 0; i < 3; i++) {
     const file = join(folder, `receipt-${receipt.at}-${hex()}.json`);
@@ -180,10 +207,13 @@ function whatAnswer({ stored, maybeName, maybeKind }) {
 
 /** The answers `kind` needs a receipt of, for the video called `label` answered as `stored`: her card's, and with `notASession` the
     not-a-session card's too, worded for how it came (`came`, zoom, sound, or null when the record does not say), each as { form,
-    answers }. A kind no card offers is expected as an answer no card has, which no receipt holds. */
+    answers }, and `offered`, the first answer the card must have offered, where her answer alone does not say which video it is a
+    new version of. A kind no card offers is expected as an answer no card has, which no receipt holds. */
 export function expectedAnswers({ label, stored, maybeName = null, maybeKind = null, notASession = false, came = null }) {
   const first = whatAnswer({ stored, maybeName, maybeKind });
   const expected = [{ form: "what", answers: { [WHAT_Q(label)]: first === null ? "" : first, [PRIVATE_Q]: stored === "session" ? "Yes" : "No" } }];
+  // "Raw with retakes" makes a raw video a new version of another raw one only on the card that offered that version first.
+  if (stored === "raw" && typeof maybeName === "string" && maybeKind === "raw") expected[0].offered = versionOf({ name: maybeName, kind: "raw" });
   if (notASession) expected.push({ form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: NOT_SESSION } });
   return expected;
 }
@@ -204,12 +234,12 @@ function ownLabel(r) {
 const sameAnswers = (a, b) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((q) => Object.hasOwn(b, q) && a[q] === b[q]);
 
 /** "" when, for each of `expected` (expectedAnswers), a receipt on this Mac of the last hour before `now` (ms) holds that form and
-    those very answers, to questions that name its label; else NO_RECEIPT. A file in the folder that is not a receipt is passed
-    over. */
+    those very answers, to questions that name its label, from a card that offered what it must; else NO_RECEIPT. A file in the
+    folder that is not a receipt, or whose name says it was written at another time, is passed over. */
 export function receiptWhy({ home, expected, now }) {
   let names = [];
   try {
-    names = readdirSync(receiptsFolder(home)).filter((name) => RECEIPT_NAME.test(name));
+    names = readdirSync(receiptsFolder(home)).filter((name) => nameTime(name) <= now && now - nameTime(name) < RECEIPT_MS);
   } catch (e) {
     return NO_RECEIPT;
   }
@@ -217,11 +247,11 @@ export function receiptWhy({ home, expected, now }) {
   for (const name of names) {
     try {
       const r = JSON.parse(readFileSync(join(receiptsFolder(home), name), "utf8"));
-      if (isObject(r) && typeof r.at === "number" && r.at <= now && now - r.at < RECEIPT_MS && isObject(r.answers) && ownLabel(r)) receipts.push(r);
+      if (isObject(r) && r.at === nameTime(name) && isObject(r.answers) && ownLabel(r)) receipts.push(r);
     } catch (e) {
       // A file not whole, or not JSON, is no receipt.
     }
   }
-  const holds = (one) => receipts.some((r) => r.form === one.form && sameAnswers(r.answers, one.answers));
+  const holds = (one) => receipts.some((r) => r.form === one.form && sameAnswers(r.answers, one.answers) && (one.offered === undefined || r.offered === one.offered));
   return expected.length > 0 && expected.every(holds) ? "" : NO_RECEIPT;
 }

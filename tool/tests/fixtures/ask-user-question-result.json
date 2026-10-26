@@ -3,29 +3,39 @@
   "questions": [
     {
       "question": "What is Video of 20 Oct, 15:00 (Mac Studio)?",
+      "header": "What it is",
+      "multiSelect": false,
       "options": [
         {
-          "label": "Raw with retakes"
+          "label": "Raw with retakes",
+          "description": ""
         },
         {
-          "label": "Finished by your editor"
+          "label": "Finished by your editor",
+          "description": ""
         },
         {
-          "label": "iPhone clip"
+          "label": "iPhone clip",
+          "description": ""
         },
         {
-          "label": "Client or group session"
+          "label": "Client or group session",
+          "description": ""
         }
       ]
     },
     {
       "question": "Is it a private session with a client or a group?",
+      "header": "Private",
+      "multiSelect": false,
       "options": [
         {
-          "label": "Yes"
+          "label": "Yes",
+          "description": ""
         },
         {
-          "label": "No"
+          "label": "No",
+          "description": ""
         }
       ]
     }

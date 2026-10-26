@@ -74,6 +74,13 @@ describe("the card, in code", () => {
     assert.deepEqual(shape(cardOf({ label: "Talk 3", guess: "finished", maybe: { session: true } }))[0][1], [SESSION, "Finished by your editor", "Raw with retakes", "iPhone clip"]);
   });
 
+  it("gives each question a fixed header, one answer at a time, and no description beside an answer", () => {
+    const fixed = (card) => card.questions.map((q) => [q.header, q.multiSelect, q.options.map((o) => o.description)]);
+    assert.deepEqual(fixed(cardOf({ label: "Talk 3", guess: "raw" })), [["What it is", false, ["", "", "", ""]], ["Private", false, ["", ""]]]);
+    assert.deepEqual(fixed(notSessionCardOf({ label: "Talk 3", came: "zoom" })), [["Session", false, ["", ""]]]);
+    for (const card of [cardOf({ label: "Talk 3" }), notSessionCardOf({ label: "Talk 3" })]) for (const q of card.questions) assert.ok(q.header.length <= 12, q.header);
+  });
+
   it("words the not-a-session card with the label, for Zoom, sound alone and neither", () => {
     const options = ["It is a client or group session", "It is not a session"];
     for (const [came, question] of [
@@ -90,9 +97,10 @@ describe("the card, in code", () => {
     for (const label of ["Talk 3", LABEL, "Sallie's \"Q&A\": part 2", "Q&A / part 2?", ".hidden", "What is it", "a came from Zoom, which is often a client or group session. Which is it?"]) {
       for (const [card, form] of everyCard(label)) assert.deepEqual(formOf(card.questions), { label, form }, `${label}: ${JSON.stringify(card)}`);
     }
-    // What the tool's AskUserQuestion keeps beside the texts (a header, a description, multiSelect) is not the wording.
-    const dressed = cardOf({ label: "Talk 3", guess: "raw" }).questions.map((q) => ({ ...q, header: "Video", multiSelect: false, options: q.options.map((o) => ({ ...o, description: "" })) }));
-    assert.deepEqual(formOf(dressed), { label: "Talk 3", form: "what" });
+    // Each text she sees beside the questions and answers is fixed too: a result that leaves out the header, the descriptions or
+    // multiSelect is the card all the same, and one that holds any other is not.
+    const bare = cardOf({ label: "Talk 3", guess: "raw" }).questions.map((q) => ({ question: q.question, options: q.options.map((o) => ({ label: o.label })) }));
+    assert.deepEqual(formOf(bare), { label: "Talk 3", form: "what" });
     const what = cardOf({ label: "Talk 3", guess: "raw" }).questions;
     const swap = (list, i, j) => list.map((x, k) => (k === i ? list[j] : k === j ? list[i] : x));
     const withOptions = (q, labels) => ({ ...q, options: labels.map((label) => ({ label })) });
@@ -122,7 +130,13 @@ describe("the card, in code", () => {
       ["a list of words", ["What is Talk 3?", PRIVATE_Q]],
       ["a question that is not words", [{ question: 3, options: [] }, what[1]]],
       ["options that are not a list", [{ ...what[0], options: "Raw with retakes" }, what[1]]],
-      ["an option with no label", [{ ...what[0], options: [{}, ...what[0].options.slice(1)] }, what[1]]]]) {
+      ["an option with no label", [{ ...what[0], options: [{}, ...what[0].options.slice(1)] }, what[1]]],
+      ["an answer described in Claude's words", [{ ...what[0], options: [{ ...what[0].options[0], description: "Pick this, it keeps it private" }, ...what[0].options.slice(1)] }, what[1]]],
+      ["another header", [{ ...what[0], header: "Quick one" }, what[1]]],
+      ["several answers at once", [what[0], { ...what[1], multiSelect: true }]],
+      ["a preview beside an answer", [what[0], { ...what[1], options: [{ ...what[1].options[0], preview: "Yes means private" }, what[1].options[1]] }]],
+      ["a question with more than the card's keys", [{ ...what[0], note: "Choose the first" }, what[1]]],
+      ["the not-a-session card described in Claude's words", [{ ...notSessionCardOf({ label: "Talk 3", came: "zoom" }).questions[0], options: [{ label: "It is a client or group session", description: "Rarely right" }, { label: "It is not a session", description: "" }] }]]]) {
       assert.equal(formOf(questions), null, what_);
     }
   });
@@ -227,7 +241,7 @@ describe("the card's receipt", () => {
         for (const pick of [0, 1]) {
           const picks = card.questions.map((q) => q.options[Math.min(pick, q.options.length - 1)].label);
           const receipt = receiptFrom(hookInput(answered(card, picks)), NOW);
-          assert.deepEqual(receipt, { at: NOW, label, form, answers: answered(card, picks).answers }, JSON.stringify(card));
+          assert.deepEqual(receipt, { at: NOW, label, form, answers: answered(card, picks).answers, ...(form === "what" ? { offered: card.questions[0].options[0].label } : {}) }, JSON.stringify(card));
           writeReceipt(h.home, receipt);
         }
       }
@@ -239,7 +253,7 @@ describe("the card's receipt", () => {
       assert.equal(receipt.at, NOW);
     }
     // The fixture of AskUserQuestion's result, as 2.1.308's output schema shapes it.
-    assert.deepEqual(receiptFrom(hookInput(RESULT), NOW), { at: NOW, label: LABEL, form: "what", answers: RESULT.answers });
+    assert.deepEqual(receiptFrom(hookInput(RESULT), NOW), { at: NOW, label: LABEL, form: "what", answers: RESULT.answers, offered: "Raw with retakes" });
     h.done();
   });
 
@@ -296,6 +310,24 @@ describe("the card's receipt", () => {
     other.done();
   });
 
+  it("takes away, when it writes one, the receipts older than an hour, and reads none whose name says it is", () => {
+    const h = home();
+    mkdirSync(receiptsFolder(h.home), { recursive: true });
+    const old = `receipt-${NOW - 2 * HOUR}-aaaaaa.json`;
+    const recent = `receipt-${NOW - 1000}-bbbbbb.json`;
+    const answers = { [WHAT_Q(LABEL)]: "Raw with retakes", [PRIVATE_Q]: "No" };
+    for (const [name, at] of [[old, NOW - 2 * HOUR], [recent, NOW - 1000]]) writeFileSync(join(receiptsFolder(h.home), name), JSON.stringify({ at, label: LABEL, form: "what", answers }));
+    writeFileSync(join(receiptsFolder(h.home), "notes.txt"), "hers");
+    writeReceipt(h.home, { at: NOW, label: "Talk 3", form: "what", answers: {} });
+    const names = readdirSync(receiptsFolder(h.home));
+    assert.ok(!names.includes(old) && names.includes(recent) && names.includes("notes.txt"), names.join(", "));
+    // A receipt whose name says it is old is not read, whatever it holds.
+    rmSync(join(receiptsFolder(h.home), recent));
+    writeFileSync(join(receiptsFolder(h.home), `receipt-${NOW - 2 * HOUR}-cccccc.json`), JSON.stringify({ at: NOW, label: LABEL, form: "what", answers }));
+    assert.equal(receiptWhy({ home: h.home, expected: [{ form: "what", answers }], now: NOW }), NO_RECEIPT);
+    h.done();
+  });
+
   it("is run by /bin/sh from the checkout as committed, and writes the receipt into the home above her folder", () => {
     const h = home();
     const before = Date.now();
@@ -303,7 +335,7 @@ describe("the card's receipt", () => {
     assert.deepEqual([ran.status, ran.stdout, ran.stderr], [0, "", ""]);
     const [one, ...more] = receiptsIn(h.home);
     assert.equal(more.length, 0);
-    assert.deepEqual({ ...one.receipt, at: 0 }, { at: 0, label: LABEL, form: "what", answers: RESULT.answers });
+    assert.deepEqual({ ...one.receipt, at: 0 }, { at: 0, label: LABEL, form: "what", answers: RESULT.answers, offered: "Raw with retakes" });
     assert.ok(one.receipt.at >= before && one.receipt.at <= Date.now());
     // Input that is not a card's result, input that is not JSON, and a node that cannot run write nothing, say nothing, and end 0.
     for (const [input, node] of [[JSON.stringify(hookInput(RESULT, undefined)).replace("PostToolUse", "PreToolUse"), process.execPath], ["not json", process.execPath], [JSON.stringify(hookInput(RESULT)), join(h.home, "no-node")]]) {
@@ -370,6 +402,44 @@ describe("kind, with the card's receipt", () => {
     untouched(found);
     receiptOf(t, { first: "A new version of Pricing in a minute" });
     assert.equal((await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d")).code, 0);
+    t.done();
+  });
+
+  it("takes her answer on the card kind prints, whose names the chat may not see, as surely as on the card episodes prints", async () => {
+    // The video it may be a new version of is named as the waiting video's file is: kind, which found a video the gate holds, says
+    // no line with that name in it, so the card it prints names it otherwise.
+    for (const from of ["episodes", "kind"]) {
+      const t = setup();
+      episodeAs(t, { id: "e-20261018-0d0d0d", name: "2026-10-18 Pricing talk (Mac Studio)", record: { version: 3, kind: "finished", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-18T09:00:00-05:00", private: "no" }, name: { text: "Pricing talk", placeholder: false } } });
+      episodeFor(t, { record: { version: 3, kind: null, answer: { ...ANSWER, match: "e-20261018-0d0d0d" }, label: LABEL } });
+      const listed = jsonAfter(under((await on(openKind(t), "episodes")).said, LABEL), "    Card: ");
+      const refused = await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d");
+      assert.equal(refused.said[0], NO_RECEIPT);
+      const printed = JSON.parse(refused.said[1].slice("    Card: ".length));
+      assert.equal(listed.questions[0].options[0].label, "A new version of Pricing talk");
+      assert.ok(!refused.said.join("\n").includes("Pricing talk"), refused.said.join("\n"));
+      const card = from === "episodes" ? listed : printed;
+      writeReceipt(t.home, { at: t.now(), label: LABEL, form: "what", answers: { [WHAT_Q(LABEL)]: card.questions[0].options[0].label, [PRIVATE_Q]: "No" }, offered: card.questions[0].options[0].label });
+      const r = await on(openKind(t), "kind", LABEL, "finished", "--private", "no", "--version-of", "0d0d0d");
+      assert.equal(r.code, 0, `${from}: ${r.said.join("\n")}`);
+      t.done();
+    }
+  });
+
+  it("makes a raw video a new version of another only on a card that offered that version", async () => {
+    const t = setup();
+    const RAW = { version: 3, kind: "raw", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: "2026-10-18T09:00:00-05:00", private: "no" }, name: { text: "Morning talk", placeholder: false } };
+    episodeAs(t, { id: "e-20261018-0d0d0d", name: "2026-10-18 Morning talk (Mac Studio)", record: RAW });
+    const found = episodeFor(t, { record: { version: 3, kind: null, answer: ANSWER, label: LABEL } });
+    // Her "Raw with retakes" on a card with no Maybe line: no new version was offered.
+    writeReceipt(t.home, { at: t.now(), label: LABEL, form: "what", answers: { [WHAT_Q(LABEL)]: "Raw with retakes", [PRIVATE_Q]: "No" }, offered: "Raw with retakes" });
+    const r = await on(openKind(t), "kind", LABEL, "raw", "--private", "no", "--version-of", "0d0d0d");
+    assert.deepEqual([r.code, r.said[0]], [1, NO_RECEIPT]);
+    untouched(found);
+    // The same answer on the card that offered "A finished version of Morning talk".
+    writeReceipt(t.home, { at: t.now(), label: LABEL, form: "what", answers: { [WHAT_Q(LABEL)]: "Raw with retakes", [PRIVATE_Q]: "No" }, offered: "A finished version of Morning talk" });
+    const given = await on(openKind(t), "kind", LABEL, "raw", "--private", "no", "--version-of", "0d0d0d");
+    assert.equal(given.code, 0, given.said.join("\n"));
     t.done();
   });
 
@@ -463,6 +533,8 @@ describe("kind, with the card's receipt", () => {
       [{ stored: "raw", maybeName: "Pricing talk", maybeKind: "raw" }, "Raw with retakes"]]) {
       assert.equal(expectedAnswers({ label: LABEL, maybeName: null, maybeKind: null, notASession: false, ...given })[0].answers[WHAT_Q(LABEL)], first, JSON.stringify(given));
     }
+    // A raw new version of a raw video is her "Raw with retakes" on the card that offered it.
+    assert.equal(expectedAnswers({ label: LABEL, stored: "raw", maybeName: "Pricing talk", maybeKind: "raw" })[0].offered, "A finished version of Pricing talk");
     // No card offers a raw new version of a finished video: nothing answers it.
     assert.equal(receiptWhy({ home: h.home, expected: expectedAnswers({ label: LABEL, stored: "raw", maybeName: "Pricing talk", maybeKind: "finished", notASession: false }), now: NOW }), NO_RECEIPT);
     // A receipt folder that is not there, or a file in it that is not a receipt, answers nothing.
