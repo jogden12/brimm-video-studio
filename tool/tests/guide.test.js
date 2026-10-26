@@ -132,6 +132,8 @@ const STAGE_ROWS = [
   // Not in the plan's rows: a Zoom download in the other Mac's drop folder, and an import whose step is not known yet.
   [{ ...DROP({ here: false, state: "zoom" }), mac: "Mac Studio" }, "zoom", "It is a Zoom download on the Mac Studio. Those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder on that Mac."],
   [DROP({ state: "importing" }), "importing", 'It is being imported. Wait for the "Ready" notice.'],
+  // A step that opens with Claude's name keeps its capital mid-sentence, as unedited.js clause() keeps it.
+  [DROP({ state: "importing", step: "Claude's notes" }), "importing", 'It is being imported, at Claude\'s notes. Wait for the "Ready" notice.'],
   [{ conflicted: true }, "conflicted", 'Dropbox kept two copies of a change to it. Say "sort out the conflict".'],
   [{ kind: null, waiting: true }, "waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
   [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, "answering-elsewhere", "It is being answered on the Mac Studio. Carry on there."],
@@ -331,18 +333,32 @@ describe("what guide tell says", () => {
     assert.deepEqual([TELL_MS, TELL_POLL_MS], [3600000, 15000]);
     const ep = at({ ...BASE, id: "e-20261020-aaaaaa", source: JANE, at: 2 });
     const older = at({ ...BASE, id: "e-20261014-bbbbbb", source: JANE, at: 1 });
-    assert.deepEqual(trailOf(arriving.facts), JANE);
-    assert.deepEqual(trailOf(ep.facts), { id: "e-20261020-aaaaaa" });
+    const ID = "e-20261020-aaaaaa";
+    assert.deepEqual(trailOf(arriving.facts), { ...JANE, growing: true, came: 0 });
+    assert.deepEqual(trailOf(importing.facts), { ...JANE, growing: false, came: 0 });
+    assert.deepEqual(trailOf(ep.facts), { id: ID, ...JANE });
+    assert.deepEqual(trailOf(reading.facts), { id: BASE.id });
     // In a drop folder by its Mac and file, whose size grows while it comes in.
     const grown = at({ ...arriving.facts, source: { ...JANE, bytes: 9 } });
-    assert.deepEqual(follow(trailOf(arriving.facts), [ep, grown]), { item: grown, trail: { ...JANE, bytes: 9 } });
-    // Out of it, by the newest answered video that holds a file of that name and size; then by its id.
-    assert.deepEqual(follow(JANE, [older, ep]), { item: ep, trail: { id: "e-20261020-aaaaaa" } });
+    assert.deepEqual(follow(trailOf(arriving.facts), [ep, grown]), { item: grown, trail: { ...JANE, bytes: 9, growing: true, came: 0 } });
+    // Out of it, by the newest answered video that holds a file of that name and size; then by its id, with its file.
+    assert.deepEqual(follow(JANE, [older, ep]), { item: ep, trail: { id: ID, ...JANE } });
     assert.equal(follow({ ...JANE, bytes: 9 }, [older, ep]), null);
+    // A file still coming in when last seen may grow and be filed before the next look: then a larger one, filed since it came.
+    const ep9 = at({ ...ep.facts, source: { ...JANE, bytes: 9 } });
+    assert.deepEqual(follow({ ...JANE, growing: true, came: 2 }, [older, ep9]), { item: ep9, trail: { id: ID, ...JANE, bytes: 9 } });
+    assert.equal(follow({ ...JANE, bytes: 9, growing: true, came: 0 }, [ep]), null);
+    assert.equal(follow({ ...JANE, growing: true, came: 2 }, [at({ ...older.facts, source: { ...JANE, bytes: 9 } })]), null);
     // A file of that name in the other Mac's drop folder is another video.
     assert.equal(follow({ ...JANE, mac: "Sallie's laptop" }, [grown]), null);
-    assert.deepEqual(follow({ id: "e-20261020-aaaaaa" }, [older, ep]), { item: ep, trail: { id: "e-20261020-aaaaaa" } });
+    assert.deepEqual(follow({ id: ID, ...JANE }, [older, ep]), { item: ep, trail: { id: ID, ...JANE } });
+    assert.deepEqual(follow({ id: ID }, [older, ep]), { item: ep, trail: { id: ID } });
     assert.equal(follow({ id: "e-20261020-cccccc" }, [ep]), null);
+    // By its id, until the import of its file, at its size, did not finish: then by that file in its drop folder.
+    assert.deepEqual(follow({ id: ID, ...JANE }, [ep, retry]), { item: retry, trail: { id: ID, ...JANE } });
+    assert.equal(follow({ id: ID, ...JANE }, [ep, arriving]).item, ep);
+    assert.equal(follow({ id: ID, ...JANE }, [ep, at({ ...retry.facts, source: { ...JANE, bytes: 9 } })]).item, ep);
+    assert.equal(follow({ id: ID }, [ep, retry]).item, ep);
   });
   it("says in one line that it is ready, that Claude has read it, or its next step; and nothing while it is still on its way", () => {
     for (const [was, seen, now, want] of [
@@ -363,6 +379,6 @@ describe("what guide tell says", () => {
       [retry, retry, retry, 'A video of 5 bytes: Its import did not finish. Say "try it again".'],
       [done, done, done, "Pricing talk (3fa9c1) is done: nothing is left to do for it."]
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
-    assert.equal(stillLine(arriving), 'A video of 5 bytes: Nothing has changed in 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
+    assert.equal(stillLine(arriving), 'A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
   });
 });

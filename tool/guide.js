@@ -191,8 +191,9 @@ export function roughIn(rates, seconds) {
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
 
-/** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case. */
-const midSentence = (step) => step[0].toLowerCase() + step.slice(1);
+/** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
+    it opens with Claude's name or a quoted word, as unedited.js clause() keeps them. */
+const midSentence = (step) => (/^(Claude|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
 
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {
@@ -377,23 +378,32 @@ export const signatureOf = (items) =>
 export const TELL_MS = 60 * 60 * 1000;
 export const TELL_POLL_MS = 15000;
 
-/** What `guide tell` follows a video by (Trail): its record's id once it has one; in a drop folder, the Mac whose folder it is in,
-    and its file's name and size (`facts.source`), which are never said. */
-export const trailOf = (facts) => (facts.id ? { id: facts.id } : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes });
+/** What `guide tell` follows a video by (Trail), from what is read of it (`facts.source`, never said): the Mac whose drop folder
+    it is or was in, and its file's name and size; and its record's id once it has one. In a drop folder, also whether the file
+    was still coming in (`growing`), and when it came (`came`, ms). */
+export const trailOf = (facts) =>
+  facts.id
+    ? { id: facts.id, ...(facts.source || {}) }
+    : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes, growing: facts.drop.state === "arriving", came: facts.at };
 
 /** The video `trail` follows, found again among `items`: { item, trail }, with the trail as it is now, or null when none is. By
-    its id once it has one. In a drop folder, by its Mac and file, whose size grows while it comes in. Once it has left the drop
-    folder, by the newest answered video holding a file of that name and size, as the import files it (filing.js
-    holdingEpisode): from then on by that one's id. */
+    its id once it has one, unless the import of its file, at its size, did not finish: that is said of the file in its drop
+    folder, which the import shows again, and is where it ends. In a drop folder, by its Mac and file, whose size grows while it
+    comes in. Once it has left the drop folder, by the newest answered video holding a file of that name and size, as the import
+    files it (filing.js holdingEpisode); or, when the file was still coming in when last seen, a larger one, imported since it
+    came, as it may have grown and been filed between two looks. From then on by that one's id. */
 export function follow(trail, items) {
   if (trail.id) {
+    const failed = trail.file && items.find(({ facts }) => facts.drop && facts.drop.state === "retry" && facts.source.mac === trail.mac && facts.source.file === trail.file && facts.source.bytes === trail.bytes);
+    if (failed) return { item: failed, trail };
     const item = items.find(({ facts }) => facts.id === trail.id);
     return item ? { item, trail } : null;
   }
   const dropped = items.find(({ facts }) => facts.drop && facts.source.mac === trail.mac && facts.source.file === trail.file);
-  if (dropped) return { item: dropped, trail: { ...trail, bytes: dropped.facts.source.bytes } };
-  const filed = items.filter(({ facts }) => !facts.drop && facts.source && facts.source.file === trail.file && facts.source.bytes === trail.bytes).sort((a, b) => b.facts.at - a.facts.at)[0];
-  return filed ? { item: filed, trail: { id: filed.facts.id } } : null;
+  if (dropped) return { item: dropped, trail: trailOf(dropped.facts) };
+  const fits = ({ source, at }) => source.bytes === trail.bytes || (trail.growing && source.bytes > trail.bytes && at >= trail.came);
+  const filed = items.filter(({ facts }) => !facts.drop && facts.source && facts.source.file === trail.file && fits(facts)).sort((a, b) => b.facts.at - a.facts.at)[0];
+  return filed ? { item: filed, trail: { id: filed.facts.id, mac: trail.mac, file: trail.file, bytes: filed.facts.source.bytes } } : null;
 }
 
 const READ_IT = "Claude has read it.";
@@ -415,5 +425,6 @@ export function told(was, seen, now) {
   return `${facts.name}: ${next.text}`;
 }
 
-/** What `guide tell` says of a video still on its way after TELL_MS: so, and its next step. */
-export const stillLine = ({ facts, next }) => `${facts.name}: Nothing has changed in ${TELL_MS / 60000} minutes. ${next.text}`;
+/** What `guide tell` says of a video still on its way after TELL_MS: so, and its next step. It may have moved on meanwhile, from
+    coming in to being imported, or from waiting for its reading to being read. */
+export const stillLine = ({ facts, next }) => `${facts.name}: It is still on its way after ${TELL_MS / 60000} minutes. ${next.text}`;

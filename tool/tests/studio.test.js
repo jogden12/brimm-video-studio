@@ -543,6 +543,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "the Bash tool's run_in_background", "once per video, never Monitor",
       "I'll tell you here; the Mac doing the work shows a notice too", "tell her its one line in plain words",
       "with any time it gives", "offer to tell her here when it's ready",
+      "If nothing listed is coming in, being imported or waiting for her answer, ask where she dropped it, then run `guide wait` again.",
+      "If it says it is still on its way, offer to wait again.",
       "`guide page` the first time in this chat"
     ]) assert.ok(guide.includes(words), words);
     assert.ok(!guide.includes("the first time in a session"), guide);

@@ -5252,11 +5252,15 @@ function guideHandoff(ctx, e, r, links, v2) {
   return { ...read, emptyAt: Number.isInteger(empty) && read.kind === "session" ? empty : null, at: Date.parse(done.at) };
 }
 
+/** A time the guide works out, such as when a video should be ready, on this Mac's clock to the nearest minute, as aboutLeft
+    rounds how long is left. A due time, such as when the late check is made, is said as the clock shows it (clockAt). */
+const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+
 /** Where Claude's reading of a video has got, for the guide: { reading, readsAt, roughAt }. "done" once the reading that counts is
     in the record (currentReading; a session's, sessionReading); "later" for a raw video whose reading waits for the import's late
     check, also while this Mac's reading of it runs but the check still holds it: Claude starts at the time the check is due
-    (`readsAt`, on this Mac's clock), and its rough cut should be ready at `roughAt`, by the speeds this Mac measured (`rates`,
-    guide.js roughIn), "" while one is not known; "running" while this Mac's detached reading is at work on it (`running`, the
+    (`readsAt`, on this Mac's clock), and its rough cut should be ready about `roughAt` (clockNear), by the speeds this Mac
+    measured (`rates`, guide.js roughIn), "" while one is not known; "running" while this Mac's detached reading is at work on it (`running`, the
     command runningCommand says), with no time, since when the run began is not kept; "failed" when the reading this Mac last ran
     of it since her answer (a session's, since its teachings were asked for) did not end well; and "none" otherwise. A result's
     `started` is in milliseconds and the record's times are text: each is read as a time before they are compared. */
@@ -5266,7 +5270,7 @@ function guideReading(ctx, e, r, kind, running, rates) {
   /** A raw reading that waits for the import's late check: when Claude starts, and when its rough cut should be ready. */
   const later = () => {
     const rough = roughIn(rates, r.video && r.video.seconds);
-    return { reading: "later", readsAt: clockAt(due), roughAt: rough === null ? "" : clockAt(due + rough * 1000) };
+    return { reading: "later", readsAt: clockAt(due), roughAt: rough === null ? "" : clockNear(due + rough * 1000) };
   };
   if (running === "read") return due === null ? { reading: "running" } : later();
   const result = readResult(ctx.home, e.name, "read");
@@ -5354,8 +5358,9 @@ function panelRuns(ctx) {
     label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
     are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
     says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's own video alone: a run there under the
-    label of the other Mac's video is this Mac's, and says nothing of that one. And when it should be Ready, from the same run
-    (guide.js readyIn), on this Mac's clock. */
+    label of the other Mac's video is this Mac's, and says nothing of that one: as of when the panel last wrote the run, with the
+    time since taken off. And when it should be Ready, from the same run (guide.js readyIn), on this Mac's clock to the nearest
+    minute (clockNear). */
 function guideDrops(ctx) {
   const now = ctx.now();
   const statuses = readStatuses(ctx.root, now);
@@ -5384,7 +5389,13 @@ function guideDrops(ctx) {
       const label = labelIn(mine, video, mac);
       const run = here && label ? runs.find((r) => r.video === label) : undefined;
       const noted = here ? seen[seenKey(video, found)] : undefined;
-      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: run && Number.isFinite(run.left) ? run.left : null, total: run && Number.isFinite(run.total) ? run.total : null, readyAt: run && readyIn(run) !== null ? clockAt(now + readyIn(run) * 1000) : "" };
+      // The panel writes a run's times when a step starts and as its percent moves: they are as of `updated`, not now. What has
+      // passed since is taken off, and a time that has run out is not said.
+      const since = run && Number.isFinite(run.updated) ? Math.max(0, now - run.updated) / 1000 : 0;
+      const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
+      const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
+      const ready = times ? readyIn(times) : null;
+      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
       // `source` is for `guide tell` alone, which follows the video by it: never said.
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }

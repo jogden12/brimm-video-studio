@@ -181,6 +181,20 @@ describe("guide, from the records", () => {
     assert.deepEqual((await on(reading, "guide", "Long talk")).said, ['Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".']);
     t.done();
   });
+  it("says Claude starts reading a raw video now when its late check is overdue, never at a time gone by, and its rough cut to the nearest minute", async () => {
+    const t = setup();
+    const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
+    writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 60 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    writeFileSync(join(progressFolder(t.home), RATES), JSON.stringify({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }));
+    const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(t.now())}, once the import has checked its copies.`;
+    const NOTICE = "A notice comes when it is done.";
+    assert.deepEqual((await on(light(t), "guide", "Long talk")).said, [`${STARTS} Its rough cut is ready about ${clockAt(t.now() + 1032 * 1000)}. ${NOTICE}`]);
+    // At 15:00:40 the rough cut is due at 15:17:52: about 15:18. When Claude starts is a due time, said as the clock shows it.
+    const later = light(t, { now: () => t.now() + 40000 });
+    assert.deepEqual((await on(later, "guide", "Long talk")).said, [`${STARTS} Its rough cut is ready about ${clockAt(t.now() + 18 * 60000)}. ${NOTICE}`]);
+    t.done();
+  });
   it("gives a video that was a session after all its withdrawal on Principles first, whatever her note says, and then the session's own step", async () => {
     const t = setup();
     const rel = "final/Session, 2026-10-20.brimm-ops.json";
@@ -212,7 +226,7 @@ describe("guide, from the drop folders", () => {
     dropIn(t, "Mac Studio", "Second.mov");
     statusOf(t, { import: "a1", video: "Second.mov", step: "Writing the transcript", label: "Video of 20 Oct, 14:58 (Mac Studio)", pid: 4242 });
     mkdirSync(progressFolder(t.home), { recursive: true });
-    writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: 0 }));
+    writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: t.now() }));
     dropIn(t, "Mac Studio", "Third.mov");
     statusOf(t, { import: "a2", video: "Third.mov", label: "Video of 20 Oct, 14:00 (Mac Studio)", at: "2026-10-20T14:00:00-05:00", failed: "the sound could not be read" });
     dropIn(t, "Mac Studio", "GMT20261020-140000_Recording.mp4");
@@ -240,7 +254,7 @@ describe("guide, from the drop folders", () => {
     statusOf(t, { import: "c1", machine: "Sallie's laptop", video: "Other.mov", bytes: 11, step: "Writing the transcript", label: "Video of 20 Oct, 14:50 (Sallie's laptop)", pid: 4343 });
     // A run in this Mac's panel under the same label, alive: its time is this Mac's, never the other Mac's video's.
     mkdirSync(progressFolder(t.home), { recursive: true });
-    writeFileSync(join(progressFolder(t.home), "4343.json"), JSON.stringify({ version: 1, pid: 4343, video: "Video of 20 Oct, 14:50 (Sallie's laptop)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: 0 }));
+    writeFileSync(join(progressFolder(t.home), "4343.json"), JSON.stringify({ version: 1, pid: 4343, video: "Video of 20 Oct, 14:50 (Sallie's laptop)", step: "Writing the transcript", n: 2, of: 4, percent: 40, left: 180, total: 360, detail: "", started: 0, updated: t.now() }));
     dropIn(t, "Sallie's laptop", "Another.mov", "other video");
     statusOf(t, { import: "c2", machine: "Sallie's laptop", video: "Another.mov", bytes: 11, label: "Video of 20 Oct, 14:40 (Sallie's laptop)", at: "2026-10-20T14:40:00-05:00", failed: "the sound could not be read" });
     const r = await on(light(t, { alive: (pid) => pid === 4343 }), "guide");
@@ -258,12 +272,34 @@ describe("guide, from the drop folders", () => {
     dropIn(t, "Mac Studio", "Client Jane.mov");
     statusOf(t, { import: "d1", video: "Client Jane.mov", step: "Filing", label: "Video of 20 Oct, 14:58 (Mac Studio)", pid: 4242 });
     mkdirSync(progressFolder(t.home), { recursive: true });
-    const run = (over) => writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Filing", n: 4, of: 4, percent: 50, left: 120, total: null, detail: "", started: 0, updated: 0, ...over }));
+    const run = (over) => writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Filing", n: 4, of: 4, percent: 50, left: 120, total: null, detail: "", started: 0, updated: t.now(), ...over }));
     const deps = light(t, { alive: (pid) => pid === 4242 });
     run({});
     assert.equal((await on(deps, "guide")).said[2], `  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at filing, about 2 minutes left of this step. Ready about ${clockAt(t.now() + 120000)}. Wait for the "Ready" notice.`);
     run({ n: 2 });
     assert.equal((await on(deps, "guide")).said[2], '  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at filing, about 2 minutes left of this step. Wait for the "Ready" notice.');
+    t.done();
+  });
+  it("takes an import's times as of when the panel last wrote its run, says none that has run out, and rounds when it is ready to the nearest minute", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    statusOf(t, { import: "d2", video: "Client Jane.mov", step: "Writing the transcript", label: "Video of 20 Oct, 14:58 (Mac Studio)", pid: 4242 });
+    mkdirSync(progressFolder(t.home), { recursive: true });
+    // The panel writes a run when a step starts and as its percent moves, and the transcript's step gives no percent.
+    const run = (over) => writeFileSync(join(progressFolder(t.home), "4242.json"), JSON.stringify({ version: 1, pid: 4242, video: "Video of 20 Oct, 14:58 (Mac Studio)", step: "Writing the transcript", n: 2, of: 4, percent: null, left: null, total: 360, detail: "", started: 0, updated: t.now(), ...over }));
+    const AT = "  Video of 20 Oct, 14:58 (Mac Studio): It is being imported, at writing the transcript";
+    const WAIT = 'Wait for the "Ready" notice.';
+    const deps = light(t, { alive: (pid) => pid === 4242 });
+    // Written 3 minutes ago with 6 minutes left in all: 3 minutes are left now.
+    run({ updated: t.now() - 180000 });
+    assert.equal((await on(deps, "guide")).said[2], `${AT}, about 3 minutes left in all. Ready about ${clockAt(t.now() + 180000)}. ${WAIT}`);
+    // Written longer ago than the times it gave: none is said.
+    run({ updated: t.now() - 400000, left: 180 });
+    assert.equal((await on(deps, "guide")).said[2], `${AT}. ${WAIT}`);
+    // At 15:00:10, 5 and a half minutes left: about 6 minutes, and ready about 15:06, never 15:05.
+    run({ updated: t.now() + 10000, total: 330 });
+    const later = light(t, { alive: (pid) => pid === 4242, now: () => t.now() + 10000 });
+    assert.equal((await on(later, "guide")).said[2], `${AT}, about 6 minutes left in all. Ready about ${clockAt(t.now() + 6 * 60000)}. ${WAIT}`);
     t.done();
   });
   // Not in the plan's tests: the other ways an import does not finish, and the size a running import or a hold is taken at.
@@ -431,6 +467,34 @@ describe("guide tell", () => {
     assert.doesNotMatch(r.said.join("\n"), /Jane|Client|\.mov/);
     t.done();
   });
+  it("follows a video still coming in that grows and is filed before the next look, and says in one line that it is ready", async () => {
+    const t = setup();
+    const dir = join(t.root, "Drop", "Mac Studio");
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    noteSeen(t.home, dir, t.now());
+    const filed = onWait(t, 1, () => {
+      writeFileSync(join(dir, "Client Jane.mov"), "the video");
+      episodeAs(t, { ...VIDEOS.waiting, record: { ...VIDEOS.waiting.record, ...imported("15:00"), video: { file: "Client Jane.mov", bytes: 9, seconds: 5, recorded: "2026-10-20", recordedFrom: "import" } } });
+    });
+    const r = await on(light(t, { wait: filed }), "guide", "A video of 5 bytes", "tell");
+    assert.deepEqual(r, { code: 0, said: ['Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa): It is ready. It is waiting for your answer. Say "what\'s waiting?" to see its card.'] });
+    assert.deepEqual(t.waits, [15000]);
+    t.done();
+  });
+  it("says in one line that the import of a video Claude is reading did not finish, once its late check finds a problem", async () => {
+    const t = setup();
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    const status = { import: "e3", video: "Client Jane.mov", label: "Video of 20 Oct, 14:50 (Mac Studio)", step: "Waiting for its late check" };
+    statusOf(t, status);
+    // A finished video: its reading is not held for the late check.
+    episodeAs(t, { ...VIDEOS.read, record: { ...VIDEOS.read.record, reading: null, video: { file: "Client Jane.mov", bytes: 5, seconds: 120, recorded: "2026-10-20", recordedFrom: "import" } } });
+    const problem = onWait(t, 2, () => statusOf(t, { ...status, problem: "a copy did not match" }));
+    const r = await on(light(t, { wait: problem }), "guide", "Pricing talk", "tell");
+    assert.deepEqual(r, { code: 0, said: ['Video of 20 Oct, 14:50 (Mac Studio): Its import did not finish. Say "try it again".'] });
+    assert.deepEqual(t.waits, [15000, 15000]);
+    assert.doesNotMatch(r.said.join("\n"), /Jane|Client|\.mov|did not match/);
+    t.done();
+  });
   it("says in one line that Claude has read a video, once its reading is in", async () => {
     const t = setup();
     const found = episodeAs(t, { ...VIDEOS.read, record: { ...VIDEOS.read.record, reading: null } });
@@ -470,7 +534,7 @@ describe("guide tell", () => {
   it("gives up after 60 minutes with its next step, and says when the video is no longer under way", async () => {
     const t = setup();
     dropIn(t, "Mac Studio", "Client Jane.mov");
-    assert.deepEqual(await on(light(t), "guide", "A video of 5 bytes", "tell"), { code: 0, said: ['A video of 5 bytes: Nothing has changed in 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.'] });
+    assert.deepEqual(await on(light(t), "guide", "A video of 5 bytes", "tell"), { code: 0, said: ['A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.'] });
     assert.deepEqual(t.waits, Array(240).fill(15000));
     const gone = onWait(t, 2, () => rmSync(join(t.root, "Drop", "Mac Studio", "Client Jane.mov")));
     assert.deepEqual(await on(light(t, { wait: gone }), "guide", "A video of 5 bytes", "tell"), { code: 0, said: ['A video of 5 bytes is not under way any more. Say "what\'s next?" to see the ones that are.'] });
