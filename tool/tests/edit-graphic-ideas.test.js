@@ -196,3 +196,15 @@ describe("her skill, on ideas for graphics", () => {
     assert.ok(skill.includes("To keep a cut found there, pass its words. To put up an idea for a graphic, pass its number (`--idea`)."));
   });
 });
+
+// --- Task 5 ---
+
+describe("the README on ideas for graphics", () => {
+  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+  it("gives graphic its --idea, says how ideas are numbered and timed, and that a raw video's notes leave them out", () => {
+    const row = readme.split("\n").find((line) => line.startsWith('| `graphic "<episode>" add')) || "";
+    assert.ok(row.includes('(--at <time> \\| --at-words "<words>" \\| --idea <n>)'), row);
+    for (const words of ["numbered in the order their words are said", "A finished video and an iPhone clip have none.", "so it asks no guard", "printed by `show` and `open` without their ideas for graphics"]) assert.ok(row.includes(words), words);
+    assert.doesNotMatch(readme, /nothing reads them back yet/);
+  });
+});
