@@ -243,9 +243,10 @@ const PATH_MAX = 1024;
 
 /** One string of a tool's input as a path, resolved, or null when it is not one: absolute, starting with `~` (`~/` from the home
     folder, `~name` from the folder that holds the home folders), holding `..`, or naming something there from `cwd`; and, so
-    that a long text (a file's contents) is not walked folder by folder, shorter than any path macOS takes. */
+    that a long text (a file's contents) is not walked folder by folder, shorter than any path macOS takes. White space around it
+    is taken off first, as Claude Code's own tools take it off (expandPath). */
 function pathOf(text, cwd, home) {
-  const path = resolvedOf(text, cwd, home);
+  const path = resolvedOf(text.trim(), cwd, home);
   return path !== null && Buffer.byteLength(path) < PATH_MAX ? path : null;
 }
 

@@ -94,7 +94,7 @@ function teachingsWhole(t) {
 
 /** The tools the open guard decides by a rule of its own (open-lock.js), which no `tool` entry speaks for: Bash, Claude's file
     tools, skills, the subagent tool, SendUserFile, the web tools (held until --web open), and those it leaves to Claude Code. */
-export const TOOLS_WITH_RULES = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SendUserFile", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"];
+export const TOOLS_WITH_RULES = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SubagentHandback", "SendUserFile", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"];
 
 /** Whether `entry` is one her folder may allow besides the default (design 2026-10-26, section 2, "The allowlist is data"):
     typed, and exact. A skill by its name; a claude.ai connector's tool by its exact name, never a local extension's, never a

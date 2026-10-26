@@ -252,6 +252,9 @@ describe("paths by what they are", () => {
     assert.deepEqual(pathsIn({ file_path: "~/x", nested: { list: ["../y", "plain words", "/abs", "notes.txt"] }, url: "https://a.b/c", n: 3 }, w.cwd, w.home).sort(), [join(w.home, "x"), resolve(w.cwd, "../y"), "/abs", join(w.cwd, "notes.txt")].sort());
     assert.deepEqual(pathsIn({ a: "~", b: ["", null, true, { c: [[`${w.root}/Episodes`]] }] }, w.cwd, w.home).sort(), [w.home, join(w.root, "Episodes")].sort());
     assert.deepEqual(pathsIn("plain words", w.cwd, w.home), []);
+    // White space around a path is taken off, as Claude Code's own tools take it off.
+    assert.deepEqual(pathsIn({ a: ` ${w.episode}`, b: `\n${w.episode}`, c: `${w.episode} `, d: `\t~/x\n` }, w.cwd, w.home).sort(), [w.episode, join(w.home, "x")].sort());
+    assert.deepEqual(pathsIn({ a: "   ", b: "\n" }, w.cwd, w.home), []);
   });
   it("says a search folder holds a gated place when one is inside it", () => {
     // Zoom's folder, <home>/Documents/Zoom, is gated, so Documents holds one; Pictures holds none.

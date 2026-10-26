@@ -49,6 +49,9 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
     for (const name of ["AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"]) assert.deepEqual(await decide(name, {}), { decision: "pass", reason: "" }, name);
     assert.equal((await decide("Task", { prompt: "x" })).decision, "allow");
   });
+  it("lets a subagent hand its report back", async () => {
+    assert.equal((await decide("SubagentHandback", { report: "done" })).decision, "allow");
+  });
   it("refuses Monitor and a tool it does not know", async () => {
     assert.deepEqual(await decide("Monitor", { command: "tail -f x" }), { decision: "deny", reason: NEVER_REFUSED });
     for (const name of ["SomeToolAddedLater", "CronCreate", "Workflow", "NotebookRead", undefined]) assert.equal((await decide(name, {})).decision, "deny", String(name));
@@ -168,6 +171,16 @@ describe("the open guard, II: paths and writes", () => {
     assert.deepEqual(await read(p.notes, { cwd: join(w.root, "Episodes") }), { decision: "allow", reason: "outside the gated places" });
     assert.deepEqual(await read("x/t.txt", { cwd: join(w.root, "Episodes") }), GATED);
   });
+  it("finds a path with white space around it, as Claude Code's tools take it, and writes none so spelled", async () => {
+    for (const path of [` ${p.otherWords}`, `\t${p.transcript}`, `\n${p.episode}`, `${p.otherWords} `]) {
+      assert.deepEqual(await send(path), GATED, JSON.stringify(path));
+      assert.deepEqual(await read(path), GATED, JSON.stringify(path));
+    }
+    for (const path of [" ~/.zshrc", ` ${join(w.workshop, "a.txt")}`, `${join(w.workshop, "a.txt")} `, `${join(w.workshop, "a.txt")}\n`]) {
+      assert.deepEqual(await decide("Write", { file_path: path, content: "x" }, { cwd: w.workshop }), NO_WRITE, JSON.stringify(path));
+      assert.deepEqual(await decide("Edit", { file_path: path, old_string: "a", new_string: "b" }, { cwd: w.workshop }), NO_WRITE, JSON.stringify(path));
+    }
+  });
   it("takes no path from what Write writes or what Edit changes", async () => {
     assert.equal((await decide("Write", { file_path: join(w.workshop, "ok.txt"), content: `${p.episode}\n~/.ssh/id_ed25519\n../Episodes` })).decision, "allow");
     assert.equal((await decide("Edit", { file_path: join(w.workshop, "ok.txt"), old_string: p.episode, new_string: "~/.ssh/config" })).decision, "allow");
@@ -263,7 +276,7 @@ describe("the open guard, III: Bash", () => {
     assert.deepEqual(await bash(`${EDIT} `), ALONE);
   });
   it("refuses any other command that names edit.js or the checkout's tool folder", async () => {
-    for (const command of [`cat "${CHECKOUT}/tool/studio.js"`, `ls "${CHECKOUT}/tool"`, "python3 edit.js", `cd "${CHECKOUT}" && node tool/EDIT.JS episodes`, `cat "/System/Volumes/Data${CHECKOUT}/tool/never.js"`]) assert.deepEqual(await bash(command), ALONE, command);
+    for (const command of [`cat "${CHECKOUT}/tool/studio.js"`, `ls "${CHECKOUT}/tool"`, "python3 edit.js", `cd "${CHECKOUT}" && node tool/EDIT.JS episodes`, `cat "/System/Volumes/Data${CHECKOUT}/tool/never.js"`, `${NODE} "${CHECKOUT.replace("BRIMM video", 'BRIMM vi""deo')}/tool/ed"'it.js' episodes`, `${NODE} ${CHECKOUT.replaceAll(" ", "\\ ")}/tool/edi\\t.js episodes`]) assert.deepEqual(await bash(command), ALONE, command);
   });
   it("refuses, as a courtesy, cat, grep -r, rg and find naming a gated place", async () => {
     for (const command of [`cat "${join(w.root, "Episodes", "x", "t.txt")}"`, "grep -r secret ~/.ssh", `rg talk '${join(w.root, "Drop")}'`, "find ~/.claude -name '*.jsonl'", `ls ${join(w.root, "Episodes").replaceAll(" ", "\\ ")}`]) {
@@ -353,6 +366,26 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.deepEqual(await guard(w, "Bash", { command: w.edit }), { decision: "deny", reason: HELD_NARROWED });
     w.done();
   });
+  it("keeps a held chat to the commands a session runs while the lock is loosened too, and a call it cannot judge", async () => {
+    const w = chat();
+    untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    writeFileSync(join(w.folder, ".claude", "settings.local.json"), "{}");
+    assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} name "Pricing talk" "key phrases"` }), { decision: "deny", reason: HELD_NARROWED });
+    assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` })).decision, "allow");
+    assert.deepEqual(await date(w), CHANGED);
+    rmSync(join(w.folder, ".claude", "settings.local.json"));
+    for (const call of [{ session_id: undefined }, { transcript_path: undefined }, { session_id: "../x" }]) {
+      assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} title "Pricing talk" --words "x"` }, { call }), { decision: "deny", reason: HELD_NARROWED }, JSON.stringify(call));
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` }, { call })).decision, "allow", JSON.stringify(call));
+    }
+    w.done();
+  });
+  it("lets a chat that holds no session's words run every edit.js command while the lock is loosened", async () => {
+    const w = chat();
+    writeFileSync(join(w.folder, ".claude", "settings.local.json"), "{}");
+    assert.equal((await guard(w, "Bash", { command: `${w.edit} name "Pricing talk" "x"` })).decision, "allow");
+    w.done();
+  });
   it("keeps the open lock for a chat that ran cd Pictures", async () => {
     const w = chat();
     const pictures = join(w.folder, "Pictures");
@@ -402,7 +435,15 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
   });
   it("takes the home folder from her folder, never from HOME", async () => {
     const w = chat();
-    assert.equal((await date(w, { more: { env: { HOME: join(w.dir, "elsewhere") } } })).decision, "allow");
+    const was = process.env.HOME;
+    process.env.HOME = join(w.dir, "elsewhere");
+    try {
+      assert.equal((await date(w, { more: { env: { HOME: join(w.dir, "elsewhere") } } })).decision, "allow");
+      assert.deepEqual(await guard(w, "Read", { file_path: "~/.ssh/id_ed25519" }), { decision: "deny", reason: GATED_REFUSED });
+      assert.equal((await guard(w, "Write", { file_path: "~/BRIMM Video Workshop/a.txt", content: "x" })).decision, "allow");
+    } finally {
+      process.env.HOME = was;
+    }
     const bare = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-bare-")));
     const folder = join(bare, "BRIMM Video Studio");
     assert.deepEqual(await guardAnswer({ session_id: SESSION, transcript_path: w.transcript, cwd: folder, tool_name: "Bash", tool_input: { command: "date" } }, { checkout: w.checkout, node: w.node, folder, deps: openDeps(w, { env: { HOME: w.home } }) }), { decision: "deny", reason: REFUSED });

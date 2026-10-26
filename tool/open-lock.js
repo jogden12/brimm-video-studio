@@ -8,7 +8,8 @@
 //   6. a skill this Mac's allowlist names: allow;
 //   then a tool an exact `tool` entry names (PushNotification, the drawing tools), unless it is one with a rule of its own;
 //   7. an MCP tool: allow only a claude.ai connector's tool an `mcp-tool` entry names exactly, that the never list does not catch;
-//   8. the subagent tool (its limits are the never list's), SendUserFile, and the web tools: held until this Mac opens them, and
+//   8. the subagent tool (its limits are the never list's) and a subagent's hand-back, SendUserFile, and the web tools: held until
+//      this Mac opens them, and
 //      WebFetch never to a numeric, local or privately answering address (fetchable.js);
 //   9. the card, the task list and ToolSearch: no answer, left to Claude Code (the card must stay so);
 //  10. anything else: deny.
@@ -16,7 +17,7 @@
 // that holds a session's words (held.js) may also Read its own words file, answered allow, never pass: a pass would leave it to
 // Claude Code, whose card for a file outside her folder offers to add the folder or always allow, either of which loosens the lock;
 // and it runs only the edit.js commands a session runs (R29), so that it cannot write a session's words into a record another chat
-// reads.
+// reads: in a loosened lock too, since such a record outlives the loosening, and in a call the guard cannot judge.
 //
 // guardAnswer is what the hook runs: the home folder is the one above her folder (R25); the lock in effect is this Mac's
 // (effectiveLock), strict, or settings that cannot be read, being today's guard alone; on an open-lock Mac it makes the shared lock
@@ -110,11 +111,12 @@ function ownIdentity(path) {
   }
 }
 
-/** Whether Write or Edit may write `filePath`: a path inside the workshop, found by the identity of the workshop folder itself, with
+/** Whether Write or Edit may write `filePath`: spelled with no white space around it (which Claude Code would take off, so that the
+    path written is not the path looked at), a path inside the workshop, found by the identity of the workshop folder itself, with
     no part below it a link (the last part included, dangling or not), no `.claude` part, and a name that is not CLAUDE.md,
     CLAUDE.local.md or .mcp.json, in any letter case; one that is there must have its real path inside the workshop. */
 function writable(filePath, cwd, home) {
-  if (typeof filePath !== "string" || filePath === "") return false;
+  if (typeof filePath !== "string" || filePath === "" || filePath !== filePath.trim()) return false;
   try {
     const path = filePath === "~" || filePath.startsWith("~/") ? resolve(home, filePath.slice(2)) : resolve(cwd, filePath);
     const workshop = ownIdentity(workshopFolder(home));
@@ -182,8 +184,10 @@ function bashDecision(command, background, cwd, ctx) {
     if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("brimm-video's own command");
     return deny(RUN_ALONE);
   }
-  const folded = fold(command);
-  if (folded.includes("edit.js") || folded.includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
+  // The command as written, and its words with quotes and backslashes taken off, as the shell would run them.
+  for (const text of [command, wordsOf(command).join(" ")]) {
+    if (fold(text).includes("edit.js") || fold(text).includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
+  }
   if (pathsIn(wordsOf(command), cwd, ctx.home).some((path) => ctx.index.at(path))) return deny(GATED_REFUSED);
   return allow("a command in the sandbox");
 }
@@ -212,13 +216,18 @@ function firstWord(command, ctx) {
   return word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word;
 }
 
+/** `answer`, today's guard's, narrowed for a chat that holds a session's words: edit.js only for the commands a session runs. */
+function narrowed(answer, input, ctx) {
+  const command = isObject(input) && isObject(input.tool_input) ? input.tool_input.command : undefined;
+  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(command, ctx))) return deny(HELD_NARROWED);
+  return answer;
+}
+
 /** Step 2: what a chat that holds a session's words may do. Today's guard, with a Read of its own words file allowed, edit.js only
     for the commands a session runs, and every refusal saying the chat is held. */
 function heldDecision(input, ctx) {
   if (ownWords(input, ctx)) return allow("its own words");
-  const answer = todays(input, ctx, HELD_REFUSED);
-  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(input.tool_input.command, ctx))) return deny(HELD_NARROWED);
-  return answer;
+  return narrowed(todays(input, ctx, HELD_REFUSED), input, ctx);
 }
 
 /** The tool's input as step 4 looks for paths in it: all of it, but what Write writes and what Edit changes. */
@@ -233,14 +242,14 @@ const PASS = { decision: "pass", reason: "" };
 
 /** What the open guard answers to a tool call, `input` as the PreToolUse hook is given it, in the context `ctx` (GuardCtx):
     { checkout, node, folder, home, uid, tmp, index, allow, web, resolve, loosened, held }, `allow` being the allowlist (the
-    default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its addresses. Gives
-    { decision: "allow"|"deny"|"pass", reason }. */
+    default's and this Mac's entries), `web` "held" or "open", and `resolve` the look-up of a name, giving its addresses. A loosened
+    lock is today's guard, narrowed as for a held chat when `held` is true too. Gives { decision: "allow"|"deny"|"pass", reason }. */
 export async function openDecision(input, ctx) {
   const name = isObject(input) ? input.tool_name : undefined;
   const given = isObject(input) && isObject(input.tool_input) ? input.tool_input : {};
   const named = (type, what) => Array.isArray(ctx.allow) && ctx.allow.some((entry) => isObject(entry) && entry.type === type && entry.name === what);
 
-  if (ctx.loosened) return todays(input, ctx, LOCK_CHANGED);
+  if (ctx.loosened) return ctx.held ? narrowed(todays(input, ctx, LOCK_CHANGED), input, ctx) : todays(input, ctx, LOCK_CHANGED);
   if (ctx.held) return heldDecision(input, ctx);
 
   if (neverCaught(name, given)) return deny(NEVER_REFUSED);
@@ -259,6 +268,7 @@ export async function openDecision(input, ctx) {
   if (!OWN_RULES.has(name) && named("tool", name)) return allow("a tool this folder allows");
   if (name.startsWith("mcp__")) return isConnector(name) && named("mcp-tool", name) ? allow("a connector's tool this Mac allows") : deny(NOT_NAMED);
   if (name === "Agent" || name === "Task") return allow("a subagent of Claude Code's own");
+  if (name === "SubagentHandback") return allow("a subagent's report, handed back");
   if (name === "SendUserFile") return allow("a file shown to her");
   if (name === "WebSearch" || name === "WebFetch") {
     if (ctx.web !== "open") return deny(WEB_HELD);
@@ -435,7 +445,8 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   };
   const whole = isObject(input) && typeof input.cwd === "string" && isAbsolute(input.cwd) && typeof input.session_id === "string" && SESSION_ID.test(input.session_id)
     && typeof input.transcript_path === "string" && isAbsolute(input.transcript_path) && isObject(input.tool_input);
-  if (!whole) return openDecision(input, { ...ctx, loosened: true });
+  // A call it cannot judge is loosened, and kept to a session's commands, since whether its chat holds a session's words is not known.
+  if (!whole) return openDecision(input, { ...ctx, loosened: true, held: true });
   const text = (deps.ps || readProcesses)();
   const table = typeof text === "string" ? processTable(text) : null;
   const above = table ? claudeAbove(chainUp(table, deps.pid !== undefined ? deps.pid : process.pid)) : null;
@@ -446,7 +457,6 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const check = { ...deps, settings, env, ps: () => text, cwd: hers ? folder : input.cwd, transcript: hers ? input.transcript_path : null };
   const now = deps.now ? Number(deps.now()) : Date.now();
   const lines = lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now });
-  if (lines.length) return openDecision(input, { ...ctx, loosened: true });
   const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : null });
-  return openDecision(input, { ...ctx, held });
+  return openDecision(input, { ...ctx, loosened: lines.length > 0, held });
 }
