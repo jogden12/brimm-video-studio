@@ -198,7 +198,7 @@ describe("behind, with the open lock", () => {
     const LINE = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
     const w = openWorld();
     const user = join(w.home, ".claude", "settings.json");
-    const addRules = async () => assert.equal(await settingsMain(["user-deny"], { home: w.home, say: () => {}, tmp: w.tmp, uid: w.uid }), 0);
+    const addRules = async () => assert.equal(await settingsMain(["user-deny"], { home: w.home, say: () => {}, openMinimum: MINIMUM, tmp: w.tmp, uid: w.uid }), 0);
     // None added on this Mac: her user settings are not looked at for them, though they hold none.
     put(w, "user", { model: SECRET });
     assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);

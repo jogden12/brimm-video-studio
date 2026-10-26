@@ -25,7 +25,7 @@
 //   node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]
 //                           [--allow skill|mcp-tool|tool <name>]… [--print]
 //   node settings.js user-deny
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -325,7 +325,8 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                them from Claude) to her user settings, ~/.claude/settings.json, once each, keeping all else
                                there, so that every Claude Code session on this Mac takes them: they hold Claude's file
                                tools, not a script. It notes that it did in this Mac's settings, and the lock check then
-                               looks for them. User settings that are not a JSON object are refused, and nothing is added`;
+                               looks for them. User settings that are not a JSON object are refused, and nothing is added.
+                               Only under the open lock: on a Mac whose lock in effect is strict it changes nothing`;
 
 /** The options `write` and `plan` are told the settings every Mac has by, and the setting each one names. They are told the
     settings of the switch as `set` is, by SETTABLE's options. */
@@ -812,10 +813,12 @@ const USER_UNREAD = "Her user settings could not be read as JSON, so nothing was
     brimm-video reads on this Mac (studio.js gatedReadRules, for its settings' facts; `tmp` and `uid` a test's own), each once, after
     the deny rules there, keeping every other key and rule. A file that is not there is made with them alone; one that is there but
     is not a JSON object, or whose `permissions` is not an object or whose `permissions.deny` is not a list of rules, is refused
-    (USER_UNREAD) and nothing is changed. First this Mac's settings note `userDeny: true`, so that the lock check looks for the rules
+    (USER_UNREAD) and nothing is changed. Only on a Mac whose lock in effect is open (effectiveLock, with `openMinimum`, the version
+    the open lock was checked on): on a strict one it says so and changes nothing, and does not note `userDeny`. The file keeps the
+    mode it had, and one that is made is 0600. First this Mac's settings note `userDeny: true`, so that the lock check looks for the rules
     from then on (loosened.js), then the file is written under another name beside it, then renamed: through a link to it, the file
     it leads to, the link left as it is. Gives the number it ends with. */
-function userDeny(home, rest, say, { tmp, uid }) {
+function userDeny(home, rest, say, { tmp, uid, openMinimum }) {
   if (rest.length) {
     say(HELP);
     return 2;
@@ -824,6 +827,12 @@ function userDeny(home, rest, say, { tmp, uid }) {
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
+  }
+  // The deny rules are those of the places the open lock keeps from Claude: on a Mac whose lock in effect is strict, nothing is
+  // written, and no note that they were added.
+  if (effectiveLock(got.settings, openMinimum) !== "open") {
+    say("Not changed: her user settings get these deny rules only under the open lock, which waits for the checks by hand.");
+    return 1;
   }
   const file = join(home, ".claude", "settings.json");
   let held = {};
@@ -856,9 +865,17 @@ function userDeny(home, rest, say, { tmp, uid }) {
   } catch (e) {
     mkdirSync(dirname(file), { recursive: true });
   }
+  // The file keeps the mode it had; one that is made is 0600, as only she reads it.
+  let mode = 0o600;
+  try {
+    mode = statSync(target).mode & 0o777;
+  } catch (e) {
+    // Not there: made with 0600.
+  }
   const writing = `${target}.brimm-writing`;
   try {
-    writeFileSync(writing, JSON.stringify(written, null, 2) + "\n");
+    writeFileSync(writing, JSON.stringify(written, null, 2) + "\n", { mode: 0o600 });
+    chmodSync(writing, mode);
     renameSync(writing, target);
   } catch (e) {
     rmSync(writing, { force: true });
@@ -921,7 +938,7 @@ export function settingsMain(argv, { home = process.env.HOME || homedir(), say =
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone);
   if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
-  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid });
+  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum });
   say(HELP);
   return 2;
 }
