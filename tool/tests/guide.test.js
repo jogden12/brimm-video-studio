@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
+import { readyIn, roughIn, READING_STEPS } from "../guide.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -107,10 +108,10 @@ describe("the BRIMM Ops page's steps", () => {
   });
 });
 
-const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null };
+const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null };
 const NONE = { version: 1, handoffs: {}, finished: {} };
 const NOW = Date.parse("2026-10-25T12:00:00-05:00");
-const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, ...over } });
+const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, readyAt: "", ...over } });
 const SESSION = (over) => ({ kind: "session", session: { choice: "asked", teachingsOn: true, undecided: 0, emptyOwed: false, ...over } });
 const RAW = (over) => ({ kind: "raw", ...over });
 const shown = (n) => (n.done ? { done: true } : { stage: n.stage, text: n.text });
@@ -122,6 +123,8 @@ const STAGE_ROWS = [
   [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360 }), "importing", 'It is being imported, at writing the transcript, about 6 minutes left in all. Wait for the "Ready" notice.'],
   [DROP({ state: "importing", step: "Writing the transcript", left: 180 }), "importing", 'It is being imported, at writing the transcript, about 3 minutes left of this step. Wait for the "Ready" notice.'],
   [{ ...DROP({ here: false, state: "importing", step: "Writing the transcript" }), mac: "Mac Studio" }, "importing", 'It is being imported on the Mac Studio, at writing the transcript. Wait for the "Ready" notice on that Mac.'],
+  [DROP({ state: "importing", step: "Writing the transcript", left: 180, total: 360, readyAt: "15:06" }), "importing", 'It is being imported, at writing the transcript, about 6 minutes left in all. Ready about 15:06. Wait for the "Ready" notice.'],
+  [DROP({ state: "importing", step: "Filing", left: 120, readyAt: "15:02" }), "importing", 'It is being imported, at filing, about 2 minutes left of this step. Ready about 15:02. Wait for the "Ready" notice.'],
   [DROP({ state: "retry" }), "retry", 'Its import did not finish. Say "try it again".'],
   [{ ...DROP({ here: false, state: "retry" }), mac: "Sallie's laptop" }, "retry", "Its import did not finish on Sallie's laptop. Say \"try it again\" on that Mac."],
   [DROP({ state: "zoom" }), "zoom", "It is a Zoom download, and those go in Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer. Move it there in Finder."],
@@ -136,7 +139,8 @@ const STAGE_ROWS = [
   [{ readingsOff: true, reading: "none" }, "readings-off", "Readings are off on this Mac: ask Jason."],
   [{ reading: "running" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [{ reading: "none" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
-  [RAW({ reading: "later", readsAt: "10:58" }), "reading-later", "Claude reads it at 10:58, once the import has checked its copies. A notice comes when it is done."],
+  [RAW({ reading: "later", readsAt: "10:58" }), "reading-later", "Claude starts reading it about 10:58, once the import has checked its copies. A notice comes when it is done."],
+  [RAW({ reading: "later", readsAt: "10:58", roughAt: "11:15" }), "reading-later", "Claude starts reading it about 10:58, once the import has checked its copies. Its rough cut is ready about 11:15. A notice comes when it is done."],
   [{ reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
   [{ offersAnswered: false }, "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
   [{ v2: false }, "waits-v2", V1],
@@ -264,6 +268,21 @@ describe("the guide's lists", () => {
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: true })), ["A (aaaaaa) is done: nothing is left to do for it."]);
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." })), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit"]);
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: C.", step: "cascade", after: "" })), ["A (aaaaaa): On the BRIMM Ops page: C.", "Then: that is the last step.", "Step: cascade"]);
+  });
+});
+
+describe("the times the guide gives", () => {
+  it("are from the panel's run and this Mac's speeds, and none while one is not known", () => {
+    assert.deepEqual(READING_STEPS, ["Asking Claude", "Making the rough cut"]);
+    assert.equal(readyIn({ left: 180, total: 360, n: 2, of: 4 }), 360);
+    assert.equal(readyIn({ left: 120, total: null, n: 4, of: 4 }), 120);
+    assert.equal(readyIn({ left: 120, total: null, n: 2, of: 4 }), null);
+    assert.equal(readyIn({ left: null, total: null, n: 4, of: 4 }), null);
+    assert.equal(readyIn({ left: 30, total: null, n: null, of: null }), null);
+    assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, 2400), 1032);
+    assert.equal(roughIn({ "Asking Claude": 0.31 }, 2400), null);
+    assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, undefined), null);
+    assert.equal(roughIn({}, 2400), null);
   });
 });
 

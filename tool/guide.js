@@ -130,13 +130,15 @@ export function opsText(handoff, step, again) {
     - `name`, as the lists name it; `id`, its record's id ("" for a file in a drop folder); `aliases`, the other words that find
       it (its label, its id, its short id); `at`, when it came (ms); and `mac`, the other Mac's name, where it is held or open
       there ("" otherwise).
-    - `drop`, for a file in a drop folder, and null for anything else: { here, state, step, left, total }. `here` is true for this
-      Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish) or "zoom" (a Zoom download held
-      there). `step` is the panel's step, and `left` and `total` the seconds left of it and in all, null when not known.
+    - `drop`, for a file in a drop folder, and null for anything else: { here, state, step, left, total, readyAt }. `here` is true
+      for this Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish) or "zoom" (a Zoom
+      download held there). `step` is the panel's step, and `left` and `total` the seconds left of it and in all, null when not
+      known. `readyAt` is the time it should be Ready, as this Mac's clock says it ("15:06"), "" when not known.
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
       `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
-    - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none".
+    - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
+      is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2.
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning`; and
       `shownSinceFinish`, when it was shown in Final Cut again since its finish.
@@ -166,6 +168,24 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
+/** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. */
+export const READING_STEPS = ["Asking Claude", "Making the rough cut"];
+
+/** Seconds until an import on this Mac is Ready, from its run in the panel (progress.js): the time left in all, or on its last
+    step, where the panel gives none, the time left of that step. Null when it is not known. */
+export function readyIn({ left, total, n, of }) {
+  if (Number.isFinite(total)) return total;
+  return Number.isFinite(left) && Number.isInteger(n) && n > 0 && n === of ? left : null;
+}
+
+/** Seconds from the start of Claude's reading of a raw video `seconds` long to its rough cut, by the speeds this Mac measured
+    (`rates`, progress.js readRates), rounded. Null while either speed, or the video's length, is not known. */
+export function roughIn(rates, seconds) {
+  const speeds = READING_STEPS.map((step) => rates[step]);
+  if (!(seconds > 0) || !speeds.every((s) => Number.isFinite(s) && s > 0)) return null;
+  return Math.round(speeds.reduce((sum, s) => sum + s * seconds, 0));
+}
+
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
 
@@ -180,7 +200,8 @@ function dropNext(drop, mac) {
   if (drop.state === "arriving") return toDo("arriving", `${drop.here ? "It is coming into your drop folder." : `It is in the drop folder of ${spokenMac(mac)}.`} ${ready}`);
   if (drop.state === "importing") {
     const left = drop.total != null ? `${aboutLeft(drop.total)} left in all` : drop.left != null ? `${aboutLeft(drop.left)} left of this step` : "";
-    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${midSentence(drop.step)}` : ""}${left ? `, ${left}` : ""}. ${ready}`);
+    const readyAt = drop.readyAt ? ` Ready about ${drop.readyAt}.` : "";
+    return toDo("importing", `It is being imported${on}${drop.step ? `, at ${midSentence(drop.step)}` : ""}${left ? `, ${left}` : ""}.${readyAt} ${ready}`);
   }
   if (drop.state === "retry") return toDo("retry", `Its import did not finish${on}. Say "try it again"${there}.`);
   // A Zoom download. On the other Mac the place it goes is a sentence of its own, to keep each under 25 words.
@@ -238,7 +259,7 @@ function videoNext(facts, notes, now) {
   }
   if (facts.reading !== "done") {
     if (facts.readingsOff) return toDo("readings-off", "Readings are off on this Mac: ask Jason.");
-    if (facts.reading === "later") return toDo("reading-later", `Claude reads it at ${facts.readsAt}, once the import has checked its copies. A notice comes when it is done.`);
+    if (facts.reading === "later") return toDo("reading-later", `Claude starts reading it about ${facts.readsAt}, once the import has checked its copies.${facts.roughAt ? ` Its rough cut is ready about ${facts.roughAt}.` : ""} A notice comes when it is done.`);
     if (facts.reading === "failed") return toDo("reading-failed", READING_FAILED);
     return toDo("reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".');
   }
