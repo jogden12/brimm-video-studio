@@ -295,6 +295,27 @@ export function nextFor(facts, notes, now) {
   return facts.kind === "session" ? sessionNext(facts, notes, now) : videoNext(facts, notes, now);
 }
 
+/** The names of the videos in the drop folders, told apart. A video with no label yet (no `aliases`) is named by what it is and
+    its size, and two of one size would share that name: each of those is said with when it came (`clock(at)`, "14:58"), and two
+    that came in the same minute with a number too, in the order they came. A file's name is never part of it. */
+export function apart(videos, clock) {
+  const shared = (list) => {
+    const count = new Map();
+    for (const v of list) if (!v.aliases.length) count.set(v.name, (count.get(v.name) || 0) + 1);
+    return (v) => !v.aliases.length && count.get(v.name) > 1;
+  };
+  const once = shared(videos);
+  const timed = videos.map((v) => (once(v) ? { ...v, name: `${v.name} that came at ${clock(v.at)}` } : v));
+  const still = shared(timed);
+  const nth = new Map();
+  const counts = new Map();
+  for (const v of [...timed].filter(still).sort((a, b) => a.at - b.at)) {
+    counts.set(v.name, (counts.get(v.name) || 0) + 1);
+    nth.set(v, counts.get(v.name));
+  }
+  return timed.map((v) => (nth.has(v) ? { ...v, name: `${v.name} (${nth.get(v)})` } : v));
+}
+
 /** The videos in the order the guide says them: one waiting for her answer first, as only she can answer it; then the newest
     first, and by name when two came at the same moment. */
 export const ordered = (items) =>

@@ -11,7 +11,7 @@ import { localStamp } from "../episode.js";
 import { writeStatus } from "../importing.js";
 import { progressFolder, RATES } from "../progress.js";
 import { clockAt } from "../unedited.js";
-import { writePending } from "../filing.js";
+import { writePending, noteSeen } from "../filing.js";
 import { pendingFolder } from "../settings.js";
 import { lockOf } from "../detached.js";
 import { setup, episodeAs, otherMac } from "./episodes.js";
@@ -286,6 +286,22 @@ describe("guide, from the drop folders", () => {
       '  Video of 20 Oct, 12:00 (Mac Studio): Its import did not finish. Say "try it again".',
       '  Video of 20 Oct, 13:00 (Mac Studio): Its import did not finish. Say "try it again".'
     ]);
+    t.done();
+  });
+  it("tells apart two videos of one size with no label yet by when they came, and finds each by its name", async () => {
+    const t = setup();
+    const dir = join(t.root, "Drop", "Mac Studio");
+    dropIn(t, "Mac Studio", "Client Jane.mov");
+    noteSeen(t.home, dir, Date.parse("2026-10-20T14:50:00-05:00"));
+    dropIn(t, "Mac Studio", "Client John.mov");
+    noteSeen(t.home, dir, Date.parse("2026-10-20T14:55:00-05:00"));
+    const first = `A video of 5 bytes that came at ${clockAt(Date.parse("2026-10-20T14:50:00-05:00"))}`;
+    const second = `A video of 5 bytes that came at ${clockAt(Date.parse("2026-10-20T14:55:00-05:00"))}`;
+    const COMING_IN = 'It is coming into your drop folder. Wait for the "Ready" notice.';
+    const r = await on(light(t), "guide");
+    assert.deepEqual(r.said.slice(2), [`  ${second}: ${COMING_IN}`, `  ${first}: ${COMING_IN}`]);
+    assert.doesNotMatch(r.said.join("\n"), /Jane|John|Client|\.mov/);
+    assert.deepEqual(await on(light(t), "guide", first), { code: 0, said: [`${first}: ${COMING_IN}`] });
     t.done();
   });
 });

@@ -67,7 +67,7 @@ import { isMedia } from "./lib.js";
 import { studioFiles, studioFolder, lockBroken } from "./studio.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -5346,10 +5346,11 @@ function panelRuns(ctx) {
     not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
     it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
     imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
-    label, else by what it is and its size, never by its file's name, which may be a client's. It came when this Mac's import
-    first saw it (seen.json), as `episodes` says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's
-    own video alone: a run there under the label of the other Mac's video is this Mac's, and says nothing of that one. And when it
-    should be Ready, from the same run (guide.js readyIn), on this Mac's clock. */
+    label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
+    are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
+    says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's own video alone: a run there under the
+    label of the other Mac's video is this Mac's, and says nothing of that one. And when it should be Ready, from the same run
+    (guide.js readyIn), on this Mac's clock. */
 function guideDrops(ctx) {
   const now = ctx.now();
   const statuses = readStatuses(ctx.root, now);
@@ -5382,7 +5383,7 @@ function guideDrops(ctx) {
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null });
     }
   }
-  return videos;
+  return apart(videos, clockAt);
 }
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a

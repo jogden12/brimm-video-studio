@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
-import { readyIn, roughIn, READING_STEPS } from "../guide.js";
+import { readyIn, roughIn, READING_STEPS, apart } from "../guide.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -283,6 +283,16 @@ describe("the times the guide gives", () => {
     assert.equal(roughIn({ "Asking Claude": 0.31 }, 2400), null);
     assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, undefined), null);
     assert.equal(roughIn({}, 2400), null);
+  });
+});
+
+describe("the names of videos with no label yet", () => {
+  it("tell apart two of one size by when they came, and by a number when that is the same minute; never by a file's name", () => {
+    const v = (name, at, aliases = []) => ({ name, at, aliases });
+    assert.deepEqual(apart([v("A video of 5 bytes", 1), v("A video of 5 bytes", 2), v("A video of 9 bytes", 3), v("Video of 20 Oct, 14:58 (Mac Studio)", 4, ["Video of 20 Oct, 14:58 (Mac Studio)"])], (ms) => `t${ms}`).map((x) => x.name),
+      ["A video of 5 bytes that came at t1", "A video of 5 bytes that came at t2", "A video of 9 bytes", "Video of 20 Oct, 14:58 (Mac Studio)"]);
+    assert.deepEqual(apart([v("A video of 5 bytes", 2), v("A video of 5 bytes", 1), v("A video of 5 bytes", 1)], () => "14:58").map((x) => x.name),
+      ["A video of 5 bytes that came at 14:58 (3)", "A video of 5 bytes that came at 14:58 (1)", "A video of 5 bytes that came at 14:58 (2)"]);
   });
 });
 
