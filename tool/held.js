@@ -195,7 +195,36 @@ function keepUuids(home, sessionId, transcriptPath, compactions = 0) {
   }
 }
 
-/** Whether the chat `sessionId`, whose transcript is `transcriptPath` and whose claude process is `claude` ({ pid, start }, or null),
+/** Where the guard notes that her folder kept the open lock's shape while the lock in effect was strict (studio.js guardDecision
+    then answers, and edit.js prints a session's words into command output, which chats with the open lock may read). */
+const strictSeenFile = (home) => join(heldFolder(home), "strict-seen.json");
+
+/** Note, once, that her folder kept the open shape under the strict lock, at `now`. One that cannot be written is left: the next
+    call tries again. */
+export function noteStrictSeen(home, now = Date.now()) {
+  try {
+    writeNew(home, "strict-seen.json", { at: new Date(Number(now)).toISOString() });
+  } catch (e) {
+    // There already, or not writable now.
+  }
+}
+
+/** Whether her folder was seen with the open shape under the strict lock since settings.js studio last wrote the open lock; a held
+    folder that cannot be looked in counts as seen. */
+export function strictSeen(home) {
+  try {
+    lstatSync(strictSeenFile(home));
+    return true;
+  } catch (e) {
+    return e.code !== "ENOENT";
+  }
+}
+
+/** Take the note away, once settings.js studio has marked the chats of that time and taken away their command output. */
+export const clearStrictSeen = (home) => rmSync(strictSeenFile(home), { force: true });
+
+/** Whether the chat `sessionId`, whose transcript is `transcriptPath` and whose claude process is `claude` ({ pid, start }, null for
+    none, or "unknown" when the claude above could not be found),
     holds a session's words: a mark's id is its id; a mark's claude is its claude; an untied mark's or a session after all's time is
     at or after its transcript's start (the least timestamp of any line; none at all, while such a time exists, holds it); or its
     transcript holds a held chat's message uuid, or begins with a compaction's (a fork). When it holds a chat it keeps that chat's
@@ -214,6 +243,8 @@ export function chatHeld({ home, sessionId, transcriptPath, claude = null }) {
   };
   if (marks.some((mark) => mark.session === sessionId)) return hold();
   if (isObject(claude) && marks.some((mark) => mark.claude && mark.claude.pid === claude.pid && mark.claude.start === claude.start)) return hold();
+  // A claude that cannot be found may be a mark's: held for this call, and not kept, since it is not known.
+  if (claude === "unknown" && marks.some((mark) => mark.claude)) return true;
   if (!marks.length && !times.length && !state.uuids) return false;
   // The uuids of each marked chat, and of each held chat, whose transcript lies beside this one, kept again when it has been compacted
   // since: a fork made after its compaction may come before its own next call.

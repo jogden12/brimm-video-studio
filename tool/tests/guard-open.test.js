@@ -3,18 +3,19 @@
 // test asks this Mac's resolver, reads its settings or runs `ps`.
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
 import { LOCK_CHANGED } from "../loosened.js";
 import { HELD_NARROWED, HELD_REFUSED, markChat, untiedMark } from "../held.js";
 import { processTable } from "../chain.js";
-import { settingsFile, writeSettings } from "../settings.js";
+import { settingsFile, settingsMain, writeSettings } from "../settings.js";
+import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
-import { APP_ARGS, SESSION, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
+import { APP_ARGS, MINIMUM, SESSION, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
 import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
@@ -392,6 +393,41 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     assert.equal((await guard(w, "Bash", { command: `${w.edit} name "Pricing talk" "x"` })).decision, "allow");
     w.done();
   });
+  it("says the lock is changed while Claude Code keeps its chats somewhere other than ~/.claude, which is not gated", async () => {
+    const w = chat();
+    assert.deepEqual(await date(w, { more: { env: { CLAUDE_CONFIG_DIR: join(w.home, "Claude config") } } }), CHANGED);
+    assert.equal((await date(w, { more: { env: { CLAUDE_CONFIG_DIR: join(w.home, ".claude") } } })).decision, "allow");
+    assert.equal((await date(w, { more: { env: { CLAUDE_CONFIG_DIR: "" } } })).decision, "allow");
+    w.done();
+  });
+  it("keeps a chat to a session's commands when the claude above cannot be found while a mark names a claude", async () => {
+    const w = chat();
+    const other = transcript(w.projects, [{ type: "user", uuid: "x-1", timestamp: AT }], OTHER);
+    markChat({ home: w.home, env: { CLAUDE_CODE_SESSION_ID: OTHER, CLAUDE_PID: "700" }, table: processTable(chatChain({ args: APP_ARGS(w.folder, w.home) })), pid: 900, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    assert.ok(other);
+    for (const ps of [() => null, () => psText([[1, 0, "/sbin/launchd"], [800, 1, "/bin/sh"], [900, 800, "node guard.mjs"]])]) {
+      assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} name "Pricing talk" "key phrases"` }, { more: { ps } }), { decision: "deny", reason: HELD_NARROWED });
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} episodes` }, { more: { ps } })).decision, "allow");
+    }
+    w.done();
+  });
+  it("says the lock is changed after a time her folder kept the open shape under the strict lock, until settings.js studio writes it again", async () => {
+    const w = chat();
+    const output = join(w.tmp, `claude-${w.uid}`, claudeDirName(w.folder), SESSION, "tasks", "a.output");
+    assert.deepEqual(await date(w, { more: { minimum: null } }), { decision: "deny", reason: REFUSED });
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, "words printed under the strict lock");
+    assert.deepEqual(await date(w), CHANGED);
+    const marks = () => readdirSync(heldFolder(w.home)).filter((n) => n.startsWith("mark-")).length;
+    const before = existsSync(heldFolder(w.home)) ? marks() : 0;
+    assert.equal(await settingsMain(["studio", "--node", w.node], { home: w.home, say: () => {}, openMinimum: MINIMUM, tmp: w.tmp, uid: w.uid, freePort: () => 47123 }), 0);
+    assert.equal(marks(), before + 1);
+    assert.equal(existsSync(output), false);
+    assert.deepEqual(await date(w), { decision: "deny", reason: HELD_REFUSED }, "a chat of that time is held");
+    const later = transcript(w.projects, [{ type: "user", uuid: "l-1", timestamp: "2099-01-01T00:00:00.000Z" }], OTHER);
+    assert.equal((await date(w, { call: { session_id: OTHER, transcript_path: later } })).decision, "allow", "a chat begun after goes on");
+    w.done();
+  });
   it("keeps the open lock for a chat that ran cd Pictures", async () => {
     const w = chat();
     const pictures = join(w.folder, "Pictures");
@@ -502,6 +538,21 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     rmSync(join(w.home, ".claude", "plugins"), { recursive: true });
     rmSync(join(w.home, ".claude", "settings.json"));
     assert.equal((await ask()).decision, "allow");
+    // An agent definition appearing where Claude Code would load one is looked at again.
+    const agents = looks;
+    mkdirSync(join(w.home, ".claude", "agents"), { recursive: true });
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, agents + 1);
+    writeFileSync(join(w.home, ".claude", "agents", "Explore.md"), "---\nname: Explore\n---\n");
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, agents + 2);
+    mkdirSync(join(w.folder, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(w.folder, ".claude", "agents", "Plan.md"), "---\nname: Plan\n---\n");
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, agents + 3);
+    writeFileSync(join(w.folder, ".claude", "agents", "Plan.md"), "---\nname: Plan\nisolation: remote\n---\n");
+    assert.equal((await ask()).decision, "allow");
+    assert.equal(looks, agents + 4);
     const before = looks;
     appendFileSync(w.transcript, `${JSON.stringify({ type: "user", uuid: "u-2", timestamp: AT })}\n`);
     assert.equal((await ask()).decision, "allow");

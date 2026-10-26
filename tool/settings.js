@@ -33,7 +33,7 @@ import { textWriter } from "./dropbox.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, realOf } from "./places.js";
-import { untiedMark } from "./held.js";
+import { clearStrictSeen, strictSeen, untiedMark } from "./held.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
 export const settingsFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -760,10 +760,13 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
       say(studioFiles({ checkout: would.checkout, node: told.node, folder: realOf(studioFolder(home)), lock, facts: shown })[".claude/settings.json"].trimEnd());
       return 0;
     }
-    if (open && !openAlready(home)) {
+    // Chats from before the open lock, or from a time her folder kept the open shape under the strict lock, may hold a session's words
+    // in their command output (R7).
+    if (open && (!openAlready(home) || strictSeen(home))) {
       try {
         untiedMark({ home, now });
         clearChatOutput(facts.tmp, facts.uid, realOf(studioFolder(home)));
+        clearStrictSeen(home);
       } catch (e) {
         say(`The folder for Claude could not be written (the chats before the open lock could not be marked: ${e.code || "an error"}).`);
         return 1;

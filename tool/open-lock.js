@@ -44,7 +44,7 @@ import { isConnector, neverCaught } from "./never.js";
 import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
-import { HELD_NARROWED, HELD_REFUSED, chatHeld, wordsFolder } from "./held.js";
+import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeen, wordsFolder } from "./held.js";
 import { LOCK_CHANGED, addedWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
@@ -289,6 +289,15 @@ const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 const MANAGED_PREFS = "/Library/Managed Preferences";
 const PREFS_FILE = "com.anthropic.claudecode.plist";
 
+/** The entries of `dir`, by their paths; none when it cannot be listed. */
+function entriesOf(dir) {
+  try {
+    return readdirSync(dir).map((name) => join(dir, name));
+  } catch (e) {
+    return [];
+  }
+}
+
 /** What a file or folder is now, for the cache's signature: its size, time and inode (and, for a link, those of where it leads), or
     "missing". */
 function stamp(path) {
@@ -324,6 +333,7 @@ function foldersOf(dir) {
     open shape is made from. */
 function watched({ home, folder, checkout, env, deps, settings, claude }) {
   const config = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  const agentFolders = [join(home, ".claude", "agents"), join(config, "agents"), join(folder, ".claude", "agents")];
   const managed = deps.managedDir || MANAGED_DIR;
   const prefs = deps.managedPrefs || MANAGED_PREFS;
   const plugins = join(home, ".claude", "plugins");
@@ -347,6 +357,8 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     join(home, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
     join(plugins, "synced"), ...foldersOf(join(plugins, "synced")),
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
+    // The agent definitions Claude Code would load, one named as a built-in agent among them, each file by itself.
+    ...[...agentFolders, ...pluginDirs.map((dir) => join(dir, "agents"))].flatMap((dir) => [dir, ...entriesOf(dir)]),
     ...skillRoots, ...skillRoots.flatMap((root) => skills.flatMap(({ name }) => [join(root, name), join(root, name, "SKILL.md")])),
     managed, join(managed, "managed-settings.json"), join(managed, "managed-settings.d"), ...dropIns,
     prefs, join(prefs, account), join(prefs, account, PREFS_FILE), join(prefs, PREFS_FILE),
@@ -413,6 +425,29 @@ function lockLines({ home, checkout, folder, node, input, deps, env, settings, f
   return lines;
 }
 
+/** Whether her folder has the open lock's shape: its settings hold the sandbox, which only the open shape writes. */
+function openShaped(folder) {
+  try {
+    const written = JSON.parse(readFileSync(join(folder, ".claude", "settings.json"), "utf8"));
+    return isObject(written) && Object.hasOwn(written, "sandbox");
+  } catch (e) {
+    return false;
+  }
+}
+
+/** What loosens the open lock beyond the shared lock check, as lines for Jason: Claude Code keeping its settings and chats somewhere
+    other than ~/.claude (CLAUDE_CONFIG_DIR), which no gated place holds; and a time her folder kept the open shape under the strict
+    lock (noteStrictSeen), whose chats may have left a session's words in command output, until settings.js studio writes it again. */
+function beyondWhy(env, home) {
+  const why = [];
+  const config = env.CLAUDE_CONFIG_DIR;
+  if (config && (!isAbsolute(config) || fold(realOf(resolve(config))) !== fold(realOf(join(home, ".claude"))))) {
+    why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
+  }
+  if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");
+  return why;
+}
+
 /** Look a name up as WebFetch would, every address it has, within five seconds. */
 function lookUp(host) {
   let timer;
@@ -435,7 +470,12 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   if (typeof folder !== "string" || !isAbsolute(folder)) return today();
   const home = dirname(folder);
   const settings = readSettings(home).settings;
-  if (!settings || effectiveLock(settings, deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE) !== "open") return today();
+  if (!settings || effectiveLock(settings, deps.minimum !== undefined ? deps.minimum : OPEN_LOCK_CLAUDE) !== "open") {
+    // Her folder left with the open shape while the lock in effect is strict: noted, so that the open lock is not in effect again
+    // until its chats' command output is taken away (R7).
+    if (openShaped(folder)) noteStrictSeen(home, deps.now ? Number(deps.now()) : Date.now());
+    return today();
+  }
   const facts = factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
   const ctx = {
     checkout, node, folder, home, uid: facts.uid, tmp: facts.tmp,
@@ -455,7 +495,7 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
   const env = { ...(deps.env || process.env), CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: input.session_id };
   const check = { ...deps, settings, env, ps: () => text, cwd: hers ? folder : input.cwd, transcript: hers ? input.transcript_path : null };
   const now = deps.now ? Number(deps.now()) : Date.now();
-  const lines = lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now });
-  const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : null });
+  const lines = [...lockLines({ home, checkout, folder, node, input, deps: check, env, settings, facts, claude: above, now }), ...beyondWhy(env, home)];
+  const held = chatHeld({ home, sessionId: input.session_id, transcriptPath: input.transcript_path, claude: above ? { pid: above.pid, start: above.start } : "unknown" });
   return openDecision(input, { ...ctx, loosened: lines.length > 0, held });
 }
