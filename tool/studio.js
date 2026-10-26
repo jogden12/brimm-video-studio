@@ -15,12 +15,41 @@
 // edit.js's path, outside the folder, for a read, and stops every brimm-video command (the review of PR 21, finding 1).
 // `node settings.js studio --node "<node>"` writes the folder, as install.sh --machine does. The checkout's path and node's
 // are written into the files here, in node, since a path may hold spaces and an apostrophe.
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+//
+// That is the strict lock, and it stays as it is. The open lock (design 2026-10-26, section 7) is the other shape her folder can be
+// written in (openSettingsOf): Claude Code's sandbox on, with edit.js the one command outside it and no network; the never list
+// (never.js) and the gated places (places.js) denied, by their real paths in both spellings; writes only into the workshop,
+// ~/BRIMM Video Workshop; the app's secrets taken from sandboxed commands; Claude Code's memory off; and, beside the guard, a hook
+// after every card she answers (the receipt). It is written only where this Mac's settings say open and OPEN_LOCK_CLAUDE is set
+// (settings.js effectiveLock), so while that is null every Mac keeps the strict lock. What it rests on that the by-hand round
+// records is data here (studio/allow.json, environment.json, app-flags.json), and starts so that the open lock fails closed.
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { neverDenyRules } from "./never.js";
+import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
 /** Her folder for Claude, in the home folder. */
 export const studioFolder = (home) => join(home, "BRIMM Video Studio");
+/** The workshop, in the home folder, on this Mac's own disk: the one folder Claude writes into under the open lock. */
+export const workshopFolder = (home) => join(home, "BRIMM Video Workshop");
+
+/** The Claude Code version the by-hand round in the Code tab passed the open lock on (R2). While it is null, the lock in effect is
+    strict on every Mac whatever its settings say, and `settings.js studio --lock open` refuses. It is set, on Jason's yes, after
+    that round. */
+export const OPEN_LOCK_CLAUDE = null;
+
+/** A data file in tool/studio/, as the object it holds. */
+const data = (name) => JSON.parse(readFileSync(new URL(`./studio/${name}`, import.meta.url), "utf8"));
+/** What her folder allows under the open lock on every Mac, each entry typed and exact (design section 2, "The allowlist is data");
+    this Mac's settings may add to it (studioAllow). */
+export const ALLOW_DEFAULT = data("allow.json");
+/** The names in the Claude app's environment: `deny`, those taken from every sandboxed command (C27: the app's own, and the binary's
+    own list of secrets), and `harmless`, those the guard lets be, which the by-hand round records. Names only, never values. */
+export const ENVIRONMENT = data("environment.json");
+/** The record of the flags the Claude app starts her chats with, which the by-hand round makes. Empty until then, so that every
+    flag is outside it and every chat is loosened (R3). */
+export const APP_FLAGS = data("app-flags.json");
 
 /** A template in tool/studio/, with the checkout's path and node's put in. */
 const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${name}`, import.meta.url), "utf8").split("{{CHECKOUT}}").join(checkout).split("{{NODE}}").join(node);
@@ -40,6 +69,68 @@ function settingsOf({ checkout, node, folder }) {
     disableAllHooks: false,
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
+    }
+  };
+}
+
+/** The folder's settings for Claude Code under the open lock, for the Mac `facts` describes (settings.js factsOf: its home,
+    BRIMM Video, its uid, Claude Code's temp folder, Zoom's folder, the proxy port, the web tools and what it allows). Each path a
+    rule names is a real path, in both spellings (places.js); `Read()` and `Edit()` rules spell an absolute path with `//`, the
+    sandbox's own lists plainly. What it denies:
+    - to Claude's own tools: the never list; Read of each gated place's read rules, and of a .env file in her folder (R20); Write
+      and Edit in her folder, the checkout, BRIMM Video and every place only brimm-video writes, the app's data, LaunchAgents,
+      ~/.claude and ~/.ssh, and of a CLAUDE.md, CLAUDE.local.md, .mcp.json or .claude anywhere in the workshop;
+    - to sandboxed commands: reading any gated place but Assets and the three places Bash needs (readAllowed), writing anywhere
+      but the workshop, the network (with both proxy ports set to one nothing listens on, so no proxy login is made: C38), and the
+      app's secret names.
+    It allows edit.js (outside the sandbox: its one excluded command), writes into the workshop, and the web tools only once this
+    Mac's settings open them. No folder is added to the session. */
+export function openSettingsOf({ checkout, node, folder, facts }) {
+  const { home } = facts;
+  const AS = join(home, "Library", "Application Support");
+  const BV = realOf(facts.root);
+  const W = realOf(workshopFolder(home));
+  const places = gatedPlaces(facts);
+  const both = (path) => bothSpellings(realOf(path));
+  const read = (path, kind) => bothSpellings(path).map((p) => (kind === "file" ? `Read(/${p})` : `Read(/${p}/**)`));
+  const edit = (path) => both(path).map((p) => `Edit(/${p}/**)`);
+  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(AS, "Claude"), join(home, "Library", "LaunchAgents"), join(home, ".claude"), join(home, ".ssh")];
+  return {
+    permissions: {
+      defaultMode: "default",
+      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, `Edit(/${W}/**)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
+      deny: [
+        ...neverDenyRules(facts.allow),
+        ...places.flatMap((place) => place.readRules.flatMap((rule) => read(rule, place.kind))),
+        "Read(**/.env)",
+        "Read(**/.env.*)",
+        ...onlyBrimmVideo.flatMap(edit),
+        ...bothSpellings(W).flatMap((w) => [".claude/**", "CLAUDE.md", "CLAUDE.local.md", ".mcp.json"].map((inner) => `Edit(/${w}/**/${inner})`))
+      ],
+      disableBypassPermissionsMode: "disable",
+      disableAutoMode: "disable"
+    },
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      excludedCommands: [`${node} "${checkout}/tool/edit.js" *`],
+      network: { deniedDomains: ["*"], httpProxyPort: facts.port, socksProxyPort: facts.port },
+      filesystem: {
+        allowWrite: [W],
+        denyWrite: [...both(folder), ...both(join(AS, "Claude"))],
+        denyRead: places.flatMap((place) => bothSpellings(place.path)),
+        allowRead: readAllowed({ ...facts, folder })
+      },
+      credentials: { envVars: ENVIRONMENT.deny.map((name) => ({ name, mode: "deny" })) }
+    },
+    autoMemoryEnabled: false,
+    autoDreamEnabled: false,
+    disableSkillShellExecution: true,
+    disableAllHooks: false,
+    hooks: {
+      PreToolUse: settingsOf({ checkout, node, folder }).hooks.PreToolUse,
+      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }]
     }
   };
 }
@@ -67,22 +158,29 @@ export function lockBroken(settings, { checkout, folder }) {
   return broken;
 }
 
-/** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. */
-export function studioFiles({ checkout, node, folder }) {
+/** The files of her folder, `folder`, by their paths in it, each with its text: the checkout's path and node's put in. With the
+    strict lock, today's; with the open lock, its settings (for the Mac `facts` describes) and its own CLAUDE.md. */
+export function studioFiles({ checkout, node, folder, lock = "strict", facts }) {
+  const open = lock === "open";
   return {
-    "CLAUDE.md": filled("CLAUDE.md", { checkout, node }),
-    ".claude/settings.json": JSON.stringify(settingsOf({ checkout, node, folder }), null, 2) + "\n",
+    "CLAUDE.md": filled(open ? "CLAUDE-open.md" : "CLAUDE.md", { checkout, node }),
+    ".claude/settings.json": JSON.stringify(open ? openSettingsOf({ checkout, node, folder, facts }) : settingsOf({ checkout, node, folder }), null, 2) + "\n",
     ".claude/skills/brimm-edit/SKILL.md": filled("SKILL.md", { checkout, node })
   };
 }
 
 /** Write her folder in `home`: its three files, written over the ones there, and Pictures/. Nothing else in it is touched.
     It is on this Mac's own disk, so the files are written in place. The hook is given the folder as the disk spells it,
-    which is the folder Claude Code runs in, even when it was made by hand in another case. Gives back the folder. */
-export function writeStudio(home, { checkout, node }) {
+    which is the folder Claude Code runs in, even when it was made by hand in another case. With the open lock it also makes
+    the workshop, readable by her alone. Gives back the folder. */
+export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
+  if (lock === "open") {
+    mkdirSync(workshopFolder(home), { recursive: true, mode: 0o700 });
+    chmodSync(workshopFolder(home), 0o700);
+  }
   mkdirSync(studioFolder(home), { recursive: true });
   const folder = realpathSync.native(studioFolder(home));
-  for (const [name, text] of Object.entries(studioFiles({ checkout, node, folder }))) {
+  for (const [name, text] of Object.entries(studioFiles({ checkout, node, folder, lock, facts }))) {
     mkdirSync(dirname(join(folder, name)), { recursive: true });
     writeFileSync(join(folder, name), text);
   }
