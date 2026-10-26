@@ -92,12 +92,12 @@ describe("the gated places", () => {
   it("finds Claude Code's temp folder under the temp folder it is given, never /private/tmp in a test", () => {
     const w = world();
     assert.ok(gatedPlaces(w).some((p) => p.carve === "tmp" && p.path === realOf(join(w.tmp, `claude-${w.uid}`))));
-    assert.ok(!gatedPlaces(w).some((p) => p.path.startsWith("/private/tmp/")));
-    assert.ok(!readAllowed(w).some((p) => p.startsWith("/private/tmp/")));
+    for (const p of [...gatedPlaces(w).map((place) => place.path), ...readAllowed(w)]) assert.ok(p.startsWith(`${w.dir}/`), p);
     w.done();
   });
   it("spells each place a second way, under /System/Volumes/Data", () => {
     assert.deepEqual(bothSpellings("/Users/s/x"), ["/Users/s/x", "/System/Volumes/Data/Users/s/x"]);
+    assert.deepEqual(bothSpellings("/"), ["/", "/System/Volumes/Data"]);
   });
   it("leaves out Dropbox's cache folder when no folder above BRIMM Video holds one", () => {
     const w = world({ cache: false });
@@ -105,8 +105,23 @@ describe("the gated places", () => {
     w.done();
   });
   it("knows a .env file by its name", () => {
-    for (const p of ["/a/.env", "/a/.env.local"]) assert.ok(isEnvFile(p), p);
+    for (const p of ["/a/.env", "/a/.env.local", "/a/.ENV", "/a/.Env.Local"]) assert.ok(isEnvFile(p), p);
     for (const p of ["/a/env.txt", "/a/.envrc", "/a/x.env", "/a/.env/inside"]) assert.ok(!isEnvFile(p), p);
+  });
+  it("opens no folder that is a link, so an Assets that links to Episodes, or her temp folder linked to ~/.claude, opens nothing", () => {
+    const w = world();
+    const own = join(w.tmp, `claude-${w.uid}`, claudeDirName(w.folder));
+    for (const d of [join(w.root, "Episodes", "x"), join(w.home, ".claude", "projects"), dirname(own)]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(w.root, "Episodes", "x", "t.txt"), "x");
+    symlinkSync(join(w.root, "Episodes"), join(w.root, "Assets"));
+    symlinkSync(join(w.home, ".claude"), own);
+    assert.deepEqual(readAllowed(w).slice(0, 2), [join(realOf(w.root), "Assets"), join(realOf(dirname(own)), claudeDirName(w.folder))]);
+    const ix = gatedIndex(gatedPlaces(w), readAllowed(w));
+    assert.equal(ix.at(join(w.root, "Episodes", "x", "t.txt"))?.path, realOf(w.root));
+    assert.equal(ix.at(join(w.root, "Assets", "x", "t.txt"))?.path, realOf(w.root));
+    assert.equal(ix.at(join(w.home, ".claude", "projects", "a.jsonl"))?.carve, "claude");
+    assert.equal(ix.at(join(own, "projects", "a.jsonl"))?.carve, "claude");
+    w.done();
   });
   it("finds the real path of the nearest folder that is there, with the rest of the path after it", () => {
     const w = world();
@@ -201,8 +216,26 @@ describe("paths by what they are", () => {
     assert.equal(ix.at(`/System/Volumes/Data${join(w.home, "Documents", "Zoom")}`)?.path, realOf(join(w.home, "Documents", "Zoom")));
     assert.equal(ix.at(join(w.home, "Documents", "Zoom recordings", "x.m4a")), null);
   });
-  it("holds a .env file anywhere", () => {
-    for (const p of ["/anywhere/.env", join(w.home, "Documents", ".env.local"), join(w.workshop, ".env")]) assert.ok(ix.at(p), p);
+  it("holds a path by macOS's dot-root spellings, /.vol, /.nofollow and /.resolve, and a search of them", () => {
+    for (const p of ["/.vol", "/.vol/16777234/2", `/.nofollow${w.episode}`, `/.resolve/1${w.episode}`, `/.nofollow${w.notes}`]) assert.ok(ix.at(p), p);
+    for (const d of ["/.vol", "/.vol/16777234", "/.nofollow", `/.nofollow${w.home}`]) assert.ok(ix.holds(d), d);
+  });
+  it("holds a link in a gated place that leads to an open folder", () => {
+    symlinkSync(join(w.root, "Assets"), join(w.root, "Episodes", "to-assets"));
+    assert.equal(ix.at(join(w.root, "Episodes", "to-assets"))?.path, realOf(w.root));
+  });
+  it("says /, /System, /System/Volumes and /System/Volumes/Data each hold a gated place", () => {
+    for (const d of ["/", "/System", "/System/Volumes", "/System/Volumes/Data"]) assert.ok(ix.holds(d), d);
+  });
+  it("takes no path from a string too long to be one, and is quick about it", () => {
+    const code = "const a = b / c; // see ../x\n".repeat(40000);
+    const started = Date.now();
+    assert.deepEqual(pathsIn({ content: code, long: `/${"a/".repeat(600)}` }, w.cwd, w.home), []);
+    assert.ok(Date.now() - started < 5000);
+    assert.deepEqual(pathsIn({ p: `/${"b".repeat(1022)}` }, w.cwd, w.home), [`/${"b".repeat(1022)}`]);
+  });
+  it("holds a .env file anywhere, in any letter case", () => {
+    for (const p of ["/anywhere/.env", join(w.home, "Documents", ".env.local"), join(w.workshop, ".env"), "/anywhere/.ENV", join(w.workshop, ".Env.Local")]) assert.ok(ix.at(p), p);
     assert.equal(ix.at(join(w.home, "Documents", "env.txt")), null);
   });
   it("takes every path-like string from any field, nested, and nothing else", () => {
