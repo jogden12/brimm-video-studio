@@ -1,7 +1,7 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio (studio.js): its CLAUDE.md, its settings, its skill and Pictures/, and the
 // guard hook that lets her session run brimm-video's edit.js and nothing else. Each test writes into a home folder of its own.
 // The hook is run here as Claude Code runs it, by /bin/sh and node, on made-up tool calls: nothing it allows is run.
-import { after, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -9,11 +9,15 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio.js";
-import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain } from "../edit.js";
+import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
+import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
+import { UNTRUSTED } from "../loosened.js";
+import { NO_RECEIPT } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 import { CHECKOUT, NODE, EDIT, ALLOWED } from "./guard-cases.js";
+import { openWorld } from "./open-world.js";
 
 const FOLDER = "/Users/sallie/BRIMM Video Studio";
 const bash = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout: CHECKOUT, node: NODE }).decision;
@@ -808,5 +812,104 @@ describe("writing her folder", () => {
   it("tells Claude in its CLAUDE.md to use the skill, run nothing else, and speak plainly", () => {
     const text = studioFiles({ checkout: CHECKOUT, node: NODE })["CLAUDE.md"];
     for (const line of ["Use the brimm-edit skill for everything here.", "do not run any other program", "Nothing here posts, sends or publishes anything.", "Never show her command names, paths or flags."]) assert.ok(text.includes(line), line);
+  });
+});
+
+describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-26, section 7)", () => {
+  // The open lock's CLAUDE.md and skill are files of their own (studio/CLAUDE-open.md, studio/SKILL-open.md): the strict lock's are
+  // kept as they are, so that a Mac with the strict lock, as both are until Jason opens one, keeps today's folder.
+  let w;
+  before(() => {
+    w = openWorld();
+  });
+  after(() => w.done());
+  const openFiles = () => studioFiles({ checkout: CHECKOUT, node: NODE, folder: w.folder, lock: "open", facts: w.facts });
+  const openSkill = () => openFiles()[".claude/skills/brimm-edit/SKILL.md"];
+  const strict = studioFiles({ checkout: CHECKOUT, node: NODE });
+  const strictSkill = strict[".claude/skills/brimm-edit/SKILL.md"];
+  /** The strict skill's lines that word the card itself, which the open skill takes from what episodes and kind print instead: the
+      card's paragraph, its two questions, the seven orders of its answers, and the Zoom card's sentence. */
+  const wordsTheCard = (line) => /^`episodes` names a video waiting for her answer/.test(line) || /^1\. "What is <label>\?"/.test(line) || /^ {3}- /.test(line)
+    || /^2\. "Is it a private session with a client or a group\?"/.test(line) || /^When she answered anything but "Client or group session", and the Came line says/.test(line);
+
+  it("keeps the skill under 160 lines, running only commands edit.js has, each of them one the strict skill runs, whose flags its checks run", () => {
+    const skill = openSkill();
+    assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
+    assert.ok(skill.split("\n").length < 160, `${skill.split("\n").length} lines`);
+    const given = commandsIn(skill);
+    assert.ok(given.length >= 10, given.join(" "));
+    const ranByStrict = new Set(commandsIn(strictSkill));
+    for (const span of given) {
+      assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `the open skill runs "${span}", which edit.js does not have`);
+      assert.ok(ranByStrict.has(span), `the open skill runs "${span}", which the strict skill's checks of each command and flag do not run`);
+    }
+    // No picture command yet (K2, K3).
+    assert.doesNotMatch(skill, /`picture\b/);
+  });
+  it("keeps every line of the strict skill in the open skill, but the lines that word the card itself", () => {
+    const strictLines = strictSkill.split("\n");
+    const open = new Set(openSkill().split("\n"));
+    const replaced = strictLines.filter(wordsTheCard);
+    assert.equal(replaced.length, 11, replaced.join("\n"));
+    for (const line of strictLines.filter((l) => !wordsTheCard(l))) assert.ok(open.has(line), `the open skill lacks the strict skill's line: ${line.slice(0, 90)}`);
+    for (const line of replaced) assert.ok(!open.has(line), `the open skill still words the card itself: ${line.slice(0, 90)}`);
+  });
+  it("has the skill ask the card exactly as episodes prints it, and never word it itself", () => {
+    const skill = openSkill();
+    const card = sectionOf(skill, "## The card");
+    for (const words of [
+      "The card's words are a proposal, for Jason and Sallie to settle",
+      "`episodes` prints, under each video waiting for her answer, a line `Card: {…}`.",
+      "Ask it with one `AskUserQuestion` exactly as that line gives it: its questions and answers, in that order, word for word, never two videos in one card.",
+      "Never word this card yourself.",
+      'When it also prints `Card if not a session: {…}`, and she answered anything but "Client or group session", ask that card next, as given; `kind` prints one after it says to ask first, too.',
+      "If `kind` says to ask her on the card first, ask the card it prints after that line, as given, and run `kind` again only with her answers.",
+      "say its Seen and Came lines, when given, in one line", 'she can say "which one is it?" first'
+    ]) assert.ok(card.includes(words), words);
+    assert.ok(!skill.includes("Never word a card yourself"), "the skill still words the guide's cards and the correction card");
+    assert.ok(!skill.includes('"Finished by your editor", "Raw with retakes", "iPhone clip", "Client or group session"'));
+    assert.ok(!card.includes('"What is <label>?"'), card);
+    // It listens for kind's refusal of a video with no answer on the card in edit.js's own words.
+    assert.ok(NO_RECEIPT.startsWith("Ask her on the card first"), NO_RECEIPT);
+    // The table of what to run for each answer stays, Maybe rows and all.
+    assert.ok(card.includes('| "A new version of <name>", and No |') && card.includes('| "A finished version of <name>", and No |'), card);
+  });
+  it("has the skill ask the not-a-session card as printed, and add --not-a-session only on its answer", () => {
+    const zoom = sectionOf(openSkill(), "## The card").split("\n").find((line) => line.includes("`--not-a-session`"));
+    assert.ok(zoom, "the card does not say when --not-a-session is added");
+    for (const words of ["`Card if not a session: {…}`", "on one `AskUserQuestion`", "A bare yes or no in the chat is unclear: ask again.",
+      'Only on "It is not a session", run the same `kind` with `--not-a-session` added, as `kind "<label>" finished --private no --not-a-session`',
+      'on "It is a client or group session", `kind "<label>" session --private yes`']) assert.ok(zoom.includes(words), words);
+    assert.ok(!zoom.includes("It came from Zoom (or: it is sound alone)"), zoom);
+  });
+  it("has the skill read a session's words from the file brimm-video names, show them as written, and send her to a new chat for anything else", () => {
+    const sessions = sectionOf(openSkill(), "## A client or group session");
+    assert.ok(sessions.includes(`When brimm-video says a session's words are in a file for this chat alone, read that file with Read and show it exactly as written. Then tell her: "This chat now runs brimm-video only; start a new chat for anything else."`), sessions);
+    // It listens for the line edit.js prints in their place.
+    assert.ok(wordsLine("Session, 2026-10-14", "/x/words.txt").includes("a session's words are in a file for this chat alone"));
+  });
+  it("has the skill tell her when the folder is not trusted yet, and when a chat holds a session's words", () => {
+    const skill = openSkill();
+    const start = sectionOf(skill, "## At the start of each session");
+    assert.ok(start.includes(`If \`behind\` says Claude Code has not trusted this folder yet, tell her: "Open this folder again in the Claude app and choose to trust it, then start a new chat."`), start);
+    assert.ok(UNTRUSTED.startsWith("Claude Code has not trusted this folder yet"), UNTRUSTED);
+    const sessions = sectionOf(skill, "## A client or group session");
+    assert.ok(sessions.includes(`If a refusal says "This chat holds a session's words", say that to her in plain words.`), sessions);
+    for (const refusal of [HELD_REFUSED, HELD_NARROWED]) assert.ok(refusal.startsWith("This chat holds a session's words"), refusal);
+  });
+  it("tells Claude in the open lock's CLAUDE.md what it may help with, where it writes, and what never leaves the chat", () => {
+    const md = openFiles()["CLAUDE.md"];
+    for (const words of ["brimm-edit skill", "graphics, research, writing, other programs", "only through brimm-video's commands", "Nothing here posts, sends or publishes anything.",
+      "~/BRIMM Video Workshop", "heredoc", "posted by hand", "never go into a web search, a picture's description, a drawing or the workshop",
+      "Never rate, report or share a chat about a session", "a chat that has a session's teachings is for brimm-video only", "Never show her command names, paths or flags.", "suggest she asks Jason"]) assert.ok(md.includes(words), words);
+    assert.ok(!md.includes("do not run any other program"), md);
+    assert.ok(!md.includes("{{"), md);
+  });
+  it("keeps the strict lock's CLAUDE.md and skill as they are: the strict folder runs nothing but brimm-video, and words its own card", () => {
+    assert.ok(strict["CLAUDE.md"].includes("Everything is done through brimm-video's commands. Do not open, read or change any code, and do not run any other program."));
+    for (const words of ["Workshop", "heredoc", "teachings"]) assert.ok(!strict["CLAUDE.md"].includes(words), words);
+    assert.ok(strictSkill.includes('1. "What is <label>?", with these answers, in this order (a Maybe line wins over a Guess line):'));
+    for (const words of ["Card: {", "a file for this chat alone", "not trusted this folder", "This chat holds a session's words"]) assert.ok(!strictSkill.includes(words), words);
+    assert.notEqual(openSkill(), strictSkill);
   });
 });

@@ -216,8 +216,11 @@ export async function runDetached({ home, folder, command, keepAwake = caffeinat
 }
 
 /** Start a program detached from this one, and do not wait for it: it goes on when this process ends, and what it prints goes
-    into the tool's log, ~/Library/Logs/brimm-video.log. */
-export function spawnDetached(cmd, args, { log = join(process.env.HOME || homedir(), "Library", "Logs", "brimm-video.log") } = {}) {
+    into the tool's log, ~/Library/Logs/brimm-video.log. It is started with this process's environment (`env`) but CLAUDECODE: a
+    detached run prints to no chat, so it is not under Claude Code, and never marks a chat as holding a session's words (design
+    2026-10-26, R8). Which run is detached is told by this, never by the word `--now`, which Claude can type. `spawn` is a test's
+    stand-in. */
+export function spawnDetached(cmd, args, { log = join(process.env.HOME || homedir(), "Library", "Logs", "brimm-video.log"), spawn: start = spawn, env = process.env } = {}) {
   let out = "ignore";
   try {
     mkdirSync(join(log, ".."), { recursive: true });
@@ -225,7 +228,8 @@ export function spawnDetached(cmd, args, { log = join(process.env.HOME || homedi
   } catch (e) {
     // Without the log, what the run prints is let go.
   }
-  const child = spawn(cmd, args, { detached: true, stdio: ["ignore", out, out] });
+  const { CLAUDECODE, ...outside } = env;
+  const child = start(cmd, args, { detached: true, stdio: ["ignore", out, out], env: outside });
   child.on("error", () => {});
   child.unref();
   if (typeof out === "number") closeSync(out);

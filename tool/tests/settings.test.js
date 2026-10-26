@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -566,6 +566,97 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     assert.ok(t.said[0].includes('node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]'));
     assert.ok(t.said[0].includes("[--allow skill|mcp-tool|tool <name>]… [--print]"));
     t.done();
+  });
+});
+
+describe("node settings.js user-deny: her user settings' Read deny rules (question 5, R24)", () => {
+  /** One test's made-up Mac: BRIMM Video and Claude Code's temp folder in its home, never this Mac's own, and `run(…argv)`. */
+  function userWorld() {
+    const t = setup();
+    const home = realpathSync.native(t.home);
+    const root = join(home, "Dropbox", "The BRIMM DB", "BRIMM Video");
+    const tmp = join(home, "tmp");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(tmp);
+    writeSettings(home, { ...t.given, root });
+    const run = (...argv) => {
+      t.said.length = 0;
+      return settingsMain(argv, { home, say: (line) => t.said.push(line), tmp, uid: 502 });
+    };
+    const user = join(home, ".claude", "settings.json");
+    const settings = () => readSettings(home).settings;
+    /** The Read deny rules her folder's open settings have, for this Mac: the ones her user settings are to hold too. */
+    const folderReads = () => openSettingsOf({ checkout: CHECKOUT, node: "/opt/homebrew/bin/node", folder: join(home, "BRIMM Video Studio"), facts: factsOf(home, settings(), { tmp, uid: 502 }) }).permissions.deny.filter((rule) => rule.startsWith("Read("));
+    return { ...t, home, root, run, user, settings, folderReads };
+  }
+
+  it("adds the Read deny rules to her user settings once, keeps everything else in them, and notes that it did", () => {
+    const t = userWorld();
+    const want = t.folderReads();
+    // Every gated place's rules, in both spellings, and the .env rules: some by hand.
+    for (const rule of [`Read(/${join(t.root, "Episodes")}/**)`, `Read(//System/Volumes/Data${join(t.root, "Episodes")}/**)`, `Read(/${join(t.home, ".ssh")}/**)`, `Read(/${join(t.home, ".claude.json")})`, "Read(**/.env)", "Read(**/.env.*)"]) assert.ok(want.includes(rule), rule);
+    assert.ok(!want.some((rule) => rule.includes(`${join(t.root, "Assets")}`)), "Assets is not kept from Claude");
+    mkdirSync(dirname(t.user), { recursive: true });
+    const hers = { model: "opus", permissions: { allow: ["Bash(ls:*)"], deny: ["Read(//Users/sallie/private/**)", want[3]], defaultMode: "default" }, hooks: { Stop: [] }, enabledPlugins: { "a@b": true } };
+    writeFileSync(t.user, JSON.stringify(hers));
+    for (let i = 0; i < 2; i++) {
+      assert.equal(t.run("user-deny"), 0);
+      assert.deepEqual(t.said, [`Written: ~/.claude/settings.json (${want.length} deny rules for the places only brimm-video reads)`]);
+      const now = JSON.parse(readFileSync(t.user, "utf8"));
+      assert.deepEqual(now, { ...hers, permissions: { ...hers.permissions, deny: [...hers.permissions.deny, ...want.filter((rule) => rule !== want[3])] } });
+    }
+    assert.equal(t.settings().userDeny, true);
+    // No file is left beside it, and a Mac with no user settings gets a file of the rules alone.
+    assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"]);
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.deepEqual(JSON.parse(readFileSync(t.user, "utf8")), { permissions: { deny: want } });
+    t.done();
+  });
+  it("writes through a link to her user settings, leaving the link where it is", () => {
+    const t = userWorld();
+    const elsewhere = join(t.home, "dotfiles", "claude-settings.json");
+    mkdirSync(dirname(elsewhere), { recursive: true });
+    mkdirSync(dirname(t.user), { recursive: true });
+    writeFileSync(elsewhere, JSON.stringify({ model: "opus" }));
+    symlinkSync(elsewhere, t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.ok(lstatSync(t.user).isSymbolicLink());
+    assert.deepEqual(JSON.parse(readFileSync(elsewhere, "utf8")), { model: "opus", permissions: { deny: t.folderReads() } });
+    t.done();
+  });
+  it("refuses user settings that are not a JSON object, changing nothing", () => {
+    const t = userWorld();
+    mkdirSync(dirname(t.user), { recursive: true });
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    for (const text of ["not JSON", "[1, 2]", "null", '{"permissions": []}', '{"permissions": {"deny": "Read(x)"}}', '{"permissions": {"deny": [1]}}']) {
+      writeFileSync(t.user, text);
+      assert.equal(t.run("user-deny"), 1, text);
+      assert.deepEqual(t.said, ["Her user settings could not be read as JSON, so nothing was added: Jason puts them right by hand."], text);
+      assert.equal(readFileSync(t.user, "utf8"), text);
+      assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"]);
+    }
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(t.settings().userDeny, undefined);
+    // Asked wrongly, or with no settings of this Mac's to find the places by, it writes nothing either.
+    assert.equal(t.run("user-deny", "--now"), 2);
+    assert.match(t.said[0], /^This Mac's settings for episodes/);
+    rmSync(settingsFile(t.home));
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 2);
+    assert.equal(existsSync(t.user), false);
+    t.done();
+  });
+  it("takes the note that her user settings were given the rules only as true or false", () => {
+    const good = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT };
+    assert.equal(settingsFault({ ...good, userDeny: true }), "");
+    assert.equal(settingsFault({ ...good, userDeny: false }), "");
+    assert.equal(settingsFault({ ...good, userDeny: "yes" }), "the note of her user settings' deny rules must be true or false");
+  });
+  it("is named in --help", () => {
+    const said = [];
+    settingsMain(["--help"], { say: (line) => said.push(line) });
+    assert.match(said.join("\n"), /\n {2}node settings\.js user-deny {2,}add/);
   });
 });
 

@@ -1,15 +1,17 @@
 // A made-up Mac with the open lock, for the open lock's tests: a home with a space and an apostrophe, BRIMM Video in a made-up
 // Dropbox, a checkout, a temp folder of its own (<dir>/tmp, never Claude Code's real one), this Mac's settings saying open with the
-// node her folder was written with, and her folder written open and trusted. With it, stand-ins for what the lock check and the guard would
-// ask of this Mac: the process table `ps` gives (psText, chatChain), the arguments the Claude app starts a chat's `claude` with
-// (APP_ARGS), the record of those flags (RECORD), a transcript, and the `deps` every open-lock test gives (openDeps), so that no
-// real `ps`, `lsof` or `plutil` runs, this Mac's managed settings and temp folder are never read, and the runner's own environment
-// (often a Claude Code session's) is never taken for the chat's.
+// node her folder was written with, her folder written open and trusted, and her chat's transcript where Claude Code keeps it. With
+// it, stand-ins for what the lock check and the guard would ask of this Mac: the process table `ps` gives (psText, chatChain), the
+// arguments the Claude app starts a chat's `claude` with (APP_ARGS), the record of those flags (RECORD), a transcript, the chat's
+// environment (CHAT_ENV) and the `deps` every open-lock test gives (openDeps), so that no real `ps`, `lsof` or `plutil` runs, this
+// Mac's managed settings and temp folder are never read, and the runner's own environment (often a Claude Code session's) is never
+// taken for the chat's.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ALLOW_DEFAULT, workshopFolder, writeStudio } from "../studio.js";
 import { writeSettings } from "../settings.js";
+import { claudeDirName } from "../places.js";
 
 /** The node her folder is written with in these tests. */
 export const NODE = "/opt/homebrew/bin/node";
@@ -34,6 +36,8 @@ export function openWorld() {
   const folder = writeStudio(home, { checkout, node: NODE, lock: "open", facts });
   // Her folder trusted, as step 9 of the setup guide has her do once.
   writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [folder]: { hasTrustDialogAccepted: true } } }));
+  // Her chat's transcript, started in her folder, with no folder added to it.
+  transcript(join(home, ".claude", "projects", claudeDirName(folder)), [{ type: "user", timestamp: "2026-10-26T10:00:00.000Z" }]);
   return { dir, home, root, checkout, node: NODE, folder, workshop: workshopFolder(home), uid, tmp, port, facts, cwd: folder, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -51,10 +55,14 @@ export const chatChain = ({ claude = 700, args }) => psText([
   [900, 800, `${NODE} /x/tool/edit.js episodes`],
 ]);
 
+/** Where the Claude app keeps its own copy of Claude Code `version` in `home`, as it does on the Mac Studio:
+    claude-code/<version>/<12 hex letters>/claude.app/Contents/MacOS/claude. */
+export const appCopy = (home, version = MINIMUM) => join(home, "Library", "Application Support", "Claude", "claude-code", version, "a93ded4b1b47", "claude.app", "Contents", "MacOS", "claude");
+
 /** The arguments the Claude app starts a chat in her folder with: its own copy of Claude Code, the flags of RECORD, and the app's
     notes folder added. */
 export const APP_ARGS = (folder, home) => [
-  `${join(home, "Library", "Application Support", "Claude", "claude-code", MINIMUM, "claude")}`,
+  appCopy(home),
   "--output-format stream-json",
   "--input-format stream-json",
   "--verbose",
@@ -78,12 +86,16 @@ export function transcript(dir, lines, id = SESSION) {
   return path;
 }
 
-/** The `deps` every open-lock test gives: the world's home, folder and temp folder, managed folders of its own, no environment, and
-    stand-ins for ps and lsof. `minimum` is set, since with none the lock in effect is strict. */
+/** Her chat's environment as the lock check reads it, by the names it looks at: under Claude Code, with the chat's id. */
+export const CHAT_ENV = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION };
+
+/** The `deps` every open-lock test gives: the world's home, folder and temp folder, managed folders of its own, her chat's
+    environment (CHAT_ENV), and stand-ins for ps and lsof, the claude above being the app's. `minimum` is set, since with none the lock
+    in effect is strict. */
 export const openDeps = (w, more = {}) => ({
   home: w.home,
   cwd: w.folder,
-  env: {},
+  env: CHAT_ENV,
   pid: 900,
   tmp: w.tmp,
   uid: w.uid,

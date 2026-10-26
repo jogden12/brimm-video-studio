@@ -5,9 +5,10 @@
 // start time is not that gives no row, rather than a wrong one. The Claude Code above is the first process up the chain whose
 // executable's name is `claude`, the executable being its arguments before the first " --" (the app's copy lives in a folder with
 // a space in its name). Its arguments are split at each " --", so that a value with spaces is kept whole. The app's own copy is
-// kept in a folder named for its version, Claude/claude-code/<version>/claude, which is where its version is read from.
+// kept in a folder named for its version, as on the Mac Studio, ~/Library/Application Support/Claude/claude-code/<version>/<12 hex
+// letters>/claude.app/Contents/MacOS/claude, which is where its version is read from.
 import { spawnSync } from "node:child_process";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 
 /** The arguments `ps` is run with: every process, lines as long as they are, and its id, its parent's, its start and its arguments. */
 export const PS_ARGS = ["-A", "-ww", "-o", "pid=,ppid=,lstart=,args="];
@@ -71,8 +72,12 @@ export function claudeAbove(chain) {
   return chain.find((proc) => basename(argsOf(proc.args).exe) === "claude") || null;
 }
 
-/** The version of the Claude app's own copy of Claude Code, from the folder its executable, `exe`, is kept in; null for any other. */
-export function appVersionOf(exe) {
-  const found = /\/claude-code\/(\d+(?:\.\d+)+)\//.exec(String(exe));
+/** The version of the Claude app's own copy of Claude Code in `home`, from the folder its executable, `exe`, is kept in: exactly
+    <home>/Library/Application Support/Claude/claude-code/<version>/<12 hex letters>/claude.app/Contents/MacOS/claude, as spelled;
+    null for any other, a claude-code folder elsewhere among them. */
+export function appVersionOf(exe, home) {
+  const root = join(String(home), "Library", "Application Support", "Claude", "claude-code") + "/";
+  if (typeof exe !== "string" || !exe.startsWith(root)) return null;
+  const found = /^(\d+(?:\.\d+)+)\/[0-9a-f]{12}\/claude\.app\/Contents\/MacOS\/claude$/.exec(exe.slice(root.length));
   return found ? found[1] : null;
 }

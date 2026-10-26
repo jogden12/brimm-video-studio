@@ -10,6 +10,7 @@
 // - in every settings source beside them (the user's, the managed ones, and the Claude app's --settings for this chat): any sandbox
 //   key but the few that only narrow, an Edit( allow rule, a WebFetch(domain:…) deny rule, memory turned on, folders added to every
 //   session, and a SessionStart hook, which can change the chat's id that the marks of a session's words rest on (C24);
+// - her user settings' Read deny rules for the gated places, where this Mac's settings note that `settings.js user-deny` added them;
 // - the Claude app's own flags on the chat (C30), read from the Claude Code above this check, found by walking up its own processes
 //   with `ps` (chain.js), and the folders added to the chat while it ran, read from its transcript a little at a time (scan.js);
 // - the chat's environment, by its names alone; anything listening on her folder's proxy port; a .claude, CLAUDE.md, CLAUDE.local.md
@@ -17,10 +18,10 @@
 //   hooks, since those run outside the sandbox (C16, C22).
 // Under Claude Code the session's folder is then judged by where its transcript is kept, not by the folder its commands run in (R30).
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, lockBroken, studioFolder, workshopFolder } from "./studio.js";
+import { ALLOW_DEFAULT, APP_FLAGS, ENVIRONMENT, OPEN_LOCK_CLAUDE, gatedReadRules, lockBroken, studioFolder, workshopFolder } from "./studio.js";
 import { effectiveLock, factsOf, proxyPortOf, readSettings, studioAllowOf, studioNodeOf } from "./settings.js";
 import { appVersionOf, argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { claudeDirName, realOf } from "./places.js";
@@ -91,19 +92,25 @@ export function settingsObject(file) {
     With the open lock in effect on this Mac (lockFor: this Mac's settings, deps.settings or else read, and deps.minimum, else
     OPEN_LOCK_CLAUDE), her folder's own settings are compared whole (lockBroken, for this Mac's facts and the node its settings
     recorded, R17), PR #40's four parts said as before and any other part in one line after PR #40's; then each settings source,
+    and, where this Mac's settings note that `settings.js user-deny` added them (userDeny), the user settings' Read deny rules;
     and the Claude app's --settings for this chat (deps.appSettings), as sourceWhy says, the app's also when it turns hooks off; the
     chat's environment (deps.env, else this process's: environmentWhy); her folder's proxy port (deps.lsof, else lsof itself); and
     the workshop (workshopWhy, deps.workshopLimit entries at most); enabled plugins (pluginsWhy); the skills her folder allows
     (skillsWhy); the Claude app's flags on this chat (appWhy, from deps.ps, else `ps` itself, walked up from deps.pid, else this
     process, against deps.appFlags, else APP_FLAGS), its --settings among them, which deps.appSettings stands in for when given; and,
-    under Claude Code (CLAUDECODE=1), the folders added to the chat while it ran (addedWhy, from deps.transcript, else the transcript
-    of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's id, the session runs
-    in her folder when that transcript is there (R30); otherwise, and on a strict Mac, when the folder it runs in is hers. */
+    under Claude Code (CLAUDECODE=1, or a claude above), the folders added to the chat while it ran (addedWhy, from deps.transcript,
+    else the transcript of CLAUDE_CODE_SESSION_ID in her folder's projects folder). On an open-lock Mac, under Claude Code with a chat's
+    id, the session runs in her folder when that transcript is there and the folder it runs in is hers or one inside it (R30);
+    otherwise, and on a strict Mac, when the folder it runs in is hers. */
 export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
   const env = deps.env || process.env;
-  const underClaude = env.CLAUDECODE === "1";
+  // On an open-lock Mac, the processes above this check (chain.js), null when they could not be read, and the Claude Code among them.
+  const table = open ? (deps.ps || readProcesses)() : null;
+  const claude = table === null ? null : claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
+  // Under Claude Code by its CLAUDECODE, or by a claude above, since a command can take CLAUDECODE out of its own environment.
+  const underClaude = env.CLAUDECODE === "1" || claude !== null;
   const sessionId = env.CLAUDE_CODE_SESSION_ID;
   const why = [];
   let changed = [];
@@ -122,8 +129,11 @@ export function lockLoosened({ home, checkout, deps = {} }) {
       // A folder not there any more is not hers.
     }
     // Under Claude Code on an open-lock Mac, a sandboxed `cd` may have moved the folder its commands run in (R30): the session is hers
-    // when its transcript is kept in her folder's own projects folder.
-    const hers = open && underClaude && sessionId !== undefined ? isFile(transcript) : cwd === folder;
+    // when its transcript is kept in her folder's own projects folder and its commands run in her folder or a folder inside it. Both,
+    // since a projects folder's name folds every letter but A-Z, a-z and 0-9 into "-" (claudeDirName): a chat started in
+    // ~/BRIMM-Video-Studio keeps its transcript there too, with no guard and no sandbox.
+    const inside = cwd !== null && (cwd === folder || cwd.startsWith(folder + "/"));
+    const hers = open && underClaude && sessionId !== undefined ? isFile(transcript) && inside : cwd === folder;
     if (!hers) {
       const where = cwd && cwd.startsWith(folder + "/") ? "a folder inside her folder for Claude, not in the folder itself," : "a folder other than her folder for Claude,";
       why.push(`(Jason: this session runs in ${where} and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)`);
@@ -155,11 +165,10 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   // The open lock: what else could loosen it, after PR #40's lines.
   if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
+  if (settings && settings.userDeny === true && !userDenyHeld(user, factsFor(home, settings, deps))) why.push(USER_DENY_LOST);
   let app = deps.appSettings !== undefined ? deps.appSettings : null;
-  const table = (deps.ps || readProcesses)();
   if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
   else {
-    const claude = claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
     const found = appWhy({ claude, underClaude, folder, home, record: deps.appFlags || APP_FLAGS, minimum: minimumOf(deps) });
     why.push(...found.lines);
     if (deps.appSettings === undefined) app = found.settings;
@@ -180,6 +189,17 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   }
   why.push(...workshopWhy(workshopFolder(home), deps.workshopLimit || WORKSHOP_LIMIT));
   return why;
+}
+
+/** What `behind` says when her user settings no longer hold the Read deny rules `settings.js user-deny` added to them (question 5). */
+const USER_DENY_LOST = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
+
+/** Whether her user settings, `user` (the object Claude Code reads, or null), still deny Claude's Read every gated place on the Mac
+    `facts` describes, as `settings.js user-deny` added them (studio.js gatedReadRules). Looked at only where this Mac's settings note
+    that they were added (userDeny), on an open-lock Mac. */
+function userDenyHeld(user, facts) {
+  const deny = isObject(user) && isObject(user.permissions) && Array.isArray(user.permissions.deny) ? user.permissions.deny : [];
+  return gatedReadRules(facts).every((rule) => deny.includes(rule));
 }
 
 /** Where Claude Code keeps the transcript of the chat `sessionId` started in her folder, `folder` (R30): in its projects folder
@@ -205,8 +225,34 @@ function isNotes(dir, home) {
   return realOf(dir) === dir;
 }
 
-/** The flags as they are named: two dashes, then letters, digits and dashes. Anything else after a " --" is said without its words. */
-const FLAG = /^--[A-Za-z0-9][A-Za-z0-9-]*$/;
+/** Claude Code's own option names, as its 2.1.308 binary lists the options of `claude` itself. A flag outside the record is named in
+    the lines for Jason only when it is one of these: anything else after a " --" may be a word of a flag's value, as `--final` in
+    `--add-dir=/x/Smith --final`, and is said without its words. */
+export const KNOWN_FLAGS = [
+  "--add-dir", "--advisor", "--agent", "--agent-color", "--agent-id", "--agent-name", "--agent-type", "--agents",
+  "--allow-dangerously-skip-permissions", "--allow-other-models", "--allowed-tools", "--allowedTools",
+  "--append-subagent-system-prompt", "--append-subagent-system-prompt-file", "--append-system-prompt", "--append-system-prompt-file",
+  "--attach-serve", "--autocompact", "--await-claim", "--await-initialize", "--ax-screen-reader", "--background", "--bare",
+  "--betas", "--bg", "--brief", "--channels", "--chrome", "--client-data-url", "--cloud", "--continue", "--correlation-id",
+  "--dangerously-load-development-channels", "--dangerously-skip-permissions", "--debug", "--debug-file", "--debug-to-stderr",
+  "--deep-link-cwd-b64", "--deep-link-last-fetch", "--deep-link-origin", "--deep-link-repo", "--desktop", "--disable-slash-commands",
+  "--disallowed-tools", "--disallowedTools", "--effort", "--enable-auth-status", "--enable-auto-mode", "--environment",
+  "--exclude-dynamic-system-prompt-sections", "--exec", "--fallback-model", "--fast-mode", "--file", "--fork-session",
+  "--forward-home-settings", "--forward-subagent-text", "--from-pr", "--handle-uri", "--hard-fail", "--help",
+  "--host-auth-is-org-sign-in", "--ide", "--include-hook-events", "--include-partial-messages", "--include-unsupported-models",
+  "--inherit-permission-mode", "--init", "--init-only", "--input-format", "--json-schema", "--maintenance", "--managed-settings",
+  "--max-budget-usd", "--max-thinking-tokens", "--max-turns", "--mcp-config", "--messaging-socket-path", "--model", "--name",
+  "--no-chrome", "--no-session-persistence", "--on-branch", "--output-format", "--parent-session-id", "--permission-mode",
+  "--permission-prompt-tool", "--permission-prompts", "--plan-mode-instructions", "--plan-mode-required", "--plugin-dir",
+  "--plugin-dir-no-mcp", "--plugin-url", "--pool", "--prefill", "--prefill-b64", "--print", "--proactivity", "--project",
+  "--project-config-root", "--prompt-suggestions", "--rc", "--ref", "--remote", "--remote-control",
+  "--remote-control-session-name-prefix", "--replay-user-messages", "--reply-on-resume", "--restricted", "--resume",
+  "--resume-drops-turn", "--resume-session-at", "--rewind-files", "--routine", "--runner-declares", "--safe-mode", "--sdk-url",
+  "--session-id", "--session-mirror", "--setting-sources", "--settings", "--strict-mcp-config", "--system-prompt",
+  "--system-prompt-file", "--system-prompt-snapshot", "--task-budget", "--team-name", "--teammate-mode", "--teleport", "--thinking",
+  "--thinking-display", "--tmux", "--tools", "--verbose", "--version", "--watch-artifact", "--watch-artifact-no-autoreact",
+  "--workload", "--worktree"
+];
 
 /** Whether the Claude Code version `version` is older than `minimum`, part by part. */
 function older(version, minimum) {
@@ -241,15 +287,15 @@ function appSettingsOf(value) {
     (studio/app-flags.json, which the by-hand round makes); --project-config-root other than her folder, `folder`, by its real path;
     --setting-sources other than user,project,local; an --allowedTools rule that is not a connector's tool; a --settings that cannot
     be read; any --add-dir but the app's notes folder (isNotes); and, while `minimum` is named, a version older than it, or none that
-    can be read from the executable's path. */
+    can be read from the executable's path, which must be her app's own copy in `home` (chain.js appVersionOf), by its real path. */
 export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
   if (!claude) return { lines: underClaude ? ["(Jason: the Claude Code above this check could not be found, so its flags and version are not known.)"] : [], settings: null };
   const { exe, flags } = argsOf(claude.args);
   const lines = [];
   const recorded = new Set(isObject(record) && Array.isArray(record.flags) ? record.flags : []);
   const unrecorded = [...new Set(flags.map((flag) => flag.name).filter((name) => !recorded.has(name)))];
-  for (const name of unrecorded.filter((name) => FLAG.test(name))) lines.push(`(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`);
-  if (unrecorded.some((name) => !FLAG.test(name))) lines.push("(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)");
+  for (const name of unrecorded.filter((name) => KNOWN_FLAGS.includes(name))) lines.push(`(Jason: the Claude app started this chat with ${name}, which is not among the flags recorded for her chats.)`);
+  if (unrecorded.some((name) => !KNOWN_FLAGS.includes(name))) lines.push("(Jason: the Claude app started this chat with a flag that is not among the flags recorded for her chats.)");
   const values = (name) => flags.filter((flag) => flag.name === name).map((flag) => flag.value);
   if (values("--project-config-root").some((value) => !folder || value !== folder)) lines.push("(Jason: the Claude app reads this chat's project settings from another folder (--project-config-root).)");
   if (values("--setting-sources").some((value) => value !== "user,project,local")) lines.push("(Jason: the Claude app starts this chat with other setting sources (--setting-sources).)");
@@ -263,7 +309,8 @@ export function appWhy({ claude, underClaude, folder, home, record, minimum }) {
   }
   if (values("--add-dir").some((dir) => !isNotes(dir, home))) lines.push("(Jason: this chat has a folder added to it by the Claude app (--add-dir), which its commands could write and whose skills it would load.)");
   if (minimum) {
-    const version = appVersionOf(exe);
+    // Her app's own copy, by its real path: no link on the way to it.
+    const version = realOf(exe) === exe ? appVersionOf(exe, home) : null;
     if (version === null) lines.push(`(Jason: this chat's Claude Code is not the Claude app's own copy, so its version could not be checked against the ${minimum} her folder's open lock was checked on.)`);
     else if (older(version, minimum)) lines.push(`(Jason: this chat runs Claude Code ${version}, older than the ${minimum} her folder's open lock was checked on.)`);
   }
@@ -327,12 +374,12 @@ export function environmentWhy(env, list = ENVIRONMENT) {
 }
 
 /** What `lsof` prints of whatever listens on this Mac's TCP `port`: "" when nothing does (lsof then ends with 1 and prints nothing),
-    or null when it cannot be run, is refused, or ends otherwise. */
-function listeners(port) {
+    or null when it cannot be run, is refused, is stopped at its timeout, or ends otherwise. `spawn` is a test's stand-in. */
+export function listeners(port, spawn = spawnSync) {
   try {
-    const ran = spawnSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
-    if (ran.error) return null;
-    if (ran.status === 0) return ran.stdout;
+    const ran = spawn("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
+    if (!ran || ran.error) return null;
+    if (ran.status === 0) return typeof ran.stdout === "string" ? ran.stdout : null;
     return ran.status === 1 && !ran.stdout && !ran.stderr ? "" : null;
   } catch (e) {
     return null;
@@ -440,19 +487,50 @@ function foldersIn(dir) {
 /** Whether a name is one folder's name, and nothing that leads elsewhere. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !name.includes("/");
 
-/** The folders Claude Code may load the skill `name` from (R22), those that are there: her folder's own skills, the user's, each
-    plugin's in the cache (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
-    (~/.claude/plugins/synced/<account>/<plugin>/skills). */
-export function skillFolders({ home, folder, name }) {
-  if (!plainName(name)) return [];
+/** The folders in `dir` and the links in it to folders, by their paths: none when it is not there or cannot be read. */
+function foldersThrough(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() || (e.isSymbolicLink() && isFolder(join(dir, e.name)))).map((e) => join(dir, e.name)).sort();
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Whether `path` is a folder, or a link to one. */
+function isFolder(path) {
+  try {
+    return Boolean(statSync(path, { throwIfNoEntry: false })?.isDirectory());
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Whether `path` is a link. */
+function isLink(path) {
+  try {
+    return Boolean(lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink());
+  } catch (e) {
+    return false;
+  }
+}
+
+/** The folders Claude Code may load skills from (R22): her folder's own skills, the user's, each plugin's in the cache
+    (~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills), and each plugin's synced from her account
+    (~/.claude/plugins/synced/<account>/<plugin>/skills), the plugins' as `list` finds the folders in a folder. */
+function skillRoots({ home, folder }, list) {
   const plugins = join(home, ".claude", "plugins");
-  const roots = [
+  return [
     join(folder, ".claude", "skills"),
     join(home, ".claude", "skills"),
-    ...foldersIn(join(plugins, "cache")).flatMap(foldersIn).flatMap(foldersIn).map((dir) => join(dir, "skills")),
-    ...foldersIn(join(plugins, "synced")).flatMap(foldersIn).map((dir) => join(dir, "skills")),
+    ...list(join(plugins, "cache")).flatMap(list).flatMap(list).map((dir) => join(dir, "skills")),
+    ...list(join(plugins, "synced")).flatMap(list).map((dir) => join(dir, "skills")),
   ];
-  return roots.map((root) => join(root, name)).filter((dir) => {
+}
+
+/** The folders Claude Code may load the skill `name` from (R22, skillRoots), those that are there, no link taken. */
+export function skillFolders({ home, folder, name }) {
+  if (!plainName(name)) return [];
+  return skillRoots({ home, folder }, foldersIn).map((root) => join(root, name)).filter((dir) => {
     try {
       return lstatSync(dir).isDirectory();
     } catch (e) {
@@ -471,10 +549,21 @@ function carriesHooks(dir) {
   return manifest === null || Object.hasOwn(manifest, "hooks") || Object.hasOwn(manifest, "mods");
 }
 
+/** The links in `dir`, by their paths: none when it is not there or cannot be read. */
+function linksIn(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isSymbolicLink()).map((e) => join(dir, e.name)).sort();
+  } catch (e) {
+    return [];
+  }
+}
+
 /** What plugins on this Mac could loosen the open lock, as the lines for Jason (R21): each enabled plugin that carries hooks or a mod,
     since they run outside the sandbox (C16). A plugin is enabled when any of `settingsList` (the settings sources, each an object or
     null) says `enabledPlugins["<plugin>@<marketplace>"]` is true, and is then looked for in the cache, in every version kept there;
-    every plugin synced from her account (~/.claude/plugins/synced/<account>/<plugin>) is enabled. */
+    every plugin synced from her account (~/.claude/plugins/synced/<account>/<plugin>) is enabled. A plugin that is enabled but has no
+    version in the cache, and a version or a synced plugin or account that is a link, which is not followed, are said too, since then
+    whether it carries hooks or a mod is not known. */
 export function pluginsWhy({ home, settingsList }) {
   const plugins = join(home, ".claude", "plugins");
   const enabled = new Set();
@@ -483,28 +572,38 @@ export function pluginsWhy({ home, settingsList }) {
     for (const [key, on] of Object.entries(set.enabledPlugins)) if (on === true) enabled.add(key);
   }
   const why = [];
+  const unknown = "so whether it carries hooks or a mod, which run outside the sandbox, is not known";
   for (const key of [...enabled].sort()) {
     const at = key.lastIndexOf("@");
     const [name, marketplace] = [key.slice(0, at), key.slice(at + 1)];
     if (at < 0 || !plainName(name) || !plainName(marketplace)) continue;
-    if (foldersIn(join(plugins, "cache", marketplace, name)).some(carriesHooks)) why.push(`(Jason: the plugin ${key} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+    const dir = join(plugins, "cache", marketplace, name);
+    const versions = foldersIn(dir);
+    if (versions.some(carriesHooks)) why.push(`(Jason: the plugin ${key} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
+    if (linksIn(dir).length) why.push(`(Jason: the plugin ${key} is kept through a link, ${unknown}. Turn it off for her account.)`);
+    else if (!versions.length) why.push(`(Jason: the plugin ${key} is turned on but is not in the plugins cache, ${unknown}. Turn it off for her account.)`);
   }
-  for (const dir of foldersIn(join(plugins, "synced")).flatMap(foldersIn)) {
+  const accounts = foldersIn(join(plugins, "synced"));
+  for (const dir of accounts.flatMap(foldersIn)) {
     if (carriesHooks(dir)) why.push(`(Jason: the plugin ${basename(dir)} carries hooks or a mod, which run outside the sandbox. Turn it off for her account.)`);
   }
+  if ([join(plugins, "synced"), ...accounts].some((dir) => linksIn(dir).length)) why.push(`(Jason: a plugin synced from her account is kept through a link, ${unknown}.)`);
   return why;
 }
 
 /** What skills her folder allows could loosen the open lock, as the lines for Jason: each skill of `allow` (its `skill` entries) whose
-    SKILL.md, in any folder it may be loaded from (skillFolders), registers hooks: a `hooks:` line in its front matter (C22). */
+    SKILL.md, in any folder it may be loaded from (skillRoots, through links to plugins' folders), registers hooks: a `hooks:` line in
+    its front matter (C22); and each that is a link in one of those folders, since then whether it registers hooks is not known. */
 export function skillsWhy({ home, folder, allow }) {
   const names = [...new Set((Array.isArray(allow) ? allow : []).filter((entry) => isObject(entry) && entry.type === "skill").map((entry) => entry.name))];
   const why = [];
-  for (const name of names) {
-    const hooked = skillFolders({ home, folder, name }).some((dir) => {
+  for (const name of names.filter(plainName)) {
+    const places = skillRoots({ home, folder }, foldersThrough).map((root) => join(root, name));
+    const hooked = places.filter((dir) => !isLink(dir) && isFolder(dir)).some((dir) => {
       let text;
       try {
-        text = readFileSync(join(dir, "SKILL.md"), "utf8");
+        // A byte-order mark before the front matter is not let hide it.
+        text = readFileSync(join(dir, "SKILL.md"), "utf8").replace(/^\uFEFF/, "");
       } catch (e) {
         return false;
       }
@@ -512,6 +611,7 @@ export function skillsWhy({ home, folder, allow }) {
       return Boolean(front) && /^\s*hooks\s*:/m.test(front[1]);
     });
     if (hooked) why.push(`(Jason: the skill ${name}, which her folder allows, registers hooks (hooks: in its SKILL.md).)`);
+    if (places.some(isLink)) why.push(`(Jason: the skill ${name}, which her folder allows, is kept through a link, so whether it registers hooks is not known.)`);
   }
   return why;
 }

@@ -32,6 +32,10 @@
 #                                    write the import (light or full) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
 #                                    --machine, --rules-only also writes readings off. These three options are for --machine only
+#   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
+#                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
+#                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
+#                                    takes them. Only where her folder gets the open lock, which --print says
 #
 # It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
 # 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
@@ -79,6 +83,10 @@ MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-
 SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
 WORK="$HOME/BRIMM Video Work"
 CHECKOUT="${HERE:h}"
+# The Claude Code version her folder's open lock was checked on by hand in the Code tab, read from studio.js as the Claude model is
+# from unedited.js: "" while it is null there. Until one is named every Mac's folder gets the strict lock, whatever its settings say
+# (settings.js effectiveLock), and this says so.
+OPEN_LOCK_CLAUDE="$(sed -n 's/^export const OPEN_LOCK_CLAUDE = "\([0-9][0-9.]*\)";$/\1/p' "$HERE/studio.js")"
 
 say() { print -r -- "$@"; }
 
@@ -100,6 +108,10 @@ switch_options=()
 switch_missing=""
 # Set, with --machine, when the settings settings.js would write say the light import: what is sent to Claude is said for it.
 light_import=""
+# --user-deny: her user settings are given the Read deny rules of the places her folder's open lock keeps from Claude.
+user_deny=""
+# Set, with --machine, when her folder gets the open lock: the settings say open and a Claude Code is named for it.
+open_lock=""
 while (( $# )); do
   arg="$1"
   shift
@@ -108,6 +120,7 @@ while (( $# )); do
     --remove) mode="remove" ;;
     --rules-only) rules_only="$arg" ;;
     --yes) yes="yes" ;;
+    --user-deny) user_deny="yes" ;;
     --drop|--import|--handoff)
       if (( $# )) && [[ "$1" != -* ]]; then switch_options+=("$arg" "$1"); shift; else switch_missing="${switch_missing:-$arg}"; fi ;;
     --machine)
@@ -137,6 +150,15 @@ if [[ ${#switch_options[@]} -gt 0 && "$machined" != "yes" ]]; then
   say '--drop, --import and --handoff are for one of the two Macs, set up with --machine: ./install.sh --machine "Mac Studio" --drop Drop "<path to BRIMM Video>"'
   exit 2
 fi
+# --user-deny changes her user settings, on one of the two Macs; --remove changes no settings.
+if [[ -n "$user_deny" && "$mode" == "remove" ]]; then
+  say "--remove stops the watching and changes no settings, so it does not take --user-deny."
+  exit 2
+fi
+if [[ -n "$user_deny" && "$machined" != "yes" ]]; then
+  say "--user-deny is for one of the two Macs, set up with --machine: ./install.sh --machine \"Sallie's laptop\" --user-deny \"<path to BRIMM Video>\""
+  exit 2
+fi
 # There is no folder it would watch without being told. Stopping the watching needs none.
 if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; then
   say 'Name the folder to watch for unedited video: ./install.sh "<folder>"'
@@ -160,6 +182,19 @@ settings_plan() {
   local code=0
   { planned="$("$1" "$HERE/settings.js" plan --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}" 2>&3)" || code=$?; } 3>&1
   return $code
+}
+# What the settings settings.js would write ($planned) say of her folder's lock, a line each, as settings.js reads them (lockOf, webOf,
+# proxyPortOf, zoomFolderOf): the lock, the web tools, the proxy port ("" for none), and last where Zoom keeps its recordings. Asked of
+# the node at $1, which is given the tool's folder, never settings.js itself, which would then run as a command.
+lock_facts() {
+  print -r -- "$planned" | "$1" --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const { lockOf, webOf, zoomFolderOf, proxyPortOf } = await import(pathToFileURL(join(process.argv[1], "settings.js")).href);
+const s = JSON.parse(readFileSync(0, "utf8"));
+process.stdout.write([lockOf(s), webOf(s), proxyPortOf(s) ?? "", zoomFolderOf(s, process.env.HOME)].join("\n") + "\n");
+' "$HERE"
 }
 # Whether the node at $1 is older than 22, which the tool needs: gives 0 when it is, and with "say" as the second word says so too,
 # as a refusal does. The one place its version is looked at.
@@ -383,6 +418,36 @@ if [[ "$machined" == "yes" ]]; then
     [[ "$import_name" != light ]] || light_import=1
     planned="${(F)plan_lines[1,-4]}"
   fi
+  # Her folder's lock, as the settings settings.js would write say it: open only when they say open and a Claude Code is named for the
+  # open lock, as settings.js studio decides it. With no node, the settings are today's, which say nothing of it: strict.
+  said_lock="strict"
+  web_tools="held"
+  proxy_port=""
+  zoom_folder="$HOME/Documents/Zoom"
+  if [[ -n "$planned" ]]; then
+    lock_out="$(lock_facts "$settings_node")" || lock_out=""
+    lock_lines=("${(@f)lock_out}")
+    said_lock="${lock_lines[1]-}"
+    web_tools="${lock_lines[2]-}"
+    proxy_port="${lock_lines[3]-}"
+    zoom_folder="${(F)lock_lines[4,-1]}"
+    if [[ "$said_lock" != (strict|open) || "$web_tools" != (held|open) || ( -n "$proxy_port" && "$proxy_port" != <-> ) || "$zoom_folder" != /* ]]; then
+      say "The installer could not read what settings.js said of her folder's lock, so it changed nothing."
+      say ""
+      say "Nothing was changed."
+      exit 2
+    fi
+  fi
+  [[ "$said_lock" != open || -z "$OPEN_LOCK_CLAUDE" ]] || open_lock="yes"
+  zoom_shown="$zoom_folder"
+  [[ "$zoom_folder" != "$HOME"/* ]] || zoom_shown="~/${zoom_folder#$HOME/}"
+  # Her user settings' deny rules are those of the places the open lock keeps from Claude, so --user-deny is for the open lock alone.
+  if [[ -n "$user_deny" && -z "$open_lock" ]]; then
+    say "--user-deny adds deny rules for the places her folder's open lock keeps from Claude, and her folder gets the strict lock on this Mac, so it is not taken here."
+    say ""
+    say "Nothing was changed."
+    exit 2
+  fi
   drop="$root/$drop_name/$machine"
   marker="$drop/.brimm-watched-by"
   if [[ -f "$marker" ]]; then
@@ -455,6 +520,8 @@ say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && 
 autoload -Uz is-at-least
 # Why her folder for Claude is not written, when it is not: "" when it is.
 studio_why=""
+# Set when her user settings were to be given the deny rules (--user-deny), and settings.js refused or could not.
+user_deny_why=""
 # Whether the setup ends with the check of Claude from a launch agent's context: when Claude Code is here, and never with
 # --rules-only, which asks Claude nothing.
 check_line=""
@@ -508,15 +575,45 @@ if [[ -n "$machine" ]]; then
     elif ! is-at-least "$GUARD_CLAUDE" "$claude_version"; then
       studio_why="Claude Code here is $claude_version, older than the $GUARD_CLAUDE her folder's guard needs. In Terminal: claude update, then run this again"
       say "  Claude Code's version:  $claude_version, older than the $GUARD_CLAUDE her folder's guard needs: on it the guard could let a call through. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude."
+    elif [[ -n "$open_lock" ]] && ! is-at-least "$OPEN_LOCK_CLAUDE" "$claude_version"; then
+      # The open lock was checked on that version by hand, and on none older.
+      studio_why="Claude Code here is $claude_version, older than the $OPEN_LOCK_CLAUDE her folder's open lock was checked on. In Terminal: claude update, then run this again"
+      say "  Claude Code's version:  $claude_version, older than the $OPEN_LOCK_CLAUDE her folder's open lock was checked on. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude."
     else
-      say "  Claude Code's version:  $claude_version (her folder's guard needs $GUARD_CLAUDE or later)"
+      say "  Claude Code's version:  $claude_version (her folder's guard needs $GUARD_CLAUDE or later${open_lock:+, and its open lock was checked on $OPEN_LOCK_CLAUDE})"
     fi
   else
     studio_why="Claude Code is not here. Install it, then run this again"
     say "  Claude Code's version:  not here, so the install does not write her folder for Claude until it is."
   fi
-  say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)"
-  say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there"
+  # Which lock her folder gets, and for the open lock what it keeps from Claude, in Finder's words, and what it opens.
+  if [[ -n "$open_lock" ]]; then
+    say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings, its skill, and Pictures/)"
+    say "  Her folder's lock:  open: Claude may help with anything but the never list, and its commands run in Claude Code's sandbox with no network"
+    say "  The workshop, where Claude writes:  ~/BRIMM Video Workshop"
+    say "  Kept from Claude in her folder:  BRIMM Video (all but Assets), BRIMM VIDEO Transfer, Zoom's recordings ($zoom_shown), Final Cut's backups, BRIMM Video Work, brimm-video's own settings, Claude's and the Claude app's own files, Dropbox's own files, brimm-video's logs, and the folders that hold secrets"
+    if [[ "$web_tools" == open ]]; then
+      say "  The web tools:  open"
+    else
+      say "  The web tools:  held (until node tool/settings.js studio --web open, on Jason's yes)"
+    fi
+    if [[ -n "$proxy_port" ]]; then
+      say "  Her folder's proxy port:  $proxy_port, which nothing on this Mac may listen on"
+    else
+      say "  Her folder's proxy port:  picked when her folder is written"
+    fi
+    if [[ -n "$user_deny" ]]; then
+      say "  Her user settings, ~/.claude/settings.json:  the Read deny rules for the places above, added (every Claude Code session on this Mac takes them; they hold Claude's file tools, not a script)"
+    else
+      say "  Her user settings:  left as they are (--user-deny adds deny rules for the places above)"
+    fi
+    say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check her Claude folder's open lock\", in the Code tab, is what proves her folder is locked down there"
+  else
+    say "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)"
+    say "  Her folder's lock:  strict (Claude runs only brimm-video's commands there)"
+    [[ "$said_lock" != open ]] || say "  The open lock:  waits for the checks by hand in the Code tab (no Claude Code version is named for it yet), so her folder keeps the strict lock"
+    say "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there"
+  fi
   # That copy: the app keeps each in a folder named for its version, and runs the newest. It is only said; the Terminal's version
   # above decides whether her folder is written, and /status in the Code tab says which copy runs.
   app_newest=""
@@ -526,6 +623,10 @@ if [[ -n "$machine" ]]; then
   done
   if [[ -z "$app_newest" ]]; then
     say "  The Claude app's own Claude Code:  no copy found here (in ~/Library/Application Support/Claude/claude-code), so only /status in the Code tab can say its version"
+  elif [[ -n "$open_lock" ]] && ! is-at-least "$OPEN_LOCK_CLAUDE" "$app_newest"; then
+    # The Code tab runs that copy, and the open lock was checked on none older: her folder is not written with it.
+    studio_why="${studio_why:-The Claude app's own Claude Code is $app_newest, older than the $OPEN_LOCK_CLAUDE her folder's open lock was checked on. In the app, choose Claude > Check for Updates, then run this again}"
+    say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here, older than the $OPEN_LOCK_CLAUDE her folder's open lock was checked on. In the app, choose Claude > Check for Updates, then run this again. Until then the install does not write her folder for Claude."
   elif ! is-at-least "$GUARD_CLAUDE" "$app_newest"; then
     say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here, older than the $GUARD_CLAUDE her folder's guard needs: on it the guard could let a call through. In the app, choose Claude > Check for Updates, then check /status in the Code tab"
   else
@@ -628,6 +729,8 @@ if [[ -n "$machine" ]]; then
     exit 1
   fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
+  # With --user-deny, her user settings' deny rules, added by settings.js, which refuses user settings it cannot read and then adds none.
+  if [[ -n "$user_deny" ]] && ! "$node" "$HERE/settings.js" user-deny; then user_deny_why="yes"; fi
 fi
 
 agent "$node" > "$AGENT_FILE"
@@ -680,6 +783,10 @@ if [[ -n "$machine" ]]; then
   fi
   if [[ -n "$old_folder" && -d "$old_folder" ]]; then
     say "The old drop folder, $old_folder, is no longer watched. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
+  fi
+  if [[ -n "$user_deny_why" ]]; then
+    say "Her user settings were not given the deny rules: settings.js said why, above."
+    [[ -n "$studio_why" ]] || exit 1
   fi
   if [[ -n "$studio_why" ]]; then
     say "Her folder for Claude was not written: $studio_why."

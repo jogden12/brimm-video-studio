@@ -18,6 +18,7 @@ import { readStatuses, writeStatus } from "../importing.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
 import { fileSafe } from "../names.js";
+import { cardOf as cardFor } from "../receipts.js";
 import { uneditedFolder, uneditedFolders } from "../unedited.js";
 import { noProgress } from "../progress.js";
 import { probed, TOLD, SRT, PAUSES } from "./fixtures.js";
@@ -480,12 +481,13 @@ describe("episodes, on a Mac that does the light import", () => {
     clientEpisode(t, { folder: "2026-10-19 Group session Acme (Mac Studio)", video: "Group session Acme.mov", id: "e-20261019-0c0c0c", over: SESSION_OVER });
     clientEpisode(t, { folder: "2026-10-18 Pricing talk (Mac Studio)", video: "Pricing talk.mov", id: "e-20261018-0d0d0d", over: { kind: "finished", answer: ANSWERED } });
     const said = await listing(t);
-    assert.deepEqual(said.slice(0, 7), [
+    assert.deepEqual(said.slice(0, 8), [
       "Episodes, newest first:",
       `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`,
       "    Seen: wide, 2:00, 3 retakes",
       "    Came: from a camera",
       "    Guess: raw with retakes",
+      `    Card: ${JSON.stringify(cardFor({ label: LABEL, guess: "raw", maybe: null }))}`,
       `  ${SESSION}: a client or group session, of 2:00, id 0c0c0c`,
       "  Pricing talk (a placeholder name): an episode of 2:00, in 2026-10-18 Pricing talk (Mac Studio), id 0d0d0d"
     ]);
@@ -511,8 +513,8 @@ describe("episodes, on a Mac that does the light import", () => {
     conflictedRecord(newer.folder);
     const said = await listing(t);
     assert.equal(said[1], `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`);
-    assert.deepEqual(said.slice(2, 5), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
-    assert.match(said[5], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
+    assert.deepEqual(said.slice(2, 6), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", `    Card: ${JSON.stringify(cardFor({ label: LABEL, guess: "raw", maybe: null }))}`]);
+    assert.match(said[6], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
     assert.ok(said.includes("  An episode a newer brimm-video wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Ann Other/);
     t.done();
@@ -574,7 +576,8 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     const said = (await on(depsOf(t), "episodes")).said;
     const at = said.indexOf(said.find((line) => line.startsWith(`  ${label}: `)));
     const lines = [];
-    for (let i = at + 1; i < said.length && said[i].startsWith("    "); i++) lines.push(said[i]);
+    // The card itself (`    Card: …`), which receipts.test.js pins, is left out: these are the facts above it.
+    for (let i = at + 1; i < said.length && said[i].startsWith("    "); i++) if (!said[i].startsWith("    Card")) lines.push(said[i]);
     return { said, at, lines };
   };
   /** A finished, raw, short or unanswered video that the walked video's words matched, in the folder of its own day. */
@@ -866,7 +869,8 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     rmSync(join(e.folder, `${STEM}.transcript.txt`));
     const { said, at } = await cardOf(t);
     assert.deepEqual(said.slice(at, at + 4), [`  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`, "    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
-    assert.match(said[at + 4], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode/);
+    assert.match(said[at + 4], /^ {4}Card: \{/);
+    assert.match(said[at + 5], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode/);
     t.done();
   });
   it("is the same on a Mac whose import is not the light one, for a video waiting for its answer", async () => {

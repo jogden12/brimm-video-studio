@@ -4,10 +4,10 @@
 // The tests need a Mac, which has zsh and plutil. Anywhere else they skip themselves and say why.
 // The few lines that take a launch agent away are also run alone, in zsh, never the installer whole: in a folder made for
 // the test, with a stand-in for launchctl first on the PATH, so the Mac's own launchd is never asked anything.
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,11 +45,11 @@ const ask = (...args) => askOn({}, ...args);
     its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". `finalCut` is the version of a made-up
     Final Cut Pro the installer is pointed at, or null for none; without it the installer looks at this Mac's own. With
     `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
-    holds the stand-ins and /usr/bin and /bin. */
+    holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's. */
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, finalCut, finalCutText, settings, bare = false }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, finalCut, finalCutText, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -106,7 +106,7 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
       ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(app ? { BRIMM_FINAL_CUT: app } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
-    const r = spawnSync("/bin/zsh", [INSTALL, ...args], { encoding: "utf8", input: "", env });
+    const r = spawnSync("/bin/zsh", [install, ...args], { encoding: "utf8", input: "", env });
     const agents = (r.stdout.match(/<\?xml[\s\S]*?<\/plist>\n/g) || []).map((text, i) => {
       const file = join(dir, `agent-${i}.plist`);
       writeFileSync(file, text);
@@ -495,8 +495,11 @@ describe("the installer's own text", () => {
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
     assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"'), made);
-    // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them.
-    assert.ok(!/backup/i.test(text), "the installer names no backups");
+    // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them. The one line that names
+    // them says what the open lock keeps from Claude, Final Cut's backups among it.
+    const backups = text.split("\n").filter((line) => /backup/i.test(line));
+    assert.equal(backups.length, 1, backups.join("\n"));
+    assert.ok(backups[0].trim().startsWith('say "  Kept from Claude in her folder:  '), backups[0]);
     assert.ok(made.includes('"$node" "$HERE/settings.js" marker "$drop" "$machine"'), made);
     // It is told the settings of the switch that the installer was told (--drop, --import, --handoff, and --rules-only as readings
     // off), and checks the old drop folder again itself.
@@ -519,6 +522,56 @@ describe("the installer's own text", () => {
     // A step of the guide is a numbered line that opens with its title in bold, so a person sent there finds it by that name.
     const steps = [...guide.slice(guide.indexOf("\n## Steps\n")).matchAll(/^\d+\. \*\*([^*]+):\*\*/gm)].map((m) => m[1]);
     assert.ok(steps.includes(TITLE), `no step of docs/setup/sallies-laptop.md is titled "${TITLE}":\n${steps.join("\n")}`);
+  });
+  it("names the lock-down checks by titles that are steps of the setup guide, for both locks", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const STRICT = "Check that her Claude folder only runs BRIMM Video";
+    const OPEN = "Check her Claude folder's open lock";
+    // The steps: each a numbered line that opens with its title in bold, numbered 1, 2, 3 and on with no gap. Those whose title ends in a
+    // colon are the ones the pattern above finds by their titles.
+    const steps = guide.slice(guide.indexOf("\n## Steps\n"), guide.indexOf("\n## If something goes wrong\n"));
+    const numbers = [...steps.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]));
+    assert.deepEqual(numbers, numbers.map((n, i) => i + 1), numbers.join(" "));
+    const numberOf = Object.fromEntries([...steps.matchAll(/^(\d+)\. \*\*([^*]+):\*\*/gm)].map((m) => [m[2], Number(m[1])]));
+    assert.deepEqual([numberOf[STRICT], numberOf[OPEN]], [9, 10], JSON.stringify(numberOf));
+    for (const title of [STRICT, OPEN]) {
+      assert.ok(text.includes(`the setup guide's \\"${title}\\", in the Code tab`), `install.sh: ${title}`);
+      assert.ok(readme.includes(`"${title}"`), `README.md: ${title}`);
+    }
+    // The steps after the open-lock check moved on by one, and so did every reference to them.
+    assert.equal(numberOf["The first real run"], 11, JSON.stringify(numberOf));
+    assert.ok(guide.includes("step 11 is then the first check that 12.3 opens brimm-video's timelines"), "morning check 1");
+    assert.ok(guide.includes("8. **A first run:** step 11, with your own test recordings, never her episodes."), "Switching her laptop, item 8");
+    assert.doesNotMatch(guide, /\bstep 10 is then|\*\*A first run:\*\* step 10\b|ask it again after step 10\b/);
+    // Each "step 9's check again" names the open lock's too.
+    const again = [...guide.matchAll(/step 9's check again[^.;:]*/g)].map((m) => m[0]);
+    assert.ok(again.length >= 4, again.join("\n"));
+    for (const said of again) assert.ok(said.includes("or step 10's, on an open-lock laptop"), said);
+  });
+  it("has the setup guide's open-lock check name every refusal, every hidden name and every card-free step the design lists", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const step = guide.split("\n").find((l) => /^\d+\. \*\*Check her Claude folder's open lock:\*\*/.test(l));
+    assert.ok(step, "no step is titled Check her Claude folder's open lock");
+    for (const words of ["trust", "`behind`", "`cat`", "`node -e`", "`python3`", "/System/Volumes/Data", "letter case", "`grep -r`", "`rg`", "`find`", "`mdfind`", "`osascript", "`curl`", "`nice`", "`env -u SANDBOX_RUNTIME`", "http://127.0.0.1/", "`printenv`", "HTTP_PROXY", "memory", "side-session-notes", "teachings", "words file",
+      "Episodes/0000 Lock check (test)/", "removed afterwards", "never her episodes", "the deploy key", "named owner's check", "no approval card", "every mode the menu offers"]) assert.ok(step.includes(words), words);
+    // It opens nothing that the design keeps for later phases, and runs no git pull of its own.
+    assert.doesNotMatch(step, /`picture |OpenRouter key|`[^`]*\bgit\b[^`]*\bpull`/);
+  });
+  it("has the setup guide give Jason the open lock's steps alone, and Sallie hers, and says what each new line of behind means", () => {
+    const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
+    const section = (heading) => {
+      const at = guide.indexOf(`\n## ${heading}`);
+      assert.ok(at >= 0, heading);
+      const end = guide.indexOf("\n## ", at + 1);
+      return guide.slice(at, end < 0 ? undefined : end);
+    };
+    const jason = section("The open lock (for Jason alone)");
+    for (const words of ["Finder's and QuickTime's recent", "memory/", "skills and plugins", "frontend-design", "node tool/settings.js studio --node <node> --zoom", "--lock open", "--web open", "OPEN_LOCK_CLAUDE", 'pull as under "Jason has a newer brimm-video", above', "--user-deny"]) assert.ok(jason.includes(words), words);
+    const sallie = section("The open lock (for Sallie)");
+    for (const words of ["Zoom recording into her drop folder rather than copy it", "delete Zoom's original", "add this folder", "No sandbox", "`/sandbox`", "`/memory`"]) assert.ok(sallie.includes(words), words);
+    const wrong = section("If something goes wrong");
+    for (const words of ["sandbox", "Edit(", "additionalDirectories", "--add-dir", "flag", "SessionStart", "plugin", "hooks:", "the workshop holds", "No sandbox", "memory", "looks like a secret", "proxy port", "Claude Code has not trusted this folder yet", "Read deny rule", "This chat holds a session's words", "brimm-video was run inside Claude Code's sandbox", "`/sandbox exclude`", 'choose the one-time "Yes" only']) assert.ok(wrong.includes(words), words);
   });
   // A check agent a setup cut short left behind asks Claude at every login, and nothing on screen says so. So after a real
   // setup, the guide (for her laptop) and the README (for either Mac) have its file looked for, by install.sh's own name for
@@ -1359,5 +1412,146 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const help = r.out.replace(/\s+/g, " ");
     for (const said of ["--drop Drop", '--drop "Unedited Video"', "--import light", "--handoff 2", "BRIMM Video/Drop/<this Mac>", "no longer watched", "left as it is", "refused", "--rules-only also writes readings off"]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
     assert.ok(help.includes("The switch is refused while it holds a video; Jason checks it is still empty, then deletes it by hand, so that none is dropped there by habit."), r.out);
+  });
+});
+
+/** A copy of this checkout's tool, in a folder made for the test, with OPEN_LOCK_CLAUDE set to `version` in its studio.js, as the commit
+    that names it after the checks by hand will: the installer there reads it by sed, as it reads this checkout's null. Its tests are
+    not copied. Gives its install.sh, and done(). */
+function checkoutWithOpenLock(version) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-checkout-")));
+  const tool = join(dir, "BRIMM video", "tool");
+  cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+  const studio = join(tool, "studio.js");
+  const text = readFileSync(studio, "utf8");
+  assert.ok(text.includes("\nexport const OPEN_LOCK_CLAUDE = null;\n"), "studio.js names no Claude Code for the open lock");
+  writeFileSync(studio, text.replace("\nexport const OPEN_LOCK_CLAUDE = null;\n", `\nexport const OPEN_LOCK_CLAUDE = "${version}";\n`));
+  return { install: join(tool, "install.sh"), done: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+describe("the installer and her folder's lock (the open lock, K1), asked what it would do", { skip: notAMac }, () => {
+  let copy;
+  before(() => {
+    copy = checkoutWithOpenLock("2.1.308");
+  });
+  after(() => copy.done());
+  /** The installer `install` asked what it would do for her laptop, this Mac's settings being `settings` (none when not given), its
+      Claude Code `version`, the files `files` in its home, and `more` options told. */
+  const askLaptop = ({ install = INSTALL, settings, version = "2.1.308", files = [], more = [] } = {}) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    try {
+      return askWith({ install, settings: settings && { machine: "Sallie's laptop", root, checkout: dirname(dirname(install)), ...settings }, claudeVersion: `${version} (Claude Code)`, files, onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", ...more, root);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  /** The app's own copy of Claude Code `version`, by its path from the home folder. */
+  const appCopy = (version) => `Library/Application Support/Claude/claude-code/${version}/a93ded4b1b47/claude.app/Contents/MacOS/claude`;
+  const has = (r, line) => assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+  const STRICT = "  Her folder's lock:  strict (Claude runs only brimm-video's commands there)";
+  const OPEN = "  Her folder's lock:  open: Claude may help with anything but the never list, and its commands run in Claude Code's sandbox with no network";
+  const WAITS = "  The open lock:  waits for the checks by hand in the Code tab (no Claude Code version is named for it yet), so her folder keeps the strict lock";
+  const STRICT_FOLDER = "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)";
+  const USER_ADDED = "  Her user settings, ~/.claude/settings.json:  the Read deny rules for the places above, added (every Claude Code session on this Mac takes them; they hold Claude's file tools, not a script)";
+  const USER_LEFT = "  Her user settings:  left as they are (--user-deny adds deny rules for the places above)";
+
+  it("says which lock her folder gets, and that the open lock waits for the checks by hand while no version is named for it", () => {
+    // This checkout names none: settings that say open get the strict lock, and the installer says why.
+    for (const [settings, said, unsaid] of [[undefined, [STRICT], [WAITS, OPEN]], [{ lock: "strict" }, [STRICT], [WAITS, OPEN]], [{ lock: "open" }, [STRICT, WAITS], [OPEN]]]) {
+      const r = askLaptop({ settings });
+      assert.equal(r.status, 0, r.err + r.out);
+      for (const line of [STRICT_FOLDER, ...said]) has(r, line);
+      for (const line of unsaid) assert.ok(!r.out.includes(line), `${line}\n---\n${r.out}`);
+      assert.ok(r.out.indexOf(STRICT_FOLDER) < r.out.indexOf(STRICT) && r.out.indexOf(STRICT) < r.out.indexOf("\n  The Claude app's Code tab:"), r.out);
+      assert.match(r.out, /\nNothing was changed\.\n$/);
+    }
+    // A checkout that names one: open when this Mac's settings say so, and only then.
+    for (const [settings, line] of [[undefined, STRICT], [{ lock: "strict" }, STRICT], [{ lock: "open" }, OPEN]]) {
+      const r = askLaptop({ install: copy.install, settings });
+      assert.equal(r.status, 0, r.err + r.out);
+      has(r, line);
+      assert.ok(!r.out.includes(WAITS), r.out);
+    }
+  });
+  it("for an open lock, names the workshop, the places kept from Claude in Finder's words, the web tools held and the proxy port", () => {
+    const r = askLaptop({ install: copy.install, settings: { lock: "open" } });
+    assert.equal(r.status, 0, r.err + r.out);
+    const lines = [
+      "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings, its skill, and Pictures/)",
+      OPEN,
+      "  The workshop, where Claude writes:  ~/BRIMM Video Workshop",
+      "  Kept from Claude in her folder:  BRIMM Video (all but Assets), BRIMM VIDEO Transfer, Zoom's recordings (~/Documents/Zoom), Final Cut's backups, BRIMM Video Work, brimm-video's own settings, Claude's and the Claude app's own files, Dropbox's own files, brimm-video's logs, and the folders that hold secrets",
+      "  The web tools:  held (until node tool/settings.js studio --web open, on Jason's yes)",
+      "  Her folder's proxy port:  picked when her folder is written",
+      USER_LEFT,
+      "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check her Claude folder's open lock\", in the Code tab, is what proves her folder is locked down there"
+    ];
+    for (const line of lines) has(r, line);
+    const at = lines.map((line) => r.out.indexOf(`\n${line}\n`));
+    assert.deepEqual(at, [...at].sort((a, b) => a - b), r.out);
+    assert.ok(!r.out.includes(STRICT_FOLDER) && !r.out.includes("Check that her Claude folder only runs BRIMM Video"), r.out);
+    // This Mac's settings name where Zoom keeps its recordings, the port, and the web tools opened.
+    const told = askLaptop({ install: copy.install, settings: { lock: "open", web: "open", zoomFolder: "/Volumes/Recordings/Zoom", proxyPort: 47123 } });
+    assert.equal(told.status, 0, told.err + told.out);
+    assert.ok(told.out.includes(", Zoom's recordings (/Volumes/Recordings/Zoom), "), told.out);
+    has(told, "  The web tools:  open");
+    has(told, "  Her folder's proxy port:  47123, which nothing on this Mac may listen on");
+    // None of it is said of the strict lock.
+    for (const strict of [askLaptop({ settings: { lock: "open", proxyPort: 47123 } }), askLaptop({ install: copy.install })]) assert.doesNotMatch(strict.out, /Workshop|Kept from Claude|The web tools|proxy port|Her user settings/);
+  });
+  it("does not write her folder when Claude Code is older than the version the open lock was checked on", () => {
+    const old = askLaptop({ install: copy.install, settings: { lock: "open" }, version: "2.1.300" });
+    assert.equal(old.status, 0, old.err + old.out);
+    has(old, "  Claude Code's version:  2.1.300, older than the 2.1.308 her folder's open lock was checked on. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude.");
+    const fine = askLaptop({ install: copy.install, settings: { lock: "open" }, files: [appCopy("2.1.308")] });
+    has(fine, "  Claude Code's version:  2.1.308 (her folder's guard needs 2.1.295 or later, and its open lock was checked on 2.1.308)");
+    has(fine, "  The Claude app's own Claude Code:  2.1.308, the newest copy the app keeps here (her folder's guard needs 2.1.295 or later; /status in the Code tab says which copy runs)");
+    // The Claude app's own copy, which the Code tab runs, older than that too.
+    const app = askLaptop({ install: copy.install, settings: { lock: "open" }, files: [appCopy("2.1.300")] });
+    has(app, "  The Claude app's own Claude Code:  2.1.300, the newest copy the app keeps here, older than the 2.1.308 her folder's open lock was checked on. In the app, choose Claude > Check for Updates, then run this again. Until then the install does not write her folder for Claude.");
+    // With the strict lock, only the guard's version counts, as before.
+    const strict = askLaptop({ install: copy.install, version: "2.1.300", files: [appCopy("2.1.300")] });
+    has(strict, "  Claude Code's version:  2.1.300 (her folder's guard needs 2.1.295 or later)");
+    has(strict, "  The Claude app's own Claude Code:  2.1.300, the newest copy the app keeps here (her folder's guard needs 2.1.295 or later; /status in the Code tab says which copy runs)");
+    // The real run then writes no folder, and says why at its end, as for the guard's version.
+    const text = readFileSync(INSTALL, "utf8");
+    for (const why of [
+      'studio_why="Claude Code here is $claude_version, older than the $OPEN_LOCK_CLAUDE her folder\'s open lock was checked on. In Terminal: claude update, then run this again"',
+      'studio_why="${studio_why:-The Claude app\'s own Claude Code is $app_newest, older than the $OPEN_LOCK_CLAUDE her folder\'s open lock was checked on. In the app, choose Claude > Check for Updates, then run this again}"'
+    ]) assert.ok(text.includes(why), why);
+    // It reads the version the open lock was checked on from studio.js, as it reads the Claude model from unedited.js.
+    assert.ok(text.includes(`OPEN_LOCK_CLAUDE="$(sed -n 's/^export const OPEN_LOCK_CLAUDE = "\\([0-9][0-9.]*\\)";$/\\1/p' "$HERE/studio.js")"`), "the sed of OPEN_LOCK_CLAUDE");
+  });
+  it("names her user settings' deny rules, and adds them only with --user-deny", () => {
+    const r = askLaptop({ install: copy.install, settings: { lock: "open" }, more: ["--user-deny"] });
+    assert.equal(r.status, 0, r.err + r.out);
+    has(r, USER_ADDED);
+    assert.ok(!r.out.includes(USER_LEFT), r.out);
+    assert.ok(r.out.indexOf("\n  Her folder's proxy port:") < r.out.indexOf(`\n${USER_ADDED}\n`), r.out);
+    assert.deepEqual(r.left.filter((name) => name.startsWith(".claude")), []);
+    assert.equal(r.ran, "");
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+    // The real run adds them through settings.js, once her folder's settings are written, and only when told.
+    const text = readFileSync(INSTALL, "utf8");
+    const runs = text.split("\n").filter((line) => line.includes('"$HERE/settings.js" user-deny'));
+    assert.equal(runs.length, 1, runs.join("\n"));
+    assert.ok(runs[0].includes('[[ -n "$user_deny" ]]'), runs[0]);
+    assert.ok(text.indexOf(runs[0]) > text.indexOf('if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi'), "after her folder");
+    // Refused, changing nothing, where her folder gets the strict lock: the rules are the open lock's places.
+    for (const [install, settings] of [[INSTALL, { lock: "open" }], [copy.install, undefined]]) {
+      const s = askLaptop({ install, settings, more: ["--user-deny"] });
+      assert.equal(s.status, 2, s.out);
+      assert.ok(s.out.includes("--user-deny adds deny rules for the places her folder's open lock keeps from Claude, and her folder gets the strict lock on this Mac, so it is not taken here.\n\nNothing was changed.\n"), s.out);
+      assert.equal(s.ran, "");
+    }
+    // It is for one of the two Macs, and --remove takes none.
+    const lone = ask("--print", "--user-deny", "/tmp/folder");
+    assert.equal(lone.status, 2);
+    assert.ok(lone.out.includes("--user-deny is for one of the two Macs, set up with --machine"), lone.out);
+    const removing = ask("--print", "--remove", "--user-deny");
+    assert.equal(removing.status, 2);
+    assert.ok(removing.out.includes("--remove stops the watching and changes no settings, so it does not take --user-deny."), removing.out);
   });
 });
