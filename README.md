@@ -13,8 +13,9 @@ What the project must do is in `docs/requirements.md`. Both Macs use Final Cut P
 | `docs/requirements.md` | What the project must do, and the decisions it rests on |
 | `docs/research/` | The research behind the tool and its presets, written in brimm-operations |
 | `tool/` | The unedited-video tool, its face finder and its installer |
-| `tool/edit.js` | The command line for episodes, which Claude runs: `episodes`, `open`, `push`, `status`, `retry`; phase 2's `name`, `title`, `reel`, `finish`; phase 3's `reels` and `ask`; phase 1b's `release`, `show`, `behind`, `resolve`; phase 4's `captions`, `spell`, `logo`, `text`, `graphic`, `preset` and `cut`; and Part F's `kind`, `leave`, `which`, `teachings`, `principles` and `ideas` |
+| `tool/edit.js` | The command line for episodes, which Claude runs: `episodes`, `open`, `push`, `status`, `retry`; phase 2's `name`, `title`, `reel`, `finish`; phase 3's `reels` and `ask`; phase 1b's `release`, `show`, `behind`, `resolve`; phase 4's `captions`, `spell`, `logo`, `text`, `graphic`, `preset` and `cut`; Part F's `kind`, `leave`, `which`, `teachings`, `principles` and `ideas`; and the guide's `guide` |
 | `tool/studio.js`, `tool/studio/` | Sallie's folder for Claude, `~/BRIMM Video Studio`: the files it is written from (its `CLAUDE.md`, the `brimm-edit` skill), its settings, and the guard hook that lets her sessions run `edit.js` and nothing else |
+| `tool/guide.js`, `tool/guide-note.js` | The guide: the one next step for each video in her words, the BRIMM Ops page's steps, and her note of them on this Mac (`~/Library/Application Support/BRIMM Video/guide.json`) |
 | `tool/finish.js`, `tool/parts.js`, `tool/final-transcript.js`, `tool/handoff.js` | Finishing an episode: its detached part, finding each part's Shares and exports, the final transcript made again, and the hand-off for BRIMM Ops |
 | `tool/reel.js` | The timeline pushed for a Reel: its own upright project, or, for an episode imported before phase 3, the clip the import cut |
 | `tool/reels.js` | Reel candidates: their previews, `reels.json`, the list a person reads, asking again, and a Reel's upright Final Cut project |
@@ -311,6 +312,8 @@ None of this has met a real recording yet: the tests run every step with stand-i
 ## Sallie's card
 
 One page, for her, in the order of her day, on a Mac switched to the light import (the Mac Studio since 2026-10-25). The BRIMM Video Guide (https://claude.ai/artifact/WHVePKCjhjUjtBdHvPipgC) says the same at length.
+
+Not sure what to do? Say "I have a video" or "what's next?": Claude walks you through it, one step at a time.
 
 1. **Drop it.** Put the video in `The BRIMM DB/BRIMM Video/Drop/Mac Studio/` and wait for "Ready: <label>". If its file's name holds a client's name, rename it first. Zoom downloads still go to `BRIMM VIDEO Transfer/Zoom Video Transfer/`.
 2. **Say what it is.** Open Claude in BRIMM Video Studio on the Mac Studio (on your laptop only once Jason has switched it). Say "what's waiting?". For each new video Claude shows a card with two questions, what it is and whether it is a private session with a client or a group: answer both (say "which one is it?" first if you are not sure which video it is). The card's wording is still a proposal. For a session, Claude then asks what you want from it: say "the transcript only", or "its teachings" once Jason has turned them on. Never rate, report or share a chat about a session: a thumbs rating or a report keeps the chat, whatever the settings say.

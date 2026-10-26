@@ -69,3 +69,11 @@ Her laptop was set up on 2026-10-15 and still imports the old way: Claude reads 
 7. **Dropbox:** in Finder, Control-click `Drop/Sallie's laptop` and choose Make available offline.
 8. **A first run:** step 10, with your own test recordings, never her episodes.
 9. **Teachings from sessions** stay off until you have checked, on both accounts that touch a session (the one the `claude` command is signed in to, and the one the Code tab shows), that Anthropic does not train on their chats. Then, on each Mac: `cd ~/"Claude Code/BRIMM video" && node tool/settings.js sessions --teachings on --cli-account <email> --app-account <email>`, the CLI account being the one `claude auth status` shows. They lapse after 90 days.
+
+## The guide (2026-10-25)
+
+Her folder's skill walks her through each video one step at a time: she says "I have a video" or "what's next?", and Claude says only the one next step.
+
+1. **Her laptop's switch first:** the guide works only on a Mac on the light import, so on her laptop "Switching her laptop", above, comes first. Until then it says there that this Mac isn't set up for the guide yet, and to ask Jason.
+2. **Bringing it to each Mac:** once its pull request is merged, on each Mac with her folder for Claude, pull as under "Jason has a newer brimm-video", above (only when no import is running). Then, in the checkout, run the command `behind` names (`node tool/settings.js studio --node <node>`), then start a new session in her folder: `behind` says her folder is out of date until then. The pull changes `tool/studio/`, so make step 9's check again in that same sitting, as that says.
+3. **The check:** in her folder, say "I have a video". Claude asks whether it is a private session with a client or a group, or a Zoom download; answer "No", and it opens her drop folder in Finder.
