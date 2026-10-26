@@ -308,6 +308,28 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
     assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
     w.done();
   });
+  it("refuses for a name macOS takes as one of those, as .mcp.jſon with a long s, at the top of the workshop or in a folder of it", async () => {
+    const line = "(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)";
+    const makers = {
+      ".mcp.jſon at the top": (dir) => writeFileSync(join(dir, ".mcp.j\u017Fon"), SECRET),
+      ".mcp.jſon in a folder": (dir) => {
+        mkdirSync(join(dir, "a", "b"), { recursive: true });
+        writeFileSync(join(dir, "a", "b", ".mcp.j\u017Fon"), SECRET);
+      },
+      ".MCP.JſON": (dir) => writeFileSync(join(dir, ".MCP.J\u017FON"), SECRET),
+    };
+    for (const [what, make] of Object.entries(makers)) {
+      const w = openWorld();
+      make(w.workshop);
+      refusedFor(await behindOn(w), line, what);
+      w.done();
+    }
+    const w = openWorld();
+    writeFileSync(join(w.workshop, "notes.json"), SECRET);
+    writeFileSync(join(w.workshop, ".mcp.jſon.txt"), SECRET);
+    assert.deepEqual(Object.values(await behindOn(w)).slice(0, 2), [0, NEWEST]);
+    w.done();
+  });
   it("refuses when the workshop holds more than it looks through, or a folder in it cannot be looked through", async () => {
     const w = openWorld();
     for (let i = 0; i < 6; i++) writeFileSync(join(w.workshop, `picture ${i}.svg`), SECRET);

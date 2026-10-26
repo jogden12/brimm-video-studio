@@ -393,7 +393,8 @@ export function listeners(port, spawn = spawnSync) {
 /** How many entries of the workshop are looked through, at most. */
 const WORKSHOP_LIMIT = 20000;
 
-/** The names, in any letter case, that a session started in a folder takes as its own settings, instructions or servers. */
+/** The names, in any letter case, that a session started in a folder takes as its own settings, instructions or servers. A name is
+    judged folded (places.js fold), since macOS keeps .mcp.jſon (a long s) for the very file .mcp.json. */
 const SESSION_OWN = [".claude", "claude.md", "claude.local.md", ".mcp.json"];
 
 /** What in the workshop, `workshop`, could loosen the open lock, as one line for Jason, or none: anything named as SESSION_OWN is,
@@ -412,7 +413,7 @@ export function workshopWhy(workshop, limit = WORKSHOP_LIMIT) {
       return ["(Jason: the workshop holds a folder that could not be looked through for a .claude folder or a CLAUDE.md.)"];
     }
     for (const entry of entries) {
-      if (SESSION_OWN.includes(entry.name.toLowerCase())) return ["(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)"];
+      if (SESSION_OWN.includes(fold(entry.name))) return ["(Jason: the workshop holds a .claude folder, a CLAUDE.md, a CLAUDE.local.md or a .mcp.json, which a session started there would take as its own.)"];
       if (++seen > limit) return ["(Jason: the workshop holds too much to look through for a .claude folder or a CLAUDE.md.)"];
       if (entry.isDirectory()) folders.push(join(at, entry.name));
     }
