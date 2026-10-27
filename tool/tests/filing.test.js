@@ -7,7 +7,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns, clearCrashes, heldBy } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt } from "../filing.js";
+import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { zoomTimeOf } from "../kinds.js";
@@ -147,6 +148,99 @@ describe("the wait for late checks", () => {
     assert.deepEqual([results, waits], [[], 0]);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  /** A test's own BRIMM Video and home, with this Mac's drop folder holding `names`, each of the bytes "the bytes of <name>". */
+  function world(names) {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    const home = join(dir, "home");
+    const root = join(dir, "BRIMM Video");
+    const folder = join(root, "Unedited Video", "Mac Studio");
+    mkdirSync(folder, { recursive: true });
+    for (const name of names) writeFileSync(join(folder, name), `the bytes of ${name}`);
+    const statuses = () => readStatuses(root).map(({ status }) => status);
+    return { dir, home, root, folder, statuses, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  /** A late check this Mac holds of `video`, imported into its own episode, `lastCopy` milliseconds from the epoch: the pending
+      check, kept on this Mac's disk, and the episode with its record. The one file the check looks at is whole in the episode,
+      unless `whole` is false, and then it is not there, and nor is its work copy. Gives back the pending, as it was written. */
+  function holdCheck(w, video, lastCopy, { whole = true } = {}) {
+    const id = `e-20261027-${video.slice(0, 1).toLowerCase()}00001`;
+    const folder = join(w.root, "Episodes", `2026-10-27 ${video} (Mac Studio)`);
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const bytes = Buffer.byteLength(`the bytes of ${video}`);
+    const record = { ...newEpisode({ id, machine: "Mac Studio", at: "2026-10-27T09:00:00-05:00", video: { file: video, bytes, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" } }), rev: 1 };
+    writeFileSync(recordFile(folder, 1), recordText(record));
+    const to = join(folder, `${video}.rough-cut.mp4`);
+    if (whole) writeFileSync(to, "whole");
+    const pending = { version: 1, id, name: `2026-10-27 ${video} (Mac Studio)`, folder, video, bytes, seconds: 120, drop: join(w.folder, video), work: join(w.dir, "work", id), entries: [{ from: join(w.dir, "work", id, "cut"), to, bytes: 5 }], lastCopy, root: w.root, machine: "Mac Studio", importId: "k3j9x", planTxt: `${video}.cut-plan.txt` };
+    const pendings = join(w.home, "Library", "Application Support", "BRIMM Video", "pending");
+    mkdirSync(pendings, { recursive: true });
+    writeFileSync(join(pendings, `${id}.json`), JSON.stringify(pending));
+    return { ...pending, pendingFile: join(pendings, `${id}.json`) };
+  }
+
+  it("36. says in the status of an import waiting for its late check when the check is due: lastCopy plus LATE_CHECK_MS", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const X = holdCheck(w, "X.mov", L);
+    let now = L + 60 * 1000;
+    const seen = [];
+    // A minute into the wait, the status is read; the wait then runs on until the check is due, which makes it.
+    const wait = async () => {
+      seen.push(...w.statuses());
+      now = dueAt(X) + 1;
+    };
+    await importEpisodes(w.folder, { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, keepAwake: () => {}, log: () => {} }, async () => assert.fail("nothing is waiting"));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].step, "Waiting for its late check");
+    assert.equal(seen[0].due, L + LATE_CHECK_MS);
+    assert.deepEqual([w.statuses(), existsSync(X.pendingFile)], [[], false]);
+    w.done();
+  });
+  it("36. gives the status of a check that found a problem no due", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    // Its file is not in the episode and has no work copy: the check finds a problem, and says so in the status it writes.
+    const X = holdCheck(w, "X.mov", L, { whole: false });
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => dueAt(X) + 1, wait: async () => {}, keepAwake: () => {}, log: () => {} };
+    await importEpisodes(w.folder, deps, async () => assert.fail("nothing is waiting"));
+    const [status, ...others] = w.statuses();
+    assert.equal(others.length, 0);
+    assert.equal(status.step, "Late check");
+    assert.match(status.problem, /is not whole/);
+    assert.equal("due" in status, false);
+    w.done();
+  });
+  it("37. makes a late check that has come due at the per-minute timer while another video imports, and then passes over the drop file the check took out", async () => {
+    // B is imported first, and takes a long time. X is a video this Mac imported before: its check is pending, and its drop file
+    // is still in the folder, so its episode holds it. The check comes due while B imports.
+    const w = world(["B.mov", "X.mov"]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const X = holdCheck(w, "X.mov", L);
+    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    let now = L + 60 * 1000;
+    let tick = null;
+    const imported = [];
+    let during = null;
+    const importOne = async (name) => {
+      imported.push(name);
+      if (name === "B.mov") {
+        // A long import: the timer fires once X's check is due, and goes on before B's import ends.
+        now = dueAt(X) + 1000;
+        tick();
+        await Promise.resolve();
+        during = { status: w.statuses().filter((s) => s.video === "X.mov").length, dropFile: existsSync(join(w.folder, "X.mov")), pending: existsSync(X.pendingFile) };
+      }
+      return { ok: true, name };
+    };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, keepAwake: () => {}, log: () => {}, every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
+    const results = await importEpisodes(w.folder, deps, importOne);
+    assert.deepEqual(during, { status: 0, dropFile: false, pending: false });
+    assert.deepEqual(imported, ["B.mov"]);
+    assert.deepEqual(results, [{ ok: true, name: "B.mov" }]);
+    assert.deepEqual([w.statuses(), readdirSync(w.folder)], [[], ["B.mov"]]);
+    w.done();
+  });
 });
 
 describe("what the lead's review of PR 11 found in the runs' own folders", () => {
@@ -205,6 +299,14 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
       assert.ok(Number.isFinite(Date.parse(at)), at);
     }
     for (const name of ZOOM) assert.equal(t.logs.filter((line) => line === `${zoomTimeOf(name)}: ${HELD}`).length, 1, t.logs.join("\n"));
+    t.done();
+  });
+  it("36. are held by a status that carries no due, which only a status waiting for a late check does", async () => {
+    const t = drop([ZOOM[0]]);
+    await t.run();
+    const [status, ...others] = t.statuses();
+    assert.equal(others.length, 0);
+    assert.deepEqual([status.step, "due" in status], ["Held", false]);
     t.done();
   });
   it("name a Zoom download renamed with a client's words after Zoom's own name by its Zoom time alone, in the log and the status (final fix 19)", async () => {
