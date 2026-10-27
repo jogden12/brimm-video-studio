@@ -110,8 +110,46 @@ One JSON file per part, versioned. Today's episode record already holds much of 
 ```
 
 - `w0012` and the like are word ids from the transcript. Times are worked out at render time, on the newest version's clock.
-- Every change is a new version with who made it (Claude, Sallie by chat, or a hand edit in Final Cut) and why. "Go back to version 5" is just a pointer.
+- Every change is a new version, with a list of what changed (below).
 - A Reel is a part of its own with its own record, made from words of the main video.
+
+#### Versions, and what changed in each
+
+Jason, 2026-10-27: Sallie can ask for the list of versions, see what changed in each, go back to one, or bring parts of one into a new edit.
+
+**A change never edits an old version.** It makes a new one. Each version keeps:
+- its number, when it was made, and who made it: Claude, Sallie by chat, a hand edit in Final Cut, or a restore;
+- what was asked, in a line;
+- **its change list:** each thing added, changed or removed, by kind (cuts, graphics, b-roll, music, look, captions), in plain words, with its time on that version's clock;
+- the whole record as it stood, so any version can be rendered again;
+- its preview render, while it is one of the newest. Older renders are deleted, and made again from the record when asked for.
+
+**The change list is exact.** `edit.js` writes it by comparing the two records part by part. Every cut, graphic, b-roll insert and music cue keeps its id from one version to the next, so nothing is listed from memory. Claude may put a one-line summary on top. As Sallie would see one:
+
+```
+Version 8 · today, 2:12 pm · you, by chat
+Asked: use the title from version 5, but not its graphics
+- Changed: the title card says "Three pricing mistakes" again (from version 5), at 1:12
+- Removed: the list card "Three steps", at 2:40
+- Removed: the picture of a messy desk, at 3:05
+```
+
+**What she can ask:**
+
+| She says | What happens |
+|---|---|
+| "What versions are there?" | A numbered list, newest first: each version's number, when and who, its summary and its change list |
+| "What changed in version 5?" | That version's change list, and what was asked |
+| "Show me version 5" | Its preview, opened; rendered again first if it was deleted |
+| "Compare version 4 and version 7" | The change list between any two versions |
+| "Go back to version 5" | A new version that is a copy of version 5. Its change list says "Restored from version 5" and lists what that undoes. Nothing after version 5 is lost: it can be gone back to the same way |
+| "Use the title from version 5, but not its graphics" | A new version made from the newest one, with the named parts taken from version 5 and the others left out. Claude says what it will take and what it will drop before it does it |
+
+**How a part is brought across from another version:**
+- **Naming it.** A part is named by kind or by what it is: "the title", "the graphics", "the lower third", "the music", "the look", "the cuts", "the cuts between 3:00 and 5:00", "the b-roll at 4:10". When the words could mean more than one part, Claude asks. For example, "the title" could be the title card or the Reel's title.
+- **Its words come with it.** A graphic or insert brought from an older version keeps the words it is tied to. If those words are cut in the new version, it is listed as "cut now", and Claude asks whether to keep those words too (rule 4).
+- **Cuts come across as ranges of words.** Bringing back a stretch cut in version 3 changes only that stretch; everything else stays as in the newest version.
+- **Reels work the same way.** A Reel has its own versions, so "Reel 2: go back to version 3" works too.
 
 ### 4.3 Claude's jobs
 
@@ -275,7 +313,9 @@ What Sallie says, and what happens:
 | "Make it moody" | `look moody` | ffmpeg |
 | "Quiet music under it" | `music add`, ducked under her voice | ffmpeg |
 | "Make Reel 2 with bold captions" | `reel make 2 --captions bold` | HyperFrames |
-| "Undo that" / "Go back to version 5" | history | edit record |
+| "What versions are there?" | the list of versions, each with its changes (4.2) | edit record |
+| "Undo that" / "Go back to version 5" | a new version, copied from the one asked for (4.2) | edit record |
+| "Use the title from version 5, but not its graphics" | a new version with those parts brought across (4.2) | edit record |
 | "Open it in Final Cut" | push | Final Cut (section 7) |
 | "I changed it in Final Cut" | pull back | Final Cut (section 7) |
 | "Export it from Final Cut" | Share by Claude | Final Cut (section 7) |
@@ -388,7 +428,7 @@ Each step is a pull request with failing tests first, as the repo's rules say. N
 | Step | What | Done when |
 |---|---|---|
 | **H0. Render test** (by hand, scratch folder, never a watched one; Mac Studio only, Jason 2026-10-26) | Install HyperFrames in a scratch folder: version pinned, telemetry off, its Claude skills skipped. Render a lower third and a title card as transparent ProRes, in the brand typeface (Josefin Sans, from 2026-10-26). Lay them over a test recording with ffmpeg. Render one 60-second Reel as a full composition. | Checklist: `docs/phase-h0/checklist.md`. Jason judges the frames: navy still navy, the typeface drawn and not a stand-in, timing to the frame. Times measured on the Mac Studio. The same test on Sallie's laptop once H0 passes, when Jason says yes to installing it there |
-| **H1. Edit record and render planner** | The record's format, the move from today's record, and the planner that turns a record into ffmpeg and HyperFrames jobs (pure JavaScript) | planner output matches the FCPXML writer frame for frame on fixtures |
+| **H1. Edit record and render planner** | The record's format, the move from today's record, and the planner that turns a record into ffmpeg and HyperFrames jobs (pure JavaScript). Versions with their change lists: the list, compare, go back, and bringing parts across (4.2) | planner output matches the FCPXML writer frame for frame on fixtures; every change list on fixtures matches the difference between its two records |
 | **H2. Brand kit** | tokens, motion presets, the first components (`lower-third`, `title-card`, `list-card`, `logo-bug`, `end-card`) with their settings lists | stored reference frames match on both Macs |
 | **H3. Path A** | `render` (preview, that part), `finish` (final), the checks, Claude's frame check | a test recording goes from drop to Finished with no Final Cut |
 | **H4. Reels** | Reel composition, crops from faces, the four caption styles | Jason's test Reel judged by eye |
@@ -420,6 +460,7 @@ All answered on 2026-10-26, except picking Sinthya's replacement (7). Numbers 3 
 7. **Typefaces: Josefin Sans, from Google Fonts, in place of Sweet Sans Pro.** Fonts come from Adobe Fonts or Google Fonts (Jason: "we will find a replacement font, available either through adobe or google fonts, if needed"). Sweet Sans Pro through Adobe Fonts was tried first in H0 and came back MISSING: it never became active on the Mac Studio, not even in TextEdit. Jason then picked Josefin Sans on an answer card from a sheet of five Google Fonts faces (Varela, Montserrat, Work Sans, Josefin Sans, Raleway), each set in the guide's three roles. **Still open: Sinthya's replacement**, a script face picked by eye the same way. It should come from Google Fonts too, since the renderer cannot use Adobe Fonts.
 8. **Music: a library subscription, with Sallie picking the tracks.** Her outside editor's library, if they use one. Its licence is checked for YouTube, Instagram and LinkedIn first.
 9. **Labelling: yes, and no fake people.** A synthetic-media flag on every asset and a line in the hand-off. No generated people who could pass as real, and never a generated Sallie, face or voice.
+10. **Versions with their change lists (2026-10-27).** In Jason's words: "as new versions/edits are created, claude should keep track of what was changed or added in each version so that the user could ask for a list of versions so that they can see each version with a list of changes and then either go back to a previous version or request that certain aspects of the version be brought into a new edit." Section 4.2 says how.
 
 ## Sources
 

@@ -29,14 +29,19 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   - **HyperFrames** is installed on the Mac Studio for H0, in a scratch folder. Sallie's laptop gets it only after H0 passes, on Jason's yes then.
   - **Higgsfield** is the one source of generated b-roll: its smallest paid plan, bought when that phase starts. Sallie's folder may call only its generation, cost-check and job-status tools.
   - **OpenRouter** stays for pictures only for now.
-  - **Typefaces:** Sweet Sans Pro through Adobe Fonts (replaced the same day: see the next line).
+  - **Typefaces:** Sweet Sans Pro through Adobe Fonts (replaced the same day: see "Fonts come from Adobe Fonts or Google Fonts").
+  - **Music:** a library subscription, with Sallie picking the tracks.
+  - **Generated media** is labelled for YouTube's disclosure question. No generated people who could pass as real, and never a generated Sallie, face or voice.
+  - Nothing of it is built.
 - **Fonts come from Adobe Fonts or Google Fonts (2026-10-26).** Jason, word for word: "we will find a replacement font, available either through adobe or google fonts, if needed."
   - Sinthya is on neither, so its replacement script is picked by eye: still open.
   - **Josefin Sans replaces Sweet Sans Pro.** H0's font check on the Mac Studio said MISSING for Sweet Sans Pro: it never became active there, not even in TextEdit. Jason said "lets change it out" and picked Josefin Sans, from Google Fonts, on an answer card from a sheet of five faces set in the guide's three roles.
   - The test is written up as `docs/phase-h0/checklist.md`.
-  - **Music:** a library subscription, with Sallie picking the tracks.
-  - **Generated media** is labelled for YouTube's disclosure question. No generated people who could pass as real, and never a generated Sallie, face or voice.
-  - Nothing of it is built.
+- **Versions with their changes (2026-10-27).** Reading the architecture, Jason said, word for word:
+
+  > versioning is great. as new versions/edits are created, claude should keep track of what was changed or added in each version so that the user could ask for a list of versions so that they can see each version with a list of changes and then either go back to a previous version or request that certain aspects of the version be brought into a new edit. for example, use the title but delete the graphics from version 5 in the new version.
+
+  The architecture's section 4.2, "Versions, and what changed in each", says how. Nothing of it is built.
 
 ## The workflows (2026-10-22)
 
@@ -125,3 +130,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-26: recorded Jason's answers to the architecture's other decisions, picked on answer cards the same day: a line under "Decisions" says what he chose, and the 2026-10-22 answer on text cards points to it. Sinthya's purchase is still open.
 - 2026-10-26: recorded Jason's answer on fonts, word for word, under "Decisions": a replacement from Adobe Fonts or Google Fonts, if needed. Sinthya's replacement is still to be picked. Added the render test's checklist, `docs/phase-h0/`.
 - 2026-10-26: recorded that Josefin Sans, from Google Fonts, replaces Sweet Sans Pro, after H0's font check on the Mac Studio said MISSING. The H0 checklist and its test files now use Josefin Sans.
+- 2026-10-27: recorded Jason's direction on versions, word for word, under "Decisions": a list of versions, each with what changed, going back to one, and bringing parts of one into a new edit. The architecture's section 4.2 says how. Put the font lines after the architecture's own list, where they belong.
