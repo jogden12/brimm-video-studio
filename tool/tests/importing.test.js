@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { STALE_MS, statusName, statusFault, writeStatus, readStatuses, removeStatus, importState, holdsVideo, leftByCrash } from "../importing.js";
+import { STALE_MS, statusName, statusFault, writeStatus, readStatuses, statusesOf, isStatusFileOf, dueOf, removeStatus, importState, holdsVideo, leftByCrash } from "../importing.js";
 
 const NOW = Date.parse("2026-10-14T09:30:00-05:00");
 const STATUS = { version: 1, machine: "Mac Studio", pid: 4242, video: "Pricing talk.mp4", bytes: 1823400112, seconds: 1834.27, step: "Making the rough cut", at: "2026-10-14T09:29:00-05:00" };
@@ -142,6 +142,63 @@ describe("the status files, read back", () => {
       { file: join(t.folder, "Pricing talk.mp4 (Mac Studio) 1.json"), status: ago(1), stale: false, n: 1 }
     ]);
     t.done();
+  });
+});
+
+describe("one video's statuses, from the Macs that may hold it", () => {
+  it("gives the statuses of the video from the named Macs, of any state", () => {
+    const t = setup();
+    writeStatus(t.root, ago(1), t.writeText);
+    writeStatus(t.root, ago(600, { machine: "Sallie's laptop" }), t.writeText);
+    writeStatus(t.root, ago(1, { video: "Other.mp4" }), t.writeText);
+    writeStatus(t.root, ago(1, { machine: "Jason's MacBook" }), t.writeText);
+    const got = statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
+    assert.deepEqual(got, { statuses: [ago(1), ago(600, { machine: "Sallie's laptop" })], unreadable: [] });
+    assert.deepEqual(statusesOf(t.root, "Never imported.mov", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
+    t.done();
+  });
+  it("gives nothing when there is no folder for them", () => {
+    const t = setup();
+    assert.deepEqual(statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
+    t.done();
+  });
+  it("lists a file named for the video that cannot be read, and none named for another", () => {
+    const t = setup();
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, "Pricing talk.mp4 (Mac Studio) k3j9x 4.json"), "{not json");
+    writeFileSync(join(t.folder, "Other.mp4 (Mac Studio) 1.json"), "{not json");
+    writeFileSync(join(t.folder, "Pricing talk.mp4 (Jason's MacBook) 2.json"), "{not json");
+    writeStatus(t.root, ago(1), t.writeText);
+    const got = statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
+    assert.deepEqual(got.unreadable, [join(t.folder, "Pricing talk.mp4 (Mac Studio) k3j9x 4.json")]);
+    assert.deepEqual(got.statuses, [ago(1)]);
+    t.done();
+  });
+  it("tells a file name that starts as the video's status files from the Mac do, and no other", () => {
+    assert.equal(isStatusFileOf("Pricing talk.mp4 (Mac Studio) k3j9x 4.json", "Pricing talk.mp4", "Mac Studio"), true);
+    assert.equal(isStatusFileOf("Pricing talk.mp4 (Mac Studio) 4.json", "/x/Unedited Video/Mac Studio/Pricing talk.mp4", "Mac Studio"), true);
+    assert.equal(isStatusFileOf("Pricing talk.mp4 (Mac Studio) 4.json", "Pricing talk.mp4", "Sallie's laptop"), false);
+    assert.equal(isStatusFileOf("Other.mp4 (Mac Studio) 1.json", "Pricing talk.mp4", "Mac Studio"), false);
+    assert.equal(isStatusFileOf("Talk (final).mp4 (Sallie's MacBook Pro (M4, 2024)) 2.json", "Talk (final).mp4", "Sallie's MacBook Pro (M4, 2024)"), true);
+  });
+});
+
+describe("a status's due, the time its late check is due", () => {
+  it("dueOf is the status's due when it is a finite number, and null for any other", () => {
+    assert.equal(dueOf({ ...STATUS, due: 1760000000000 }), 1760000000000);
+    for (const due of ["x", NaN, Infinity, null, [5], undefined]) assert.equal(dueOf({ ...STATUS, due }), null, String(due));
+    assert.equal(dueOf(STATUS), null);
+    assert.equal(dueOf({}), null);
+  });
+  it("a status with due is as whole, as running and as holding as one without", () => {
+    const judged = (status) => [statusFault(status), importState(status, NOW), holdsVideo(status, NOW)];
+    // Running, stopped, and held: a due of any kind changes none of what is judged.
+    for (const base of [STATUS, ago(600), ago(1, { held: "Zoom downloads wait." }), ago(1, { failed: "ffmpeg stopped" })]) {
+      assert.deepEqual(judged({ ...base, due: 5 }), judged(base));
+      assert.deepEqual(judged({ ...base, due: "x" }), judged(base));
+    }
+    assert.deepEqual(judged({ ...STATUS, due: 5 }), ["", "running", true]);
+    assert.deepEqual(judged({ ...ago(600), due: "x" }), ["", "stopped", false]);
   });
 });
 

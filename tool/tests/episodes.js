@@ -87,6 +87,8 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     home, say: (line) => said.push(line), now: () => clock,
     openApp: (app, file) => opened.push([app, file]), start: (cmd, args) => started.push([cmd, args]),
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
+    // No test asks launchctl whether this Mac's launch agent is at work: it is not, unless a test says it is.
+    agentRunning: () => false,
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
