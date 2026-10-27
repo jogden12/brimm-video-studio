@@ -1,13 +1,13 @@
 # brimm-video with the HyperFrames app: the workflows, re-imagined
 
 - **Date:** 2026-10-27.
-- **Status:** a proposal for Jason. Nothing in it is decided, built or installed. Section 9 lists what needs his yes.
+- **Status:** a proposal for Jason. Nothing in it is built or installed. Section 9 lists what needs his yes. He answered decisions 5, 6 and 10 on 2026-10-27.
 - **Jason's direction,** word for word, is in `docs/requirements.md` under "Decisions", "The HyperFrames app (2026-10-27)". In short:
   - the HyperFrames Mac app already does the editing: graphics, cuts and Reels;
   - brimm-video should keep what BRIMM Ops needs;
   - from a session, brimm-video may find clips of Sallie with learnings, and some may become Reels.
   - **Revised the same day:**
-    - for teachings, the client's words may be left in, perhaps with their permission first;
+    - for teachings, the client's words may be left in, with no permission needed (decision 5);
     - sessions should be kept out of AI training;
     - a session is analysed when it is dropped in, and Claude suggests clips with their times;
     - nothing of a session goes to HyperFrames by default. Sallie can override that, but only after confirming either that the client consents to their words being used, or that a clip is Sallie alone, with the client's identity taken out where possible.
@@ -116,14 +116,8 @@ Written to Jason's revision of 2026-10-27, word for word in the requirements.
    - Sallie's folder also turns off the two ways a chat's transcript can be uploaded for review: Claude Code's `/feedback` command, and its "share your transcript" survey.
    - Zoom, HeyGen, Higgsfield and OpenRouter never get a session, except a clip under rule 4.
    - "Kept out of training", below, says what each service does.
-2. **Client words in teachings.** Claude may read the client's words with Sallie's, for teachings.
-   - Every other speaker's name is replaced by "Participant 1", "Participant 2" and so on, as today's reading does.
-   - Decision 5 asks whether this waits for the client's permission. If it does, a session whose client has not agreed is read with Sallie's words only, and the client's names are replaced.
-3. **Consent is recorded on the Mac,** in the episode's record, with its date and what it covers. There are two kinds:
-   - **teachings:** the client agreed that their session may be read by Claude;
-   - **use:** the client agreed that a clip with their words or picture may be used.
-
-   One clause in her client agreement could cover every future session. Consent is never sent anywhere.
+2. **Client words in teachings.** Claude reads the client's words with Sallie's, for teachings, with no permission needed (Jason, decision 5). Every other speaker's name is replaced by "Participant 1", "Participant 2" and so on, as today's reading does.
+3. **Consent to use a clip is recorded on the Mac,** in the episode's record, with its date: the client agreed that a clip with their words or picture may be used (a "use" consent). One clause in her client agreement could cover every future session. Consent is never sent anywhere.
 4. **Nothing of a session goes to HyperFrames by default.** Sallie can override that, per clip, only after confirming one of two things:
    - **the client consents** to their words being used (a "use" consent, recorded); or
    - **the clip is Sallie alone,** confirmed after she has watched the version with the client's identity taken out.
@@ -139,7 +133,7 @@ Written to Jason's revision of 2026-10-27, word for word in the requirements.
    - the names brimm-video can see (`sessions.js`);
    - faces in sampled frames;
    - text on screen (Apple's on-device Vision), since Zoom shows names on tiles.
-3. **Then Claude reads it,** in the same run, under rule 1. With a "teachings" consent, or if Jason decides none is needed, it reads the whole transcript with the other speakers renamed. Otherwise it reads Sallie's words only. It writes:
+3. **Then Claude reads it,** in the same run, under rule 1: the whole transcript, with the other speakers renamed (rule 2). It writes:
    - **teachings:** BRIMM business principles with no client names, recurring principles, and Reel ideas;
    - **clip suggestions,** each with:
      - a start and an end on the recording's clock;
@@ -156,7 +150,7 @@ Written to Jason's revision of 2026-10-27, word for word in the requirements.
    - **Sallie alone:** brimm-video asks her to confirm that she has watched it and that it is just her. Then the version with the identity taken out becomes a project of its own.
    - **With the client:** it asks her to confirm the client's "use" consent, and records it if it is new. Then the clip becomes a project of its own.
    - Each project holds that clip and its words only, nothing else of the session. It opens in the app like an iPhone clip.
-   - **In the app,** the clip is edited from brimm-video's own transcript, not the Script panel's HeyGen transcription, unless Jason has opted the HeyGen account out of training (decision 6).
+   - **In the app,** the clip is edited from brimm-video's own transcript, not the Script panel's HeyGen transcription, until HeyGen confirms the account's training opt-out, which Jason is asking for (decision 6).
 7. **"Film it again"** stays an option for any clip idea. Zoom sends 720p at most, so an upright crop of a call is soft, and filming again often looks better.
 
 ### Kept out of training: what each service does
@@ -167,7 +161,7 @@ Read on 2026-10-27; check the current terms before relying on them.
 |---|---|---|
 | **Claude** (Sallie's Pro or Max account, Claude Code included) | Only when the account allows it. With training off, data is kept 30 days and not trained on. Feedback sent with `/feedback` may be used to improve the product. A transcript shared through the session survey is never used for training. Team, Enterprise and API accounts are not trained on by default | The training gate checks the account before every session reading. Sallie's folder turns off `/feedback` and the survey (`DISABLE_FEEDBACK_COMMAND=1`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`). A Team account or an API key would make it the default rather than a setting |
 | **Zoom** | Its terms say it does not use audio, video or chat to train its own or others' AI (changed in 2023). Its AI Companion features ask their own consent | Sessions are recorded without AI Companion summaries, unless Jason decides otherwise |
-| **HeyGen** (the app's Script panel, Share and the cloud) | Its privacy policy says it may use what you give it to train its models. Enterprise customers are excluded by default; others can opt out by email | No session clip uses those features until Jason has asked HeyGen to opt the account out (decision 6) |
+| **HeyGen** (the app's Script panel, Share and the cloud) | Its privacy policy says it may use what you give it to train its models. Enterprise customers are excluded by default; others can opt out by email | Jason asks HeyGen to opt the account out (decision 6). No session clip uses those features until HeyGen confirms it |
 | **HyperFrames**, rendering on the Mac | Sends no project or video content. Its telemetry is off | As in H0 |
 | **Higgsfield** | Uses uploaded content to improve its models | Never gets a session |
 
@@ -215,12 +209,12 @@ Unchanged: Reel suggestions, the spellings, then the hand-off. A Reel she wants 
 2. **Installing the HyperFrames app** on the Mac Studio for A0, and later on Sallie's laptop.
 3. **HeyGen accounts** (free) for Sallie and Jason, and the BRIMM brand kit in their HeyGen workspace.
 4. **The Script panel's transcription by HeyGen** for videos meant for posting. The other option: only if A0 shows the panel cannot use brimm-video's own transcript.
-5. **A client's permission for teachings.** Is it needed before Claude reads a session with the client's words? If yes, a session without it is read with Sallie's words only. A clause in her client agreement could cover every future session.
-6. **HeyGen's training opt-out.** Jason emails HeyGen to opt the account out of training. Until then, no session clip uses the Script panel, Share or the cloud.
+5. **A client's permission for teachings: not needed** (Jason, 2026-10-27: "no"). Claude reads a session's whole transcript for teachings, with the other speakers renamed, under the training gate.
+6. **HeyGen's training opt-out: yes** (Jason, 2026-10-27). Jason emails HeyGen to opt the account out of training. Until HeyGen confirms it, no session clip uses the Script panel, Share or the cloud.
 7. **Share links:** invited people only.
 8. **Higgsfield:** wait until A0 shows whether the app's b-roll is enough.
 9. **H0:** stop after step 4, and run A0 instead.
-10. **Zoom downloads treated as sessions** the moment they are dropped, with Sallie able to correct one.
+10. **Zoom downloads treated as sessions at the drop: yes** (Jason, 2026-10-27), with Sallie able to correct one.
 
 ## 10. Build order
 
@@ -229,7 +223,7 @@ Unchanged: Reel suggestions, the spellings, then the hand-off. A Reel she wants 
 | **A0. The app test** (by hand, Mac Studio, Jason's own recording) | See the list below | Jason's verdict on each, with times |
 | **B1. Projects** | brimm-video makes a project for a raw video and an iPhone clip, and opens it | Tests on fixtures; one by hand |
 | **B2. The hand-off from the app** | `finish` from the app's exports: the final transcript and hand-off version 2 | Tests; one by hand into BRIMM Ops |
-| **S1. Session reading at the drop** | Zoom downloads taken as sessions; the consent records; Claude's reading under the training gate, whole or Sallie's words only by consent; clip suggestions with times; the feedback switches in her folder | Tests that a session without the needed consent sends no client word, and that no request leaves without the gate |
+| **S1. Session reading at the drop** | Zoom downloads taken as sessions; Claude's reading of the whole transcript under the training gate, other speakers renamed; clip suggestions with times; the "use" consent record; the feedback switches in her folder | Tests that no request leaves without the training gate, that every other speaker is renamed, and that a Zoom download is read only as a session until Sallie corrects it |
 | **S2. Session clips** | Cutting the suggested clips; taking out what identifies the client (muted names, blurred text, the active-speaker picture, faces marked); the two confirmations; the clip's project | Tests; one by hand with Jason's own made-up call |
 | **R. Retire** | What the app does, one pull request at a time | Each on Jason's yes |
 
