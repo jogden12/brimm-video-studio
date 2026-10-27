@@ -42,6 +42,11 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   > versioning is great. as new versions/edits are created, claude should keep track of what was changed or added in each version so that the user could ask for a list of versions so that they can see each version with a list of changes and then either go back to a previous version or request that certain aspects of the version be brought into a new edit. for example, use the title but delete the graphics from version 5 in the new version.
 
   The architecture's section 4.2, "Versions, and what changed in each", says how. Nothing of it is built.
+- **The HyperFrames app (2026-10-27).** Jason, word for word:
+
+  > the hyperframes mac app seems to do everything that we want to do. brimm video, it seems, attempts to do some of the more sophisticated hyperframes functionality but not as well. some aspects of brimm video are needed in order to pass information to Brimm Ops, but the graphics editing, cutting reels, etc all duplicates work that hyperframes can do. re-imagine the brimm video workflow, incorporating direct interaction with the hyperframes app by the user. what would the workflow look like for a raw unedited video and 1-5 minute clips shot on iphone. zoom sessions with clients can also be used, but the full text should never be passed to an ai model. in the case of zoom sessions, brimm video could identify clips of Sallie talking that have important learnings to incorporate as long as client information is stripped out. some of those short clips could even be used for short reels.
+
+  The proposal answering it is `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`; its section 9 lists what it asks of Jason. Nothing of it is decided or built. One thing in it is already Jason's rule: a session's full text is never passed to an AI model. Today's session reading, which sends the meeting's transcript with the other speakers' names replaced, does not meet it, and is not to be used for a session until it does.
 
 ## The workflows (2026-10-22)
 
@@ -131,3 +136,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-26: recorded Jason's answer on fonts, word for word, under "Decisions": a replacement from Adobe Fonts or Google Fonts, if needed. Sinthya's replacement is still to be picked. Added the render test's checklist, `docs/phase-h0/`.
 - 2026-10-26: recorded that Josefin Sans, from Google Fonts, replaces Sweet Sans Pro, after H0's font check on the Mac Studio said MISSING. The H0 checklist and its test files now use Josefin Sans.
 - 2026-10-27: recorded Jason's direction on versions, word for word, under "Decisions": a list of versions, each with what changed, going back to one, and bringing parts of one into a new edit. The architecture's section 4.2 says how. Put the font lines after the architecture's own list, where they belong.
+- 2026-10-27: recorded Jason's direction on the HyperFrames app, word for word, under "Decisions", with its rule that a session's full text is never passed to an AI model, and the proposal that answers it, `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`.
