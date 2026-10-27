@@ -66,6 +66,33 @@ export function readRates(folder) {
 /** A rate measured again: the new one counts for half, so the estimate follows the Mac without jumping. */
 export const blended = (old, now) => (Number.isFinite(old) ? (old + now) / 2 : now);
 
+/** Add what a run measured to the rates on this Mac: `measured` holds, for each step, the seconds of work it took for each
+    second of video, each a finite number above 0 (any other is left out, since the file would hold it as null). Each is
+    blended with the rate this Mac has for that step, as `blended` does, and one it has none for is taken as it is. The rates
+    are read again just now, and the whole file is written under a name of this process's own (rates.json.<pid>.writing) and
+    then renamed into place, so two writers at once never leave a half-written file in place, which readRates would read as
+    no rates at all: the one that renames last has its rates in, and the other's may be lost. `pid`, `write` and `rename` are
+    for a test to give. Gives back true when the file was written, and false, throwing nothing, when it could not be. */
+export function addRates(folder, measured, { pid = process.pid, write = writeFileSync, rename = renameSync } = {}) {
+  const writing = join(folder, `${RATES}.${pid}.writing`);
+  try {
+    const rates = readRates(folder);
+    for (const [name, rate] of Object.entries(measured)) if (Number.isFinite(rate) && rate > 0) rates[name] = blended(rates[name], rate);
+    mkdirSync(folder, { recursive: true });
+    write(writing, JSON.stringify(rates, null, 2) + "\n");
+    rename(writing, join(folder, RATES));
+    return true;
+  } catch (e) {
+    // A file this process wrote and could not rename is not left behind.
+    try {
+      rmSync(writing, { force: true });
+    } catch (e2) {
+      // Left where it is.
+    }
+    return false;
+  }
+}
+
 /** The last `bytes` of a file as text, or "" when it cannot be read. */
 function tail(file, bytes) {
   let fd;
@@ -267,15 +294,9 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
       if (!v) return;
       spend(now());
       if (finished === true && v.length > 0) {
-        const rates = readRates(folder);
-        for (const [name, ms] of Object.entries(v.spent)) if (ms > 0) rates[name] = blended(rates[name], ms / 1000 / v.length);
-        try {
-          mkdirSync(folder, { recursive: true });
-          writeFileSync(join(folder, RATES + ".writing"), JSON.stringify(rates, null, 2) + "\n");
-          renameSync(join(folder, RATES + ".writing"), join(folder, RATES));
-        } catch (e) {
-          once("file", `The progress panel's file could not be written (${e.code || e.message}). The work goes on without it.`);
-        }
+        const measured = {};
+        for (const [name, ms] of Object.entries(v.spent)) if (ms > 0) measured[name] = ms / 1000 / v.length;
+        if (Object.keys(measured).length && !addRates(folder, measured, { pid })) once("rates", "The progress panel's rates could not be written. The work goes on without them.");
       }
       gone(file);
       v = null;
