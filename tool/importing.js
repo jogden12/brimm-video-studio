@@ -38,6 +38,10 @@ function startOf(video, machine) {
     when it has one, and the file's number. A path is cut to its file's name. */
 export const statusName = (video, machine, n, id = "") => `${startOf(video, machine)}${id ? `${id} ` : ""}${n}.json`;
 
+/** Whether a file name in Episodes/.importing/ starts as the status files of `video` from the Mac `machine` do: the start of
+    `statusName`, and nothing of the import's id or the number. It says of a file that cannot be read whose it was meant to be. */
+export const isStatusFileOf = (name, video, machine) => name.startsWith(startOf(video, machine));
+
 /** The number at the end of a status file's name, or 0 when it has none. */
 const numberOf = (name) => {
   const m = / (\d+)\.json$/.exec(name);
@@ -137,6 +141,21 @@ export function readStatuses(root, now = Date.now()) {
   for (const r of read.filter((r) => r.status)) if (!highest.has(key(r)) || highest.get(key(r)).n < r.n) highest.set(key(r), r);
   return read.filter((r) => !r.status || highest.get(key(r)) === r);
 }
+
+/** One video's statuses at `now`, in milliseconds, from the Macs `machines`: of `readStatuses`, those that can be read, are
+    of `video` and were written by one of the Macs, of any state, stale or not, and the paths of the files that cannot be
+    read and are named for `video` as a status file of one of the Macs is (isStatusFileOf). As { statuses, unreadable }. */
+export function statusesOf(root, video, machines, now = Date.now()) {
+  const read = readStatuses(root, now);
+  const statuses = read.filter((r) => r.status && r.status.video === video && machines.includes(r.status.machine)).map((r) => r.status);
+  const unreadable = read.filter((r) => !r.status && machines.some((m) => isStatusFileOf(basename(r.file), video, m))).map((r) => r.file);
+  return { statuses, unreadable };
+}
+
+/** When a status says its late check is due, in milliseconds: `due`, when it is a finite number, and null for anything else
+    or when it has none. `statusFault` does not look at it, so a bad one never makes a status unreadable, and a Mac that
+    does not know the field reads the status as it always has. */
+export const dueOf = (status) => (typeof status.due === "number" && Number.isFinite(status.due) ? status.due : null);
 
 /** Take away the status files of one video from one Mac, `machine`, under `root`: of the import `id` alone, once its files
     have passed the late check; or of every import of the video, with no id, at this Mac's next run after a crash, or by
