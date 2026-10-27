@@ -9,7 +9,7 @@ import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFil
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude, importHold, importHolds, clockAt } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions, roughRate } from "../cuts.js";
@@ -5090,5 +5090,96 @@ describe("the light import", () => {
     writeSettings(home, { import: "full" });
     assert.ok(!("light" in depsFor(programs, () => {}, { HOME: home })));
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("importHold's state", () => {
+  const NOW = Date.parse("2026-10-27T10:00:00Z");
+  const MIN = 60 * 1000;
+  const VIDEO = "Pricing talk.mp4";
+  const ID = "k3x9";
+  const record = { id: ID, video: { file: VIDEO, bytes: 13 } };
+  const writeText = (to, text) => writeFileSync(to, text);
+  /** A root and a home for one test, each its own folder. */
+  const folders = () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-hold-"));
+    return { dir, root: join(dir, "BRIMM Video"), home: join(dir, "home") };
+  };
+  /** The status of an import of the video, written `ago` before NOW, on `machine`, with `over` set. */
+  const statusOf = (f, over = {}, ago = 0, machine = "Mac Studio") =>
+    writeStatus(f.root, { version: 1, machine, pid: 4242, import: ID, video: VIDEO, bytes: 13, seconds: 23.4, step: "Waiting for its late check", at: new Date(NOW - ago).toISOString(), ...over }, writeText);
+  /** This Mac's late check of the video, whose last copy was `ago` before NOW, so that it is due at 15 minutes after that. */
+  const pendingOf = (f, ago, over = {}) =>
+    writePending(f.home, { version: 1, id: ID, name: "2026-10-27 Pricing talk (Mac Studio)", folder: join(f.root, "Episodes", "2026-10-27 Pricing talk (Mac Studio)"), video: VIDEO, bytes: 13, seconds: 23.4, drop: "/drop", work: "/work", entries: [], lastCopy: NOW - ago, root: f.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...over });
+  const holdOf = (f, importing = false) => importHold({ root: f.root, home: f.home, machine: "Mac Studio", record, now: NOW, importing });
+  const check = (f, importing, want) => {
+    const hold = holdOf(f, importing);
+    assert.deepEqual(hold, want);
+    rmSync(f.dir, { recursive: true, force: true });
+  };
+  const RUNNING = (on) => `The import of this episode has not finished on ${on} yet: it is at "Waiting for its late check". Say it again when it has.`;
+  const NOT_YET = (at) => `This Mac has still to make the late check of this episode's import, due at ${clockAt(at)}. Say "try it again" for ${VIDEO} to have it made then, then say this again.`;
+  const OWED = `This Mac has still to make the late check of this episode's import. Say "try it again" for ${VIDEO} to have it made now, then say this again.`;
+  const PROBLEM = (on) => `The late check of this episode's import found a problem: x.srt is not whole in Dropbox. Once it is put right, say "try it again" for ${VIDEO} on ${on}, then say this again.`;
+
+  it("is running while the import of the video is at work on the Mac Studio", () => {
+    const f = folders();
+    statusOf(f);
+    check(f, false, { why: RUNNING("Mac Studio"), waits: true, state: "running" });
+  });
+  it("is running while the import of the video is at work on Sallie's laptop", () => {
+    const f = folders();
+    statusOf(f, {}, 0, "Sallie's laptop");
+    check(f, false, { why: RUNNING("Sallie's laptop"), waits: true, state: "running" });
+  });
+  it("is due while this Mac's late check is ahead and its import is at work", () => {
+    const f = folders();
+    pendingOf(f, 10 * MIN);
+    check(f, true, { why: NOT_YET(NOW + 5 * MIN), waits: true, state: "due" });
+  });
+  it("is due while this Mac's late check is past its time and its import is at work, and does not wait", () => {
+    const f = folders();
+    pendingOf(f, 35 * MIN);
+    check(f, true, { why: OWED, waits: false, state: "due" });
+  });
+  it("is owed while this Mac's late check is ahead and no import is at work", () => {
+    const f = folders();
+    pendingOf(f, 10 * MIN);
+    check(f, false, { why: NOT_YET(NOW + 5 * MIN), waits: true, state: "owed" });
+  });
+  it("is owed while this Mac's late check is past its time and no import is at work, and does not wait", () => {
+    const f = folders();
+    pendingOf(f, 35 * MIN);
+    check(f, false, { why: OWED, waits: false, state: "owed" });
+  });
+  it("is stopped when the status of the import was written 11 minutes ago", () => {
+    const f = folders();
+    statusOf(f, {}, 11 * MIN);
+    check(f, false, { why: `The import of this episode stopped on Mac Studio before its late check was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" });
+  });
+  it("is failed when the status of the import says why it failed", () => {
+    const f = folders();
+    statusOf(f, { failed: "ffmpeg stopped" });
+    check(f, false, { why: 'The import of this episode failed on Mac Studio: ffmpeg stopped. Say "try it again" to import it again.', waits: false, state: "failed" });
+  });
+  it("is a problem when the status of the import says the late check found one", () => {
+    const f = folders();
+    statusOf(f, { problem: "x.srt is not whole in Dropbox." });
+    check(f, false, { why: PROBLEM("Mac Studio"), waits: false, state: "problem" });
+  });
+  it("is a problem when this Mac's pending late check says it found one", () => {
+    const f = folders();
+    pendingOf(f, 10 * MIN, { problem: "x.srt is not whole in Dropbox." });
+    check(f, false, { why: PROBLEM("Mac Studio"), waits: false, state: "problem" });
+  });
+  it("is nothing when nothing holds the video", () => {
+    const f = folders();
+    check(f, false, { why: "", waits: false, state: "" });
+  });
+  it("gives importHolds the same words for a late check this Mac owes", () => {
+    const f = folders();
+    pendingOf(f, 35 * MIN);
+    assert.equal(importHolds({ root: f.root, home: f.home, machine: "Mac Studio", record, now: NOW }), OWED);
+    rmSync(f.dir, { recursive: true, force: true });
   });
 });
