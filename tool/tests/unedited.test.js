@@ -5176,6 +5176,21 @@ describe("importHold's state", () => {
     const f = folders();
     check(f, false, { why: "", waits: false, state: "" });
   });
+  it("says the same whether or not this Mac's import is at work, over a hold that is not this Mac's owed check", () => {
+    const rows = [
+      [(f) => statusOf(f), { why: RUNNING("Mac Studio"), waits: true, state: "running" }],
+      [(f) => statusOf(f, { failed: "ffmpeg stopped" }), { why: 'The import of this episode failed on Mac Studio: ffmpeg stopped. Say "try it again" to import it again.', waits: false, state: "failed" }],
+      [(f) => statusOf(f, { problem: "x.srt is not whole in Dropbox." }), { why: PROBLEM("Mac Studio"), waits: false, state: "problem" }],
+      [(f) => statusOf(f, {}, 11 * MIN), { why: `The import of this episode stopped on Mac Studio before its late check was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" }]
+    ];
+    for (const [set, want] of rows) {
+      for (const importing of [false, true]) {
+        const f = folders();
+        set(f);
+        check(f, importing, want);
+      }
+    }
+  });
   it("gives importHolds the same words for a late check this Mac owes", () => {
     const f = folders();
     pendingOf(f, 35 * MIN);

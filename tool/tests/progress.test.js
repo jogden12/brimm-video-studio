@@ -298,10 +298,7 @@ describe("the rates this Mac keeps", () => {
     assert.deepEqual(between.after, [`${RATES}.1.writing`]);
     assert.deepEqual(between.rates, { "Reading the sound": 0.2, "Making the rough cut": 0.1 });
     // The file that came last is the one in place, and it parses whole: one writer's rate may be lost, never the whole file.
-    const rates = readRates(t.folder);
-    assert.equal(typeof rates, "object");
-    assert.ok(Number.isFinite(rates["Making the rough cut"]) || Number.isFinite(rates["Asking Claude"]));
-    assert.equal(rates["Reading the sound"], 0.2);
+    assert.deepEqual(readRates(t.folder), { "Reading the sound": 0.2, "Asking Claude": 0.3 });
     assert.doesNotThrow(() => JSON.parse(readFileSync(join(t.folder, RATES), "utf8")));
     assert.deepEqual(t.writing(), []);
     t.done();

@@ -71,7 +71,9 @@ function namesIn(root) {
     ffprobe has read the length, and `at` is when it was written (localStamp). `failed`, why the import failed,
     `problem`, what the late check found wrong, and `held`, why the video is left in the drop folder and not imported, are
     there only when they apply, and so is `label`, the name of a light import's video until she answers (kinds.js labelFor),
-    which a command shows in place of the file's name. */
+    which a command shows in place of the file's name. A status that waits for its late check also carries `due`, when the
+    check is due, in milliseconds (filing.js waitingStatus); it is not looked at here, so a bad one never makes the whole status
+    unreadable, and `dueOf` reads it only when it is a finite number. */
 export function statusFault(s) {
   if (s === null || typeof s !== "object" || Array.isArray(s)) return "it is not an import's status";
   if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this brimm-video reads version 1`;
