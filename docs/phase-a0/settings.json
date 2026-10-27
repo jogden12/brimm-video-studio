@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(npx hyperframes publish:*)",
+      "Bash(npx hyperframes cloud:*)",
+      "Bash(npx hyperframes lambda:*)",
+      "Bash(npx hyperframes cloudrun:*)",
+      "Bash(npx hyperframes auth:*)",
+      "Bash(npx hyperframes feedback:*)",
+      "Bash(npm run publish:*)"
+    ]
+  },
+  "env": {
+    "HYPERFRAMES_NO_TELEMETRY": "1",
+    "HYPERFRAMES_SKIP_SKILLS": "1",
+    "DISABLE_FEEDBACK_COMMAND": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  }
+}

@@ -64,6 +64,15 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   - **6. Jason emails HeyGen** to opt the account out of AI training. Until HeyGen confirms it, no session clip uses HeyGen's features: the Script panel, Share or the cloud.
   - **10. A Zoom download is treated as a session** the moment it is dropped, and Sallie can correct one.
 
+  Then his answers to the rest, word for word: "1. confirmed your assumptions", "2. yes", "3. will upgrade to lowest tier paid account", "4. yes", "5. yes", "6. yes", "7. yes". The chat showed the open decisions numbered 1 to 7, so his 5, 6 and 7 answer the proposal's decisions 7, 8 and 9. That is:
+  - **The design is accepted.** The HyperFrames app edits. brimm-video does intake, projects, sessions and the hand-off to BRIMM Ops.
+  - **The HyperFrames app is installed on the Mac Studio** for the app test, A0. Sallie's laptop comes after it, on his yes then.
+  - **HeyGen on its lowest paid tier,** with the BRIMM brand kit in its workspace.
+  - **HeyGen may transcribe videos meant for posting,** in the app's Script panel.
+  - **Share links for invited people only.**
+  - **Higgsfield waits** until A0 shows whether the app's b-roll is enough.
+  - **H0 stops after step 4.** A0, `docs/phase-a0/checklist.md`, runs instead.
+
 ## The workflows (2026-10-22)
 
 What brimm-video must do, as Jason decided it on 2026-10-22. The design says how.
@@ -155,3 +164,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-27: recorded Jason's direction on the HyperFrames app, word for word, under "Decisions", with its rule that a session's full text is never passed to an AI model, and the proposal that answers it, `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`.
 - 2026-10-27: recorded Jason's revision of the session rules, word for word, under "Decisions": client words may be left in for teachings, perhaps with permission; sessions kept out of AI training; Claude suggests clips at the drop; nothing of a session goes to HyperFrames unless Sallie confirms consent or a clip of her alone.
 - 2026-10-27: recorded Jason's answers to the proposal's decisions 5, 6 and 10, word for word, under "Decisions": no client permission needed for teachings; he asks HeyGen to opt out of training; Zoom downloads are sessions at the drop.
+- 2026-10-27: recorded Jason's answers to the rest of the proposal's decisions, word for word, with how his numbers map to the proposal's: the design is accepted, the app is installed on the Mac Studio for A0, HeyGen on its lowest paid tier, HeyGen transcription for videos meant for posting, Share for invited people only, Higgsfield waits, H0 stops after step 4. Added A0's checklist, `docs/phase-a0/`.

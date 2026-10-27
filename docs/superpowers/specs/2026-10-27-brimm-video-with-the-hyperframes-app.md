@@ -1,7 +1,7 @@
 # brimm-video with the HyperFrames app: the workflows, re-imagined
 
 - **Date:** 2026-10-27.
-- **Status:** a proposal for Jason. Nothing in it is built or installed. Section 9 lists what needs his yes. He answered decisions 5, 6 and 10 on 2026-10-27.
+- **Status:** the design, accepted by Jason on 2026-10-27: every decision in section 9 is answered. Nothing in it is built or installed yet. The next step is A0, the app test (`docs/phase-a0/checklist.md`).
 - **Jason's direction,** word for word, is in `docs/requirements.md` under "Decisions", "The HyperFrames app (2026-10-27)". In short:
   - the HyperFrames Mac app already does the editing: graphics, cuts and Reels;
   - brimm-video should keep what BRIMM Ops needs;
@@ -184,7 +184,7 @@ Unchanged: Reel suggestions, the spellings, then the hand-off. A Reel she wants 
   - Allowed only for videos meant for posting: one named tool, the 2026-10-26 rule.
   - For a session clip, only after HeyGen's training opt-out (section 5). A0 checks whether the panel can use brimm-video's own transcript instead.
 - **HeyGen's paid parts are not used** without Jason's yes: Video 1 clips, voices, avatars and the cloud.
-- **A HeyGen sign-in is needed** for brand kits and the Script panel. The account itself is free.
+- **A HeyGen sign-in is needed** for brand kits and the Script panel. Jason takes the lowest paid tier (decision 3). Whether it includes the Script panel's transcription is checked in A0.
 
 ## 8. What happens to the 2026-10-26 plan and to H0
 
@@ -205,15 +205,17 @@ Unchanged: Reel suggestions, the spellings, then the hand-off. A Reel she wants 
 
 ## 9. Decisions for Jason
 
-1. **The split** of section 1: the app edits; brimm-video does intake, projects, sessions and the hand-off.
-2. **Installing the HyperFrames app** on the Mac Studio for A0, and later on Sallie's laptop.
-3. **HeyGen accounts** (free) for Sallie and Jason, and the BRIMM brand kit in their HeyGen workspace.
-4. **The Script panel's transcription by HeyGen** for videos meant for posting. The other option: only if A0 shows the panel cannot use brimm-video's own transcript.
+All answered on 2026-10-27, in Jason's words in the requirements.
+
+1. **The split of section 1: yes** ("confirmed your assumptions"). The app edits; brimm-video does intake, projects, sessions and the hand-off.
+2. **Installing the HyperFrames app on the Mac Studio for A0: yes.** Sallie's laptop comes after A0, on his yes then.
+3. **HeyGen: the lowest paid tier,** not the free account ("will upgrade to lowest tier paid account"). The BRIMM brand kit goes in its workspace.
+4. **The Script panel's transcription by HeyGen, for videos meant for posting: yes.**
 5. **A client's permission for teachings: not needed** (Jason, 2026-10-27: "no"). Claude reads a session's whole transcript for teachings, with the other speakers renamed, under the training gate.
 6. **HeyGen's training opt-out: yes** (Jason, 2026-10-27). Jason emails HeyGen to opt the account out of training. Until HeyGen confirms it, no session clip uses the Script panel, Share or the cloud.
-7. **Share links:** invited people only.
-8. **Higgsfield:** wait until A0 shows whether the app's b-roll is enough.
-9. **H0:** stop after step 4, and run A0 instead.
+7. **Share links: invited people only. Yes.**
+8. **Higgsfield: wait until A0 shows whether the app's b-roll is enough. Yes.**
+9. **H0: stop after step 4, and run A0 instead. Yes.**
 10. **Zoom downloads treated as sessions at the drop: yes** (Jason, 2026-10-27), with Sallie able to correct one.
 
 ## 10. Build order

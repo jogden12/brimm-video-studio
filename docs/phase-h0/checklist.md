@@ -1,5 +1,7 @@
 # H0: the render test, a checklist for Jason
 
+**Stopped after step 4, on 2026-10-27** (Jason). Steps 5 to 8 test brimm-video's own renderer, which the accepted design of 2026-10-27 drops: the HyperFrames app renders instead. What steps 0 to 4 showed still stands: HyperFrames runs on the Mac Studio, and Josefin Sans works in it. The next test is A0, `docs/phase-a0/checklist.md`.
+
 For Jason, on the Mac Studio. It is the gate of the architecture of 2026-10-26 (`docs/superpowers/specs/2026-10-26-claude-video-editing-architecture.md`, section 10, H0; section 11, decisions 1, 2 and 7). It answers four questions before anything is built:
 
 1. **Colour:** does the brand's navy come out as navy once a graphic is laid over a video?

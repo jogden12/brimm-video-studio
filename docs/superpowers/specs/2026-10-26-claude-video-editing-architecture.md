@@ -1,7 +1,7 @@
 # Claude video editing: system architecture
 
 - **Date:** 2026-10-26.
-- **Status:** a design Jason has said yes to, on 2026-10-26, with the half-day render test (H0) as its gate. Nothing in it is built, installed or turned on yet. Section 11 records his answers, and the one item still open: picking a replacement for Sinthya. The H0 checklist is `docs/phase-h0/checklist.md`. **On 2026-10-27 Jason asked for the workflow to be re-imagined around the HyperFrames app:** the proposal is `2026-10-27-brimm-video-with-the-hyperframes-app.md`, and where it differs from this design and he says yes, it wins.
+- **Status:** a design Jason has said yes to, on 2026-10-26, with the half-day render test (H0) as its gate. Nothing in it is built, installed or turned on yet. Section 11 records his answers, and the one item still open: picking a replacement for Sinthya. The H0 checklist is `docs/phase-h0/checklist.md`. **On 2026-10-27 Jason asked for the workflow to be re-imagined around the HyperFrames app, and accepted the result the same day:** `2026-10-27-brimm-video-with-the-hyperframes-app.md`. Where the two differ, that design wins.
 - **What it is:** one design for editing The BRIMM's videos by talking to Claude, graphics included. Outside services may be used. Nobody has to edit in Final Cut Pro. Final Cut stays available: Claude can send an edit to it, read back what a person changed there, and use it to export finished files.
 - **How it was made:** a fresh design. It was not bound by the research handoff of 2026-10-26 or by the design of 2026-10-22. It does keep this repo's rules from `CLAUDE.md`. Facts about outside tools were checked on 2026-10-26; "Sources" at the end says how.
 
