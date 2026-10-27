@@ -241,6 +241,44 @@ describe("the wait for late checks", () => {
     assert.deepEqual([w.statuses(), readdirSync(w.folder)], [[], ["B.mov"]]);
     w.done();
   });
+  it("37. logs a late check that cannot be made at the per-minute timer, and throws nothing, so the import of the other video goes on", async () => {
+    const w = world(["B.mov"]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { pendingFile, ...pending } = holdCheck(w, "X.mov", L);
+    // A folder that cannot be searched is where one of X's episode's files should be, so that looking at the file throws
+    // (EACCES), and does not say that the file is not there.
+    const locked = join(w.dir, "locked");
+    mkdirSync(locked);
+    writeFileSync(pendingFile, JSON.stringify({ ...pending, entries: [{ ...pending.entries[0], to: join(locked, "X.mov.rough-cut.mp4") }] }));
+    chmodSync(locked, 0o000);
+    try {
+      let now = L + 60 * 1000;
+      let tick = null;
+      const imported = [];
+      const logs = [];
+      let ticked = null;
+      const importOne = async (name) => {
+        imported.push(name);
+        // A long import: the timer fires once X's check is due. An uncaught throw in a timer would end the whole import process.
+        now = dueAt(pending) + 1000;
+        assert.doesNotThrow(() => tick());
+        ticked = { pending: existsSync(pendingFile), dropFile: existsSync(join(w.folder, "X.mov")) };
+        await Promise.resolve();
+        return { ok: true, name };
+      };
+      const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, keepAwake: () => {}, log: (line) => logs.push(line), every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
+      const results = await importEpisodes(w.folder, deps, importOne);
+      assert.deepEqual(imported, ["B.mov"]);
+      assert.deepEqual(results, [{ ok: true, name: "B.mov" }]);
+      assert.deepEqual(logs.filter((line) => line.includes("late check")), ["The late check of a video waiting for it could not be made (EACCES). The next look makes it again."]);
+      // Nothing of X's was put away, so that the next run's look makes its check again.
+      assert.deepEqual(ticked, { pending: true, dropFile: false });
+      assert.equal(existsSync(pendingFile), true);
+    } finally {
+      chmodSync(locked, 0o700);
+      w.done();
+    }
+  });
 });
 
 describe("what the lead's review of PR 11 found in the runs' own folders", () => {

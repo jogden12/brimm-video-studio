@@ -616,7 +616,14 @@ export async function importEpisodes(dir, deps, importOne) {
       const { every = setInterval, cancel = clearInterval } = deps;
       const keep = every(() => {
         for (const pending of mine().filter((p) => !p.problem)) waitingStatus(pending, deps, "Waiting for its late check");
-        finishDue(false);
+        // A check that cannot be made, as when a file cannot be looked at, must not end the process in the middle of another video's
+        // import: a throw in a timer is never caught. The check stays pending, and the next run's look makes it again. A light
+        // import's log names no video by its file, so this line names none.
+        try {
+          finishDue(false);
+        } catch (e) {
+          log(`The late check of a video waiting for it could not be made (${e.code || e.message}). The next look makes it again.`);
+        }
       }, LOOK_AGAIN_MS);
       if (keep && typeof keep.unref === "function") keep.unref();
       let result;
