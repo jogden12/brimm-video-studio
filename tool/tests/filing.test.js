@@ -190,7 +190,7 @@ describe("the wait for late checks", () => {
       seen.push(...w.statuses());
       now = dueAt(X) + 1;
     };
-    await importEpisodes(w.folder, { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, keepAwake: () => {}, log: () => {} }, async () => assert.fail("nothing is waiting"));
+    await importEpisodes(w.folder, { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} }, async () => assert.fail("nothing is waiting"));
     assert.equal(seen.length, 1);
     assert.equal(seen[0].step, "Waiting for its late check");
     assert.equal(seen[0].due, L + LATE_CHECK_MS);
@@ -202,7 +202,7 @@ describe("the wait for late checks", () => {
     const L = Date.parse("2026-10-27T10:00:00");
     // Its file is not in the episode and has no work copy: the check finds a problem, and says so in the status it writes.
     const X = holdCheck(w, "X.mov", L, { whole: false });
-    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => dueAt(X) + 1, wait: async () => {}, keepAwake: () => {}, log: () => {} };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => dueAt(X) + 1, wait: async () => {}, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} };
     await importEpisodes(w.folder, deps, async () => assert.fail("nothing is waiting"));
     const [status, ...others] = w.statuses();
     assert.equal(others.length, 0);
@@ -233,7 +233,7 @@ describe("the wait for late checks", () => {
       }
       return { ok: true, name };
     };
-    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, keepAwake: () => {}, log: () => {}, every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {}, every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
     const results = await importEpisodes(w.folder, deps, importOne);
     assert.deepEqual(during, { status: 0, dropFile: false, pending: false });
     assert.deepEqual(imported, ["B.mov"]);
@@ -266,7 +266,7 @@ describe("the wait for late checks", () => {
         await Promise.resolve();
         return { ok: true, name };
       };
-      const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, keepAwake: () => {}, log: (line) => logs.push(line), every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
+      const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: (line) => logs.push(line), every: (fn) => { tick = fn; return 1; }, cancel: () => {} };
       const results = await importEpisodes(w.folder, deps, importOne);
       assert.deepEqual(imported, ["B.mov"]);
       assert.deepEqual(results, [{ ok: true, name: "B.mov" }]);
