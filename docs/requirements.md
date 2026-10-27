@@ -46,7 +46,18 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
 
   > the hyperframes mac app seems to do everything that we want to do. brimm video, it seems, attempts to do some of the more sophisticated hyperframes functionality but not as well. some aspects of brimm video are needed in order to pass information to Brimm Ops, but the graphics editing, cutting reels, etc all duplicates work that hyperframes can do. re-imagine the brimm video workflow, incorporating direct interaction with the hyperframes app by the user. what would the workflow look like for a raw unedited video and 1-5 minute clips shot on iphone. zoom sessions with clients can also be used, but the full text should never be passed to an ai model. in the case of zoom sessions, brimm video could identify clips of Sallie talking that have important learnings to incorporate as long as client information is stripped out. some of those short clips could even be used for short reels.
 
-  The proposal answering it is `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`; its section 9 lists what it asks of Jason. Nothing of it is decided or built. One thing in it is already Jason's rule: a session's full text is never passed to an AI model. Today's session reading, which sends the meeting's transcript with the other speakers' names replaced, does not meet it, and is not to be used for a session until it does.
+  The proposal answering it is `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`; its section 9 lists what it asks of Jason. Nothing of it is decided or built.
+
+  Jason revised the session part the same day, word for word:
+
+  > revisions: for teachings, client words can be left in. we may need to ask their permission first. can those sessions be excluded from being used for AI model training? those session videos should be analyzed when dropped in, and claude produces clips, or timestamp suggestions for clips, that can be shared with hyperframes. the full video should not be sent there as a default that can be overridden by the user after confirming client consent for their words OR confirmation that the clip is just Sallie speaking (client identities deleted if possible)
+
+  So these replace the first wording's rule that a session's full text is never passed to an AI model:
+  - **Teachings:** the client's words may go to Claude for teachings. Whether that waits for the client's permission is the proposal's decision 5. Today's session reading, which sends the meeting's transcript with the other speakers' names replaced, fits this.
+  - **Training:** only on an account whose training setting is off, as today's training gate checks.
+  - **HyperFrames:** nothing of a session goes there by default. Sallie may override that for a clip, after confirming the client's consent for their words, or that the clip is her alone, with the client's identity taken out where possible.
+
+  The proposal's section 5 is written to this.
 
 ## The workflows (2026-10-22)
 
@@ -137,3 +148,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-26: recorded that Josefin Sans, from Google Fonts, replaces Sweet Sans Pro, after H0's font check on the Mac Studio said MISSING. The H0 checklist and its test files now use Josefin Sans.
 - 2026-10-27: recorded Jason's direction on versions, word for word, under "Decisions": a list of versions, each with what changed, going back to one, and bringing parts of one into a new edit. The architecture's section 4.2 says how. Put the font lines after the architecture's own list, where they belong.
 - 2026-10-27: recorded Jason's direction on the HyperFrames app, word for word, under "Decisions", with its rule that a session's full text is never passed to an AI model, and the proposal that answers it, `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`.
+- 2026-10-27: recorded Jason's revision of the session rules, word for word, under "Decisions": client words may be left in for teachings, perhaps with permission; sessions kept out of AI training; Claude suggests clips at the drop; nothing of a session goes to HyperFrames unless Sallie confirms consent or a clip of her alone.
