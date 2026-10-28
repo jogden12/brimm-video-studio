@@ -24,19 +24,20 @@
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
-// commands run, and every other is refused before it reads a word.
+// commands run, and every other is refused before it reads a word. A command that says a session's words, under Claude Code, marks
+// the chat first (held.js); on an open-lock Mac it says them into a file only that chat may read, and tells the chat the file.
 //
 // It never posts, sends or publishes anything.
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { homedir, userInfo } from "node:os";
+import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
-import { readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder } from "./settings.js";
-import { UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
+import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -64,7 +65,14 @@ import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
-import { studioFiles, studioFolder, lockBroken } from "./studio.js";
+import { studioFiles, studioFolder } from "./studio.js";
+import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
+import { sandboxedWhy } from "./sandboxed.js";
+import { afterAllNoted, clearOldWords, markChat, noteAfterAll, writeWords } from "./held.js";
+import { SESSION_ID } from "./scan.js";
+import { processTable, readProcesses } from "./chain.js";
+import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
+import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
@@ -211,6 +219,9 @@ export function contextFor(deps = {}) {
   const { settings } = got;
   // The names of a gated video that a command has found (findEpisode, hideNames), which no line it says after may hold.
   const hidden = { names: [], keep: [] };
+  // A session's words the command says, once the chat is marked (holdWords): on an open-lock Mac every line from then on is kept
+  // in `lines`, for editMain to write into the chat's words file (handOverWords), and none is said.
+  const words = { marked: false, lines: null, session: null, label: "" };
   const say = deps.say || ((line) => process.stdout.write(`${line}\n`));
   return {
     settings,
@@ -219,8 +230,13 @@ export function contextFor(deps = {}) {
     episodes: episodesFolder(settings.root),
     home,
     // Only the names are taken out: any other path in a line stays readable.
-    say: (line) => say(hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line),
+    say: (line) => {
+      const shown = hidden.names.length ? withoutNames(line, hidden.names, hidden.keep, { paths: false }) : line;
+      if (words.lines) words.lines.push(shown);
+      else say(shown);
+    },
     hidden,
+    words,
     now: deps.now || Date.now,
     statfs: deps.statfs || statfsSync,
     stat: deps.stat || ((path) => statSync(path, { throwIfNoEntry: false })),
@@ -326,6 +342,7 @@ function episodeAt(ctx, name, links = null) {
   const copies = past ? conflictedCopies(folder).filter((c) => /^record\/\d{4}\.json$/.test(conflictedOf(c))).map((c) => recordAt(join(folder, c))) : [];
   const records = (read.record ? [read.record] : past ? [inForce, ...copies] : []).filter((r) => r !== null && typeof r === "object" && !Array.isArray(r));
   const newer = read.newer ? read.record : past && past.newer ? past.record : null;
+  noteSessionsAfterAll(ctx, records);
   let held;
   return {
     name, folder, read, inForce, records, newer,
@@ -337,6 +354,24 @@ function episodeAt(ctx, name, links = null) {
       return held;
     }
   };
+}
+
+/** Note each of `records` that is a session after all (its `session.emptyRevision` is set: it was read as another kind, and answered
+    a session since) the first time this Mac reads it at that revision, with the time it is read (held.js noteAfterAll; design
+    2026-10-26, R9): every chat begun before then may hold its words, and is held. episodeAt reads every record so, for `episodes`,
+    `status`, `guide` and findEpisode alike (`behind` reads no record, so it notes none), so the other Mac notes it at the start of
+    her next chat. A note that cannot be written now is tried again at the next read, which notes a later time and so holds more
+    chats, not fewer. */
+function noteSessionsAfterAll(ctx, records) {
+  for (const r of records) {
+    const revision = r.session !== null && typeof r.session === "object" && !Array.isArray(r.session) ? r.session.emptyRevision : undefined;
+    if (revision === undefined || revision === null || afterAllNoted(ctx.home, r.id, revision)) continue;
+    try {
+      noteAfterAll({ home: ctx.home, id: r.id, revision, at: new Date(ctx.now()).toISOString() });
+    } catch (e) {
+      // Tried again at the next read.
+    }
+  }
 }
 
 /** Whether an episode is gated (gate.js): any record it is known by is a video not yet answered or a session not cleared, so
@@ -441,6 +476,65 @@ function notRead(ctx, found, said = found.name) {
   return `${capital(shown)}: ${clean(found.read.why)}.`;
 }
 
+/** What a command ends with when the chat it runs in cannot be marked as holding a session's words, or, on an open-lock Mac, when
+    the chat's id is not one a words file can be named by: the words are shown nowhere. */
+export const MARK_FAILED = "This chat could not be marked as holding a session's words, so they are not shown here: ask Jason.";
+
+/** The one line a chat is told on an open-lock Mac in place of a session's words: the video's label, and the file they are in. */
+export const wordsLine = (label, path) => `${label}: a session's words are in a file for this chat alone: ${path}`;
+
+/** The commands that say a session's words (design 2026-10-26, R8): those a session runs once the training gate is on, beyond
+    those it runs with the gate off (gate.js SESSION_TAUGHT beyond SESSION): `teachings`, `principles`, `ideas`, `finish`, `reel`
+    and `render`. Not `read`, the reading's own detached run, which prints to no chat. */
+const SAYS_WORDS = SESSION_TAUGHT.filter((command) => !SESSION_COMMANDS.includes(command) && command !== "read");
+
+/** Once the gate lets a command run for the episode `e`: when the command is one that says a session's words (SAYS_WORDS), a record
+    of `e` is a session not cleared, it runs under Claude Code (CLAUDECODE=1 in deps.env, else this process's) and her folder is on
+    this Mac, mark the chat first (held.js markChat: its id, and the claude above this process in `ps`'s table, deps.ps and
+    deps.pid being a test's), on a strict Mac as on an open one (R7). A detached run is not under Claude Code (spawnDetached), so it
+    is never marked; nothing is decided by the word `--now`. Then, only where the lock in effect is open, every line the command
+    says from here on is kept for the chat's words file (ctx.words; handOverWords). { why: MARK_FAILED } ends the command when the
+    mark cannot be written, or, on an open-lock Mac, when the chat's id is not a chat's; null lets it go on. A command marks once. */
+function holdWords(ctx, e) {
+  if (!ctx.asked || !ctx.words || ctx.words.marked || !SAYS_WORDS.includes(ctx.asked.command)) return null;
+  const session = e.records.filter(recordShaped).find(sessionNotCleared);
+  if (!session) return null;
+  const env = ctx.deps.env || process.env;
+  if (env.CLAUDECODE !== "1" || !existsSync(studioFolder(ctx.home))) return null;
+  try {
+    const table = processTable((ctx.deps.ps || readProcesses)());
+    markChat({ home: ctx.home, env, table, pid: ctx.deps.pid !== undefined ? ctx.deps.pid : process.pid, now: ctx.now() });
+  } catch (err) {
+    return { why: MARK_FAILED };
+  }
+  ctx.words.marked = true;
+  if (lockFor(ctx.settings, ctx.deps) !== "open") return null;
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  if (typeof id !== "string" || !SESSION_ID.test(id)) return { why: MARK_FAILED };
+  Object.assign(ctx.words, { lines: [], session: id, label: shownName(session) });
+  return null;
+}
+
+/** At the end of a command whose lines were kept for the chat's words file (holdWords): write them into a file of the chat's own
+    (held.js writeWords, named for the command), and tell the chat its label and the file, and nothing else. A file that cannot
+    be written ends the command with MARK_FAILED, the lines shown nowhere. Gives the command's code. */
+function handOverWords(ctx, code) {
+  const { words } = ctx;
+  if (!words || !words.lines) return code;
+  const lines = words.lines;
+  words.lines = null;
+  if (!lines.length) return code;
+  let path;
+  try {
+    path = writeWords({ home: ctx.home, sessionId: words.session, label: words.label, what: ctx.asked.command, text: `${lines.join("\n")}\n`, now: ctx.now() });
+  } catch (e) {
+    ctx.say(MARK_FAILED);
+    return 1;
+  }
+  ctx.say(wordsLine(words.label, path));
+  return code;
+}
+
 /** The episode a person names, by what they `said`: its folder's name, its id or short id, or words that are all in its folder's
     name or its own name; and a gated one by its label (shownName), the whole of it, whatever its case and spacing, so that a
     label numbered " (2)" fits that video alone and the bare label the first, or by the label and short id its lists give it,
@@ -481,7 +575,7 @@ export function findEpisode(ctx, said) {
     // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
     // foresaw names none of it (editMain).
     if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
-    return gateOf(ctx, e, known(e), said, e.inForce) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
+    return gateOf(ctx, e, known(e), said, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
@@ -579,7 +673,8 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
 /** The lines of her card for the video not yet answered whose record is `named` (spec 2026-10-22, section 2, "The card"), below
     its line, each indented four spaces, which her skill reads word for word and in this order: what the import saw (answer.seen),
     how it came, the tool's guess, and the episode whose words it found in the video, as "Maybe a new version of: <its name> (id
-    <short id>), <its kind>". Each line is left out when its fact is not given: no sight of it, or one not in the shape seenLine
+    <short id>), <its kind>"; and last the card itself, called `label`, as JSON (cardLinesFor, R10). Each of the first four lines
+    is left out when its fact is not given: no sight of it, or one not in the shape seenLine
     makes on one line (isSeenLine: a record may hold any text there, and a line break would forge the card's lines), no way it
     came, no guess, or a match that is none.
     The match (answer.match, an id) is looked for among `others`, the episodes `episodes` lists, by their records alone (episodeAt's
@@ -594,7 +689,7 @@ const GUESS_WORDS = { finished: "finished by your editor", raw: "raw with retake
     copy). It is named as shownName names it, with its kind in the words `kind` says (KIND_SAID). A match that is itself a session not
     cleared, or one of whose versions is (matchedSession), gives the line "Maybe a new version of a client or group session." in its
     place, naming none: her skill then offers "Client or group session" first, and `kind` takes no other answer for it. */
-function cardLines(named, others, links) {
+function cardLines(named, label, others, links) {
   const answer = named.answer;
   if (answer === null || typeof answer !== "object" || answer.state !== "needs your answer") return [];
   const lines = [];
@@ -603,16 +698,46 @@ function cardLines(named, others, links) {
   if (Object.hasOwn(GUESS_WORDS, answer.guess)) lines.push(`    Guess: ${GUESS_WORDS[answer.guess]}`);
   // A match that is a session not cleared, or a version of one, is offered as such, naming none (edit.js answerWhy then takes only
   // a session for it).
-  if (matchedSession(links, named)) {
-    lines.push("    Maybe a new version of a client or group session.");
-    return lines;
-  }
+  const maybe = maybeOf(named, others, links);
+  if (maybe && maybe.session) lines.push("    Maybe a new version of a client or group session.");
+  else if (maybe) lines.push(`    Maybe a new version of: ${shownName(maybe.record)} (id ${maybe.record.id.slice(-6)}), ${KIND_SAID[recordKind(maybe.record)]}`);
+  return [...lines, ...cardLinesFor(named, label, others, links)];
+}
+
+/** The video the Maybe line of the card of `named` names, as cardLines says it: { session: true } for a match that is a session not
+    cleared or a version of one, { record } for a match `kind --version-of` would take (its record in force), or null. */
+function maybeOf(named, others, links) {
+  const answer = named.answer;
+  if (answer === null || typeof answer !== "object") return null;
+  if (matchedSession(links, named)) return { session: true };
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
   if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
     && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
     && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
-    lines.push(`    Maybe a new version of: ${shownName(match.inForce)} (id ${match.inForce.id.slice(-6)}), ${KIND_SAID[recordKind(match.inForce)]}`);
+    return { record: match.inForce };
   }
+  return null;
+}
+
+/** Her card for the video with no kind whose record is `named`, called `label` (receipts.js cardOf): by its Guess line, and the Maybe
+    line cardLines says. */
+function cardFor(named, label, others, links) {
+  const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
+  const found = maybeOf(named, others, links);
+  const maybe = !found ? null : found.session ? { session: true } : { name: shownName(found.record), kind: recordKind(found.record) };
+  return cardOf({ label, guess: Object.hasOwn(GUESS_WORDS, answer.guess) ? answer.guess : null, maybe });
+}
+
+/** The card's own lines for the video with no kind whose record is `named`, called `label` (R10): "    Card: <JSON>", the card her
+    skill asks with AskUserQuestion as it is (receipts.js cardOf, by its Guess line and the Maybe line cardLines says), and, when it
+    came as a Zoom download or as sound alone, or `notASession` asks for it, "    Card if not a session: <JSON>" (notSessionCardOf,
+    worded for how it came when the record says). A video she left alone has them too: `kind` prints them when it asks for her click
+    first. `others` and `links` are as cardLines has them. */
+export function cardLinesFor(named, label, others, links, { notASession = false } = {}) {
+  const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
+  const lines = [`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`];
+  const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
+  if (came || notASession) lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came }))}`);
   return lines;
 }
 
@@ -637,7 +762,7 @@ function episodeLines(ctx, e, left, all, links) {
     const held = e.held && !gated(named);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
     lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
-    if (!left && recordKind(named) === null) lines.push(...cardLines(named, all, links));
+    if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
@@ -662,6 +787,9 @@ function shownLine(pushed) {
   return `Shown: v${top.v} (${top.how === "render" ? "rendered" : "in Final Cut"}), on ${top.on}`;
 }
 
+/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one. */
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
 
@@ -677,7 +805,7 @@ export async function episodes(ctx) {
   const { say } = ctx;
   // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
   const links = linksOf(ctx.root);
-  const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+  const all = listedEpisodes(ctx, links);
   const shown = all.filter((e) => !isLeft(e));
   const left = all.filter(isLeft);
   if (!shown.length && !left.length) say("No episodes yet.");
@@ -2147,79 +2275,27 @@ function notesForHer(text, record) {
 /** Where `show` copies a file of the episode in `folder` to open it: ~/BRIMM Video Work/<folder>/shown/, on this Mac's own disk. */
 const shownFolder = (home, folder) => join(episodeWork(home, folder), "shown");
 
-/** The file in a shown/ folder that lists what brimm-video put into it (showCopy, whichCommand): `behind` takes away those files alone,
-    and only from a folder that has it (clearShownIn). */
-export const SHOWN_MARKER = ".brimm-shown.json";
+/** The file in a shown/ folder that lists what brimm-video put into it (reveal.js). */
+export { SHOWN_MARKER };
 
-/** The names the marker in the shown/ folder `dir` lists, or null when it has none that can be read. Only a plain name in the folder
-    counts: never a path, nor the marker itself. */
-function shownListed(dir) {
-  try {
-    const read = JSON.parse(readFileSync(join(dir, SHOWN_MARKER), "utf8"));
-    if (read === null || typeof read !== "object" || !Array.isArray(read.files)) return null;
-    return read.files.filter((name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && name !== SHOWN_MARKER && !/[/\\\u0000]/.test(name));
-  } catch (e) {
-    return null;
+/** The folder `show` and `which` copy a file of the episode `found`, whose record is `record`, into, made: on a Mac whose lock in
+    effect is open, ~/BRIMM Video Work/shown/<its id>/, whose name is no file's and no client's (reveal.js, R12); on any other, the
+    episode's own shown/ folder, as always. Throws when it cannot be made. */
+function madeShownDir(ctx, found, record) {
+  if (lockFor(ctx.settings, ctx.deps) !== "open") {
+    const dir = shownFolder(ctx.home, found.name);
+    mkdirSync(dir, { recursive: true });
+    return dir;
   }
-}
-
-/** Have the marker in `dir` list `names`, and take it away when there are none. */
-function listShown(dir, names) {
-  const file = join(dir, SHOWN_MARKER);
-  if (!names.length) rmSync(file, { force: true });
-  else writeFileSync(file, `${JSON.stringify({ files: [...new Set(names)] })}\n`);
-}
-
-/** Add `name` to what the marker in `dir` lists, before the file is put there: a file listed and not there is passed over. */
-const addShown = (dir, name) => listShown(dir, [...(shownListed(dir) || []), name]);
-
-/** Take away from the shown/ folder `dir` the files its marker lists that `only` takes, each on its own: a file or a link, never a
-    folder, and nothing inside one; then the marker, once it lists nothing that is left, and the folder, once nothing else is in it.
-    A folder that is not one (a link to one included), or has no marker, is left as it is. Gives back the names still listed, or
-    null for such a folder. */
-function clearShownIn(dir, only = () => true) {
-  const at = lstatSync(dir, { throwIfNoEntry: false });
-  if (!at || !at.isDirectory()) return null;
-  const listed = shownListed(dir);
-  if (listed === null) return null;
-  const left = [];
-  for (const name of listed) {
-    const file = join(dir, name);
-    const found = lstatSync(file, { throwIfNoEntry: false });
-    if (!found) continue;
-    if (found.isDirectory() || !only(name)) {
-      left.push(name);
-      continue;
-    }
-    try {
-      rmSync(file);
-    } catch (e) {
-      left.push(name);
-    }
-  }
-  listShown(dir, left);
-  if (!left.length) {
-    try {
-      rmdirSync(dir);
-    } catch (e) {
-      // Something brimm-video did not put there is in it, and stays.
-    }
-  }
-  return left;
-}
-
-/** A name in `dir` for a copy named `base` with its `ending` that nothing there has: "<base><ending>", then "<base> 2<ending>" and on.
-    Nothing in shown/ is ever written over, a file brimm-video did not list (an older brimm-video's copy) least of all. */
-function freeShownName(dir, base, ending) {
-  for (let n = 1; ; n++) {
-    const name = `${base}${n > 1 ? ` ${n}` : ""}${ending}`;
-    if (!lstatSync(join(dir, name), { throwIfNoEntry: false })) return name;
-  }
+  const dir = shownByIdFolder(ctx.home, record.id);
+  madeShownByIdFolder(dir);
+  return dir;
 }
 
 /** Open the file `rel` of the episode `found` (whose record is `record`, one the gate holds: a video not yet answered, left alone,
     or a session not cleared) on this Mac, and print nothing of it (spec 2, "What else the mark stops"): it is copied into
-    ~/BRIMM Video Work/<folder>/shown/, made read-only (TextEdit saves in place, and the file in Dropbox is never written into),
+    ~/BRIMM Video Work/<folder>/shown/ (on an open-lock Mac, ~/BRIMM Video Work/shown/<its id>/: madeShownDir), made read-only
+    (TextEdit saves in place, and the file in Dropbox is never written into),
     and opened in TextEdit, and she is told only that it was, by the video's name. The copies `show` made before in that folder go
     first, and `behind`, at the next session start, clears them all: each is listed by the folder's marker (SHOWN_MARKER) before it
     is made, and only what the marker lists is ever taken away. The copy is named by the video's name, never its file's. A file
@@ -2228,12 +2304,10 @@ function showCopy(ctx, found, record, rel, what) {
   const name = namedAs(found, record);
   const from = join(found.folder, rel);
   if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
-  const dir = shownFolder(ctx.home, found.name);
   let copy = "";
   try {
-    mkdirSync(dir, { recursive: true });
-    clearShownIn(dir, (listed) => listed.endsWith(".txt"));
-    mkdirSync(dir, { recursive: true });
+    clearShownIn(madeShownDir(ctx, found, record), (listed) => listed.endsWith(".txt"));
+    const dir = madeShownDir(ctx, found, record);
     const named = freeShownName(dir, `${fileSafe(name)} ${what}`, ".txt");
     copy = join(dir, named);
     addShown(dir, named);
@@ -2253,7 +2327,8 @@ function showCopy(ctx, found, record, rel, what) {
 
 /** Clear the copies `show` and `which` made, of every episode (showCopy, whichCommand): `behind` does it at every session's start.
     Only the files a shown/ folder's marker lists are taken away (clearShownIn): a shown/ with no marker, and anything else in BRIMM
-    Video Work, is left as it is, and nothing is gone into but shown/ itself. One that cannot be taken away stays until the next. */
+    Video Work, is left as it is, and nothing is gone into but shown/ itself. One that cannot be taken away stays until the next.
+    The copies by id in ~/BRIMM Video Work/shown/<id>/ (reveal.js, R12) are cleared the same way. */
 function clearShown(ctx) {
   let names = [];
   try {
@@ -2268,132 +2343,35 @@ function clearShown(ctx) {
       // It is cleared at the next session start.
     }
   }
+  // And the copies by id an open-lock Mac makes (reveal.js), in ~/BRIMM Video Work/shown/<id>/, whatever this Mac's lock is now.
+  const byId = join(workFolder(ctx.home), "shown");
+  const at = lstatSync(byId, { throwIfNoEntry: false });
+  if (!at || !at.isDirectory()) return;
+  let ids = [];
+  try {
+    ids = readdirSync(byId);
+  } catch (e) {
+    return;
+  }
+  for (const id of ids) {
+    try {
+      clearShownIn(join(byId, id));
+    } catch (e) {
+      // It is cleared at the next session start.
+    }
+  }
+  try {
+    rmdirSync(byId);
+  } catch (e) {
+    // A copy, or something brimm-video did not put there, is in it still.
+  }
 }
 
 /** How long `behind` gives git, each time: well inside the two minutes the Code tab gives a command. */
 const BEHIND_MS = 20000;
 
-/** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
-    for these words (tests/studio.test.js). */
-export const LOCK_CHANGED = "This folder's lock is changed on this Mac: ask Jason before going on.";
-
-/** Where Claude Code reads this Mac's managed settings (a Mac's folder: managed-settings.json, and managed-settings.d/*.json beside it,
-    read in the order of their names). A test gives another, as `managedDir` in its deps. */
-const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
-
-/** Where Claude Code reads this Mac's managed preferences, as its 2.1.308 binary says: the user's, <user>/com.anthropic.claudecode.plist,
-    then the Mac's, com.anthropic.claudecode.plist, each made JSON by plutil. A test gives another folder, as `managedPrefs` in its deps. */
-const MANAGED_PREFS = "/Library/Managed Preferences";
-const PREFS_FILE = "com.anthropic.claudecode.plist";
-
-/** A managed preferences file as the object Claude Code reads from it, or null: it is not there, or plutil cannot make it a JSON
-    object (it is not a property list, holds a date or data, or is not a dictionary). Claude Code takes none of such a file. */
-function prefsObject(file) {
-  if (!lstatSync(file, { throwIfNoEntry: false })) return null;
-  const made = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", file], { encoding: "utf8", timeout: 5000 });
-  if (made.status !== 0) return null;
-  try {
-    const settings = JSON.parse(made.stdout);
-    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-/** A settings file as the object Claude Code reads from it, or null: it is not there, cannot be read, is not JSON (a byte-order mark,
-    a comment and a comma at the end are not JSON) or is not an object. Claude Code leaves such a file out. */
-function settingsObject(file) {
-  try {
-    const settings = JSON.parse(readFileSync(file, "utf8"));
-    return settings !== null && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-/** `behind`: whether the lock on her folder for Claude has been loosened on this Mac (spec 2026-10-22, section 7), as the lines
-    `behind` says under LOCK_CHANGED, for Jason, each in parentheses and none holding a word of any file; [] when it holds. The lock
-    rests on a guard hook (studio.js), which these can turn off, so these files are looked at, and no other, and the folder the
-    session runs in, where Claude Code reads the guard from; nothing is written.
-    `home` and `deps` are the command's (deps.env, deps.managedDir, deps.managedPrefs, deps.user and deps.cwd are a test's own), and
-    `checkout` is the one the guard is run from. In this order:
-    - the folder the session runs in, which her skill runs `behind` in, as Claude Code runs every command, and which a locked session
-      cannot change, since the guard lets only edit.js run: when this Mac has her folder, it must be that folder itself, by its real
-      path. Claude Code reads .claude/settings.json only from the session's own folder, but her CLAUDE.md and her skill from the
-      folders above it too, so a session in Pictures, or in a folder above hers, looks like hers and has no lock. Which folder it is
-      is not said: its name may be a client's;
-    - her folder's .claude/settings.local.json: anything of that name there is one, a file, a folder or a link to nowhere, and so is
-      anything that cannot be looked at (a folder that may not be searched), since then it is not known that there is none;
-    - her folder's own .claude/settings.json (studio.js lockBroken): it is not there, cannot be read, or is not an object; or it says
-      disableAllHooks is true (absent, as main wrote the folder, it turns no hook off), no longer has the guard hook settingsOf
-      writes, or no longer turns Bypass and Auto mode off. Every other difference from what is written there is only "out of date" (studioStale);
-    - the user's settings, ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR/settings.json when that is set (Claude Code's own): when it
-      is a JSON object with disableAllHooks true, whether or not she has a folder, since hooks off would defeat the lock of one made
-      later. A file that is not that is left out by Claude Code, so it turns nothing off;
-    - this Mac's managed settings (MANAGED_DIR): managed-settings.json, then the files of managed-settings.d that end in .json and do
-      not begin with a dot (a file or a link), in the order of their names; then its managed preferences (MANAGED_PREFS), the user's,
-      then the Mac's; then the server-managed settings Claude Code keeps beside the user settings, remote-settings.json. Each when it
-      sets disableAllHooks true, or allowManagedHooksOnly true, which lets only managed hooks run, and the guard is not one. Claude
-      Code takes its managed settings from one of these only, but which one is not looked into: any of them is said. */
-function lockLoosened({ home, checkout, deps = {} }) {
-  const why = [];
-  let folder = null;
-  try {
-    folder = realpathSync.native(studioFolder(home));
-  } catch (e) {
-    // She has no folder for Claude on this Mac, so nothing in it can be there.
-  }
-  if (folder) {
-    let cwd = null;
-    try {
-      cwd = realpathSync.native(deps.cwd || process.cwd());
-    } catch (e) {
-      // A folder not there any more is not hers.
-    }
-    if (cwd !== folder) {
-      const where = cwd && cwd.startsWith(folder + "/") ? "a folder inside her folder for Claude, not in the folder itself," : "a folder other than her folder for Claude,";
-      why.push(`(Jason: this session runs in ${where} and Claude Code reads the folder's lock only in the folder itself. Start her sessions on ~/BRIMM Video Studio itself.)`);
-    }
-    try {
-      if (lstatSync(join(folder, ".claude", "settings.local.json"), { throwIfNoEntry: false })) why.push("(Jason: her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)");
-    } catch (e) {
-      if (e.code !== "ENOTDIR") why.push("(Jason: her folder's .claude/settings.local.json could not be looked for, so it is not known that there is none.)");
-    }
-    const own = settingsObject(join(folder, ".claude", "settings.json"));
-    if (own === null) why.push("(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)");
-    else {
-      const broken = lockBroken(own, { checkout, folder });
-      if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)");
-      if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
-      const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
-      if (modes.length) why.push(`(Jason: her folder's .claude/settings.json ${modes.join(" and ")}. Its contents are not shown here.)`);
-    }
-  }
-  const config = (deps.env || process.env).CLAUDE_CONFIG_DIR;
-  const user = settingsObject(config ? join(config, "settings.json") : join(home, ".claude", "settings.json"));
-  if (user && user.disableAllHooks === true) why.push(`(Jason: this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
-  const managed = deps.managedDir || MANAGED_DIR;
-  let dropIns = [];
-  try {
-    dropIns = readdirSync(join(managed, "managed-settings.d"), { withFileTypes: true })
-      .filter((e) => (e.isFile() || e.isSymbolicLink()) && e.name.endsWith(".json") && !e.name.startsWith(".")).map((e) => `managed-settings.d/${e.name}`).sort();
-  } catch (e) {
-    // No drop-ins.
-  }
-  const prefs = deps.managedPrefs || MANAGED_PREFS;
-  const account = deps.user || userInfo().username;
-  const sources = [
-    ...["managed-settings.json", ...dropIns].map((file) => [file, settingsObject(join(managed, file))]),
-    ...[join(account, PREFS_FILE), PREFS_FILE].map((file) => [`Managed Preferences/${file}`, prefsObject(join(prefs, file))]),
-    [`the server-managed ones Claude Code keeps in ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/remote-settings.json`, settingsObject(config ? join(config, "remote-settings.json") : join(home, ".claude", "remote-settings.json"))]
-  ];
-  for (const [file, set] of sources) {
-    if (!set) continue;
-    if (set.disableAllHooks === true) why.push(`(Jason: this Mac's managed settings, ${file}, turn hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
-    if (set.allowManagedHooksOnly === true) why.push(`(Jason: this Mac's managed settings, ${file}, allow only managed hooks (allowManagedHooksOnly), so the guard hook, which is not a managed one, does not run. Its contents are not shown here.)`);
-  }
-  return why;
-}
+/** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (loosened.js, which makes the check). */
+export { LOCK_CHANGED } from "./loosened.js";
 
 /** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. */
 function refuseIfLoosened(lock, say) {
@@ -2408,12 +2386,26 @@ function refuseIfLoosened(lock, say) {
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
-    checkout, and otherwise always ends with 0: a check that could not be made is said. */
+    checkout, and otherwise always ends with 0: a check that could not be made is said. With the open lock in effect on this Mac it
+    also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
+    this Mac's settings add to what her folder allows, so that a change shows (design section 2). */
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
   const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
   if (refused !== null) return refused;
+  const open = lockFor(ctx.settings, ctx.deps) === "open";
+  if (open) {
+    let folder = null;
+    try {
+      folder = realpathSync.native(studioFolder(ctx.home));
+    } catch (e) {
+      // She has no folder for Claude on this Mac, so it has nothing to trust.
+    }
+    const untrusted = trustWhy({ home: ctx.home, folder, env: ctx.deps.env || process.env });
+    if (untrusted) ctx.say(untrusted);
+  }
+  const added = open ? studioAllowOf(ctx.settings) : [];
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer brimm-video. Is this Mac offline?";
@@ -2421,6 +2413,7 @@ async function behind(ctx) {
   const stale = studioStale(ctx);
   const folderLine = () => {
     if (stale) ctx.say(`Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
     return 0;
   };
   const fetched = await git("fetch", "-q", "origin", "main");
@@ -2438,7 +2431,9 @@ async function behind(ctx) {
 
 /** Whether her folder for Claude (studio.js), when this Mac has one, is not what this checkout would write now, as after a
     git pull, which never rewrites it: {node}, the node its settings name (or Homebrew's, when they cannot be read), for the
-    command that writes it again; or null when it is as this checkout writes it, or there is none. */
+    command that writes it again; or null when it is as this checkout writes it, or there is none. It is compared with the folder
+    of the lock in effect on this Mac (loosened.js lockFor), the open one for this Mac's facts, since the command it names writes
+    that one again. */
 function studioStale(ctx) {
   let folder;
   try {
@@ -2459,7 +2454,8 @@ function studioStale(ctx) {
   } catch (e) {
     // Settings that cannot be read are out of date too, and Homebrew's node is the one the installer finds.
   }
-  const want = studioFiles({ checkout: ctx.settings.checkout, node, folder });
+  const lock = lockFor(ctx.settings, ctx.deps);
+  const want = studioFiles({ checkout: ctx.settings.checkout, node, folder, lock, facts: lock === "open" ? factsFor(ctx.home, ctx.settings, ctx.deps) : undefined });
   return Object.entries(want).every(([name, text]) => read(name) === text) ? null : { node: nameableNode(node) };
 }
 
@@ -3319,7 +3315,7 @@ function notInFinalCut(ctx, found, record) {
   if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.`;
   return `${name} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
 }
-const handoffWritten = (revision) => `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.`;
+const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.` : `The hand-off is written as revision ${revision}.`);
 /** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
     her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
 const hasFinalCut = (record) => {
@@ -3382,7 +3378,9 @@ async function importHandoff(ctx, found, record, done) {
   if (wrote.why) return refuse(ctx, wrote.why);
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
   else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.`);
-  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision)}`);
+  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}`);
+  // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
+  if (wrote.shown === false) ctx.say(cantOpen(shownName(record)));
   return 0;
 }
 
@@ -3987,6 +3985,48 @@ const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes"
 const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
+/** Whether `kind` may answer the video called `name`, whose record is `record`, as `plan` says (R10, R11; design 2026-10-26, section
+    5, "The card's receipt"): under Claude Code, on a Mac whose lock in effect is open, a video with no kind yet, waiting for her
+    answer or left alone, is answered only when a receipt of the last hour holds her answers on the card (receipts.js), and with
+    --not-a-session her answer on the not-a-session card too; a session, on her answer to either card. When it may not, it says
+    NO_RECEIPT and the video's card, which her skill then asks, and nothing is written. In Terminal, on a strict Mac, and for a
+    video answered already, no receipt is asked for. */
+function receiptHeld(ctx, record, plan, name) {
+  if ((ctx.deps.env || process.env).CLAUDECODE !== "1" || lockFor(ctx.settings, ctx.deps) !== "open" || recordKind(record) !== null) return true;
+  const answer = record.answer !== null && typeof record.answer === "object" ? record.answer : {};
+  const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
+  const target = plan.target ? plan.target.record : null;
+  const links = linksOf(ctx.root);
+  const others = listedEpisodes(ctx, links);
+  // The receipt is of the card this video's line prints, its first answer among it (Claude may word no part of it), and a new version
+  // is only of the video its Maybe line offered, by its id: two videos may have one name, and the chat sees neither's (below).
+  const card = cardFor(record, name, others, links);
+  const maybe = maybeOf(record, others, links);
+  const offeredTarget = !target || (maybe && maybe.record && maybe.record.id === target.id);
+  // Her card names the video as `episodes` printed it, or as this command prints it, without the names of the video it found (ctx.say).
+  const said = (text) => (ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
+  const now = ctx.now();
+  for (const spell of offeredTarget ? [(text) => text, said] : []) {
+    const label = spell(name);
+    const expected = expectedAnswers({ label, stored: plan.stored, maybeName: target ? spell(shownName(target)) : null, maybeKind: target ? recordKind(target) : null, notASession: plan.notASession, came, offered: spell(card.questions[0].options[0].label) });
+    if (receiptWhy({ home: ctx.home, expected, now }) === "") return true;
+    if (plan.stored === "session" && receiptWhy({ home: ctx.home, expected: sessionByFollowUp({ label, came }), now }) === "") return true;
+  }
+  ctx.say(NO_RECEIPT);
+  for (const line of cardLinesFor(record, name, others, links, { notASession: plan.notASession })) ctx.say(line);
+  return false;
+}
+
+/** Refuse `kind` for `why`, of the video called `name` whose record is `record`: when it says to ask first whether the video is a
+    session, the card that asks it follows, by the video's label and how it came when the record says (R10). */
+function refuseAnswer(ctx, name, record, why) {
+  ctx.say(why);
+  if (why === ASK_IF_SESSION) {
+    const came = record.answer && typeof record.answer === "object" ? record.answer.came : null;
+    ctx.say(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: name, came: came === "zoom" || came === "sound" ? came : null }))}`);
+  }
+  return 1;
+}
 const MARK_STAYS = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
 const SESSION_TARGET = "That video is a client or group session, so this new version is one too: answer it as a session.";
 /** What `--clear-session` is refused in when the answer given is a session: a mark is cleared by saying what the video really is. */
@@ -4386,7 +4426,8 @@ async function answerKind(ctx, found, plan, began) {
   const { record } = read;
   const name = namedAs(found, record);
   const why = answerWhy(ctx, found, record, plan);
-  if (why) return refuse(ctx, why);
+  if (why) return refuseAnswer(ctx, name, record, why);
+  if (!receiptHeld(ctx, record, plan, name)) return 1;
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
@@ -4421,7 +4462,7 @@ async function answerKind(ctx, found, plan, began) {
     const late = answerWhy(ctx, found, base, plan);
     if (late) {
       if (plan.clearSession) await letGoClaimWritten(ctx, found, base);
-      return refuse(ctx, stop(late));
+      return refuseAnswer(ctx, name, base, stop(late));
     }
   }
   // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still. To a session,
@@ -4484,12 +4525,23 @@ async function answerKind(ctx, found, plan, began) {
   }
   if (aside) forgetComing(ctx, found);
   if (stored === "session") {
+    // A video read as another kind, answered now as a session, is a session after all: every chat begun before now may have been
+    // shown its words, and is held (held.js; design 2026-10-26, R9). Noted with the time after the write; one that cannot be
+    // written is noted at the next read of the record (noteSessionsAfterAll), later.
+    if (next.session.emptyRevision !== undefined) {
+      try {
+        noteAfterAll({ home: ctx.home, id: next.id, revision: next.session.emptyRevision, at: new Date(ctx.now()).toISOString() });
+      } catch (e) {
+        // Noted at the next read.
+      }
+    }
     // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
     // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
     hideNames(ctx, episodeAt(ctx, found.name));
-    if (empty && empty.handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
+    const shown = !(empty && empty.handoff) || (await showInFinder(ctx, { record: next, label: next.name.text, path: join(found.folder, empty.handoff.rel) }));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
-    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed);
+    if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
+    if (!shown) say(cantOpen(next.name.text));
     if (owed.length) say(owedWords(next.name.text));
     sayVersionsToMark(ctx, found, next);
     return 0;
@@ -4583,7 +4635,9 @@ const OUT_OF_SHARED = "Its files are out of the shared folder.";
 /** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
     for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
     held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
-const emptyWritten = (label, n, gone = true) => `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`;
+const emptyWritten = (label, n, gone = true, shown = true) => (shown
+  ? `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`
+  : `The empty session revision of ${label} is written as revision ${n}.${gone ? ` ${WORDS_GONE}` : ""}`);
 const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
 const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
 const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
@@ -4854,23 +4908,27 @@ function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
   const fault = handoffFaultV2(made);
   if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
   const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
-  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone) };
+  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone), unshown: emptyWritten(label, target.revision, gone, false) };
 }
 
 /** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
     its words, and when it was not written, that its files are out of the shared folder, unless some stayed in final/, which are
     said, by what they are. */
-function sayEmpty(ctx, label, empty, stayed) {
-  ctx.say(empty.handoff || stayed.length ? empty.words : `${empty.words} ${OUT_OF_SHARED}`);
+function sayEmpty(ctx, label, empty, stayed, shown = true) {
+  const words = shown ? empty.words : empty.unshown;
+  ctx.say(empty.handoff || stayed.length ? words : `${words} ${OUT_OF_SHARED}`);
   if (stayed.length) ctx.say(stayedWords(label, whatsInFinal(stayed)));
 }
 
-/** Show a file in Finder, through this Mac's program runner: a hand-off for her to drop on the BRIMM Ops page. */
-async function showInFinder(ctx, path) {
+/** Show the file at `path`, of the video whose record is `record` and which is called `label`, in Finder, through this Mac's program
+    runner: a hand-off for her to drop on the BRIMM Ops page, or a video to post, which `clone` copies. On an open-lock Mac a copy of
+    it is shown (reveal.js revealed). False when that copy could not be made, and nothing was shown: the caller says cantOpen. */
+async function showInFinder(ctx, { record, label, path, clone }) {
   try {
-    await (ctx.deps.run || runProgram)("/usr/bin/open", ["-R", path]);
+    return await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: ctx.deps.run || runProgram, record, label, path, clone });
   } catch (e) {
     // The file is there all the same.
+    return true;
   }
 }
 
@@ -4893,12 +4951,13 @@ async function emptyRevisionAgain(ctx, found, record) {
   const wrote = await setAsideWritten(ctx, found, record, next, aside, handoff, { quiet: true, session: true });
   if (wrote.code !== 0) return 1;
   forgetComing(ctx, found);
-  if (handoff) await showInFinder(ctx, join(found.folder, empty.handoff.rel));
-  if (empty) sayEmpty(ctx, label, empty, wrote.stayed);
+  const shown = !handoff || (await showInFinder(ctx, { record: next, label, path: join(found.folder, empty.handoff.rel) }));
+  if (empty) sayEmpty(ctx, label, empty, wrote.stayed, shown);
   else {
     ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
     if (wrote.stayed.length) ctx.say(stayedWords(label, whatsInFinal(wrote.stayed)));
   }
+  if (!shown) ctx.say(cantOpen(label));
   sayVersionsToMark(ctx, found, next);
   return !empty || handoff ? 0 : 1;
 }
@@ -5037,7 +5096,9 @@ const OWN_FILE = "Its copy could not be made, so it opened under its file's name
     no time; it is made only of a video whole on this Mac, and only as a clone, on one disk (cloneWhole). When it
     cannot be made, or the video is not whole here (on the Mac that did not import it the file is online-only, and a clone would
     have Dropbox bring it all over first), the video's own file is opened, and she is told its name shows in the title bar; QuickTime
-    Player then has Dropbox bring it over, which is said. It says nothing else of the video. */
+    Player then has Dropbox bring it over, which is said. It says nothing else of the video. On an open-lock Mac the clone is made in
+    ~/BRIMM Video Work/shown/<its id>/ (madeShownDir), and a video the gate holds, or one held as a session, that it cannot clone is
+    not opened at all: cantOpen (design 2026-10-26, section 1, "What brimm-video opens and shows"). */
 export async function whichCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
   const got = episodeFor(ctx, words, { newerEnds: 1 });
@@ -5048,12 +5109,11 @@ export async function whichCommand(ctx, rest) {
   const here = ctx.isWhole(video);
   let opened = "";
   if (here) {
-    const dir = shownFolder(ctx.home, found.name);
     try {
-      mkdirSync(dir, { recursive: true });
-      // The clone `which` made before goes first; the copies `show` made stay.
-      clearShownIn(dir, (listed) => !listed.endsWith(".txt"));
-      mkdirSync(dir, { recursive: true });
+      // The clone `which` made before goes first; the copies `show` made stay. On an open-lock Mac the copies Finder showed are in
+      // the same folder, for her to drag: nothing in it is taken away until `behind`.
+      if (lockFor(ctx.settings, ctx.deps) !== "open") clearShownIn(madeShownDir(ctx, found, record), (listed) => !listed.endsWith(".txt"));
+      const dir = madeShownDir(ctx, found, record);
       const named = freeShownName(dir, fileSafe(name), extname(record.video.file));
       addShown(dir, named);
       cloneWhole(ctx, video, join(dir, named));
@@ -5062,6 +5122,8 @@ export async function whichCommand(ctx, rest) {
       // The video itself is opened instead, and she is told so.
     }
   }
+  // On an open-lock Mac a video the gate holds, or one held as a session, is never opened under its file's name (R12).
+  if (!opened && lockFor(ctx.settings, ctx.deps) === "open" && (gated(record) || found.held)) return refuse(ctx, cantOpen(name));
   try {
     ctx.openApp("QuickTime Player", opened || video);
   } catch (e) {
@@ -5384,7 +5446,9 @@ async function finishSessionCommand(ctx, found) {
   }
   for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);
   const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
-  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film. It is shown in Finder: drop it on the BRIMM Ops page.`);
+  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film.${done.shown === false ? "" : " It is shown in Finder: drop it on the BRIMM Ops page."}`);
+  // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
+  if (done.shown === false) ctx.say(cantOpen(name));
   return 0;
 }
 
@@ -5632,7 +5696,18 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
   const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
   if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
-  await showInFinder(ctx, path);
+  // On an open-lock Mac the video to post is shown as a clone of it, made only of one whole on this Mac (cloneWhole, as `which`):
+  // one that is not, Dropbox is had bring over first, as `show` does.
+  if (video && lockFor(ctx.settings, ctx.deps) === "open" && !ctx.isWhole(path)) {
+    const name = basename(folder);
+    if (runningCommand(ctx.home, name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: name, args: [where.join("/")] });
+    return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
+  }
+  const clone = video ? (from, to) => {
+    if (!ctx.isWhole(from)) throw new Error("it is not whole on this Mac");
+    cloneWhole(ctx, from, to);
+  } : undefined;
+  if (!(await showInFinder(ctx, { record, label: shownName(record), path, clone }))) return refuse(ctx, cantOpen(shownName(record)));
   ctx.say(`Shown in Finder: ${what}${video ? ", to post" : ""}.`);
   return 0;
 }
@@ -5802,8 +5877,11 @@ export async function editMain(argv, deps = {}) {
   // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
   // before the command goes on: the folder a detached run is given by `--now` is found by it too.
   const ctx = { ...made, asked: { command, words: rest } };
+  // Under Claude Code, each command first takes away the words files a day old (held.js clearOldWords).
+  if ((ctx.deps.env || process.env).CLAUDECODE === "1") clearOldWords(ctx.home, ctx.now());
+  let code;
   try {
-    return await run(ctx, rest);
+    code = await run(ctx, rest);
   } catch (e) {
     // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
     // any command on a Mac that does the light import, where any video's file may be named for a client: its error may name the
@@ -5811,13 +5889,24 @@ export async function editMain(argv, deps = {}) {
     // is thrown as it always was.
     if (!ctx.hidden.names.length && !ctx.hidden.switched && !lightImport(ctx.settings)) throw e;
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
-    return 1;
+    code = 1;
   }
+  // A session's words the command said on an open-lock Mac go into the chat's words file, and the chat is told the file.
+  return handOverWords(ctx, code);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  editMain(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
-  });
+  // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js). The check is the open lock's:
+  // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
+  const open = effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
+  const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync }) : "";
+  if (sandboxed) {
+    process.stdout.write(`${sandboxed}\n`);
+    process.exitCode = 1;
+  } else {
+    editMain(process.argv.slice(2)).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }
 

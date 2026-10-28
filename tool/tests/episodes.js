@@ -87,11 +87,13 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     home, say: (line) => said.push(line), now: () => clock,
     openApp: (app, file) => opened.push([app, file]), start: (cmd, args) => started.push([cmd, args]),
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
+    // No test asks launchctl whether this Mac's launch agent is at work: it is not, unless a test says it is.
+    agentRunning: () => false,
     run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
     // No test reads this computer's own Claude settings: `behind` looks at the environment, the managed settings folder and the
-    // managed preferences (edit.js lockLoosened), and here they are empty and in the test's own folder. Its session runs in her
+    // managed preferences (loosened.js lockLoosened), and here they are empty and in the test's own folder. Its session runs in her
     // folder for Claude, as her sessions do, whether or not a test has written that folder.
     env: {}, managedDir: join(dir, "managed"), managedPrefs: join(dir, "managed-preferences"), user: "sallie", cwd: join(home, "BRIMM Video Studio"),
     wait: async (ms) => {

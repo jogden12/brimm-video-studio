@@ -60,7 +60,10 @@ function setup({ settings = true } = {}) {
     online: async () => true,
     statfs: () => ({ bavail: 300 * 2 ** 18, bsize: 4096 }),
     // No test asks launchctl about this Mac's own launch agent: it is idle unless a test says otherwise.
-    agentRunning: () => false
+    agentRunning: () => false,
+    // The chat's environment is never the runner's (often a Claude Code session's): not under Claude Code, so nothing is marked
+    // and no words file is touched.
+    env: {}
   };
   const run = async (...argv) => {
     const said = [];

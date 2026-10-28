@@ -1,18 +1,23 @@
-// Sallie's session may run one program: brimm-video's edit.js, from this Mac's checkout. This hook answers every tool call
-// before Claude Code asks anyone, in whatever mode the session is in: yes to edit.js, nothing (Claude Code's own rules) for
-// reads inside her folder, and no to everything else. The checkout is the one this file is in, node the one the installer
-// found and the folder the one settings.js wrote, both of which guard.sh is given.
+// Sallie's session may run only what her folder's lock allows. This hook answers every tool call before Claude Code asks anyone, in
+// whatever mode the session is in. On a Mac with the strict lock, today's guard: yes to edit.js, nothing (Claude Code's own rules)
+// for reads inside her folder, and no to everything else. On a Mac with the open lock in effect, the open guard (open-lock.js
+// guardAnswer), which falls back to today's while anything loosens the lock or the chat holds a session's words. The checkout is
+// the one this file is in, node the one the installer found and the folder the one settings.js wrote, both of which guard.sh is
+// given. Anything that goes wrong refuses the call. Once it has answered it ends, whatever is still running (a name's look-up that
+// timed out, which cannot be stopped).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { guardDecision } from "../studio.js";
+import { guardAnswer } from "../open-lock.js";
 
+const end = (text) => (text ? process.stdout.write(text, () => process.exit(0)) : process.exit(0));
 const answer = (decision, reason) =>
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: decision, permissionDecisionReason: reason } }));
+  end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: decision, permissionDecisionReason: reason } }));
 try {
   const node = process.argv[2];
   const checkout = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/, "");
-  const { decision, reason } = guardDecision(JSON.parse(readFileSync(0, "utf8") || "{}"), { checkout, node, folder: process.argv[3] || "" });
+  const { decision, reason } = await guardAnswer(JSON.parse(readFileSync(0, "utf8") || "{}"), { checkout, node, folder: process.argv[3] || "" });
   if (decision !== "pass") answer(decision, reason);
+  else end("");
 } catch {
   answer("deny", "brimm-video's guard could not check this. Ask Jason.");
 }

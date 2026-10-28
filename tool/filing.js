@@ -375,10 +375,12 @@ const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(
 /** The label of a light import's video, as its statuses carry it, from its late check: { label }, or nothing. */
 const labelOf = (pending) => (pending.label ? { label: pending.label } : {});
 
-/** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. */
+/** Write the status of a video whose import is waiting for its late check, so the other Mac sees this one is still at it. Of
+    the step "Waiting for its late check" it says when the check is due, as `due`, in milliseconds: the other Mac does not make
+    its own look at the video's files before then. */
 function waitingStatus(pending, deps, step) {
   try {
-    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())), ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
+    writeStatus(pending.root, { version: 1, machine: pending.machine, pid: process.pid, ...(pending.importId ? { import: pending.importId } : {}), video: pending.video, bytes: pending.bytes, seconds: pending.seconds, step, at: localStamp(new Date(Date.now())), ...(step === "Waiting for its late check" ? { due: dueAt(pending) } : {}), ...labelOf(pending) }, textWriter({ work: join(pending.work, "status"), ...ruleOpts(deps) }));
   } catch (e) {
     // The status costs nothing but itself, and the next minute's is written again.
   }
@@ -527,8 +529,9 @@ const LOOK_AGAIN_MS = 60 * 1000;
     are due, first; then each video waiting in the folder (`importOne(name)`, which resolves what uneditedFile does), unless
     an episode or a status holds it (heldBy), or, in a light import (`deps.light`), it is a Zoom download, which is held in
     the folder with a status that says why until the import takes them; then, while any late check of this run is not yet
-    due, a wait of a minute at most, a look for videos that arrived meanwhile, and each late check that has come due. The
-    Mac is kept awake while there is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those
+    due, a wait of a minute at most, a look for videos that arrived meanwhile, and each late check that has come due; and,
+    while a video imports, each minute, the late checks that have come due then, whose drop files the loop then passes over.
+    The Mac is kept awake while there is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those
     held, each with `held`. In a light import the log names no video by its file, which may be named for a client: a video by
     the label its status carries, or as "A video in the drop folder", and why it is held with nothing of its file's names in it.
     A Zoom download is named by its Zoom time alone (kinds.js zoomTimeOf), the part of its name that is Zoom's: the time and a
@@ -591,6 +594,9 @@ export async function importEpisodes(dir, deps, importOne) {
     }
     if (first) log(names.length ? `Looked in the folder: ${names.length} waiting${deps.light ? "" : ` (${names.join(", ")})`}.` : "Looked in the folder: nothing is waiting.");
     for (const name of names) {
+      // A late check that came due while an earlier video imported took this video out of the folder: it is no video to import,
+      // and none to say failed.
+      if (!statSync(join(dir, name), { throwIfNoEntry: false })) continue;
       const id = key(name);
       let held = heldBy({ root: episode.root, video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0 });
       // A light import takes no Zoom download yet: it is left in the folder, and its status says why.
@@ -605,10 +611,19 @@ export async function importEpisodes(dir, deps, importOne) {
       }
       seen.add(id);
       wake();
-      // While a video is imported, which can take many minutes, the videos waiting for their late checks go on saying so.
+      // While a video is imported, which can take many minutes, the videos waiting for their late checks go on saying so, and
+      // each late check that comes due is made, as the loop below makes it: a long import does not hold a video's check.
       const { every = setInterval, cancel = clearInterval } = deps;
       const keep = every(() => {
         for (const pending of mine().filter((p) => !p.problem)) waitingStatus(pending, deps, "Waiting for its late check");
+        // A check that cannot be made, as when a file cannot be looked at, must not end the process in the middle of another video's
+        // import: a throw in a timer is never caught. The check stays pending, and the next run's start makes it again. A light
+        // import's log names no video by its file, and an error's own words may hold a path, so this line gives only its code.
+        try {
+          finishDue(false);
+        } catch (e) {
+          log(`The late check of a video waiting for it could not be made (${e.code || "an error"}). The next run makes it again.`);
+        }
       }, LOOK_AGAIN_MS);
       if (keep && typeof keep.unref === "function") keep.unref();
       let result;

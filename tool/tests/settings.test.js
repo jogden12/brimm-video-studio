@@ -4,12 +4,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { studioFolder, studioFiles } from "../studio.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN } from "../settings.js";
+import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAULT } from "../studio.js";
+import { claudeDirName, realOf } from "../places.js";
+import { chatHeld } from "../held.js";
+import { heldFolder } from "../scan.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -282,6 +285,425 @@ describe("the switch's settings", () => {
     assert.equal(dropFolder("/r", "Mac Studio"), "/r/Unedited Video/Mac Studio");
     assert.equal(dropFolder("/r", "Mac Studio", "Drop"), "/r/Drop/Mac Studio");
     assert.equal(dropFolder("/r", "Mac Studio", undefined), "/r/Unedited Video/Mac Studio");
+  });
+});
+
+describe("this Mac's lock settings (the open lock, K1)", () => {
+  const good = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT };
+  it("keeps the lock strict, the web tools held and Zoom's folder in Documents when the settings say nothing", () => {
+    assert.deepEqual([lockOf({}), lockOf({ lock: "open" }), lockOf(undefined), webOf({}), webOf({ web: "open" })], ["strict", "open", "strict", "held", "open"]);
+    assert.equal(zoomFolderOf({}, "/Users/sallie"), "/Users/sallie/Documents/Zoom");
+    assert.equal(zoomFolderOf({ zoomFolder: "/Users/sallie/Zoom recordings" }, "/Users/sallie"), "/Users/sallie/Zoom recordings");
+    assert.deepEqual([studioAllowOf({}), proxyPortOf({}), studioNodeOf({}), studioNodeOf(undefined)], [[], null, null, null]);
+    assert.deepEqual([proxyPortOf({ proxyPort: 47123 }), studioNodeOf({ studioNode: "/opt/homebrew/bin/node" })], [47123, "/opt/homebrew/bin/node"]);
+    assert.equal(settingsFault({ ...good, lock: "strict", web: "held", zoomFolder: "/Users/sallie/Documents/Zoom", proxyPort: 47123, studioNode: "/opt/homebrew/bin/node", studioAllow: [] }), "");
+  });
+  it("refuses a lock, a web setting, a Zoom folder, a proxy port or a node that will not do", () => {
+    for (const [more, why] of [[{ lock: "loose" }, 'the lock must be "strict" or "open"'], [{ web: "on" }, 'the web tools must be "held" or "open"'], [{ zoomFolder: "Zoom" }, "the Zoom folder is not a whole path"], [{ proxyPort: 80 }, "the proxy port must be a whole number from 1024 to 65535"], [{ proxyPort: 47123.5 }, "the proxy port must be a whole number from 1024 to 65535"], [{ studioNode: "node" }, "the node her folder was written with is not a whole path"]])
+      assert.equal(settingsFault({ ...good, ...more }), why);
+  });
+  it("keeps an entry her folder allows only when it is typed and exact, and never one on the never list", () => {
+    const WHY = "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
+    const id = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
+    for (const ok of [{ type: "skill", name: "theme-factory" }, { type: "mcp-tool", name: id + "list_designs" }, { type: "tool", name: "CronCreate" }, { type: "tool", name: "CronDelete" }, { type: "tool", name: "CronList" }]) assert.equal(settingsFault({ ...good, studioAllow: [ok] }), "");
+    for (const bad of [{ type: "skill", name: "../x" }, { type: "mcp-tool", name: "mcp__PDF_Tools__fill_pdf" }, { type: "mcp-tool", name: id + "*" }, { type: "mcp-tool", name: id + "send_invoice" }, { type: "tool", name: "Monitor" }, { type: "tool", name: "NotebookEdit" }, { type: "tool", name: "Workflow" }, { type: "tool", name: "Artifact" }, { type: "tool", name: "Read(~/.ssh/id)" }, { type: "tool", name: "Read" + "(x)" }, { type: "tool", name: "cronCreate" }, { type: "tool", name: "Cron Create" }, ...["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", "Task", "SendUserFile", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch", "ReadMcpResourceTool", "ListMcpResourcesTool", "ReadMcpResourceDirTool"].map((name) => ({ type: "tool", name })), { type: "plugin", name: "x" }, "brimm-edit"])
+      assert.equal(settingsFault({ ...good, studioAllow: [bad] }), WHY, JSON.stringify(bad));
+    assert.equal(settingsFault({ ...good, studioAllow: { type: "skill", name: "theme-factory" } }), WHY);
+  });
+  it("takes a lock, web, Zoom folder, proxy port, node or allowed list of null as not set, and shows none of them", () => {
+    const unset = { lock: null, web: null, zoomFolder: null, proxyPort: null, studioNode: null, studioAllow: null };
+    assert.equal(settingsFault({ ...good, ...unset }), "");
+    assert.deepEqual([lockOf(unset), webOf(unset), zoomFolderOf(unset, "/Users/sallie"), studioAllowOf(unset), proxyPortOf(unset), studioNodeOf(unset)], ["strict", "held", "/Users/sallie/Documents/Zoom", [], null, null]);
+    const t = setup();
+    writeSettings(t.home, t.given);
+    assert.equal(t.asked("show"), 0);
+    const today = [...t.said];
+    t.said.length = 0;
+    writeSettings(t.home, unset);
+    assert.equal(t.asked("show"), 0);
+    assert.deepEqual(t.said, today);
+    t.done();
+  });
+  it("shows the lock, the web tools, Zoom's folder, the entries allowed and the proxy port, each only when it is set", () => {
+    const t = setup();
+    writeSettings(t.home, t.given);
+    assert.equal(t.asked("show"), 0);
+    const today = [...t.said];
+    t.said.length = 0;
+    writeSettings(t.home, { lock: "open", web: "held", zoomFolder: join(t.home, "Zoom recordings"), proxyPort: 47123, studioAllow: [{ type: "skill", name: "theme-factory" }], studioNode: "/opt/homebrew/bin/node" });
+    assert.equal(t.asked("show"), 0);
+    assert.deepEqual(t.said, [
+      ...today,
+      "  Her folder's lock:  open",
+      "  The web tools:  held",
+      `  Zoom's recordings:  ${t.home}/Zoom recordings`,
+      "  Also allowed in her folder:  skill theme-factory",
+      "  Her folder's proxy port:  47123"
+    ]);
+    t.done();
+  });
+});
+
+describe("node settings.js studio, for both locks (the open lock, K1)", () => {
+  const NODE = "/opt/homebrew/bin/node";
+  const MINIMUM = "2.1.308";
+  const NOT_YET = 'Not changed: the open lock waits for the checks by hand in the Code tab (the design\'s "By hand before K1 ships"). Her folder keeps the strict lock.';
+  /** One test's made-up Mac: BRIMM Video and Claude Code's temp folder inside its home, never this Mac's own. `run(minimum, …argv)`
+      runs settings.js with that minimum, the made-up temp folder and uid, and a stand-in that picks port 47123 and counts its calls. */
+  function studioWorld() {
+    const t = setup();
+    const root = join(t.home, "Dropbox", "The BRIMM DB", "BRIMM Video");
+    const tmp = join(t.home, "tmp");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(tmp);
+    writeSettings(t.home, { ...t.given, root });
+    let ports = 0;
+    const run = (openMinimum, ...argv) => {
+      t.said.length = 0;
+      return settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), openMinimum, tmp, uid: 502, freePort: () => {
+        ports += 1;
+        return 47123;
+      } });
+    };
+    const folder = () => realpathSync.native(studioFolder(t.home));
+    const written = () => readFileSync(join(folder(), ".claude", "settings.json"), "utf8");
+    const settings = () => readSettings(t.home).settings;
+    const facts = () => factsOf(t.home, settings(), { tmp, uid: 502 });
+    return { ...t, root, tmp, run, ports: () => ports, folder, written, settings, facts };
+  }
+
+  it("writes her folder with the strict lock unless this Mac's settings say open", () => {
+    const t = studioWorld();
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
+    assert.equal(t.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder() })[".claude/settings.json"]);
+    // A strict write leaves this Mac's settings as they were: no lock, no node, no port.
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "strict"), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
+    assert.deepEqual([t.settings().lock, t.settings().studioNode, t.settings().proxyPort], ["strict", undefined, undefined]);
+    assert.equal(t.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder() })[".claude/settings.json"]);
+    assert.equal(t.ports(), 0);
+    t.done();
+  });
+  it("writes the strict folder for settings that say open while no Claude Code is named for the open lock", () => {
+    const t = studioWorld();
+    writeSettings(t.home, { lock: "open" });
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    assert.equal(t.run(null, "studio", "--node", NODE), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
+    assert.equal(t.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder() })[".claude/settings.json"]);
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    assert.deepEqual([effectiveLock({ lock: "open" }, null), effectiveLock({ lock: "open" }), effectiveLock({ lock: "open" }, MINIMUM), effectiveLock({}, MINIMUM), effectiveLock(undefined, MINIMUM)], ["strict", "strict", "open", "strict", "strict"]);
+    t.done();
+  });
+  it("refuses the open lock, writing nothing, until the Claude Code it was checked on is named", () => {
+    const t = studioWorld();
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--web", "open", "--zoom", join(t.home, "Zoom")), 1);
+    assert.equal(t.said.at(-1), NOT_YET);
+    const s = readSettings(t.home).settings;
+    assert.deepEqual([s.lock, s.web, s.zoomFolder, s.studioNode], [undefined, undefined, undefined, undefined]);
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    t.done();
+  });
+  it("writes the open lock, the workshop and a proxy port picked once, when the minimum is named", () => {
+    const t = studioWorld();
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()} (the open lock)`]);
+    assert.deepEqual([t.settings().lock, t.settings().proxyPort, t.settings().studioNode], ["open", 47123, NODE]);
+    assert.deepEqual(t.facts(), { home: t.home, root: t.root, uid: 502, tmp: realOf(t.tmp), zoomFolder: join(t.home, "Documents", "Zoom"), port: 47123, web: "held", allow: ALLOW_DEFAULT });
+    const files = studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder(), lock: "open", facts: t.facts() });
+    for (const [name, text] of Object.entries(files)) assert.equal(readFileSync(join(t.folder(), name), "utf8"), text, name);
+    assert.equal(statSync(workshopFolder(t.home)).mode & 0o777, 0o700);
+    assert.equal(t.ports(), 1);
+    // Written again, the lock in effect is open from the settings, and the port is the one stored.
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()} (the open lock)`]);
+    assert.equal(t.ports(), 1);
+    assert.equal(t.written(), files[".claude/settings.json"]);
+    // Another node is recorded as the one her folder was written with.
+    assert.equal(t.run(MINIMUM, "studio", "--node", "/usr/local/bin/node"), 0);
+    assert.equal(t.settings().studioNode, "/usr/local/bin/node");
+    t.done();
+  });
+  it("writes an untied mark and takes away old command output when it first writes the open lock, and neither when the folder is open already", () => {
+    const t = studioWorld();
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    const own = join(t.tmp, "claude-502", claudeDirName(t.folder()));
+    const chat = "11111111-2222-4333-8444-555555555555";
+    const output = join(own, chat, "tasks", "a.output");
+    const elsewhere = join(t.tmp, "claude-502", "-another-folder", chat, "tasks", "b.output");
+    for (const file of [output, elsewhere, join(own, chat, "tasks", "keep.txt")]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "x");
+    }
+    const marks = () => (existsSync(heldFolder(t.home)) ? readdirSync(heldFolder(t.home)).filter((n) => n.startsWith("mark-")) : []);
+    assert.deepEqual(marks(), []);
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.equal(marks().length, 1);
+    assert.deepEqual(JSON.parse(readFileSync(join(heldFolder(t.home), marks()[0]), "utf8")), { at: JSON.parse(readFileSync(join(heldFolder(t.home), marks()[0]), "utf8")).at, session: null, claude: null, tied: false });
+    assert.deepEqual([existsSync(output), existsSync(elsewhere), existsSync(join(own, chat, "tasks", "keep.txt"))], [false, true, true]);
+    const projects = join(t.home, ".claude", "projects", claudeDirName(t.folder()));
+    mkdirSync(projects, { recursive: true });
+    writeFileSync(join(projects, `${chat}.jsonl`), `${JSON.stringify({ type: "user", uuid: "u-1", timestamp: "2026-01-01T00:00:00.000Z" })}\n`);
+    assert.equal(chatHeld({ home: t.home, sessionId: chat, transcriptPath: join(projects, `${chat}.jsonl`), claude: null }), true);
+    writeFileSync(output, "x");
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.equal(marks().length, 1);
+    assert.equal(existsSync(output), true);
+    // Strict again while no Claude Code is named for the open lock, then open again: chats of the strict time are held too.
+    assert.equal(t.run(null, "studio", "--node", NODE), 0);
+    assert.deepEqual(t.said, [`Written: ${t.folder()}`]);
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 0);
+    assert.equal(marks().length, 2);
+    assert.equal(existsSync(output), false);
+    t.done();
+  });
+  it("writes the open lock first on a Mac with no folder for Claude with an untied mark too, and not at all when it cannot write one", () => {
+    const t = studioWorld();
+    mkdirSync(dirname(heldFolder(t.home)), { recursive: true });
+    writeFileSync(heldFolder(t.home), "a file where the folder goes");
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 1);
+    assert.match(t.said.at(-1), /^The folder for Claude could not be written \(the chats before the open lock could not be marked: /);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    assert.equal(t.settings().lock, undefined);
+    rmSync(heldFolder(t.home));
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.equal(readdirSync(heldFolder(t.home)).filter((n) => n.startsWith("mark-")).length, 1);
+    t.done();
+  });
+  it("keeps the web tools held until told --web open, and adds an allowed entry once, by its type and exact name", () => {
+    const t = studioWorld();
+    const allowed = () => JSON.parse(t.written()).permissions;
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
+    assert.ok(!allowed().allow.includes("WebFetch") && !allowed().allow.includes("WebSearch"));
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--web", "open"), 0);
+    assert.equal(t.settings().web, "open");
+    assert.deepEqual(allowed().allow.slice(-2), ["WebFetch", "WebSearch"]);
+    for (let i = 0; i < 2; i++) assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--allow", "skill", "brand-review"), 0);
+    assert.deepEqual(t.settings().studioAllow, [{ type: "skill", name: "brand-review" }]);
+    assert.ok(allowed().deny.includes("CronCreate"));
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--allow", "tool", "CronCreate", "--web", "held"), 0);
+    assert.deepEqual(t.settings().studioAllow, [{ type: "skill", name: "brand-review" }, { type: "tool", name: "CronCreate" }]);
+    assert.ok(!allowed().deny.includes("CronCreate") && allowed().deny.includes("CronList"));
+    assert.ok(!allowed().allow.includes("WebFetch"));
+    assert.deepEqual(t.facts().allow, [...ALLOW_DEFAULT, { type: "skill", name: "brand-review" }, { type: "tool", name: "CronCreate" }]);
+    // Told on a strict Mac, the settings are written, and the folder stays strict.
+    const s = studioWorld();
+    assert.equal(s.run(MINIMUM, "studio", "--node", NODE, "--web", "open", "--zoom", join(s.home, "Zoom recordings")), 0);
+    assert.deepEqual([s.settings().web, s.settings().zoomFolder, s.settings().lock], ["open", join(s.home, "Zoom recordings"), undefined]);
+    assert.equal(s.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: s.folder() })[".claude/settings.json"]);
+    s.done();
+    t.done();
+  });
+  it("prints the folder's settings for a lock without writing anything", () => {
+    const t = studioWorld();
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    const folder = realOf(studioFolder(t.home));
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
+    assert.equal(t.said.length, 1);
+    const facts = { ...factsOf(t.home, { ...t.settings(), lock: "open" }, { tmp: t.tmp, uid: 502 }), port: "<port>" };
+    assert.deepEqual(JSON.parse(t.said[0]), openSettingsOf({ checkout: CHECKOUT, node: NODE, folder, facts }));
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder })[".claude/settings.json"]));
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(existsSync(workshopFolder(t.home)), false);
+    t.done();
+  });
+  it("prints, with no --lock, the lock her folder would really get, and never picks a port to print", () => {
+    const t = studioWorld();
+    writeSettings(t.home, { lock: "open" });
+    const folder = realOf(studioFolder(t.home));
+    const strict = JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder })[".claude/settings.json"]);
+    assert.equal(t.run(null, "studio", "--node", NODE, "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), strict);
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]).sandbox.network, { deniedDomains: ["*"], httpProxyPort: "<port>", socksProxyPort: "<port>" });
+    assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--print"), 0);
+    assert.equal(JSON.parse(t.said[0]).sandbox.network.httpProxyPort, "<port>");
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "strict", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), strict);
+    writeSettings(t.home, { proxyPort: 47200 });
+    assert.equal(t.run(null, "studio", "--node", NODE, "--lock", "open", "--print"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]).sandbox.network, { deniedDomains: ["*"], httpProxyPort: 47200, socksProxyPort: 47200 });
+    assert.equal(t.ports(), 0);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    t.done();
+  });
+  it("refuses a studio line that will not do", () => {
+    const t = studioWorld();
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    for (const argv of [["studio"], ["studio", "--node"], ["studio", "--node", "node"], ["studio", "/opt/homebrew/bin/node"], ["studio", "--node", NODE, "more"], ["studio", "--lock", "open", "--node", NODE], ["studio", "--node", NODE, "--allow", "skill"], ["studio", "--node", NODE, "--lock"]]) {
+      assert.equal(t.run(MINIMUM, ...argv), 2, argv.join(" "));
+      assert.match(t.said[0], /^This Mac's settings for episodes/, argv.join(" "));
+    }
+    for (const [argv, why] of [
+      [["--lock", "maybe"], 'the lock must be "strict" or "open"'],
+      [["--web", "on"], 'the web tools must be "held" or "open"'],
+      [["--allow", "mcp-tool", "mcp__PDF_Tools__fill_pdf"], "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold"],
+      [["--allow", "plugin", "x"], "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold"],
+      [["--zoom", "Zoom"], "the Zoom folder is not a whole path"]
+    ]) {
+      assert.equal(t.run(MINIMUM, "studio", "--node", NODE, ...argv), 1, argv.join(" "));
+      assert.deepEqual(t.said, [`Not written: ${why}.`]);
+    }
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(t.ports(), 0);
+    t.done();
+  });
+  it("says how studio is used, with every option", () => {
+    const t = setup();
+    assert.equal(t.asked("--help"), 0);
+    assert.ok(t.said[0].includes('node settings.js studio --node "<path to node>" [--lock strict|open] [--web held|open] [--zoom "<folder>"]'));
+    assert.ok(t.said[0].includes("[--allow skill|mcp-tool|tool <name>]… [--print]"));
+    t.done();
+  });
+});
+
+describe("node settings.js user-deny: her user settings' Read deny rules (question 5, R24)", () => {
+  /** One test's made-up Mac: BRIMM Video and Claude Code's temp folder in its home, never this Mac's own, and `run(…argv)`. */
+  function userWorld({ lock = "open", minimum = "2.1.308" } = {}) {
+    const t = setup();
+    const home = realpathSync.native(t.home);
+    const root = join(home, "Dropbox", "The BRIMM DB", "BRIMM Video");
+    const tmp = join(home, "tmp");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(tmp);
+    // Her user settings get the rules only under the open lock (whole-branch review I2): this Mac's settings say open, and the
+    // Claude Code version it was checked on is named, unless a test says otherwise.
+    writeSettings(home, { ...t.given, root, ...(lock ? { lock } : {}) });
+    const run = (...argv) => {
+      t.said.length = 0;
+      return settingsMain(argv, { home, say: (line) => t.said.push(line), openMinimum: minimum, tmp, uid: 502 });
+    };
+    const user = join(home, ".claude", "settings.json");
+    const settings = () => readSettings(home).settings;
+    /** The Read deny rules her folder's open settings have, for this Mac: the ones her user settings are to hold too. */
+    const folderReads = () => openSettingsOf({ checkout: CHECKOUT, node: "/opt/homebrew/bin/node", folder: join(home, "BRIMM Video Studio"), facts: factsOf(home, settings(), { tmp, uid: 502 }) }).permissions.deny.filter((rule) => rule.startsWith("Read("));
+    return { ...t, home, root, run, user, settings, folderReads };
+  }
+
+  it("adds the Read deny rules to her user settings once, keeps everything else in them, and notes that it did", () => {
+    const t = userWorld();
+    const want = t.folderReads();
+    // Every gated place's rules, in both spellings, and the .env rules: some by hand.
+    for (const rule of [`Read(/${join(t.root, "Episodes")}/**)`, `Read(//System/Volumes/Data${join(t.root, "Episodes")}/**)`, `Read(/${join(t.home, ".ssh")}/**)`, `Read(/${join(t.home, ".claude.json")})`, "Read(**/.env)", "Read(**/.env.*)"]) assert.ok(want.includes(rule), rule);
+    assert.ok(!want.some((rule) => rule.includes(`${join(t.root, "Assets")}`)), "Assets is not kept from Claude");
+    mkdirSync(dirname(t.user), { recursive: true });
+    const hers = { model: "opus", permissions: { allow: ["Bash(ls:*)"], deny: ["Read(//Users/sallie/private/**)", want[3]], defaultMode: "default" }, hooks: { Stop: [] }, enabledPlugins: { "a@b": true } };
+    writeFileSync(t.user, JSON.stringify(hers));
+    for (let i = 0; i < 2; i++) {
+      assert.equal(t.run("user-deny"), 0);
+      assert.deepEqual(t.said, [`Written: ~/.claude/settings.json (${want.length} deny rules for the places only brimm-video reads)`]);
+      const now = JSON.parse(readFileSync(t.user, "utf8"));
+      assert.deepEqual(now, { ...hers, permissions: { ...hers.permissions, deny: [...hers.permissions.deny, ...want.filter((rule) => rule !== want[3])] } });
+    }
+    assert.equal(t.settings().userDeny, true);
+    // No file is left beside it, and a Mac with no user settings gets a file of the rules alone.
+    assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"]);
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.deepEqual(JSON.parse(readFileSync(t.user, "utf8")), { permissions: { deny: want } });
+    t.done();
+  });
+  it("writes through a link to her user settings, leaving the link where it is", () => {
+    const t = userWorld();
+    const elsewhere = join(t.home, "dotfiles", "claude-settings.json");
+    mkdirSync(dirname(elsewhere), { recursive: true });
+    mkdirSync(dirname(t.user), { recursive: true });
+    writeFileSync(elsewhere, JSON.stringify({ model: "opus" }));
+    symlinkSync(elsewhere, t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.ok(lstatSync(t.user).isSymbolicLink());
+    assert.deepEqual(JSON.parse(readFileSync(elsewhere, "utf8")), { model: "opus", permissions: { deny: t.folderReads() } });
+    t.done();
+  });
+  it("keeps the mode her user settings had when it rewrites them, and gives a file it makes 0600 (earlier note d)", () => {
+    const t = userWorld();
+    mkdirSync(dirname(t.user), { recursive: true });
+    for (const mode of [0o600, 0o640, 0o644]) {
+      writeFileSync(t.user, JSON.stringify({ model: "opus" }));
+      chmodSync(t.user, mode);
+      assert.equal(t.run("user-deny"), 0);
+      assert.equal(statSync(t.user).mode & 0o777, mode, mode.toString(8));
+    }
+    // Through a link, the file it leads to keeps its mode.
+    const elsewhere = join(t.home, "dotfiles", "claude-settings.json");
+    mkdirSync(dirname(elsewhere), { recursive: true });
+    writeFileSync(elsewhere, JSON.stringify({ model: "opus" }));
+    chmodSync(elsewhere, 0o600);
+    rmSync(t.user);
+    symlinkSync(elsewhere, t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.equal(statSync(elsewhere).mode & 0o777, 0o600);
+    // A file that was not there is made 0600.
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 0);
+    assert.equal(statSync(t.user).mode & 0o777, 0o600);
+    t.done();
+  });
+  it("refuses user settings that are not a JSON object, changing nothing", () => {
+    const t = userWorld();
+    mkdirSync(dirname(t.user), { recursive: true });
+    const before = readFileSync(settingsFile(t.home), "utf8");
+    for (const text of ["not JSON", "[1, 2]", "null", '{"permissions": []}', '{"permissions": {"deny": "Read(x)"}}', '{"permissions": {"deny": [1]}}']) {
+      writeFileSync(t.user, text);
+      assert.equal(t.run("user-deny"), 1, text);
+      assert.deepEqual(t.said, ["Her user settings could not be read as JSON, so nothing was added: Jason puts them right by hand."], text);
+      assert.equal(readFileSync(t.user, "utf8"), text);
+      assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"]);
+    }
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(t.settings().userDeny, undefined);
+    // Asked wrongly, or with no settings of this Mac's to find the places by, it writes nothing either.
+    assert.equal(t.run("user-deny", "--now"), 2);
+    assert.match(t.said[0], /^This Mac's settings for episodes/);
+    rmSync(settingsFile(t.home));
+    rmSync(t.user);
+    assert.equal(t.run("user-deny"), 2);
+    assert.equal(existsSync(t.user), false);
+    t.done();
+  });
+  it("adds nothing on a Mac whose lock in effect is strict: settings that say strict or none, or open with no version checked (whole-branch review I2)", () => {
+    const NOT_OPEN = "Not changed: her user settings get these deny rules only under the open lock, which waits for the checks by hand.";
+    for (const [what, options] of [["strict settings", { lock: "strict" }], ["no lock set", { lock: null }], ["open, but no version checked", { minimum: null }]]) {
+      const t = userWorld(options);
+      mkdirSync(dirname(t.user), { recursive: true });
+      const hers = JSON.stringify({ model: "opus", permissions: { deny: ["Read(//Users/sallie/private/**)"] } });
+      writeFileSync(t.user, hers);
+      const before = readFileSync(settingsFile(t.home), "utf8");
+      assert.equal(t.run("user-deny"), 1, what);
+      assert.deepEqual(t.said, [NOT_OPEN], what);
+      assert.equal(readFileSync(t.user, "utf8"), hers, what);
+      assert.deepEqual(readdirSync(dirname(t.user)), ["settings.json"], what);
+      assert.equal(readFileSync(settingsFile(t.home), "utf8"), before, what);
+      assert.equal(t.settings().userDeny, undefined, what);
+      // Nor does it make the file on a Mac with none.
+      rmSync(t.user);
+      assert.equal(t.run("user-deny"), 1, what);
+      assert.equal(existsSync(t.user), false, what);
+      t.done();
+    }
+  });
+  it("takes the note that her user settings were given the rules only as true or false", () => {
+    const good = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT };
+    assert.equal(settingsFault({ ...good, userDeny: true }), "");
+    assert.equal(settingsFault({ ...good, userDeny: false }), "");
+    assert.equal(settingsFault({ ...good, userDeny: "yes" }), "the note of her user settings' deny rules must be true or false");
+  });
+  it("is named in --help", () => {
+    const said = [];
+    settingsMain(["--help"], { say: (line) => said.push(line) });
+    assert.match(said.join("\n"), /\n {2}node settings\.js user-deny {2,}add/);
   });
 });
 

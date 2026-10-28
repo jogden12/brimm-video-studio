@@ -1608,31 +1608,36 @@ export function importHolds({ root, home, machine, record, now = Date.now() }) {
   return importHold({ root, home, machine, record, now }).why;
 }
 
-/** importHolds, with whether the hold clears by itself: { why, waits }. It `waits` while an import of the video is at work on
-    either Mac (its late check comes within that run), and while this Mac's own late check of it is still to come, at its time,
-    with no problem found yet. A hold that needs a person (an import that failed or stopped, a late check that found a problem,
-    or one this Mac owes past its time with no import at work to make it) does not. A raw reading waits only while it waits
-    (reading.js). { why: "" } when none holds it. */
-export function importHold({ root, home, machine, record, now = Date.now() }) {
+/** importHolds, with whether the hold clears by itself and what holds it: { why, waits, state }. It `waits` while an import of
+    the video is at work on either Mac (its late check comes within that run), and while this Mac's own late check of it is
+    still to come, at its time, with no problem found yet. A hold that needs a person (an import that failed or stopped, a late
+    check that found a problem, or one this Mac owes past its time with no import at work to make it) does not. A raw reading
+    waits only while it waits (reading.js). `state` says which hold it is: "running" (an import of the video is at work on
+    either Mac), "failed", "problem" (a status, or this Mac's pending check, says the late check found one), "due" (this Mac
+    owes the late check, and its own import, `importing`, is at work and makes it, before its time or after), "owed" (this Mac
+    owes it and no import is at work to make it), "stopped" (a status of an import that stopped), or "" when none holds it,
+    as { why: "", waits: false, state: "" }. `importing` is whether this Mac's launch agent run is at work now. */
+export function importHold({ root, home, machine, record, now = Date.now(), importing = false }) {
   const video = record.video.file;
   const said = (text) => String(text).replace(/\.$/, "");
   const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
   const statuses = readStatuses(root, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
   const state = (want) => statuses.find((s) => importState(s, now) === want);
-  const held = (why, waits = false) => ({ why, waits });
+  const held = (why, waits = false, kind = "") => ({ why, waits, state: kind });
   const running = state("running");
-  if (running) return held(`The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`, true);
+  if (running) return held(`The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`, true, "running");
   const failed = state("failed");
-  if (failed) return held(`The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`);
+  if (failed) return held(`The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`, false, "failed");
   const problem = state("problem");
-  if (problem) return held(`The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`);
+  if (problem) return held(`The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`, false, "problem");
   const owed = readPendings(home).find((p) => p.id === record.id && (!machine || p.machine === machine) && resolve(String(p.root)) === resolve(root));
-  if (owed && owed.problem) return held(`The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`);
-  // No import of the video is at work here (a running status would have said so), so none makes the check unless told to.
-  if (owed && dueAt(owed) > now) return held(`This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`, true);
-  if (owed) return held(`This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`);
+  if (owed && owed.problem) return held(`The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`, false, "problem");
+  // No import of the video is at work here (a running status would have said so), so none makes the check unless told to. The
+  // hold is "due" when this Mac's launch agent run is at work, as it will make the check itself, and "owed" when it is not.
+  if (owed && dueAt(owed) > now) return held(`This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`, true, importing ? "due" : "owed");
+  if (owed) return held(`This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`, false, importing ? "due" : "owed");
   const stopped = state("stopped");
-  if (stopped) return held(`The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`);
+  if (stopped) return held(`The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`, false, "stopped");
   return held("");
 }
 

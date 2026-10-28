@@ -581,7 +581,7 @@ describe("behind", () => {
     });
     it("reads the managed settings from the folder Claude Code uses on a Mac unless it is told another", () => {
       // The folder is injectable for the tests above; on a Mac it is this one (and Claude Code's drop-ins are in managed-settings.d).
-      assert.match(readFileSync(new URL("../edit.js", import.meta.url), "utf8"), /const MANAGED_DIR = "\/Library\/Application Support\/ClaudeCode";/);
+      assert.match(readFileSync(new URL("../loosened.js", import.meta.url), "utf8"), /const MANAGED_DIR = "\/Library\/Application Support\/ClaudeCode";/);
     });
 
     // --- When brimm-video has no settings on this Mac (fix round 1, item 4) ---
@@ -696,7 +696,7 @@ describe("behind", () => {
       t.done();
     });
     it("takes the folder edit.js runs in for the session's unless a test gives another", () => {
-      assert.match(readFileSync(new URL("../edit.js", import.meta.url), "utf8"), /\(deps\.cwd \|\| process\.cwd\(\)\)/);
+      assert.match(readFileSync(new URL("../loosened.js", import.meta.url), "utf8"), /\(deps\.cwd \|\| process\.cwd\(\)\)/);
     });
 
     // --- This Mac's managed preferences, and its server-managed settings (2026-10-25). Claude Code 2.1.308's own binary reads managed
@@ -760,7 +760,7 @@ describe("behind", () => {
       t.done();
     });
     it("reads the managed preferences from the folder Claude Code reads them from, for the user this Mac says, unless it is told others", () => {
-      const text = readFileSync(new URL("../edit.js", import.meta.url), "utf8");
+      const text = readFileSync(new URL("../loosened.js", import.meta.url), "utf8");
       assert.match(text, /const MANAGED_PREFS = "\/Library\/Managed Preferences";/);
       assert.match(text, /deps\.user \|\| userInfo\(\)\.username/);
     });

@@ -1,0 +1,9 @@
+[
+  { "type": "skill", "name": "brimm-edit" },
+  { "type": "skill", "name": "brimm-graphics" },
+  { "type": "skill", "name": "frontend-design" },
+  { "type": "skill", "name": "theme-factory" },
+  { "type": "tool", "name": "mcp__visualize__show_widget" },
+  { "type": "tool", "name": "mcp__visualize__read_me" },
+  { "type": "tool", "name": "PushNotification" }
+]

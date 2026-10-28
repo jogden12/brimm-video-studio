@@ -5,10 +5,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { progressFolder, PANEL, PANEL_PID, RATES, ffmpegProgress, aboutLeft, detailOf, readRates, blended, reporter, noProgress } from "../progress.js";
+import { progressFolder, PANEL, PANEL_PID, RATES, ffmpegProgress, aboutLeft, detailOf, readRates, blended, addRates, reporter, noProgress } from "../progress.js";
 
 /** One test's progress folder, a clock that moves only when told, a timer whose ticks a test runs by hand, a stand-in for
     starting a program, and what the log said. */
@@ -269,6 +269,117 @@ describe("the time left in all", () => {
     mkdirSync(t.folder, { recursive: true });
     writeFileSync(join(t.folder, RATES), "[]");
     assert.deepEqual(readRates(t.folder), {});
+    t.done();
+  });
+});
+
+describe("the rates this Mac keeps", () => {
+  /** A progress folder of its own, with the rates in it when given, and what is in the folder whose name ends in .writing. */
+  const ratesSetup = (rates) => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-rates-"));
+    const folder = join(dir, "progress");
+    mkdirSync(folder, { recursive: true });
+    if (rates) writeFileSync(join(folder, RATES), JSON.stringify(rates));
+    return { dir, folder, writing: () => readdirSync(folder).filter((name) => name.endsWith(".writing")).sort(), done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  it("are written by two writers at once through names of their own, and read whole afterwards", () => {
+    const t = ratesSetup({ "Reading the sound": 0.2 });
+    let between = null;
+    // Writer 1 has written its file and is about to rename it into place. Writer 2 then does all of its work.
+    const rename = (from, to) => {
+      const before = t.writing();
+      const ok = addRates(t.folder, { "Making the rough cut": 0.1 }, { pid: 2 });
+      between = { before, ok, after: t.writing(), rates: readRates(t.folder) };
+      renameSync(from, to);
+    };
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.3 }, { pid: 1, rename }), true);
+    assert.deepEqual(between.before, [`${RATES}.1.writing`]);
+    assert.equal(between.ok, true);
+    assert.deepEqual(between.after, [`${RATES}.1.writing`]);
+    assert.deepEqual(between.rates, { "Reading the sound": 0.2, "Making the rough cut": 0.1 });
+    // The file that came last is the one in place, and it parses whole: one writer's rate may be lost, never the whole file.
+    assert.deepEqual(readRates(t.folder), { "Reading the sound": 0.2, "Asking Claude": 0.3 });
+    assert.doesNotThrow(() => JSON.parse(readFileSync(join(t.folder, RATES), "utf8")));
+    assert.deepEqual(t.writing(), []);
+    t.done();
+  });
+  it("blend a rate this Mac has with the one measured, and take a new name as it is", () => {
+    const t = ratesSetup({ "Asking Claude": 0.2, "Reading the sound": 0.5 });
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.3, "Making the rough cut": 0.1 }), true);
+    assert.deepEqual(readRates(t.folder), { "Asking Claude": 0.25, "Reading the sound": 0.5, "Making the rough cut": 0.1 });
+    // Nothing is left under the process's own name, which is process.pid when none is given.
+    assert.deepEqual(t.writing(), []);
+    t.done();
+  });
+  it("are read again just now, so a rate another run added meanwhile is kept", () => {
+    const t = ratesSetup();
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.3 }), true);
+    writeFileSync(join(t.folder, RATES), JSON.stringify({ "Asking Claude": 0.3, "Making the rough cut": 0.4 }));
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.1 }), true);
+    assert.deepEqual(readRates(t.folder), { "Asking Claude": 0.2, "Making the rough cut": 0.4 });
+    t.done();
+  });
+  it("take no measure that is not a finite number above 0, which the file would hold as null", () => {
+    const t = ratesSetup({ "Asking Claude": 0.2 });
+    assert.equal(addRates(t.folder, { "Asking Claude": 0, "Making the rough cut": NaN, "Reading the sound": -1, "Writing the transcript": Infinity, "Filing": "0.3" }), true);
+    assert.deepEqual(readRates(t.folder), { "Asking Claude": 0.2 });
+    t.done();
+  });
+  it("say false and throw nothing when they cannot be written, and leave no file of their own", () => {
+    const t = ratesSetup({ "Asking Claude": 0.2 });
+    // The rename fails, after the file was written.
+    const rename = () => {
+      throw Object.assign(new Error("denied"), { code: "EACCES" });
+    };
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.3 }, { pid: 7, rename }), false);
+    assert.deepEqual(t.writing(), []);
+    assert.deepEqual(readRates(t.folder), { "Asking Claude": 0.2 });
+    // The write fails.
+    const write = () => {
+      throw Object.assign(new Error("full"), { code: "ENOSPC" });
+    };
+    assert.equal(addRates(t.folder, { "Asking Claude": 0.3 }, { pid: 7, write }), false);
+    // A file is where the folder would be.
+    const file = join(t.dir, "not-a-folder");
+    writeFileSync(file, "x");
+    assert.equal(addRates(file, { "Asking Claude": 0.3 }), false);
+    t.done();
+  });
+  it("are kept by reporter.end(true) of what each step took, through a name of its own and never the one fixed name", () => {
+    const t = setup();
+    mkdirSync(t.folder, { recursive: true });
+    writeFileSync(join(t.folder, RATES), JSON.stringify({ "Making the cut plan": 0.01 }));
+    // A folder is where the old fixed name would go: writing through it would fail, so the rates would not be kept.
+    mkdirSync(join(t.folder, `${RATES}.writing`));
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Making the cut plan", "Making the rough cut"]);
+    t.r.step("Making the cut plan");
+    t.clock.t += 3000;
+    t.r.step("Making the rough cut");
+    t.clock.t += 5000;
+    // Another run adds a step's rate meanwhile: it is read again at the end, and kept.
+    writeFileSync(join(t.folder, RATES), JSON.stringify({ "Making the cut plan": 0.01, "Asking Claude": 0.4 }));
+    t.r.end(true);
+    assert.deepEqual(readRates(t.folder), { "Making the cut plan": 0.02, "Asking Claude": 0.4, "Making the rough cut": 0.05 });
+    assert.ok(statSync(join(t.folder, `${RATES}.writing`)).isDirectory());
+    assert.deepEqual(readdirSync(join(t.folder, `${RATES}.writing`)), []);
+    assert.deepEqual(readdirSync(t.folder).filter((name) => name.endsWith(".writing")), [`${RATES}.writing`]);
+    assert.deepEqual(t.logs.filter((line) => /could not be written/.test(line)), []);
+    t.done();
+  });
+  it("that reporter.end(true) cannot write are said once in the log, and nothing is thrown", () => {
+    const t = setup();
+    // A file is where the folder would be.
+    writeFileSync(t.folder, "not a folder");
+    for (const video of ["a.mov", "b.mov"]) {
+      t.r.begin(video);
+      t.r.length(100);
+      t.r.step("Making the cut plan");
+      t.clock.t += 3000;
+      assert.doesNotThrow(() => t.r.end(true));
+    }
+    assert.deepEqual(t.logs.filter((line) => /rates/.test(line)), ["The progress panel's rates could not be written. The work goes on without them."]);
     t.done();
   });
 });
