@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build BRIMM Video Studio from brimm-video at the tag `brimm-video-v1`: the HyperFrames project maker (B1), the finish from the app's exports (B2), the guide's new states, the two-Mac snapshot, the session reading and clips (S1, S2), and then the retirement of what the app does. Each step is a pull request that Jason merges, test first.
+**Goal:** Build BRIMM Video Studio from brimm-video as it stood at c666508 (the tag `brimm-video-v1` and the late-check groundwork merged after it): the HyperFrames project maker (B1), the finish from the app's exports (B2), the guide's new states, the two-Mac snapshot, the session reading and clips (S1, S2), and then the retirement of what the app does. Each step is a pull request that Jason merges, test first.
 
 **Architecture:** `docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md`. Two doors between Studio and the app: a project folder going in, exported files coming out. The BRIMM Ops hand-off is the same file, written by the same code.
 
@@ -12,7 +12,7 @@
 
 **Not here:**
 - A0 and A0b, the app tests (Jason, by hand). This plan says which pull request waits for which answer.
-- Saving brimm-video: the Studio repo's `main` branch and the tag `brimm-video-v1` (handoff sections 3 and 6). The repo exists (Jason made it on 2026-10-28) and holds brimm-video's history on the branch `claude/seed-from-brimm-video`, but a cloud session may push only `claude/*` branches, so Jason renames that branch to `main` and pushes the tag from his Mac.
+- The Studio repo's `main` branch and its copy of the tag `brimm-video-v1` (handoff Appendix A, section 6). brimm-video already has the tag, at 42a39a3. The Studio repo exists (Jason made it on 2026-10-28) and holds brimm-video's history up to c666508 on the branch `claude/seed-from-brimm-video`. A cloud session may push only `claude/*` branches, so Jason renames that branch to `main` and pushes the tag to the Studio repo from a clone that has both remotes.
 - Switching Sallie's laptop to the light import (`docs/setup/sallies-laptop.md`).
 - The contract change for a session clip with no client (decision D5, with brimm-operations).
 - HeyGen's training opt-out (Jason's email).
@@ -365,7 +365,7 @@ And the suite passes whole, with the tests of a deleted module deleted with it a
 ## Open items
 
 - A0, its additions (`docs/phase-a0/additions.md`) and A0b are not run. PRs 4 to 7 each name the answer they wait for.
-- The Studio repo's `main` branch and the tag `brimm-video-v1` (Jason, from his Mac; see "Not here").
+- The Studio repo's `main` branch and its copy of the tag `brimm-video-v1` (Jason; see "Not here").
 - The questions Q1 to Q3 and decisions D1 to D10 of the spec. Decision D5 (a session clip's hand-off) needs brimm-operations as well.
 - Sallie's laptop is not on the light import, which PR 12 waits for (`docs/setup/sallies-laptop.md`).
 - Whether the Mac's ffmpeg has the tone-mapping filter PR 3 needs (`ffmpeg -filters`). The installer's check should print it.

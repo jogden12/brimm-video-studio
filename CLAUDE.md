@@ -2,7 +2,7 @@
 
 Video for The BRIMM, run through Claude Code or Claude chat, apart from BRIMM Ops. Jason Ogden owns the repo. The HyperFrames Mac app does the editing. Studio does everything around it: it takes a video in, reads it, makes the app's project, takes the exports back, and writes BRIMM Ops its hand-off file, all for a person to check.
 
-Studio began as brimm-video (the tag `brimm-video-v1`), which keeps running for Sallie until Jason switches each Mac. The code here is still brimm-video's, and is changed step by step.
+Studio began as brimm-video: its history up to c666508, which is the tag `brimm-video-v1` (42a39a3, what ran on the Mac Studio on 2026-10-27) and the late-check groundwork merged after it. brimm-video itself keeps running for Sallie until Jason switches each Mac. The code here is still brimm-video's, and is changed step by step.
 
 - What it must do: `docs/requirements.md`. Jason's preferences there win over Sallie's comments.
 - The design, accepted on 2026-10-27: `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`. The architecture and the workflows: `docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md`. The build plan: `docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md`. The handoffs: `docs/handoffs/`.

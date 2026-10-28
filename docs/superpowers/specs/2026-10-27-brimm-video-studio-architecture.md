@@ -770,7 +770,7 @@ The build plan has the detail. The rules:
 
 ## 12. The roll-out, in one line each
 
-1. A0 and A0b (Jason, by hand). 2. Save brimm-video and make the Studio repo (handoff sections 3 and 6). 3. Sallie's laptop to the light import. 4. B1 on the Mac Studio only, on Jason's own recordings. 5. B2, and one real hand-off into BRIMM Ops by hand. 6. Sallie's laptop gets the toolchain, the app and Studio. 7. S1, then S2, on Jason's own made-up call before Sallie's. 8. The retirement waves. brimm-video, at the tag `brimm-video-v1`, keeps running for her until Jason switches each Mac, and is the way back.
+1. A0 and A0b (Jason, by hand). 2. Save brimm-video and make the Studio repo (handoff sections 3 and 6; both are done, but for the Studio repo's `main` and its copy of the tag). 3. Sallie's laptop to the light import. 4. B1 on the Mac Studio only, on Jason's own recordings. 5. B2, and one real hand-off into BRIMM Ops by hand. 6. Sallie's laptop gets the toolchain, the app and Studio. 7. S1, then S2, on Jason's own made-up call before Sallie's. 8. The retirement waves. brimm-video keeps running for her, from its own `main`, until Jason switches each Mac, and its tag `brimm-video-v1` (what ran on the Mac Studio on 2026-10-27) is the way back.
 
 ---
 
