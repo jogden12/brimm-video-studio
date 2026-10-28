@@ -181,7 +181,8 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
       assert.deepEqual([claim.kind, claim.session.cleared, claim.editing.by], ["session", null, "Mac Studio"], word);
       assert.deepEqual(readdirSync(join(found.folder, "record")), ["0001.json", "0002.json", "0003.json"], word);
       // The reading is started as for any answer, under the kind, and its result is said.
-      assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", kept, "--rev", "3"]], word);
+      // A session cleared as a raw video or an iPhone clip is an ordinary one: its working copy is started beside the reading.
+      assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", kept, "--rev", "3"], ...(kept === "finished" ? [] : [["workcopy", "--now", FOLDER]])], word);
       assert.deepEqual(r.said, [CLICK(), CLEARED(SESSION_NAME, said), `${SESSION_NAME}: read ended 0 minutes ago. Made: notes.txt.`], word);
       assert.doesNotMatch(r.text, secret, word);
       t.done();

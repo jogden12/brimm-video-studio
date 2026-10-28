@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLAIM_WAIT_MS, COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { NOT_SET_UP } from "../app.js";
 import { HELD } from "../gate.js";
+import { readResult } from "../detached.js";
 import { layoutOf, localStamp, recordFile, recordText } from "../episode.js";
 import { PIN, cliPath } from "../hyperframes.js";
 import { episodeWork, writeSettings } from "../settings.js";
@@ -261,9 +262,11 @@ describe("app: the claim and the bring are open's", () => {
     const r = await app(t.ctx.deps, FOLDER);
     const coming = (again) => `Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "${again}" again when it is done; "how far is it?" shows how far it has got.`;
     assert.deepEqual([r.code, r.said], [0, [coming(`open ${NAME} in HyperFrames`)]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--asked-by", "app"]]);
     assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [1, [], []]);
     assert.deepEqual((await on(t.ctx.deps, "open", FOLDER)).said, [coming(`open ${NAME}`)]);
+    // The bring open starts is told nothing of who asked: its words stay open's own.
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--asked-by", "app"], ["bring", "--now", FOLDER]]);
     t.done();
   });
   it("brings the files for a take-over, and says to take it over again, as open does", async () => {
@@ -271,7 +274,7 @@ describe("app: the claim and the bring are open's", () => {
     t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
     const r = await app(t.ctx.deps, FOLDER, "--take-over");
     assert.deepEqual([r.code, r.said], [0, [`Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "take it over" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over"]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over", "--asked-by", "app"]]);
     assert.deepEqual([reread(found).rev, reread(found).editing.by, t.waits, runsOf(t)], [1, "Sallie's laptop", [], []]);
     t.done();
   });
@@ -282,7 +285,7 @@ describe("app: the claim and the bring are open's", () => {
     writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [share]: 9 }, released: { at: "2026-10-20T14:30:00-05:00", by: "Sallie's laptop", files: { ...first.files, [share]: 9 } } }));
     const r = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [`Still arriving from Sallie's laptop: 1 file. Dropbox is bringing them over; say "open ${NAME} in HyperFrames" again when it is done.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share, "--asked-by", "app"]]);
     assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [2, [], []]);
     t.done();
   });
@@ -321,6 +324,110 @@ describe("app: the claim and the bring are open's", () => {
   });
 });
 
+describe("app: what the bring it starts says when it is done", () => {
+  /** What `bring` says to say next, and what it made, as the result it leaves holds them. */
+  const nextOf = (t) => readResult(t.home, FOLDER, "bring");
+  /** The bring `app` started, run as its detached run would run it: the words it was started with, after the program and the file. */
+  async function runStarted(t, which = 0) {
+    const [, args] = t.started[which];
+    return on(t.ctx.deps, ...args.slice(1));
+  }
+  /** Files not whole here until a bring has read them: the raw video. `readAll` is the bring's reading of one file to its end. */
+  function offline(t, { fails = false } = {}) {
+    const read = [];
+    let brought = false;
+    t.ctx.deps.isWhole = (path) => brought || !path.endsWith("Pricing talk.mp4");
+    t.ctx.deps.readAll = async (path) => {
+      read.push(path);
+      if (fails) throw Object.assign(new Error("no space left"), { code: "ENOSPC" });
+      brought = true;
+    };
+    return read;
+  }
+  it("says to open it in HyperFrames again, not to open it, once every file is here, so that her next words run app and not open", async () => {
+    const { t } = world();
+    offline(t);
+    await app(t.ctx.deps, FOLDER);
+    assert.equal((await runStarted(t)).code, 0);
+    const result = nextOf(t);
+    assert.deepEqual([result.ok, result.made, result.failed], [true, ["Pricing talk.mp4"], []]);
+    assert.equal(result.next, `Every file of ${NAME} is here. Say "open ${NAME} in HyperFrames" again.`);
+    assert.doesNotMatch(result.next, PLAIN);
+    // "How far is it?" says it, as the result left it.
+    const howFar = (await on(t.ctx.deps, "status")).text;
+    assert.ok(howFar.endsWith(`Made: Pricing talk.mp4. Every file of ${NAME} is here. Say "open ${NAME} in HyperFrames" again.`), howFar);
+    t.done();
+  });
+  it("says to open it in HyperFrames to try again, not to open it, when a file did not come", async () => {
+    const { t } = world();
+    const read = offline(t, { fails: true });
+    await app(t.ctx.deps, FOLDER);
+    assert.equal((await runStarted(t)).code, 1);
+    assert.equal(read.length, 1);
+    const result = nextOf(t);
+    assert.deepEqual([result.ok, result.failed], [false, ["Pricing talk.mp4 could not be read (ENOSPC)"]]);
+    assert.equal(result.next, `Some files of ${NAME} are not here yet. Say "open ${NAME} in HyperFrames" to try again.`);
+    assert.doesNotMatch(result.next, PLAIN);
+    t.done();
+  });
+  it("keeps open's own words for a bring open starts, exactly", async () => {
+    const { t } = world();
+    offline(t);
+    await on(t.ctx.deps, "open", FOLDER);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER]]);
+    assert.equal((await runStarted(t)).code, 0);
+    assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME}".`);
+    t.done();
+    const u = world();
+    offline(u.t, { fails: true });
+    await on(u.t.ctx.deps, "open", FOLDER);
+    await runStarted(u.t);
+    assert.equal(nextOf(u.t).next, `Some files of ${NAME} are not here yet. Say "open ${NAME}" to try again.`);
+    u.t.done();
+  });
+  it("keeps what a take-over says next, to take it over again, and says app's words for the plain next", async () => {
+    const { t } = world({ record: { ...RAW, editing: HERS } });
+    offline(t);
+    await app(t.ctx.deps, FOLDER, "--take-over");
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over", "--asked-by", "app"]]);
+    assert.equal((await runStarted(t)).code, 0);
+    const result = nextOf(t);
+    assert.deepEqual(result.takeOver, { by: "Sallie's laptop", since: HERS.since, next: `Every file of ${NAME} is here. Say "take it over" again.` });
+    assert.equal(result.next, `Every file of ${NAME} is here. Say "open ${NAME} in HyperFrames" again.`);
+    // While her yes to the take-over stands, "how far is it?" says to take it over again, as it says it of open's.
+    assert.match((await on(t.ctx.deps, "status")).text, /Say "take it over" again\.$/);
+    t.done();
+  });
+  it("brings only the files it was given, and not the words that tell it who asked", async () => {
+    const { t, found } = world();
+    const share = "edit/from-final-cut/Pricing talk main v2 3fa9c1.mov";
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [share]: 9 }, released: { at: "2026-10-20T14:30:00-05:00", by: "Sallie's laptop", files: { ...first.files, [share]: 9 } } }));
+    let brought = false;
+    t.ctx.deps.isWhole = (path) => brought || !path.endsWith(".mov");
+    const read = [];
+    t.ctx.deps.readAll = async (path) => {
+      read.push(path);
+      brought = true;
+    };
+    await app(t.ctx.deps, FOLDER);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share, "--asked-by", "app"]]);
+    assert.equal((await runStarted(t)).code, 0);
+    assert.deepEqual([read, nextOf(t).made], [[join(found.folder, share)], [share]]);
+    assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME} in HyperFrames" again.`);
+    t.done();
+  });
+  it("takes any other asker, or none, for open: only app has words of its own", async () => {
+    for (const asked of [["--asked-by", "open"], ["--asked-by", "push"], ["--asked-by"], ["--asked-by", ""]]) {
+      const { t } = world();
+      offline(t);
+      assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, ...asked)).code, 0, asked.join(" "));
+      assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME}".`, asked.join(" "));
+      t.done();
+    }
+  });
+});
+
 describe("app: the project, and what is said and recorded of it", () => {
   it("asks for the working copy when there is none, says it is being made, and keeps the claim it made", async () => {
     const { t, found } = world({ copy: false });
@@ -329,6 +436,21 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
     // Claimed, as the plan orders it (the claim, then the copy), and no project is recorded or opened.
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
+    t.done();
+  });
+  it("opens the project from the working copy the run it asked for made, and asks for none again: the copy's key is the one app looks for", async () => {
+    const { t, found, work } = world({ copy: false });
+    const asked = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([asked.code, asked.said.length], [0, 1]);
+    const [, args] = t.started[0];
+    // The run `app` started is run as it would run, with ffprobe and ffmpeg's stand-ins; it makes the copy where app looks for it.
+    const made = await on(t.ctx.deps, ...args.slice(1));
+    assert.equal(made.code, 0, made.text);
+    const opened = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([opened.code, opened.said], [0, [OPEN]]);
+    assert.deepEqual(t.started.map(([, more]) => more.slice(1)), [["workcopy", "--now", FOLDER]]);
+    const project = join(work, reread(found).app.projects[0].name);
+    assert.equal(readFileSync(join(project, "media", "recording.mp4"), "utf8"), "a part of a Story");
     t.done();
   });
   it("keeps the project and says why when HyperFrames will not open, with no time it was opened in the record", async () => {
