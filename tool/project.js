@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { heardWords, insideTheirTime } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
@@ -156,6 +157,13 @@ ${faces.join("\n")}
     "the BRIMM" (Jason, 2026-10-28: "'Brim' or 'brim' should always be corrected to 'BRIMM'"). Whole words only: "brimming" stays.
     Every project's words are spelled so, before the episode's own spellings, and its brimm/spellings.json lists them first. */
 export const HOUSE_SPELLINGS = Object.freeze([["brim", "BRIMM"], ["Brim", "BRIMM"], ["BRIM", "BRIMM"]].map((pair) => Object.freeze(pair)));
+
+/** The words of a project as they are said, for transcript.json. The transcriber starts a word where the word before it ended
+    (cuts.js wordsOf), so a word after a pause starts in the pause: A0 (2026-10-28) found the app's agent trusting the app's own
+    transcript over this one for that. Each word starts halfway into the time it was given (clock.js insideTheirTime) and, where
+    the cut plan's `phrases` are given, no earlier than the phrase it ends in, which starts on the pause's end (clock.js
+    heardWords). Only the main video has a cut plan: a Reel's words and a clip's are moved inside their time and no more. */
+export const saidWords = (words, phrases = []) => heardWords(insideTheirTime(Array.isArray(words) ? words : []), Array.isArray(phrases) ? phrases : []);
 
 /** transcript.json (F5): the list the pinned `transcribe` writes, {text, start, end, id} for each word in order, its ids "w0",
     "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names, the house's spellings and the
@@ -389,7 +397,7 @@ export function projectFiles(input) {
   const episode = kind !== "clip";
   const name = episode ? projectName({ name: input.name, part: kind === "main" ? "main" : input.part, number: kind === "main" ? input.number : undefined, id: input.id }) : projectName({ clip: input.clip, id: input.id });
   const what = kind === "main" ? `the main video of the episode “${fileSafe(input.name)}”` : kind === "reel" ? `Reel ${input.part.reel} of the episode “${fileSafe(input.name)}”` : `clip ${input.clip} of a session`;
-  const transcript = transcriptJson(input.words, episode ? input.spellings : []);
+  const transcript = transcriptJson(saidWords(input.words, kind === "main" ? input.plan?.phrases : []), episode ? input.spellings : []);
 
   const files = new Map();
   files.set("index.html", indexHtml(input.facts));

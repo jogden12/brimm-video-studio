@@ -2,7 +2,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
-import { secondsOf, clockText, clockOf, clockOfRanges, rawAt, timelineAt, lengthOf, wordsAt, momentOf, heardWords, cutsOn, cutNear } from "../clock.js";
+import { secondsOf, clockText, clockOf, clockOfRanges, rawAt, timelineAt, lengthOf, wordsAt, momentOf, heardWords, insideTheirTime, cutsOn, cutNear } from "../clock.js";
 import { fcpxml } from "../fcpxml.js";
 import { TOLD, PAUSES } from "./fixtures.js";
 
@@ -47,6 +47,20 @@ describe("the words, from when they are said", () => {
   it("start after the pause before them, where the transcriber starts them where the word before ended", () => {
     const moved = WORDS.filter((w, i) => w.start !== RAW[i].start).map((w) => [w.w, w.start]);
     assert.deepEqual(moved, [["Welcome", 1.111], ["Let", 3.695], ["Welcome", 6.07], ["So", 12.459], ["So", 13.583], ["It", 17.246], ["Thank", 19.414]]);
+  });
+});
+
+describe("the words, from inside the time the transcriber gave them", () => {
+  it("start halfway into it: the transcriber starts a word where the word before it ended, so its time holds the pause before it", () => {
+    const given = [{ w: "Hello", start: 0, end: 0.4 }, { w: "there", start: 0.4, end: 1.6 }, { w: "friend.", start: 1.6, end: 2 }];
+    assert.deepEqual(insideTheirTime(given), [{ w: "Hello", start: 0.2, end: 0.4 }, { w: "there", start: 1, end: 1.6 }, { w: "friend.", start: 1.8, end: 2 }]);
+    assert.deepEqual(given[1], { w: "there", start: 0.4, end: 1.6 }, "the words it is given are as they were");
+  });
+  it("leave a word with no length where it is, and keep their times to the millisecond", () => {
+    assert.deepEqual(insideTheirTime([{ w: "uh,", start: 1.5, end: 1.5 }, { w: "so", start: 2, end: 2.0123 }]), [{ w: "uh,", start: 1.5, end: 1.5 }, { w: "so", start: 2.006, end: 2.0123 }]);
+  });
+  it("are none when there are none", () => {
+    assert.deepEqual(insideTheirTime([]), []);
   });
 });
 
