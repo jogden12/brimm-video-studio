@@ -7,8 +7,9 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
-import { assertSafe, cutSuggestions, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, transcriptJson, writeProject } from "../project.js";
+import { assertSafe, cutSuggestions, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, saidWords, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -136,6 +137,50 @@ describe("transcript.json (F5)", () => {
     assert.equal(spelled[2].text, "Hormozi,");
     assert.deepEqual(spelled.map(({ id, start, end }) => [id, start, end]), JSON.parse(GOLDEN.transcript).map(({ id, start, end }) => [id, start, end]));
     assert.equal(json(projectFiles(main()), "transcript.json")[2].text, "Hormozi,");
+  });
+});
+
+describe("the words as they are said (F5)", () => {
+  // The transcriber starts a word where the word before it ended, so a word after a pause starts in the pause. "Next" is said at 2 s.
+  const given = [{ w: "Hello,", start: 0, end: 0.4 }, { w: "there.", start: 0.4, end: 0.9 }, { w: "Next", start: 0.9, end: 2.4 }, { w: "word.", start: 2.4, end: 2.9 }];
+  const phrases = [{ id: "p1", start: 0, end: 0.9 }, { id: "p2", start: 2, end: 2.9 }];
+  const plan = {
+    by: "rules",
+    phrases: [
+      { id: "p1", start: 0, end: 0.9, text: "Hello, there.", words: given.slice(0, 2), keep: true, kind: "keep", why: "" },
+      { id: "p2", start: 2, end: 2.9, text: "Next word.", words: given.slice(2), keep: false, kind: "false start", why: "said again" }
+    ]
+  };
+  const starts = (files) => json(files, "transcript.json").map((word) => word.start);
+  it("start halfway into the time the transcriber gave them, and on the pause's end where the cut plan's phrases say a pause ends", () => {
+    assert.deepEqual(saidWords(given, phrases).map((w) => [w.w, w.start, w.end]), [["Hello,", 0.2, 0.4], ["there.", 0.65, 0.9], ["Next", 2, 2.4], ["word.", 2.65, 2.9]]);
+    assert.equal(saidWords(given)[2].start, 1.65, "without the phrases a word is only moved inside its time");
+  });
+  it("are what a main project's transcript.json holds, and its cut suggestions start where the words do", () => {
+    const files = projectFiles(main({ words: given, plan, spellings: [] }));
+    assert.deepEqual(json(files, "transcript.json").map(({ id, start, end }) => [id, start, end]), [["w0", 0.2, 0.4], ["w1", 0.65, 0.9], ["w2", 2, 2.4], ["w3", 2.65, 2.9]]);
+    const [cut] = json(files, "brimm/cut-suggestions.json").suggestions;
+    assert.deepEqual([cut.from, cut.to, cut.start, cut.end], ["w2", "w3", 2, 2.9]);
+  });
+  it("are moved inside their time only in a Reel's project and a clip's, whose words no cut plan of the main video speaks for", () => {
+    assert.deepEqual(starts(projectFiles(reel({ words: given, plan }))), [0.2, 0.65, 1.65, 2.65]);
+    assert.deepEqual(starts(projectFiles(clip({ words: given }))), [0.2, 0.65, 1.65, 2.65]);
+  });
+  it("start a word after a long pause on the pause's end: \"Instagram\" of the A0 recording, which the app's transcript has at 121.82 s", () => {
+    // What whisper.cpp wrote (-ojf, with -dtw) and ffmpeg printed (silencedetect) for 3 seconds of the A0 test recording.
+    const told = { transcription: [{ offsets: { from: 119330, to: 122700 }, tokens: [
+      { text: " newsletter", offsets: { from: 119330, to: 120060 }, t_dtw: 12038 },
+      { text: " section", offsets: { from: 120060, to: 120680 }, t_dtw: 12090 },
+      { text: ",", offsets: { from: 120680, to: 120960 }, t_dtw: 12166 },
+      { text: " Instagram", offsets: { from: 121430, to: 121690 }, t_dtw: 12208 },
+      { text: " captions", offsets: { from: 121690, to: 121980 }, t_dtw: 12260 }
+    ] }] };
+    const printed = "[silencedetect @ 0x6000] silence_start: 121.07\n[silencedetect @ 0x6000] silence_end: 121.8 | silence_duration: 0.73\n";
+    const words = wordsOf(told);
+    assert.equal(words[2].start, 120.9, "wordsOf starts \"Instagram\" where \"section,\" ended: in the pause");
+    const made = json(projectFiles(main({ words, plan: { by: "rules", phrases: phrasesOf(words, pausesOf(printed)) }, spellings: [] })), "transcript.json");
+    // The app's transcript has "section," at 120.58 and "captions" at 122.34.
+    assert.deepEqual(made.map(({ text, start, end }) => [text, start, end]), [["newsletter", 119.855, 120.38], ["section,", 120.64, 120.9], ["Instagram", 121.8, 122.08], ["captions", 122.34, 122.6]]);
   });
 });
 

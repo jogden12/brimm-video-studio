@@ -86,6 +86,13 @@ export const heardWords = (words, phrases) => words.map((w) => {
   return phrase && w.start < phrase.start ? { ...w, start: phrase.start } : w;
 });
 
+/** The words with each start moved halfway into the time the transcriber gave the word. The transcriber starts a word where the
+    word before it ended (cuts.js wordsOf), so the word's time holds the pause before it, and the word starts somewhere inside it:
+    halfway is the guess that is least far out whatever the pause. Against the HyperFrames app's own transcript of the A0
+    recording (490 of its 507 words found in both) the starts were 0.12 s out at the middle and 0.44 s out for 9 in 10; moved
+    halfway in and then to the ends of the pauses (heardWords) they are 0.03 s and 0.12 s. A word with no length stays where it is. */
+export const insideTheirTime = (words) => words.map((w) => ({ ...w, start: Math.round((w.start + Math.max(0, w.end - w.start) / 2) * 1000) / 1000 }));
+
 /** A word as words are compared: in lower case, without its punctuation. */
 const plain = (w) => String(w).normalize("NFC").toLowerCase().replace(/[’]/g, "'").replace(/[^\p{L}\p{N}']+/gu, "");
 
