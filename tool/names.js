@@ -37,7 +37,7 @@ export const machineSlug = (machine) => String(machine ?? "").toLowerCase().repl
 export const shortId = (id) => String(id).slice(-6);
 
 /** The name of a part as it goes into a name: "main", or "reel 2". */
-const partName = (part) => (part === "main" ? "main" : `reel ${part.reel}`);
+export const partName = (part) => (part === "main" ? "main" : `reel ${part.reel}`);
 
 /** The name a push gives its project in Final Cut, as "Pricing talk main v3 3fa9c1". Share and File > Export XML… name their
     files after the project, so the push records it and files are found by it, never by the episode's current name. */

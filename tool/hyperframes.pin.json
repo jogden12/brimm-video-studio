@@ -1,4 +1,8 @@
 {
   "version": "0.8.208",
-  "integrity": "sha512-a019TOERCx/qj9NtUc7D69gGPguXR97Vbs8CjUUq6KKS+FqlaUBob6CG2KT8ohHhHvHTc1K3mie2hyxZLqt+8w=="
+  "integrity": "sha512-a019TOERCx/qj9NtUc7D69gGPguXR97Vbs8CjUUq6KKS+FqlaUBob6CG2KT8ohHhHvHTc1K3mie2hyxZLqt+8w==",
+  "gsap": {
+    "version": "3.14.2",
+    "integrity": "sha512-GJ07/MKsATTFk2vf2brRm9tZwqiLwN2YLl4nxWcrQi+l342DYlHYTZ4B2MxXALLoCgbR6r66UavcIcYhP/bxZg=="
+  }
 }

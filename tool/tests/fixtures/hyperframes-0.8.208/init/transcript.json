@@ -1,0 +1,38 @@
+[
+  {
+    "text": "Pricing,",
+    "start": 0.5,
+    "end": 1.1,
+    "id": "w0"
+  },
+  {
+    "text": "says",
+    "start": 1.2,
+    "end": 1.6,
+    "id": "w1"
+  },
+  {
+    "text": "Hormozy,",
+    "start": 1.7,
+    "end": 2.5,
+    "id": "w2"
+  },
+  {
+    "text": "is",
+    "start": 2.7,
+    "end": 2.9,
+    "id": "w3"
+  },
+  {
+    "text": "a",
+    "start": 3,
+    "end": 3.1,
+    "id": "w4"
+  },
+  {
+    "text": "skill.",
+    "start": 3.2,
+    "end": 4,
+    "id": "w5"
+  }
+]
