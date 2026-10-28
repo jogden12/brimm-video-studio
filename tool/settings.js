@@ -14,10 +14,10 @@
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
-//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
-//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
-//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
 //   node settings.js show
@@ -142,6 +142,8 @@ export function settingsFault(s) {
     return "an entry her folder allows must be a skill by its name, a connector's tool by its exact name, or a tool the never list does not hold";
   }
   if (isSet(s.userDeny) && typeof s.userDeny !== "boolean") return "the note of her user settings' deny rules must be true or false";
+  if (s.app !== undefined && s.app !== "hyperframes" && s.app !== "off") return 'the editing app must be "hyperframes" or "off"';
+  if (s.appHandover !== undefined && typeof s.appHandover !== "boolean") return "whether her chat is handed to the app must be true or false";
   return "";
 }
 
@@ -276,7 +278,7 @@ export function writeSettings(home, fields) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
@@ -287,13 +289,13 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be, the drop
                                folder as it is now and as it will be, and, when the folder watched changes, the old one's
                                whole path, a line each, or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
-  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"]
+  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
                                makes the new folder, marks it and points the import at it, after it has checked the old one.
@@ -506,8 +508,24 @@ export const SETTABLE = {
   "--drop": {
     field: "drop", takes: 'Drop or "Unedited Video"', read: (v) => (v === "Drop" || v === "Unedited Video" ? v : undefined), said: String,
     otherwise: "Unedited Video", subject: "The drop folder", be: "is", was: "it was"
+  },
+  "--app": {
+    field: "app", takes: "hyperframes or off", read: (v) => (v === "hyperframes" || v === "off" ? v : undefined), said: String,
+    otherwise: "off", subject: "The editing app", be: "is", was: "it was"
+  },
+  "--app-handover": {
+    field: "appHandover", takes: "on or off", read: (v) => (v === "on" ? true : v === "off" ? false : undefined), said: (v) => (v ? "on" : "off"),
+    otherwise: false, subject: "Handing her chat to the app", be: "is", was: "it was"
   }
 };
+
+/** The editing app this Mac opens an episode in: "hyperframes" when its settings say so (`node settings.js set --app
+    hyperframes`), and "" otherwise, when `app` says this Mac isn't set up for it (architecture 2026-10-27, 6.1). */
+export const appOf = (s) => (s && s.app === "hyperframes" ? "hyperframes" : "");
+
+/** Whether her chat may be handed to the app when it opens a project: only when this Mac's settings turn it on (`--app-handover
+    on`), and off otherwise (5.6). Whether it is handed over even then is hyperframes.js handoverAllowed's to say. */
+export const appHandoverOn = (s) => Boolean(s && s.appHandover === true);
 
 /** A moment as a local time with its offset, "2026-10-22T20:00:00-04:00", as localStamp in episode.js writes it. That file
     cannot be read here: it reads this one. */
@@ -642,6 +660,8 @@ function show(home, say, now) {
   if (isSet(s.zoomFolder)) say(`  Zoom's recordings:  ${s.zoomFolder}`);
   if (isSet(s.studioAllow)) say(`  Also allowed in her folder:  ${s.studioAllow.length ? s.studioAllow.map(({ type, name }) => `${type} ${name}`).join(", ") : "nothing more"}`);
   if (isSet(s.proxyPort)) say(`  Her folder's proxy port:  ${s.proxyPort}`);
+  if (s.app !== undefined) say(`  The editing app:  ${s.app}`);
+  if (s.appHandover !== undefined) say(`  Her chat handed to the app:  ${s.appHandover ? "on" : "off"}`);
   return 0;
 }
 

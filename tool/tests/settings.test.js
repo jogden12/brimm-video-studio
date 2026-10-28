@@ -12,7 +12,7 @@ import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAUL
 import { claudeDirName, realOf } from "../places.js";
 import { chatHeld } from "../held.js";
 import { heldFolder } from "../scan.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -223,6 +223,21 @@ describe("the switch's settings", () => {
     assert.equal(settingsFault({ ...BASE, import: "light", readings: false, handoffVersion: 2, drop: "Drop" }), "");
     assert.equal(settingsFault({ ...BASE, import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video" }), "");
     assert.equal(settingsFault(BASE), "");
+  });
+  it("check the editing app and the handover of her chat to it, only when they are there", () => {
+    assert.match(settingsFault({ ...BASE, app: "final cut" }), /editing app/);
+    assert.match(settingsFault({ ...BASE, app: true }), /editing app/);
+    assert.match(settingsFault({ ...BASE, appHandover: "on" }), /handed to the app/);
+    assert.equal(settingsFault({ ...BASE, app: "hyperframes", appHandover: true }), "");
+    assert.equal(settingsFault({ ...BASE, app: "off", appHandover: false }), "");
+  });
+  it("say the editing app is HyperFrames, and her chat is handed to it, only when this Mac's settings turn them on", () => {
+    assert.equal(appOf(BASE), "");
+    assert.equal(appOf({ ...BASE, app: "off" }), "");
+    assert.equal(appOf({ ...BASE, app: "hyperframes" }), "hyperframes");
+    assert.equal(appHandoverOn(BASE), false);
+    assert.equal(appHandoverOn({ ...BASE, appHandover: false }), false);
+    assert.equal(appHandoverOn({ ...BASE, appHandover: true }), true);
   });
   it("have a sessionTeachings that is off (absent, null or false), or whole: on, when it was turned on, and the two accounts", () => {
     assert.equal(settingsFault({ ...BASE, sessionTeachings: null }), "");
@@ -883,6 +898,22 @@ describe("node settings.js set and sessions", () => {
     t.said.length = 0;
     assert.equal(t.run("set", "--handoff", "2", "--readings", "off"), 0);
     assert.deepEqual(t.said, ["The hand-off version is 2 already.", "Readings are now off (they were on).", `Written: ${settingsFile(t.home)}`]);
+    t.done();
+  });
+  it("set turns the editing app and the handover of her chat on and off, and show says them", () => {
+    const t = mac();
+    assert.equal(t.run("set", "--app", "hyperframes", "--app-handover", "on"), 0);
+    assert.deepEqual(t.said, ["The editing app is now hyperframes (it was off).", "Handing her chat to the app is now on (it was off).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, app: "hyperframes", appHandover: true });
+    t.said.length = 0;
+    assert.equal(t.run("show"), 0);
+    assert.deepEqual(t.said.slice(-2), ["  The editing app:  hyperframes", "  Her chat handed to the app:  on"]);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--app-handover", "off", "--app", "off"), 0);
+    assert.deepEqual(t.said, ["Handing her chat to the app is now off (it was on).", "The editing app is now off (it was hyperframes).", `Written: ${settingsFile(t.home)}`]);
+    t.said.length = 0;
+    assert.equal(t.run("set", "--app", "final-cut"), 1);
+    assert.deepEqual(t.said, ["Not changed: --app takes hyperframes or off."]);
     t.done();
   });
   it("set says the drop folder is Unedited Video already on a Mac whose settings name none, and changes nothing", () => {
