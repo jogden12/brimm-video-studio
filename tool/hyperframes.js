@@ -138,8 +138,22 @@ export function denyRules() {
   return [...barred.flatMap((name) => SPELLINGS.map((spell) => `Bash(${spell(name)}:*)`)), "Bash(npm run publish:*)"].sort();
 }
 
-/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and four variables that turn off
-    the command line's telemetry and skills download and Claude Code's /feedback command and transcript-share survey. `kind` is
+/** What the command line does on its own unless it is told not to, and the variable that tells it (version 0.8.208, read in its
+    dist): it tells its makers of its use (HYPERFRAMES_NO_TELEMETRY), downloads skills (HYPERFRAMES_SKIP_SKILLS), fetches the
+    registry's newest version in the background to say there is one (HYPERFRAMES_NO_UPDATE_CHECK), can schedule a background install
+    of that newer version (HYPERFRAMES_NO_AUTO_INSTALL), and installs a package it finds missing when a feature needs it, an optional
+    one (HYPERFRAMES_NO_OPTIONAL_INSTALL: it then says the package is not installed, and the feature needs it). All five are off, in
+    each place the command line is run: Studio's own runs (childEnv), the app's agent's (settingsFor), and the installer's (install.sh
+    run_hyperframes, which a test holds to this list). The rule behind them is that nothing is installed on a Mac without Jason's yes:
+    a newer version comes by a pull request that moves the pin and then by the installer, and a feature whose optional package is
+    missing says so and is not given it (5.3). A new object each time. */
+const quiet = () => ({
+  HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
+});
+
+/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and seven variables: the five that
+    turn off what the command line does on its own (quiet: its telemetry, skills download, update check, background install and
+    install of a missing optional package) and Claude Code's /feedback command and transcript-share survey. `kind` is
     "main" (an episode's, or a Reel's) or "clip" (a session's, which also denies the web: its words must not go anywhere, 5.4); any
     other throws. There is no `allow`: what the agent may run is what the app's own permissions give it. A new object each time. */
 export function settingsFor(kind) {
@@ -147,7 +161,7 @@ export function settingsFor(kind) {
   const deny = kind === "clip" ? [...denyRules(), "WebFetch", "WebSearch"].sort() : denyRules();
   return {
     permissions: { deny },
-    env: { HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" }
+    env: { ...quiet(), DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" }
   };
 }
 
@@ -156,7 +170,8 @@ const absolute = (path) => typeof path === "string" && isAbsolute(path);
 const isChat = (id) => typeof id === "string" && SESSION_ID.test(id);
 
 /** The environment the command line is run in (5.6): a list, not what Studio inherited. `PATH` is node's own folder, /usr/bin and
-    /bin; `HOME` and `LANG` come from `base` (LANG is en_US.UTF-8 when it has none); telemetry and the skills download are off. No
+    /bin; `HOME` and `LANG` come from `base` (LANG is en_US.UTF-8 when it has none); what it does on its own is off (quiet:
+    telemetry, the skills download, the update check, the background install and the install of a missing optional package). No
     key, nothing of Anthropic's, no proxy setting, and none of the variables by which `open` finds an agent's conversation to hand
     over (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID, GROK_SESSION_ID, F3). `CLAUDE_CODE_SESSION_ID` is added, as `sessionId`, only
     when `handover` is true and the id is a chat's: it is how the app is handed the chat, so whether it may be is handoverAllowed's
@@ -171,8 +186,7 @@ export function childEnv(options) {
     PATH: [dirname(node), "/usr/bin", "/bin"].join(":"),
     HOME: home,
     LANG: typeof base.LANG === "string" && base.LANG !== "" ? base.LANG : "en_US.UTF-8",
-    HYPERFRAMES_NO_TELEMETRY: "1",
-    HYPERFRAMES_SKIP_SKILLS: "1"
+    ...quiet()
   };
   if (handover === true && isChat(sessionId)) env.CLAUDE_CODE_SESSION_ID = sessionId;
   return env;

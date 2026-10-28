@@ -269,11 +269,13 @@ drop_toolchain() {
 }
 # Runs the pinned HyperFrames command line with the arguments given, as the setup asks it twice (for its Chrome, and for its check):
 # by node and the program's absolute path in the toolchain, never through npx, which would run whatever hyperframes it found first
-# (spec 5.3). It is run in the variables hyperframes.js's childEnv gives it that never change, telemetry and the skills download off, as
-# npm is run with telemetry off in the step that installs the command line; node's folder leads the PATH, so that it is the node that
-# was checked. What it prints goes to the terminal as it comes, none of it is captured, and its exit status is this function's.
+# (spec 5.3). It is run in the variables hyperframes.js's childEnv gives it that never change, all that the command line does on its
+# own off: telemetry, the skills download, its check for a newer version, its background install of one, and its install of a
+# missing optional package (nothing is installed on a Mac but by this installer, on Jason's yes), as npm is run with telemetry off in
+# the step that installs the command line; node's folder leads the PATH, so that it is the node that was checked. What it prints goes
+# to the terminal as it comes, none of it is captured, and its exit status is this function's.
 run_hyperframes() {
-  env PATH="${node:h}:$PATH" HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_SKIP_SKILLS=1 "$node" "$HYPERFRAMES_PROGRAM" "$@"
+  env PATH="${node:h}:$PATH" HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_SKIP_SKILLS=1 HYPERFRAMES_NO_UPDATE_CHECK=1 HYPERFRAMES_NO_AUTO_INSTALL=1 HYPERFRAMES_NO_OPTIONAL_INSTALL=1 "$node" "$HYPERFRAMES_PROGRAM" "$@"
 }
 
 # What unedited.js is told in the plist: --rules-only, when that was asked for here, and then each watched folder after its

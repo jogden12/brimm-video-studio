@@ -68,8 +68,8 @@ describe("the HyperFrames stand-in", () => {
     s.run(["--version"]);
     s.run(["open", s.project, "--json"], { handover: true, sessionId: CHAT });
     assert.deepEqual(s.runs(), [
-      { args: ["--version"], env: ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] },
-      { args: ["open", s.project, "--json"], env: ["CLAUDE_CODE_SESSION_ID", "HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }
+      { args: ["--version"], env: ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] },
+      { args: ["open", s.project, "--json"], env: ["CLAUDE_CODE_SESSION_ID", "HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }
     ]);
   });
   it("answers nothing else, and ends with 2", (c) => {
@@ -148,7 +148,7 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.ok(!existsSync(e.paths.video), "the working copy was moved in, not copied");
     assert.ok(existsSync(e.paths.facts), "its facts stay where they were");
     assert.match(readFileSync(join(e.project, "transcript.json"), "utf8"), /"Sallie\."/);
-    assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }]);
+    assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }]);
     assert.equal(e.saved.length, 1);
     const next = e.saved[0];
     assert.equal(layoutOf(next), 4);

@@ -45,7 +45,7 @@ function runsOf(t) {
   return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
 }
 /** The names of the variables the pinned command line is run with (hyperframes.js childEnv): no chat's id among them. */
-const PINNED_ENV = ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"];
+const PINNED_ENV = ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"];
 
 const START = Date.parse("2026-10-20T15:00:00-05:00");
 const AT = "2026-10-20T15:00:00-05:00";
