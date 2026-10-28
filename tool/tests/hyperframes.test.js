@@ -23,6 +23,10 @@ const AGENT = ["preview", "render", "lint", "check", "validate", "inspect", "key
 const EDIT = ["open", "catch-up"];
 const DENIED = ["init", "add", "catalog", "capture", "present", "publish", "cloud", "lambda", "cloudrun", "auth", "feedback", "telemetry", "skills", "models", "browser", "upgrade", "benchmark", "clean", "transcribe", "tts", "remove-background"];
 const classOf = (c) => Object.keys(COMMANDS).filter((name) => COMMANDS[name].class === c).sort();
+/** The variables by which version 0.8.208 takes a HeyGen key or token, in the order it looks (resolveCredential), and then at its own
+    file, ~/.heygen/credentials. An empty value counts as unset. A project's settings blank all three, since whether the app hands
+    its assistant one is not known, and Studio's own runs (childEnv) carry none of them. */
+const HEYGEN = ["HEYGEN_API_KEY", "HYPERFRAMES_API_KEY", "HEYGEN_ACCESS_TOKEN"];
 
 describe("the pinned command line", () => {
   it("is version 0.8.208, with the registry's integrity string", () => {
@@ -127,10 +131,12 @@ describe("every command of the pinned help is classified", () => {
 describe("the deny rules and the project's settings", () => {
   const spellings = (c) => [`Bash(npx hyperframes ${c}:*)`, `Bash(npx --yes hyperframes@0.8.208 ${c}:*)`, `Bash(hyperframes ${c}:*)`];
   // The command line's own update check, its background install of a newer version and its install of a missing optional package are
-  // off too (version 0.8.208 does each unless told not to): nothing is installed on a Mac without Jason's yes.
+  // off too (version 0.8.208 does each unless told not to): nothing is installed on a Mac without Jason's yes. The last three are
+  // blank: HEYGEN, above.
   const ENV = {
     HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1",
-    DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1"
+    DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
+    HEYGEN_API_KEY: "", HYPERFRAMES_API_KEY: "", HEYGEN_ACCESS_TOKEN: ""
   };
 
   it("denyRules has a rule for each denied command in each spelling", () => {
@@ -169,7 +175,7 @@ describe("the deny rules and the project's settings", () => {
     assert.ok(!denyRules().includes("Bash(anything:*)"));
   });
 
-  it("settingsFor(\"main\") holds the deny rules and seven variables, and nothing else", () => {
+  it("settingsFor(\"main\") holds the deny rules and ten variables, and nothing else", () => {
     const settings = settingsFor("main");
     assert.deepEqual(Object.keys(settings), ["permissions", "env"]);
     assert.deepEqual(Object.keys(settings.permissions), ["deny"]);
@@ -182,12 +188,21 @@ describe("the deny rules and the project's settings", () => {
     const main = settingsFor("main");
     assert.ok(clip.permissions.deny.includes("WebFetch") && clip.permissions.deny.includes("WebSearch"));
     assert.ok(!main.permissions.deny.includes("WebFetch") && !main.permissions.deny.includes("WebSearch"));
-    // Everything main denies a clip denies, the rules are sorted, and the variables are the same seven.
+    // Everything main denies a clip denies, the rules are sorted, and the variables are the same ten.
     assert.deepEqual(clip.permissions.deny.filter((rule) => rule !== "WebFetch" && rule !== "WebSearch"), main.permissions.deny);
     assert.deepEqual(clip.permissions.deny, [...clip.permissions.deny].sort());
     assert.deepEqual(clip.env, ENV);
     assert.deepEqual(Object.keys(clip), ["permissions", "env"]);
     assert.deepEqual(Object.keys(clip.permissions), ["deny"]);
+  });
+  it("settingsFor blanks all three variables by which the command line takes a HeyGen key or token, in a main project's settings and a clip's", () => {
+    for (const kind of ["main", "clip"]) {
+      const { env } = settingsFor(kind);
+      for (const name of HEYGEN) {
+        assert.ok(Object.hasOwn(env, name), `${kind}: ${name} is there`);
+        assert.strictEqual(env[name], "", `${kind}: ${name} is blank, not unset and not a value`);
+      }
+    }
   });
   it("settingsFor is the same text each time, and a new object each time", () => {
     assert.equal(JSON.stringify(settingsFor("main")), JSON.stringify(settingsFor("main")));
@@ -207,7 +222,8 @@ describe("the environment the command line is run in", () => {
     PATH: "/usr/local/bin:/somewhere/else", HOME, LANG: "en_GB.UTF-8", SHELL: "/bin/zsh", USER: "sallie", TMPDIR: "/var/folders/x/",
     ANTHROPIC_API_KEY: "sk-ant-made-up", ANTHROPIC_BASE_URL: "https://proxy.example", ANTHROPIC_AUTH_TOKEN: "made-up",
     HTTPS_PROXY: "http://proxy.example:3128", HTTP_PROXY: "http://proxy.example:3128", https_proxy: "http://proxy.example:3128", ALL_PROXY: "socks5://x", NO_PROXY: "x",
-    AWS_SECRET_ACCESS_KEY: "made-up", AWS_ACCESS_KEY_ID: "made-up", GITHUB_TOKEN: "ghp_made-up", OPENROUTER_API_KEY: "made-up", HEYGEN_API_KEY: "made-up",
+    AWS_SECRET_ACCESS_KEY: "made-up", AWS_ACCESS_KEY_ID: "made-up", GITHUB_TOKEN: "ghp_made-up", OPENROUTER_API_KEY: "made-up",
+    HEYGEN_API_KEY: "made-up", HYPERFRAMES_API_KEY: "made-up", HEYGEN_ACCESS_TOKEN: "made-up",
     CLAUDE_CODE_SESSION_ID: "11111111-2222-4333-8444-555555555555", CODEX_THREAD_ID: "thread-1", GROK_SESSION_ID: "grok-1",
     NODE_OPTIONS: "--require /somewhere/evil.js", NODE_EXTRA_CA_CERTS: "/somewhere/ca.pem", SSH_AUTH_SOCK: "/tmp/agent.1", DYLD_INSERT_LIBRARIES: "/somewhere/lib.dylib",
     HYPERFRAMES_DESKTOP_PROJECT: "/somewhere", XDG_CONFIG_HOME: "/somewhere"
@@ -221,7 +237,8 @@ describe("the environment the command line is run in", () => {
       PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME, LANG: "en_GB.UTF-8",
       HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
     });
-    for (const gone of ["ANTHROPIC_API_KEY", "HTTPS_PROXY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID"]) assert.ok(!(gone in env), gone);
+    // Not a HeyGen key either, in any of the three variables the command line takes one from: Studio's own runs have none to find.
+    for (const gone of ["ANTHROPIC_API_KEY", "HTTPS_PROXY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID", ...HEYGEN]) assert.ok(!(gone in env), gone);
     assert.ok(!Object.keys(env).some((name) => /^ANTHROPIC_|PROXY/i.test(name)));
   });
   it("childEnv takes PATH from node's own folder, then /usr/bin and /bin", () => {
