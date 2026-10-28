@@ -200,17 +200,25 @@ const quiet = () => ({
   HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
 });
 
-/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and seven variables: the five that
+/** The three variables by which the command line takes a HeyGen key or token (version 0.8.208, resolveCredential), each set to "": it
+    takes the first that is set, in this order, HEYGEN_API_KEY, HYPERFRAMES_API_KEY, HEYGEN_ACCESS_TOKEN, and then reads its own
+    file, ~/.heygen/credentials; an empty value counts as unset. Whether the app hands its agent one of them is not known, so a
+    project's settings blank all three (settingsFor), and a command the agent runs finds none set. Studio's own runs (childEnv) are
+    a list of their own and carry none, so they need no blanks. A new object each time. */
+const heygenBlanks = () => ({ HEYGEN_API_KEY: "", HYPERFRAMES_API_KEY: "", HEYGEN_ACCESS_TOKEN: "" });
+
+/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and ten variables: the five that
     turn off what the command line does on its own (quiet: its telemetry, skills download, update check, background install and
-    install of a missing optional package) and Claude Code's /feedback command and transcript-share survey. `kind` is
-    "main" (an episode's, or a Reel's) or "clip" (a session's, which also denies the web: its words must not go anywhere, 5.4); any
-    other throws. There is no `allow`: what the agent may run is what the app's own permissions give it. A new object each time. */
+    install of a missing optional package), Claude Code's /feedback command and transcript-share survey, and, blank, the three by
+    which the command line takes a HeyGen key or token (heygenBlanks). `kind` is "main" (an episode's, or a Reel's) or "clip" (a
+    session's, which also denies the web: its words must not go anywhere, 5.4); any other throws. There is no `allow`: what the agent
+    may run is what the app's own permissions give it. A new object each time. */
 export function settingsFor(kind) {
   if (kind !== "main" && kind !== "clip") throw new Error(`settingsFor: a project's kind is "main" or "clip", not ${JSON.stringify(kind)}`);
   const deny = kind === "clip" ? [...denyRules(), "WebFetch", "WebSearch"].sort() : denyRules();
   return {
     permissions: { deny },
-    env: { ...quiet(), DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" }
+    env: { ...quiet(), DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1", ...heygenBlanks() }
   };
 }
 
