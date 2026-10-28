@@ -11,7 +11,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PIN, toolchainDir } from "../hyperframes.js";
+import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
 const HERE = dirname(INSTALL);
@@ -30,6 +30,11 @@ const MACOS = (version) => `[ "$1" = "-productVersion" ] && echo ${version}\n`;
 const NOWHERE_ELSE = "/nowhere/bin:/nowhere/else/bin";
 /** Where a line about Final Cut Pro begins, for one of the two Macs (--machine): it is optional now, since HyperFrames is where she edits. */
 const FINAL_CUT = "  Final Cut Pro, optional now (HyperFrames is where she edits):";
+/** The two lines for one of the two Macs (--machine) about the Chrome the HyperFrames command line renders with and its doctor check,
+    said right after the lines about the command line itself. `kept` is the folder the command line keeps that Chrome in: its own
+    copy, in the home folder's cache (the pinned package's CACHE_DIR, which the H0 render test also found by hand). */
+const CHROME = (kept) => `  Its Chrome:  found, or fetched from storage.googleapis.com when it is not there, by the command line's own browser ensure, once the command line is in place: the Chrome Headless Shell it renders with, its own copy, kept in ${kept} (a Chrome you use is left alone). If it cannot be had, the setup stops there, before this Mac's drop folder, its settings and its launch agent are touched`;
+const DOCTOR = "  Its doctor check:  the command line's own doctor, run last, right after its Chrome. Its words are shown for Jason to read on each Mac, the installer reads none of them, and it does not stop the setup. It may say that a newer version of the command line is out: that is expected, since the pin moves only by a pull request. Nothing it suggests is installed here";
 
 /** Ask the installer what it would do. Gives back how it ended, what it printed, each launch agent it showed, as plutil reads
     it, and what was changed: `left` is what is in the home folder afterwards, and `ran` the programs it ran that change
@@ -571,6 +576,118 @@ describe("the installer's own text", () => {
     ]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
     assert.deepEqual([r.left, r.ran], [[], ""]);
   });
+  it("says in its help that --machine then has the command line find or fetch the Chrome it renders with and run its doctor check, and that a Chrome that cannot be had stops the setup and the check never does", { skip: notAMac }, () => {
+    const r = ask("--print", "--help");
+    assert.equal(r.status, 0, r.err);
+    const help = r.out.replace(/\s+/g, " ");
+    for (const said of [
+      "It then has that command line find or fetch the Chrome it renders with, with its own browser ensure, into ~/.cache/hyperframes/chrome, and stops, before the Mac's drop folder, its settings and its launch agent are touched, if it cannot be had.",
+      "Last it runs the command line's own doctor, whose words are shown for Jason and which does not stop the setup."
+    ]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
+    assert.deepEqual([r.left, r.ran], [[], ""]);
+  });
+  // The Chrome the command line renders with is found or fetched, and its doctor check run, on a real setup only (on Jason's yes), which no
+  // test does. So the lines of that step are read here, not run.
+  it("has the pinned command line find or fetch its Chrome and then run its doctor check only for a Mac set up with --machine, once the command line is in place and checked: a Chrome that cannot be had stops the setup before anything of the Mac is written, and the check never does (its lines, read, not run)", () => {
+    // What the installer does, without the comments that say what it does not.
+    const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+    // The command line is run by one function, and asked for its Chrome and its check and nothing else: no other command is run through it.
+    const runs = code.split("\n").filter((line) => /\brun_hyperframes\b/.test(line) && !line.startsWith("run_hyperframes() {"));
+    assert.equal(runs.length, 2, runs.join("\n"));
+    assert.ok(runs[0].includes("run_hyperframes browser ensure") && runs[1].includes("run_hyperframes doctor"), runs.join("\n"));
+    // What each prints goes to the terminal as it comes: nothing is captured, piped or redirected, and none of doctor's words is read.
+    for (const run of runs) assert.doesNotMatch(run.replaceAll("||", ""), /[|>]|\$\(/, run);
+    // The step is the block that asks for the Chrome: it is for --machine alone.
+    const asked = text.indexOf("\n  if ! run_hyperframes browser ensure; then\n");
+    assert.ok(asked > 0, "the Chrome is asked for, and a refusal is looked at");
+    const start = text.lastIndexOf('\nif [[ -n "$machine" ]]; then\n', asked) + 1;
+    assert.ok(start > 0 && !text.slice(start, asked).includes("\nfi\n"), "the --machine guard is the step's own: no other block ends between it and the Chrome");
+    const block = text.slice(start, text.indexOf("\nfi\n", asked) + 4);
+    assert.ok(block.includes("run_hyperframes doctor"), "and the check is in the same block");
+    // It comes once the command line is in place and checked, installed now or here already: after the step that installs it, and after
+    // node is in place; and before anything of the Mac is written, or the model fetched.
+    const toolchainStep = text.indexOf('if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
+    assert.ok(toolchainStep > 0 && start > text.indexOf("\nfi\n", toolchainStep) + 4, "after the step that installs the command line");
+    assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi'), "after node is in place");
+    for (const later of ['if [[ ! -f "$MODEL" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
+      assert.ok(start < text.indexOf(later), later);
+    }
+    // The Chrome first, then the check, and the check is the step's last.
+    assert.ok(block.indexOf("run_hyperframes browser ensure") < block.indexOf("run_hyperframes doctor"), block);
+    // A Chrome that cannot be had stops the setup there, with the words that say what was kept and that nothing of the Mac was touched.
+    const refused = block.slice(block.indexOf("  if ! run_hyperframes browser ensure; then\n"), block.indexOf("\n  fi\n", asked - start) + 6);
+    assert.match(refused, /^ {2}if ! run_hyperframes browser ensure; then\n(?: {4}[^\n]*\n)* {4}exit 1\n {2}fi\n$/, refused);
+    for (const said of [
+      "could not find or fetch its Chrome (what it said is above).",
+      "The command line $HYPERFRAMES_VERSION stays in $TOOLCHAIN: it is installed, and was checked against the pin.",
+      "Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed first stays.",
+      "then run this again"
+    ]) assert.ok(refused.includes(said), `${said}\n---\n${refused}`);
+    assert.equal(block.split("exit").length - 1, 1, "the Chrome stops the setup, and nothing else in the step does");
+    // The check never stops it: its status is looked at, and said when it is not 0, and the setup goes on.
+    const checked = block.slice(block.indexOf("  doctor_status=0\n"));
+    assert.ok(checked.startsWith("  doctor_status=0\n  run_hyperframes doctor || doctor_status=$?\n"), checked);
+    assert.ok(!checked.includes("exit"), checked);
+    assert.ok(checked.includes('say "doctor ended with status $doctor_status (what it said is above). That does not stop the setup."'), checked);
+  });
+  it("runs the command line by node and the toolchain's program, each by its absolute path and never through npx, with the variables hyperframes.js gives it that never change (read from childEnv, so that the two cannot drift)", () => {
+    const fn = functionOf("run_hyperframes");
+    // The program is hyperframes.js's cliPath: in the toolchain, which is in the work folder under the home folder, so its path is
+    // absolute. The installer's three lines, expanded, give the very path cliPath gives for a home folder named $HOME.
+    const line = (name) => (new RegExp(`\\n${name}="([^"\\n]*)"\\n`).exec(text) || [])[1];
+    assert.ok(line("HYPERFRAMES_PROGRAM") && line("TOOLCHAIN") && line("WORK"), "the program, the toolchain and the work folder, in install.sh");
+    const expanded = line("HYPERFRAMES_PROGRAM").replace("$TOOLCHAIN", line("TOOLCHAIN")).replace("$WORK", line("WORK")).replace("$HYPERFRAMES_VERSION", PIN.version);
+    assert.equal(expanded, cliPath("$HOME"));
+    assert.ok(expanded.startsWith("$HOME/"), "under the home folder, so it is absolute");
+    // The run: node, then the program, then the arguments as they were given, each quoted whole (the folder has a space in its name).
+    assert.ok(fn.includes('"$node" "$HYPERFRAMES_PROGRAM" "$@"'), fn);
+    assert.doesNotMatch(fn, /npx/, "never through npx, which would run whatever hyperframes it found first");
+    // The variables childEnv gives the command line that are the same whoever the Mac and node are: told apart by asking it twice.
+    const asked = (home, lang, node) => childEnv({ base: { HOME: home, LANG: lang }, node });
+    const one = asked("/Users/one", "en_US.UTF-8", "/opt/homebrew/bin/node");
+    const two = asked("/Users/two", "fr_FR.UTF-8", "/usr/local/bin/node");
+    const fixed = Object.entries(one).filter(([name, value]) => two[name] === value);
+    assert.ok(fixed.some(([name, value]) => name === "HYPERFRAMES_NO_TELEMETRY" && value === "1"), `telemetry off is among them: ${JSON.stringify(fixed)}`);
+    assert.ok(fixed.length >= 2, JSON.stringify(fixed));
+    // Every one is given to the run, as the same value; and node's folder leads the PATH, as childEnv has it, so that it is the node checked.
+    for (const [name, value] of fixed) assert.ok(fn.includes(` ${name}=${value} `), `${name}=${value}\n---\n${fn}`);
+    assert.ok(fn.includes('env PATH="${node:h}:$PATH" '), fn);
+    assert.deepEqual(one.PATH.split(":").slice(0, 1), ["/opt/homebrew/bin"], "childEnv has node's folder first too");
+    // It is defined once, and the Chrome's run and the check's go through it alone (the test above).
+    assert.equal(text.split("run_hyperframes() {").length - 1, 1, "defined once");
+  });
+  // The function alone, in zsh, with a stand-in for node that writes down how it was run: no test runs the step, and none runs the pinned
+  // command line, whose program here is a path that holds nothing. What this sees is what a read of the text cannot: that a program in a
+  // folder with a space in its name (BRIMM Video Work) reaches node whole, that the variables and the PATH arrive, and that node's exit
+  // status is the function's, whichever it is.
+  it("hands node the program by its whole path, with the variables that never change and node's folder first on the PATH, and gives back node's exit status (the function alone, with a stand-in for node)", { skip: noZsh }, () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-run-hyperframes-")));
+    try {
+      mkdirSync(join(dir, "bin"));
+      mkdirSync(join(dir, "home"));
+      const log = join(dir, "log");
+      // It ends with 3 for doctor and 0 for anything else, and writes down its arguments one to a line and the few variables.
+      writeFileSync(join(dir, "bin", "node"), `#!/bin/sh\n{\n  for a in "$@"; do printf 'arg:%s\\n' "$a"; done\n  printf 'telemetry:%s\\nskills:%s\\npath:%s\\nhome:%s\\n' "$HYPERFRAMES_NO_TELEMETRY" "$HYPERFRAMES_SKIP_SKILLS" "$PATH" "$HOME"\n} >> "$STAND_IN_LOG"\ncase "$*" in *" doctor") exit 3 ;; esac\nexit 0\n`);
+      chmodSync(join(dir, "bin", "node"), 0o755);
+      const program = join(dir, "BRIMM Video Work", ".toolchain", `hyperframes-${PIN.version}`, "node_modules", "hyperframes", "bin", "hyperframes.mjs");
+      const script = `set -euo pipefail\nnode=${JSON.stringify(join(dir, "bin", "node"))}\nHYPERFRAMES_PROGRAM=${JSON.stringify(program)}\n${functionOf("run_hyperframes")}run_hyperframes browser ensure\nprint -r -- "ensure: $?"\nended=0\nrun_hyperframes doctor || ended=$?\nprint -r -- "doctor: $ended"\n`;
+      // The PATH it is started with holds neither the stand-in's folder nor Homebrew's, so that the stand-in's folder on the PATH it sees
+      // can only be the function's doing.
+      const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: join(dir, "home"), PATH: "/usr/bin:/bin", STAND_IN_LOG: log } });
+      assert.deepEqual([r.status, r.stdout, r.stderr], [0, "ensure: 0\ndoctor: 3\n", ""]);
+      const said = readFileSync(log, "utf8").trimEnd().split("\n");
+      const run = (command) => [`arg:${program}`, ...command.map((word) => `arg:${word}`), "telemetry:1", "skills:1"];
+      // Two runs, each handed the program whole and then the arguments, with both variables, and node's folder first on the PATH.
+      const paths = said.filter((line) => line.startsWith("path:"));
+      assert.equal(paths.length, 2, said.join("\n"));
+      for (const path of paths) assert.equal(path, `path:${join(dir, "bin")}:/usr/bin:/bin`);
+      assert.deepEqual(said.filter((line) => !line.startsWith("path:")), [...run(["browser", "ensure"]), `home:${join(dir, "home")}`, ...run(["doctor"]), `home:${join(dir, "home")}`]);
+      // The program is not run by the stand-in or by anything else, and nothing is made but the log.
+      assert.deepEqual(readdirSync(dir).sort(), ["bin", "home", "log"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("names the lock-down check by a title that is a step of the setup guide it sends Jason to, and so does the README", () => {
     const TITLE = "Check that her Claude folder only runs BRIMM Video";
     const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
@@ -753,9 +870,10 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       "  At the end:  one real call to Claude from the background job (a launch agent of its own, com.thebrimm.claude-check, taken away when it answers or after 90 seconds), to prove its sign-in is seen there",
       "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
-    // The checks come after the line about swift, in this order: Final Cut Pro, then the HyperFrames command line and its check.
+    // The checks come after the line about swift, in this order: Final Cut Pro, then the HyperFrames command line, its download's check,
+    // its Chrome and its doctor check.
     const at = (line) => out.indexOf(`\n  ${line}`);
-    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro, optional now", "HyperFrames toolchain:", "Its download is checked:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
+    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro, optional now", "HyperFrames toolchain:", "Its download is checked:", "Its Chrome:", "Its doctor check:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
     assert.deepEqual(order, [...order].sort((a, b) => a - b), out);
     assert.ok(!order.includes(-1), out);
     assert.doesNotMatch(r.out, /sallie@example\.com|The BRIMM"|orgName/);
@@ -764,6 +882,14 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     changedNothing(r);
     d.done();
   });
+  /** What a listing of a home folder that holds only these files says: each file and every folder above it. */
+  const listing = (files) => [...new Set(files.flatMap(([path]) => path.split("/").map((_, i, parts) => parts.slice(0, i + 1).join("/"))))].sort();
+  /** The files of a folder that holds the command line, as npm leaves them, but for what the options change or take away. */
+  const holding = ({ version = PIN.version, integrity = PIN.integrity, lock = true, program = true } = {}) => [
+    [`${toolchainDir("")}/node_modules/hyperframes/package.json`, JSON.stringify({ name: "hyperframes", version })],
+    ...(program ? [[`${toolchainDir("")}/node_modules/hyperframes/bin/hyperframes.mjs`, "// made for the test\n"]] : []),
+    ...(lock ? [[`${toolchainDir("")}/package-lock.json`, JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/hyperframes": { version, integrity } } })]] : [])
+  ];
   // Final Cut Pro is optional now: HyperFrames is where she edits. Its command line, the version tool/hyperframes.pin.json pins, is
   // kept in a folder of its own for that version (hyperframes.js, toolchainDir). The installer says what it would put there and how
   // the download is checked, and installs nothing: the step itself runs only on Jason's yes, and no test runs it.
@@ -790,17 +916,47 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     changedNothing(plain);
     d.done();
   });
+  // The command line renders with a Chrome of its own. Its `browser ensure` finds the pinned one in the cache folder the command line keeps
+  // it in, or fetches it there once; its `doctor` is its check of the Mac. The installer says both, with where the Chrome is kept, once
+  // the command line is in place, and runs neither: the steps themselves run only on Jason's yes, and no test runs them.
+  it("names the step that has the command line find or fetch its Chrome, and where it keeps it, and its doctor check that follows, right after the lines about the command line. It changes nothing", () => {
+    const d = dropbox();
+    const r = ask("--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    // Where the command line keeps it: in the home folder's cache, on the Mac's own disk, and never in Dropbox or in BRIMM Video Work.
+    const kept = `${r.home}/.cache/hyperframes/chrome`;
+    for (const line of [CHROME(kept), DOCTOR]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+    // They come after the lines about the command line itself and before the ones about Claude Code.
+    const at = (label) => r.out.indexOf(`\n  ${label}`);
+    const order = ["HyperFrames toolchain:", "Its download is checked:", "Its Chrome:", "Its doctor check:", "Claude Code, signed in:"].map(at);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), r.out);
+    assert.ok(!order.includes(-1), r.out);
+    // Only said: the Chrome is not asked for and doctor is not run, so nothing is made, in the home folder or anywhere else.
+    changedNothing(r);
+    // A folder watched on its own, without --machine, is given neither, and says nothing of them.
+    const plain = ask("--print", "/Volumes/Work/Unedited video");
+    assert.equal(plain.status, 0, plain.err);
+    assert.doesNotMatch(plain.out, /Chrome|doctor/);
+    changedNothing(plain);
+    d.done();
+  });
+  it("says the same of the Chrome and the check when the command line is here already, and when this Mac has no node to read it with, and runs nothing of it", () => {
+    const d = dropbox();
+    // A program that would leave a file in the home folder if node ran it: a print that ran the command line would show in what is left.
+    const files = holding().map(([path, body]) => (path.endsWith("/bin/hyperframes.mjs") ? [path, 'import { writeFileSync } from "node:fs";\nwriteFileSync(`${process.env.HOME}/ran-by-the-command-line`, "ran");\n'] : [path, body]));
+    for (const [what, options] of [["here already", { files }], ["here already, and no node", { files, bare: true }]]) {
+      const r = askWith(options, "--print", "--machine", "Mac Studio", d.root);
+      assert.equal(r.status, 0, `${what}: ${r.err}${r.out}`);
+      // With node the lock file is read, and the command line is here already; without it nothing can be read, so it is to install.
+      assert.match(r.out, options.bare ? /\n {2}HyperFrames toolchain: {2}[^\n]*to install in / : /\n {2}HyperFrames toolchain: {2}[^\n]*here already in /, what);
+      for (const line of [CHROME(`${r.home}/.cache/hyperframes/chrome`), DOCTOR]) assert.ok(r.out.includes(`\n${line}\n`), `${what}\n${line}\n---\n${r.out}`);
+      assert.deepEqual([r.left, r.ran], [listing(files), ""], what);
+    }
+    d.done();
+  });
   it("says the HyperFrames command line is here already, and leaves it, only when its folder holds the pinned version and npm's lock file holds the pin's integrity string: anything less is to install", () => {
     const d = dropbox();
     const dir = toolchainDir("");
-    /** What a listing of a home folder that holds only these files says: each file and every folder above it. */
-    const listing = (files) => [...new Set(files.flatMap(([path]) => path.split("/").map((_, i, parts) => parts.slice(0, i + 1).join("/"))))].sort();
-    /** The files of a folder that holds the command line, as npm leaves them, but for what the options change or take away. */
-    const holding = ({ version = PIN.version, integrity = PIN.integrity, lock = true, program = true } = {}) => [
-      [`${dir}/node_modules/hyperframes/package.json`, JSON.stringify({ name: "hyperframes", version })],
-      ...(program ? [[`${dir}/node_modules/hyperframes/bin/hyperframes.mjs`, "// made for the test\n"]] : []),
-      ...(lock ? [[`${dir}/package-lock.json`, JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/hyperframes": { version, integrity } } })]] : [])
-    ];
     const line = (how) => `  HyperFrames toolchain:  version ${PIN.version} of its command line (not the app), ${how}`;
     const ALREADY = (folder) => line(`here already in ${folder}, and npm's lock file there holds the pin's integrity string, so it is left as it is`);
     const TO_INSTALL = (folder) => line(`to install in ${folder} with npm, none of the package's own scripts run`);
