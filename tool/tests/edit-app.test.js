@@ -152,6 +152,87 @@ describe("app: the gate asks first, in its own words", () => {
   });
 });
 
+describe("app: after a correction of the kind, the next main project is another folder (architecture 4.8)", () => {
+  const KEPT = "kept for an earlier kind";
+  /** Every file of a project's folder, by its path, with what it holds: to see that the kept project is as it was. */
+  const treeOf = (dir) => Object.fromEntries(listAll(dir).map((rel) => [rel, readFileSync(join(dir, rel), "utf8")]));
+  /** She answers the episode `word` again (kind … --again), and the working copy's run that `kind` asked for is run as it would run. */
+  async function corrected(t, word) {
+    const before = t.started.length;
+    const kind = await on(t.ctx.deps, "kind", NAME, word, "--private", "no", "--again");
+    assert.equal(kind.code, 0, kind.text);
+    const asked = t.started.slice(before).map(([, args]) => args.slice(1)).filter((args) => args[0] === "workcopy");
+    assert.deepEqual(asked, [["workcopy", "--now", FOLDER]], "kind asked for a new working copy: the project that held the last is kept");
+    const made = await on(t.ctx.deps, ...asked[0]);
+    assert.equal(made.code, 0, made.text);
+    return kind;
+  }
+  it("makes \"main 2\" for the new kind, records it as the main project, and keeps the first as it was, in the record and on disk", async () => {
+    const { t, found, work } = world();
+    assert.equal((await app(t.ctx.deps, FOLDER)).code, 0);
+    const [first] = reread(found).app.projects;
+    assert.equal(first.name, "Pricing- what to charge- main 3fa9c1");
+    const firstTree = treeOf(join(work, first.name));
+    const kind = await corrected(t, "clip");
+    assert.ok(kind.said.includes(`Its HyperFrames project, made when it was answered as raw with retakes, is kept as it was. Say "open ${NAME} in HyperFrames" to make a new one.`));
+    assert.deepEqual(reread(found).app.projects, [{ ...first, state: KEPT }]);
+    // She says it, and app makes the next project: its name is the first no project of the record has.
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    const second = join(work, "Pricing- what to charge- main 2 3fa9c1");
+    assert.equal(readFileSync(join(second, "media", "recording.mp4"), "utf8"), "a part of a Story");
+    assert.equal(JSON.parse(readFileSync(join(second, "meta.json"), "utf8")).name, "Pricing- what to charge- main 2 3fa9c1");
+    const projects = reread(found).app.projects;
+    assert.deepEqual(projects.map((p) => [p.key, p.name, p.state, p.opened.length]), [["main", first.name, KEPT, 1], ["main", "Pricing- what to charge- main 2 3fa9c1", "opened", 1]]);
+    assert.deepEqual(projects[0], { ...first, state: KEPT });
+    // The first project is as it was, every file of it, and the stand-in opened each in its turn.
+    assert.deepEqual(treeOf(join(work, first.name)), firstTree);
+    assert.deepEqual(runsOf(t).map((run) => run.args), [["open", join(work, first.name), "--json"], ["open", second, "--json"]]);
+    t.done();
+  });
+  it("makes \"main 3\" after the next correction, and asking again opens that one and makes no other", async () => {
+    const { t, found, work } = world();
+    await app(t.ctx.deps, FOLDER);
+    await corrected(t, "clip");
+    await app(t.ctx.deps, FOLDER);
+    await corrected(t, "raw");
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    const names = ["Pricing- what to charge- main 3fa9c1", "Pricing- what to charge- main 2 3fa9c1", "Pricing- what to charge- main 3 3fa9c1"];
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[names[0], KEPT], [names[1], KEPT], [names[2], "opened"]]);
+    const made = readdirSync(work).sort();
+    const again = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([again.code, again.said, readdirSync(work).sort()], [0, [OPEN], made]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.opened.length]), [[names[0], 1], [names[1], 1], [names[2], 2]]);
+    t.done();
+  });
+  it("adopts the folder a run left at the \"main 2\" name when its record was not written, and writes nothing over it", async () => {
+    const { t, found, work } = world();
+    await app(t.ctx.deps, FOLDER);
+    const [first] = reread(found).app.projects;
+    await corrected(t, "clip");
+    // The run that makes "main 2" gets as far as the app and cannot write the record: the folder is there, the record does not know it.
+    const second = join(work, "Pricing- what to charge- main 2 3fa9c1");
+    const rev = reread(found).rev;
+    const write = t.ctx.deps.clone;
+    t.ctx.deps.clone = () => {
+      throw new Error("the record cannot be written");
+    };
+    // (Not through the helper that checks every line for a path: what a record that cannot be written says names the record's folder.)
+    const failed = await on(t.ctx.deps, "app", FOLDER);
+    t.ctx.deps.clone = write;
+    assert.equal(failed.code, 1, failed.text);
+    assert.ok(existsSync(join(second, "index.html")));
+    assert.equal(reread(found).rev, rev, "the record was not written");
+    const before = [readdirSync(work).sort(), treeOf(second)];
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([readdirSync(work).sort(), treeOf(second)], before, "nothing was written over the folder that was there");
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[first.name, KEPT], ["Pricing- what to charge- main 2 3fa9c1", "opened"]]);
+    t.done();
+  });
+});
+
 describe("app: a finished video is not edited in HyperFrames (architecture 4.3)", () => {
   const FINISHED = { ...RAW, kind: "finished" };
   const NO_PROJECT = `${NAME} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;

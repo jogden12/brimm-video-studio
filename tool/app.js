@@ -5,6 +5,9 @@
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - a folder at the project's name that the record does not know, as a run whose record was not written leaves, is taken as the
 //     project it is and recorded: nothing is made or started for it either;
+//   - the project's name is the first that no project the record keeps has: "main", and "main 2", "main 3" and so on once a correction
+//     of the video's kind has kept the project made for the earlier kind (4.8). That project keeps its name, its folder and its entry,
+//     and a folder that is there is never written over, whatever the record says of it;
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
@@ -174,20 +177,35 @@ function changedSince(project, { found, record }) {
 /** The record's entry for a main project that is made and has never been opened. */
 const madeEntry = (ctx, { name, at, from, workingCopy }) => ({ key: "main", name, madeAt: at, on: ctx.machine, from, workingCopy, opened: [], handover: false, fromSuggestion: null, state: "made" });
 
-/** A folder at the name the main project would get that the record does not know, taken as the project it is: a run that made the
-    project and could not write the record leaves one, and the next run finds it here instead of making it again. Gives { project },
+/** The name the next main project gets, and which one it is (project.js projectName): the first of "<name> main <id>", "<name> main 2
+    <id>", "<name> main 3 <id>" and on that no project the record keeps has. A correction of the video's kind keeps the project made
+    for the earlier kind, in the record and on disk (4.8), and its name stays its own, so the next main project is another folder: a
+    folder of a project the record keeps is never written over, nor taken for the new one. The main project in use is not counted
+    among those the record keeps: the one made now takes its place in the record (this is asked only when its folder is gone, or it
+    could not be opened as it was), so it may have its name again. Its key in the record stays "main" whatever its number. */
+function nextMain(record, projects) {
+  const kept = projects.filter((p) => !isMain(p));
+  for (let number = 1; ; number++) {
+    const name = projectName({ name: record.name.text, part: "main", number, id: record.id });
+    if (!kept.some((p) => p.name === name)) return { name, number };
+  }
+}
+
+/** A folder at the name the main project would get (nextMain) that the record does not know, taken as the project it is: a run that
+    made the project and could not write the record leaves one, and the next run finds it here instead of making it again. Gives { project },
     the record's entry for it as makeProject does (state "made", never opened, made now, from the raw video as it is), or { code } 1
     when part of it cannot be read (then a line says so, and nothing is opened), or null when there is no such folder. Nothing is
     asked for and nothing is written, so the words of the recording are not needed. The working copy it was made from is
     described by the facts beside that copy (workcopy.js) when they are still there, which they are unless something took them
     away, and otherwise by the project's own brimm/facts.json (project.js), with the size of the video in the project.
-    A folder the record lists is its own, whatever it is kept for: a project kept for an earlier kind has the name a new main
-    project would get (4.8), and is never taken for the main one. */
+    A folder of a project the record keeps is its own, whatever it is kept for: the name looked at is the first that no such project
+    has (nextMain), so a project kept for an earlier kind (4.8) is never taken for the main one, and a folder at the name after
+    it is the one a run left. A folder there that cannot be taken for a project is not written over either. */
 function adoptProject(ctx, { found, record, at, projects }) {
   const { home } = ctx;
-  const name = projectName({ name: record.name.text, part: "main", id: record.id });
+  const { name } = nextMain(record, projects);
   const dir = join(episodeWork(home, found.name), name);
-  if (projects.some((p) => p.name === name) || !existsSync(dir)) return null;
+  if (!existsSync(dir)) return null;
   const raw = statSync(join(found.folder, record.video.file));
   const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
   const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir);
@@ -205,9 +223,10 @@ function adoptProject(ctx, { found, record, at, projects }) {
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
     The project is written whole or not at all (project.js writeProject), and a folder of that name that is there already is never
-    written over: it throws. A folder the record does not know is taken before this (adoptProject), so what is left to throw is the
-    name of a project the record keeps for an earlier kind. */
-function makeProject(ctx, { found, record, at }, { cli, guidance }) {
+    written over: it throws. Its name is the first that no project the record keeps has (nextMain), so after a correction of the
+    kind it is "main 2", and a folder the record does not know at that name is taken before this (adoptProject): what is left to
+    throw is a folder that appeared between the two. */
+function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
   const words = wordsIn(join(found.folder, `${stem}.words.json`));
@@ -223,10 +242,10 @@ function makeProject(ctx, { found, record, at }, { cli, guidance }) {
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
-  const name = projectName({ name: record.name.text, part: "main", id: record.id });
+  const { name, number } = nextMain(record, projects);
   const reels = jsonIn(join(found.folder, REELS_FILE));
   writeProject(join(episodeWork(home, found.name), name), projectFiles({
-    kind: "main", id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
+    kind: "main", number, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
@@ -244,7 +263,9 @@ function makeProject(ctx, { found, record, at }, { cli, guidance }) {
     and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
     replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
     folder is not here is replaced by the folder at the name the project would get, when one is there that the record does not
-    know (adoptProject), and otherwise by a new project (makeProject).
+    know (adoptProject), and otherwise by a new project (makeProject). A project kept for an earlier kind (KEPT) is none in use:
+    the next is made as any first one is, under the first name no project the record keeps has (nextMain), "main 2" after the
+    first, and the kept one keeps its folder, its name and its entry in the record.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
@@ -271,7 +292,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
     if (changedSince(project, { found, record })) ctx.say(recordingChanged(record.name.text));
   } else {
-    const taken = adoptProject(ctx, { found, record, at, projects }) ?? makeProject(ctx, { found, record, at }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
+    const taken = adoptProject(ctx, { found, record, at, projects }) ?? makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
     if (taken.code !== undefined) return taken.code;
     ({ project } = taken);
   }

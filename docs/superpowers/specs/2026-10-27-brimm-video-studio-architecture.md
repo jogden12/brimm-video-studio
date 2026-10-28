@@ -394,7 +394,7 @@ Section 8. In short: Studio takes the exports, transcribes them again on the Mac
 
 ### 4.8 Corrections
 
-- **"It's actually finished" (or raw, or an iPhone clip).** Today's `kind … --again`. A project that exists is kept, never deleted by Studio, and marked as made for the earlier kind; `app` offers a new one.
+- **"It's actually finished" (or raw, or an iPhone clip).** Today's `kind … --again`. A project that exists is kept, never deleted by Studio, and marked as made for the earlier kind (`kind` writes the mark in the record that changes the kind, and says so once); `app` offers a new one, which is another folder under the first name that no project of the record has: "main 2", then "main 3" and so on (5.1). Its `key` in the record stays "main"; the kept project keeps its own name, folder and entry.
 - **A new version of a video** (`versions.js` fingerprint): a new revision of the episode, its own project. The old one is untouched.
 - **A spelling added later** is not pushed into an open project: the app may be editing it. It applies to the final transcripts at `finish`, and the chat tells her to ask the app's assistant to fix any caption already drawn.
 - **Asking Claude again** (`ask`) rewrites `brimm/` only while the project has never been opened. After that it says so and changes nothing in the project.
@@ -424,7 +424,7 @@ Section 8. In short: Studio takes the exports, transcribes them again on the Mac
     <project name>/                       a session clip's, e.g. "Session clip 3 3fa9c1"
 ```
 
-The project's folder name, its `meta.json` name and its title in the app are one name, built as `projectName` builds Final Cut's today (`<file-safe name> <part> <short id>`, without the version: versions are the app's). The app names an export after the project, so the record keeps the name and `finish` finds files by it, never by the episode's later name. A session's projects are named from its label and a number, never from a file.
+The project's folder name, its `meta.json` name and its title in the app are one name, built as `projectName` builds Final Cut's today (`<file-safe name> <part> <short id>`, without the version: versions are the app's). The app names an export after the project, so the record keeps the name and `finish` finds files by it, never by the episode's later name. The main video's later projects, which a correction of the kind makes (4.8), have the part "main 2", "main 3" and so on (`Pricing talk main 2 3fa9c1`): the first name that no project the record keeps has, so that a folder that is there, recorded or not, is never written over; one the record does not know, which a run that could not write its record left, is taken as the project it is. A session's projects are named from its label and a number, never from a file.
 
 ### 5.2 What goes in a project
 
