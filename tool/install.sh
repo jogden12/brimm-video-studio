@@ -18,8 +18,9 @@
 #                                    below), which is made, with a marker that names this Mac, and each video dropped there
 #                                    is imported into BRIMM Video/Episodes. This Mac's settings are written in
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
-#                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro and Claude Code's
-#                                    sign-in are here, and what Jason does by hand for any that is not
+#                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro (optional now) and
+#                                    Claude Code's sign-in are here, what Jason does by hand for any that is not, and whether
+#                                    the HyperFrames command line is here or would be installed
 #   ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
@@ -40,10 +41,13 @@
 # It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
 # 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
 # installs or downloads. The model is the transcript tool's own, in the same place, so a Mac that has that tool has it
-# already. A finished video is moved, with what was made of it, into a new folder named for the day, in the folder it was
-# put in. It does not install Claude Code. A folder that the transcript tool's launch agent watches already is refused:
-# whichever of the two tools looked first would file the video away. The launch agent is com.thebrimm.unedited, so a run
-# replaces the one an earlier installer gave this Mac under that name, and what it does is in ~/Library/Logs/brimm-video.log.
+# already. With --machine it also installs the HyperFrames command line that tool/hyperframes.pin.json pins, with npm and none of
+# the package's own scripts, into ~/BRIMM Video Work/.toolchain/hyperframes-<version>, unless that folder holds it already. It
+# stops, and takes that folder away again, if the download's integrity string is not the pin's. A finished video is moved, with
+# what was made of it, into a new folder named for the day, in the folder it was put in. It does not install Claude Code. A
+# folder that the transcript tool's launch agent watches already is refused: whichever of the two tools looked first would
+# file the video away. The launch agent is com.thebrimm.unedited, so a run replaces the one an earlier installer gave this Mac
+# under that name, and what it does is in ~/Library/Logs/brimm-video.log.
 # Nothing here needs a password or a key. No video and no sound ever leaves the Mac. Claude is asked to read each cut plan:
 # the words of the transcript with their times and the rules' plan are then sent to Claude through Claude Code, on the
 # Claude account signed in on this Mac, with the video's file name and its length. With --rules-only nothing leaves the Mac.
@@ -87,6 +91,14 @@ CHECKOUT="${HERE:h}"
 # from unedited.js: "" while it is null there. Until one is named every Mac's folder gets the strict lock, whatever its settings say
 # (settings.js effectiveLock), and this says so.
 OPEN_LOCK_CLAUDE="$(sed -n 's/^export const OPEN_LOCK_CLAUDE = "\([0-9][0-9.]*\)";$/\1/p' "$HERE/studio.js")"
+# The HyperFrames command line this Mac is given (spec 5.3), as tool/hyperframes.pin.json pins it: its version, and the integrity
+# string the npm registry gives that version. Read here with sed, as the line above is, so that a Mac with no node yet can say what it
+# would install. Only the pin's own two lines are read: GSAP's, nested in the pin, are indented further. The folder is hyperframes.js's
+# toolchainDir: one for each version, in the work folder, on this Mac's own disk and never in Dropbox. A pin that cannot be read is
+# refused with --machine, before anything is changed.
+HYPERFRAMES_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",\{0,1\}$/\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"
+HYPERFRAMES_INTEGRITY="$(sed -n 's/^  "integrity": "\([^"]*\)",\{0,1\}$/\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"
+TOOLCHAIN="$WORK/.toolchain/hyperframes-$HYPERFRAMES_VERSION"
 
 say() { print -r -- "$@"; }
 
@@ -213,6 +225,35 @@ find_claude() {
     if [[ -x "$dir/claude" ]]; then print -r -- "$dir/claude"; return 0; fi
   done
   return 1
+}
+
+# What the folder $1 holds of the pinned HyperFrames command line, as the node at $2 reads it: the version installed, and the
+# integrity string npm's lock file keeps for it, one to a line, each empty where there is none or what is there is not shaped as a
+# version or an integrity string is. Nothing else a file holds is ever repeated. Nothing is written, and a node that is not here, or
+# does not answer, says nothing.
+toolchain_holds() {
+  { [[ -x "$2" ]] && "$2" -e '
+const { readFileSync } = require("node:fs");
+const read = (file) => { try { return JSON.parse(readFileSync(process.argv[1] + "/" + file, "utf8")); } catch { return null; } };
+const fit = (value, shape) => (typeof value === "string" && shape.test(value) ? value : "");
+const installed = read("node_modules/hyperframes/package.json");
+const locked = read("package-lock.json")?.packages?.["node_modules/hyperframes"];
+console.log(fit(installed?.version, /^\d+\.\d+\.\d+$/) + "\n" + fit(locked?.integrity, /^sha512-[A-Za-z0-9+\/]{86}==$/));
+' "$1" 2>/dev/null; } || true
+}
+# Whether the folder $1 holds the pinned command line: installed, at the pinned version, with its program, and with the pin's
+# integrity string in npm's lock file, as the node at $2 reads them. Gives 0 when it does. The one place that is looked at: the
+# summary says it, the real run leaves a folder that passes as it is, and checks what npm fetched with it before going on.
+toolchain_here() {
+  local -a held
+  held=("${(@f)$(toolchain_holds "$1" "$2")}")
+  [[ "${held[1]-}" == "$HYPERFRAMES_VERSION" && "${held[2]-}" == "$HYPERFRAMES_INTEGRITY" && -f "$1/node_modules/hyperframes/bin/hyperframes.mjs" ]]
+}
+# Takes the toolchain folder away again, after an install that failed or fetched what the pin does not name: that folder alone, the
+# one for a version under .toolchain in the work folder, and nothing else, however $TOOLCHAIN came to be.
+drop_toolchain() {
+  [[ "$TOOLCHAIN" == "$WORK/.toolchain/hyperframes-"[0-9]* ]] || return 0
+  rm -rf "$TOOLCHAIN"
 }
 
 # What unedited.js is told in the plist: --rules-only, when that was asked for here, and then each watched folder after its
@@ -344,6 +385,14 @@ if [[ "$machined" == "yes" ]]; then
   fi
   root="${folders[1]}"
   if [[ "${root:t}" != "BRIMM Video" ]]; then say "The folder for --machine is BRIMM Video, in The BRIMM DB in Dropbox, and this is not: $root"; exit 2; fi
+  # The pin of the HyperFrames command line, read above, is looked at before anything is: a pin read as nothing would name no folder
+  # and no version, and npm would be asked for hyperframes@, which is whichever version is newest.
+  if [[ ! "$HYPERFRAMES_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' || ! "$HYPERFRAMES_INTEGRITY" =~ '^sha512-[A-Za-z0-9+/]{86}==$' ]]; then
+    say "The pin of the HyperFrames command line, tool/hyperframes.pin.json, does not hold a version like 0.8.208 and the registry's integrity string for it, so the installer changed nothing."
+    say ""
+    say "Nothing was changed."
+    exit 2
+  fi
   for w in "${(@f)$(watched "$TRANSCRIBE_LABEL")}"; do
     [[ -n "$w" ]] || continue
     if [[ "$root" == "$w" || "$root" == "$w"/* ]]; then
@@ -542,17 +591,29 @@ if [[ -n "$machine" ]]; then
   else
     say "  macOS:  $macos"
   fi
+  # Final Cut Pro is optional now: HyperFrames is where she edits. It is looked for all the same, and its version said, for a Mac that
+  # uses it, and every line about it says so.
+  final_cut_label="Final Cut Pro, optional now (HyperFrames is where she edits)"
   if [[ ! -d "$FINAL_CUT" ]]; then
-    say "  Final Cut Pro:  not here. Install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push."
+    say "  $final_cut_label:  not here. To have it, install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push."
   else
     version="$(plutil -extract CFBundleShortVersionString raw -o - "$FINAL_CUT/Contents/Info.plist" 2>/dev/null || true)"
     update="update it in App Store > Updates"
     [[ -z "$old_macos" ]] || update="update macOS first, then App Store > Updates"
     if [[ -n "$version" ]] && is-at-least "$FINAL_CUT_CHECKED" "$version"; then
-      say "  Final Cut Pro:  $version, here"
+      say "  $final_cut_label:  $version, here"
     else
-      say "  Final Cut Pro:  ${version:-of a version that could not be read}, here; phase 0 was checked with $FINAL_CUT_CHECKED: $update"
+      say "  $final_cut_label:  ${version:-of a version that could not be read}, here; phase 0 was checked with $FINAL_CUT_CHECKED: $update"
     fi
+  fi
+  # The pinned HyperFrames command line, in a folder of its own for its version: what would be installed there, and how the download
+  # is checked, or that it is there already and kept. Only said here; the real run installs it (below), after node is in place. A
+  # folder is "here already" by the one look the real run also takes (toolchain_here), so what is said is what is done.
+  if toolchain_here "$TOOLCHAIN" "$node"; then
+    say "  HyperFrames toolchain:  version $HYPERFRAMES_VERSION of its command line (not the app), here already in $TOOLCHAIN, and npm's lock file there holds the pin's integrity string, so it is left as it is"
+  else
+    say "  HyperFrames toolchain:  version $HYPERFRAMES_VERSION of its command line (not the app), to install in $TOOLCHAIN with npm, none of the package's own scripts run"
+    say "  Its download is checked:  against the pin's integrity string, $HYPERFRAMES_INTEGRITY, in tool/hyperframes.pin.json. If they differ, the install stops, says so, and takes that folder away again"
   fi
   # Whether Claude Code is signed in, and on which plan. Its email and its organisation are never shown. And its version: her
   # folder's guard blocks a call when it cannot run only on Claude Code new enough for that (onFailure), so her folder is
@@ -690,6 +751,39 @@ if node_old "$node" say; then
   exit 1
 fi
 
+# For one of the two Macs, the pinned HyperFrames command line (tool/hyperframes.pin.json), in a folder of its own for its version on
+# this Mac's disk, to be run by its path. npm fetches it with none of the package's own scripts run, and what it fetched must be the
+# pinned version, carry the pin's integrity string and have its program, before anything is done with it: if it does not, that folder
+# is taken away again and the setup stops here, before this Mac's drop folder, settings and launch agent are touched. A folder that
+# holds all three already is left as it is, which --print says. A pin that cannot be read was refused at the start.
+if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then
+  npm="${node:h}/npm"
+  [[ -x "$npm" ]] || npm="$(find_program npm || true)"
+  if [[ -z "$npm" ]]; then
+    say ""
+    say "npm is not here, and it is what installs the HyperFrames command line. It comes with Node: run brew reinstall node, then run this again."
+    exit 1
+  fi
+  say "Installing the HyperFrames command line $HYPERFRAMES_VERSION. This is done once."
+  mkdir -p "$TOOLCHAIN"
+  if ! env PATH="${node:h}:$PATH" HYPERFRAMES_NO_TELEMETRY=1 "$npm" install --prefix "$TOOLCHAIN" --ignore-scripts --no-fund --no-audit --save-exact "hyperframes@$HYPERFRAMES_VERSION"; then
+    drop_toolchain
+    say ""
+    say "npm could not install the HyperFrames command line $HYPERFRAMES_VERSION (what it said is above), so $TOOLCHAIN was taken away again. Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed first stays. Check that this Mac is online, then run this again."
+    exit 1
+  fi
+  if ! toolchain_here "$TOOLCHAIN" "$node"; then
+    fetched=("${(@f)$(toolchain_holds "$TOOLCHAIN" "$node")}")
+    program="there"
+    [[ -f "$TOOLCHAIN/node_modules/hyperframes/bin/hyperframes.mjs" ]] || program="missing"
+    drop_toolchain
+    say ""
+    say "What npm fetched is not the pinned HyperFrames command line (its version, the integrity string in npm's lock file and its program are each checked), so it was not kept, and $TOOLCHAIN was taken away again. The pin, tool/hyperframes.pin.json, says version $HYPERFRAMES_VERSION and $HYPERFRAMES_INTEGRITY. What npm left says version ${fetched[1]:-none that could be read} and ${fetched[2]:-no integrity string that could be read}, and its program, bin/hyperframes.mjs, is $program. None of the package's own scripts were run. Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed first stays. Jason looks at which registry npm used (npm config get registry), then runs this again."
+    exit 1
+  fi
+  say "The HyperFrames command line $HYPERFRAMES_VERSION is installed in $TOOLCHAIN, and what npm fetched carries the pin's integrity string."
+fi
+
 if [[ ! -f "$MODEL" ]]; then
   mkdir -p "$MODEL_DIR"
   say "Downloading the model. This is done once."
@@ -702,9 +796,9 @@ if [[ ! -f "$MODEL" ]]; then
   mv "$MODEL.part" "$MODEL"
 fi
 
-# Things can change while the programs and the model are fetched, and the first check was made before the question: a video may
-# have come into the old drop folder. So it is made again, right before the folders and the marker are made. Nothing of this Mac's
-# drop folder, settings or launch agent has been touched yet.
+# Things can change while the programs, the command line and the model are fetched, and the first check was made before the
+# question: a video may have come into the old drop folder. So it is made again, right before the folders and the marker are made.
+# Nothing of this Mac's drop folder, settings or launch agent has been touched yet.
 if [[ -n "$machine" ]]; then
   if ! settings_plan "$node"; then
     say ""

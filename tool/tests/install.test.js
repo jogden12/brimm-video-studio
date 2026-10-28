@@ -1,6 +1,6 @@
 // The installer, asked only what it would do. Every test here runs it with --print, which changes nothing: no test installs,
 // loads or removes anything, and the installer is never run without it. It is given a home folder made for the test, and
-// stand-ins for launchctl, brew and curl come first on its PATH, so a test can see that none of them was run.
+// stand-ins for launchctl, brew, curl and npm come first on its PATH, so a test can see that none of them was run.
 // The tests need a Mac, which has zsh and plutil. Anywhere else they skip themselves and say why.
 // The few lines that take a launch agent away are also run alone, in zsh, never the installer whole: in a folder made for
 // the test, with a stand-in for launchctl first on the PATH, so the Mac's own launchd is never asked anything.
@@ -11,6 +11,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PIN, toolchainDir } from "../hyperframes.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
 const HERE = dirname(INSTALL);
@@ -27,6 +28,8 @@ const XCODE_MISSING = 'echo "xcode-select: error: unable to get active developer
 const MACOS = (version) => `[ "$1" = "-productVersion" ] && echo ${version}\n`;
 /** A PATH for a launch agent of folders on no Mac, so that this Mac's own Claude Code is not found. */
 const NOWHERE_ELSE = "/nowhere/bin:/nowhere/else/bin";
+/** Where a line about Final Cut Pro begins, for one of the two Macs (--machine): it is optional now, since HyperFrames is where she edits. */
+const FINAL_CUT = "  Final Cut Pro, optional now (HyperFrames is where she edits):";
 
 /** Ask the installer what it would do. Gives back how it ended, what it printed, each launch agent it showed, as plutil reads
     it, and what was changed: `left` is what is in the home folder afterwards, and `ran` the programs it ran that change
@@ -36,8 +39,9 @@ const ask = (...args) => askOn({}, ...args);
 /** The same, of a Mac that has launch agents already: `installed` holds the text of each one's file, by its label. `kept` is
     what those files hold afterwards. `programs` names stand-ins to put in the home folder first, each by its path from
     there, such as ".local/bin/claude": a file that can be run and does nothing. `files` names plain files to put there, such
-    as the transcriber's model. `agentPath` is the PATH the installer is told to give a launch agent, in place of its own:
-    folders with no programs in them, for a test that must not find the Claude Code of the Mac it runs on.
+    as the transcriber's model, each by its path from there, or as [path, text] when it must hold something. `agentPath` is
+    the PATH the installer is told to give a launch agent, in place of its own: folders with no programs in them, for a test
+    that must not find the Claude Code of the Mac it runs on.
     For one of the two Macs (--machine) the installer asks Claude Code whether it is signed in, and its version, so such a run
     is given a stand-in for it, and no test runs the real one: `claude` is what the stand-in prints for `auth status --json`,
     by default signed in, with an email the installer must never print, and `claudeVersion` what it prints for --version.
@@ -69,10 +73,12 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       chmodSync(join(home, program), 0o755);
     }
     for (const file of files) {
-      mkdirSync(dirname(join(home, file)), { recursive: true });
-      writeFileSync(join(home, file), "made for the test");
+      const [path, text] = Array.isArray(file) ? file : [file, "made for the test"];
+      mkdirSync(dirname(join(home, path)), { recursive: true });
+      writeFileSync(join(home, path), text);
     }
-    for (const name of ["launchctl", ...(bare ? [] : ["brew"]), "curl"]) {
+    // npm too: it installs the HyperFrames command line, which only a real run does, so a --print that ran it would show in `ran`.
+    for (const name of ["launchctl", ...(bare ? [] : ["brew"]), "curl", "npm"]) {
       writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${join(dir, "ran")}"\n`);
       chmodSync(join(bin, name), 0o755);
     }
@@ -512,6 +518,59 @@ describe("the installer's own text", () => {
     const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
     assert.match(closing, /\nif \[\[ -n "\$machine" \]\]; then\n {2}say ""\n {2}say "Done\. Drop a video in:"\n {2}say " {2}\$drop"\n/);
   });
+  // The step that installs the pinned HyperFrames command line fetches from the network, so it is only run when a Mac is set up for
+  // real, on Jason's yes, which no test does. Its lines are read here, not run. (What it looks at, whether the command line is here
+  // already, is also what --print says, and is asked there, above.)
+  it("installs the pinned HyperFrames command line only for a Mac set up with --machine, and only when it is not here already: after node is in place, before anything of the Mac is written, with none of its scripts run and telemetry off (its lines, read, not run)", () => {
+    const install = 'install --prefix "$TOOLCHAIN" --ignore-scripts --no-fund --no-audit --save-exact "hyperframes@$HYPERFRAMES_VERSION"';
+    // What the installer does, without the comments that say what it does not.
+    const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+    assert.equal(code.split(" install --prefix ").length - 1, 1, "npm is asked once");
+    assert.equal(code.split("npx").length - 1, 0, "and never through npx, which runs whatever hyperframes it finds first");
+    const guard = 'if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n';
+    const start = text.indexOf(guard);
+    assert.ok(start > 0, "the step runs for --machine, when the command line is not here already");
+    const step = text.slice(start, text.indexOf("\nfi\n", start) + 4);
+    const asked = step.split("\n").find((line) => line.includes(install));
+    assert.ok(asked, `${install}\n---\n${step}`);
+    // npm is told the folder, to run no script of the package's, to fetch exactly the pinned version; and the command line's
+    // telemetry is off, and node's folder leads npm's PATH, so that the node it runs is the one that was checked.
+    assert.match(asked, /^ {2}if ! env PATH="\$\{node:h\}:\$PATH" HYPERFRAMES_NO_TELEMETRY=1 "\$npm" install --prefix /, asked);
+    // The folder is made first, and a failed install takes it away again and stops there.
+    assert.ok(step.indexOf('mkdir -p "$TOOLCHAIN"') < step.indexOf(install), step);
+    assert.ok(step.includes(`${asked}\n    drop_toolchain\n`), step);
+    // What npm fetched is checked against the pin before anything else is done with it: the same look as the summary's, and a
+    // mismatch takes the folder away and stops the setup, before the Mac's drop folder, settings and launch agent are touched.
+    const checkAt = step.indexOf('  if ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
+    assert.ok(checkAt > step.indexOf(install), step);
+    assert.match(step.slice(checkAt), /^ {2}if ! toolchain_here "\$TOOLCHAIN" "\$node"; then\n(?: {4}[^\n]*\n)* {4}drop_toolchain\n(?: {4}[^\n]*\n)* {4}exit 1\n {2}fi\n/);
+    assert.equal(step.split("exit 1").length - 1, 3, "npm missing, npm failed, and the download not the pin's each stop the setup");
+    // After node is in place, and before the second look at the settings, the folders, the marker and the settings.
+    for (const later of ['if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ']) {
+      assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi') && start < text.indexOf(later), later);
+    }
+    // The check reads the version installed and the lock file's entry for the command line, with node, and gives back only what is
+    // shaped as a version and an integrity string are: nothing else a lock file holds is ever repeated.
+    const holds = functionOf("toolchain_holds");
+    for (const read of ['"node_modules/hyperframes/package.json"', '"package-lock.json"', 'read("package-lock.json")?.packages?.["node_modules/hyperframes"]', "locked?.integrity", "/^sha512-[A-Za-z0-9+\\/]{86}==$/"]) assert.ok(holds.includes(read), `${read}\n---\n${holds}`);
+    // The folder is taken away by one function, which removes the folder of the pinned version under .toolchain and nothing else.
+    assert.equal(code.split("rm -rf").length - 1, 1, "rm -rf, once");
+    assert.match(functionOf("drop_toolchain"), /^drop_toolchain\(\) \{\n(?: {2}#[^\n]*\n)* {2}\[\[ "\$TOOLCHAIN" == "\$WORK\/\.toolchain\/hyperframes-"\[0-9\]\* \]\] \|\| return 0\n {2}rm -rf "\$TOOLCHAIN"\n\}\n$/);
+    // The pin is read from its two top-level lines alone: GSAP's, nested in the pin file, are indented further.
+    assert.ok(text.includes(`HYPERFRAMES_VERSION="$(sed -n 's/^  "version": "\\([^"]*\\)",\\{0,1\\}$/\\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"`), "the sed of the pin's version");
+    assert.ok(text.includes(`HYPERFRAMES_INTEGRITY="$(sed -n 's/^  "integrity": "\\([^"]*\\)",\\{0,1\\}$/\\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"`), "the sed of the pin's integrity string");
+    assert.ok(text.includes('\nTOOLCHAIN="$WORK/.toolchain/hyperframes-$HYPERFRAMES_VERSION"\n'), "the folder is hyperframes.js's toolchainDir");
+  });
+  it("says in its help that --machine also installs the HyperFrames command line the pin names, with npm and none of its scripts, unless it is here already, and stops if the download is not the pin's", { skip: notAMac }, () => {
+    const r = ask("--print", "--help");
+    assert.equal(r.status, 0, r.err);
+    const help = r.out.replace(/\s+/g, " ");
+    for (const said of [
+      "With --machine it also installs the HyperFrames command line that tool/hyperframes.pin.json pins, with npm and none of the package's own scripts, into ~/BRIMM Video Work/.toolchain/hyperframes-<version>, unless that folder holds it already",
+      "It stops, and takes that folder away again, if the download's integrity string is not the pin's."
+    ]) assert.ok(help.includes(said), `${said}\n---\n${r.out}`);
+    assert.deepEqual([r.left, r.ran], [[], ""]);
+  });
   it("names the lock-down check by a title that is a step of the setup guide it sends Jason to, and so does the README", () => {
     const TITLE = "Check that her Claude folder only runs BRIMM Video";
     const guide = readFileSync(new URL("../../docs/setup/sallies-laptop.md", import.meta.url), "utf8");
@@ -686,7 +745,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       "  Xcode's command line tools (git, swift):  here already",
       "  Homebrew:  here already",
       "  macOS:  27.0.1",
-      "  Final Cut Pro:  12.4, here",
+      `${FINAL_CUT}  12.4, here`,
       "  Claude Code, signed in:  yes (max)",
       "  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)",
       "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)",
@@ -694,9 +753,9 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       "  At the end:  one real call to Claude from the background job (a launch agent of its own, com.thebrimm.claude-check, taken away when it answers or after 90 seconds), to prove its sign-in is seen there",
       "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
-    // The checks come after the line about swift, in this order.
+    // The checks come after the line about swift, in this order: Final Cut Pro, then the HyperFrames command line and its check.
     const at = (line) => out.indexOf(`\n  ${line}`);
-    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
+    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro, optional now", "HyperFrames toolchain:", "Its download is checked:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
     assert.deepEqual(order, [...order].sort((a, b) => a - b), out);
     assert.ok(!order.includes(-1), out);
     assert.doesNotMatch(r.out, /sallie@example\.com|The BRIMM"|orgName/);
@@ -704,6 +763,117 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     assert.doesNotMatch(readFileSync(INSTALL, "utf8"), /\bstep \d/i);
     changedNothing(r);
     d.done();
+  });
+  // Final Cut Pro is optional now: HyperFrames is where she edits. Its command line, the version tool/hyperframes.pin.json pins, is
+  // kept in a folder of its own for that version (hyperframes.js, toolchainDir). The installer says what it would put there and how
+  // the download is checked, and installs nothing: the step itself runs only on Jason's yes, and no test runs it.
+  it("names the step that installs the pinned HyperFrames command line, with its version and its folder, and says its download is checked against the pin's integrity string. It changes nothing", () => {
+    const d = dropbox();
+    const r = ask("--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    // Where hyperframes.js keeps it: in the work folder, on the Mac's own disk, in a folder named for the version.
+    const folder = toolchainDir(r.home);
+    assert.equal(folder, `${r.home}/BRIMM Video Work/.toolchain/hyperframes-${PIN.version}`);
+    for (const line of [
+      `  HyperFrames toolchain:  version ${PIN.version} of its command line (not the app), to install in ${folder} with npm, none of the package's own scripts run`,
+      `  Its download is checked:  against the pin's integrity string, ${PIN.integrity}, in tool/hyperframes.pin.json. If they differ, the install stops, says so, and takes that folder away again`
+    ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+    // They are the pin's own version and string, and not GSAP's, which are nested in the pin file.
+    assert.ok(!r.out.includes(PIN.gsap.version) && !r.out.includes(PIN.gsap.integrity), r.out);
+    // Final Cut Pro is said to be optional, whether it is here or not.
+    assert.ok(r.out.includes(`\n${FINAL_CUT}  `), r.out);
+    changedNothing(r);
+    // A folder watched on its own, without --machine, is not given the command line, and says nothing of it.
+    const plain = ask("--print", "/Volumes/Work/Unedited video");
+    assert.equal(plain.status, 0, plain.err);
+    assert.doesNotMatch(plain.out, /HyperFrames|toolchain/);
+    changedNothing(plain);
+    d.done();
+  });
+  it("says the HyperFrames command line is here already, and leaves it, only when its folder holds the pinned version and npm's lock file holds the pin's integrity string: anything less is to install", () => {
+    const d = dropbox();
+    const dir = toolchainDir("");
+    /** What a listing of a home folder that holds only these files says: each file and every folder above it. */
+    const listing = (files) => [...new Set(files.flatMap(([path]) => path.split("/").map((_, i, parts) => parts.slice(0, i + 1).join("/"))))].sort();
+    /** The files of a folder that holds the command line, as npm leaves them, but for what the options change or take away. */
+    const holding = ({ version = PIN.version, integrity = PIN.integrity, lock = true, program = true } = {}) => [
+      [`${dir}/node_modules/hyperframes/package.json`, JSON.stringify({ name: "hyperframes", version })],
+      ...(program ? [[`${dir}/node_modules/hyperframes/bin/hyperframes.mjs`, "// made for the test\n"]] : []),
+      ...(lock ? [[`${dir}/package-lock.json`, JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/hyperframes": { version, integrity } } })]] : [])
+    ];
+    const line = (how) => `  HyperFrames toolchain:  version ${PIN.version} of its command line (not the app), ${how}`;
+    const ALREADY = (folder) => line(`here already in ${folder}, and npm's lock file there holds the pin's integrity string, so it is left as it is`);
+    const TO_INSTALL = (folder) => line(`to install in ${folder} with npm, none of the package's own scripts run`);
+    const checked = "\n  Its download is checked:  against the pin's integrity string, ";
+    const right = holding();
+    const r = askWith({ files: right }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(r.out.includes(`\n${ALREADY(toolchainDir(r.home))}\n`), r.out);
+    // It has nothing to download, so it checks nothing and installs nothing, and leaves the folder as it was.
+    assert.doesNotMatch(r.out, /to install in|Its download is checked/);
+    assert.deepEqual([r.left, r.ran], [listing(right), ""]);
+    const WRONG = `sha512-${"A".repeat(86)}==`;
+    for (const [what, files] of [
+      ["another integrity string in the lock file", holding({ integrity: WRONG })],
+      ["none in the lock file", holding({ integrity: null })],
+      ["none in the lock file's entry for it", [...holding({ lock: false }), [`${dir}/package-lock.json`, JSON.stringify({ lockfileVersion: 3, packages: { "node_modules/hyperframes": { version: PIN.version } } })]]],
+      ["a string that holds an escape, which is never repeated", holding({ integrity: `\u001b[31m${PIN.integrity}` })],
+      ["another version installed", holding({ version: "0.8.207" })],
+      ["no lock file", holding({ lock: false })],
+      ["no program", holding({ program: false })],
+      ["a lock file that is not JSON", [...holding({ lock: false }), [`${dir}/package-lock.json`, "not JSON"]]]
+    ]) {
+      const s = askWith({ files }, "--print", "--machine", "Mac Studio", d.root);
+      assert.equal(s.status, 0, `${what}: ${s.err}${s.out}`);
+      const folder = toolchainDir(s.home);
+      assert.ok(s.out.includes(`\n${TO_INSTALL(folder)}${checked}${PIN.integrity}, in tool/hyperframes.pin.json.`), `${what}\n---\n${s.out}`);
+      assert.doesNotMatch(s.out, /here already in|\u001b/, what);
+      // Only said: what is there is read, and none of it is changed.
+      assert.deepEqual([s.left, s.ran], [listing(files), ""], what);
+    }
+    // A Mac with no node cannot read the lock file, so it says the command line is to install there, whatever the folder holds.
+    const bare = askWith({ bare: true, files: right }, "--print", "--machine", "Mac Studio", d.root);
+    assert.equal(bare.status, 0, bare.err + bare.out);
+    assert.ok(bare.out.includes(`\n${TO_INSTALL(toolchainDir(bare.home))}\n`), bare.out);
+    d.done();
+  });
+  // The pin is read from tool/hyperframes.pin.json by sed, as the Claude Code version the open lock was checked on is read from
+  // studio.js, so that a Mac with no node yet can say what it would install. A pin read as nothing would name no folder and no version,
+  // and npm would be asked for hyperframes@, which is whichever is newest: so the installer refuses first, as it does for settings.
+  it("refuses, before it changes anything, a pin it cannot read a version and the registry's integrity string from, rather than ask npm for whichever version is newest", () => {
+    const d = dropbox();
+    const copy = realpathSync(mkdtempSync(join(tmpdir(), "brimm-checkout-")));
+    const tool = join(copy, "BRIMM video", "tool");
+    cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+    const pin = join(tool, "hyperframes.pin.json");
+    const WHY = "The pin of the HyperFrames command line, tool/hyperframes.pin.json, does not hold a version like 0.8.208 and the registry's integrity string for it, so the installer changed nothing.\n\nNothing was changed.\n";
+    const pinned = (more) => JSON.stringify({ version: PIN.version, integrity: PIN.integrity, ...more }, null, 2);
+    try {
+      for (const [what, text] of [
+        ["no pin file", null],
+        ["an empty one", ""],
+        ["one that is not JSON", "version 0.8.208"],
+        ["only GSAP's version and string, nested in it", JSON.stringify({ gsap: PIN.gsap }, null, 2)],
+        ["a version that is a name", pinned({ version: "latest" })],
+        ["a version with a range in it", pinned({ version: "^0.8.208" })],
+        ["a string cut short", pinned({ integrity: PIN.integrity.slice(0, 40) })],
+        ["a string that is not sha512's", pinned({ integrity: PIN.integrity.replace("sha512-", "sha1-") })]
+      ]) {
+        if (text === null) rmSync(pin, { force: true });
+        else writeFileSync(pin, text);
+        const r = askWith({ install: join(tool, "install.sh") }, "--print", "--machine", "Mac Studio", d.root);
+        assert.deepEqual([r.status, r.out], [2, WHY], what);
+        assert.deepEqual([r.left, r.ran], [[], ""], what);
+      }
+      // The pin put back as it is, the same copy of the installer goes ahead.
+      writeFileSync(pin, readFileSync(join(HERE, "hyperframes.pin.json")));
+      const fine = askWith({ install: join(tool, "install.sh") }, "--print", "--machine", "Mac Studio", d.root);
+      assert.equal(fine.status, 0, fine.err + fine.out);
+      assert.ok(fine.out.includes(`version ${PIN.version} of its command line`), fine.out);
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+      d.done();
+    }
   });
   // The Code tab runs the Claude app's own copy of Claude Code, not the Terminal's, and the app keeps each copy in a folder named
   // for its version, running the newest (2026-10-25, on the Mac Studio). The installer says which that is, and whether her folder's
@@ -763,7 +933,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
       '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
       "  macOS:  26.5; Final Cut Pro 12.4 needs macOS 26.6 or later (System Settings > General > Software Update)",
-      "  Final Cut Pro:  not here. Install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push.",
+      `${FINAL_CUT}  not here. To have it, install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push.`,
       "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
       "  Programs to install with Homebrew:  ffmpeg whisper-cpp node"
     ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
@@ -778,10 +948,10 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       ["27.0.1", "27.0.1", "update it in App Store > Updates"]
     ]) {
       const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS(macos) }, finalCut: "12.3" }, "--print", "--machine", "Sallie's laptop", d.root);
-      assert.ok(r.out.includes(`\n  macOS:  ${macosLine}\n  Final Cut Pro:  12.3, here; phase 0 was checked with 12.4: ${after}\n`), r.out);
+      assert.ok(r.out.includes(`\n  macOS:  ${macosLine}\n${FINAL_CUT}  12.3, here; phase 0 was checked with 12.4: ${after}\n`), r.out);
     }
     const newer = askWith({ onPath: { sw_vers: MACOS("27.0.1") }, finalCut: "12.4.1" }, "--print", "--machine", "Sallie's laptop", d.root);
-    assert.ok(newer.out.includes("\n  Final Cut Pro:  12.4.1, here\n"), newer.out);
+    assert.ok(newer.out.includes(`\n${FINAL_CUT}  12.4.1, here\n`), newer.out);
     d.done();
   });
   it("says when Claude Code is older than her folder's guard needs, or its version cannot be read, or it is not here: the install then does not write her folder", () => {
@@ -809,7 +979,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     for (const line of [
       "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
       "  macOS:  could not be read",
-      "  Final Cut Pro:  of a version that could not be read, here; phase 0 was checked with 12.4: update it in App Store > Updates",
+      `${FINAL_CUT}  of a version that could not be read, here; phase 0 was checked with 12.4: update it in App Store > Updates`,
       "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
       "  Claude Code's version:  could not be read (claude --version), so the install does not write her folder for Claude."
     ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
