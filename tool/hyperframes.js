@@ -6,7 +6,8 @@
 //   - the pin, and where the toolchain is kept;
 //   - what each of its commands is: one a project's agent may run, one only edit.js runs (the handover's), or one denied (5.5). The
 //     table is checked against the help the pinned version prints, so that a new pin cannot bring in a command nobody classified (F6);
-//   - the settings that deny the denied commands in a project, and the few variables the command line is run with (5.5, 5.6);
+//   - the settings that deny a project's agent the commands it may not run, and the few variables the command line is run with (5.5,
+//     5.6);
 //   - when the app may take over her chat (F3, 5.6), and the arguments of `open`;
 //   - what `open` printed, and what the app's history holds, in her words (4.6, F7).
 //
@@ -51,6 +52,7 @@ const classify = (rows) => deepFreeze(Object.fromEntries(rows.map(([name, kind, 
     deny named 6 of them (F6). A command is one of three classes, each with the reason it is in it:
     - `agent`: one a project's agent may run (20). It reads the project, draws frames, renders on this Mac or measures sound.
     - `edit`: one only edit.js runs (2). They are the handover's (5.6), and edit.js runs them with a fixed list of arguments and variables.
+      A project's settings deny them to its own agent (denyRules): edit.js runs them by absolute path, outside those settings.
     - `denied`: one nobody runs here (21). It uploads, publishes, signs in, fetches or installs from the network, generates a voice,
       changes the pin, or redoes what Studio did. A project's settings deny each (denyRules), and its notes name each.
     It is a table, one row for each command, so that a command can be in only one class, and it is checked against the help
@@ -126,13 +128,14 @@ export const unclassified = (help) => [...new Set(commandsIn(help))].filter((nam
     pinned version, and as the bare name that the link in the project's node_modules/.bin gives. */
 const SPELLINGS = [(c) => `npx hyperframes ${c}`, (c) => `npx --yes hyperframes@${PIN.version} ${c}`, (c) => `hyperframes ${c}`];
 
-/** The rules that deny the denied commands, `Bash(<command line>:*)`: for each denied command in each spelling, and one for the
-    script `npm run publish`, though a project made here has none. Sorted, so that the settings file is the same every time. A
-    prefix rule can be got round (`npx -y …`, `node …/hyperframes.mjs …`), so it is a second line: the first is that a project has
-    no credentials and no publish script, and the project's notes say it in words (5.5). A new list each time. */
+/** The rules that deny a project's agent the commands it may not run, `Bash(<command line>:*)`: each denied command and each of the
+    two only edit.js runs (which runs them by absolute path, outside the project's settings, so the rules never stop it), in each
+    spelling; and one for the script `npm run publish`, though a project made here has none. Sorted, so that the settings file is
+    the same every time. A prefix rule can be got round (`npx -y …`, `node …/hyperframes.mjs …`), so it is a second line: the first
+    is that a project has no credentials and no publish script, and the project's notes say it in words (5.5). A new list each time. */
 export function denyRules() {
-  const denied = Object.keys(COMMANDS).filter((name) => COMMANDS[name].class === "denied");
-  return [...denied.flatMap((name) => SPELLINGS.map((spell) => `Bash(${spell(name)}:*)`)), "Bash(npm run publish:*)"].sort();
+  const barred = Object.keys(COMMANDS).filter((name) => COMMANDS[name].class !== "agent");
+  return [...barred.flatMap((name) => SPELLINGS.map((spell) => `Bash(${spell(name)}:*)`)), "Bash(npm run publish:*)"].sort();
 }
 
 /** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and four variables that turn off

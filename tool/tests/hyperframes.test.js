@@ -134,14 +134,19 @@ describe("the deny rules and the project's settings", () => {
     // One command spelled out: `publish` in its three spellings, and the script of the same name.
     for (const rule of ["Bash(npx hyperframes publish:*)", "Bash(npx --yes hyperframes@0.8.208 publish:*)", "Bash(hyperframes publish:*)", "Bash(npm run publish:*)"]) assert.ok(rules.includes(rule), rule);
   });
-  it("denyRules has none for a command of the other classes, and nothing else", () => {
-    assert.deepEqual(denyRules(), [...DENIED.flatMap(spellings), "Bash(npm run publish:*)"].sort());
-    assert.equal(denyRules().length, 21 * 3 + 1);
-    for (const c of [...AGENT, ...EDIT]) assert.ok(!denyRules().some((rule) => rule.includes(` ${c}:`)), c);
+  // Only edit.js runs open and catch-up, by absolute path and outside a project's settings: a project's own agent is denied them.
+  it("denyRules also has a rule for each command only edit.js runs, in each spelling", () => {
+    const rules = denyRules();
+    for (const c of EDIT) for (const rule of spellings(c)) assert.ok(rules.includes(rule), rule);
+  });
+  it("denyRules has none for a command the agent may run, and nothing else", () => {
+    assert.deepEqual(denyRules(), [...[...DENIED, ...EDIT].flatMap(spellings), "Bash(npm run publish:*)"].sort());
+    assert.equal(denyRules().length, 23 * 3 + 1);
+    for (const c of AGENT) assert.ok(!denyRules().some((rule) => rule.includes(` ${c}:`)), c);
   });
   it("denyRules names the pinned version in the spelling that has one", () => {
     const pinned = denyRules().filter((rule) => rule.includes("--yes"));
-    assert.equal(pinned.length, 21);
+    assert.equal(pinned.length, 23);
     for (const rule of pinned) assert.match(rule, new RegExp(`^Bash\\(npx --yes hyperframes@${PIN.version.replace(/\./g, "\\.")} [a-z-]+:\\*\\)$`));
   });
   it("denyRules are sorted and without repeats, so the settings file is the same every time", () => {
