@@ -154,8 +154,18 @@ ${faces.join("\n")}
 
 /** The company's name as it is written, whatever the transcriber wrote: "brim", "Brim" and "BRIM" are BRIMM, so "the Brim" is
     "the BRIMM" (Jason, 2026-10-28: "'Brim' or 'brim' should always be corrected to 'BRIMM'"). Whole words only: "brimming" stays.
-    Every project's words are spelled so, before the episode's own spellings, and its brimm/spellings.json lists them first. */
+    Every project's words are spelled so, before the episode's own spellings. Its brimm/spellings.json lists them too, after the
+    episode's own (withHouseSpellings), since the app makes a transcript of its own for every video it opens, and that one says "Brim". */
 export const HOUSE_SPELLINGS = Object.freeze([["brim", "BRIMM"], ["Brim", "BRIMM"], ["BRIM", "BRIMM"]].map((pair) => Object.freeze(pair)));
+
+/** The spellings brimm/spellings.json lists: the episode's own ([wrong, right] pairs) first, as she gave them, and then the house's
+    (HOUSE_SPELLINGS), each left out where hers already spell that wrong word, as it is written (a spelling is matched as it is
+    written), so that hers win. A new list each time; the list given is left as it was. */
+const withHouseSpellings = (spellings) => {
+  const hers = spellings ?? [];
+  const spelt = new Set(hers.map(([wrong]) => wrong));
+  return [...hers, ...HOUSE_SPELLINGS.filter(([wrong]) => !spelt.has(wrong))];
+};
 
 /** transcript.json (F5): the list the pinned `transcribe` writes, {text, start, end, id} for each word in order, its ids "w0",
     "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names, the house's spellings and the
@@ -402,7 +412,7 @@ export function projectFiles(input) {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
   }
-  if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: [...HOUSE_SPELLINGS, ...(input.spellings ?? [])].map(([wrong, right]) => ({ wrong, right })) }));
+  if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: withHouseSpellings(input.spellings).map(([wrong, right]) => ({ wrong, right })) }));
   files.set("brimm/brand.md", BRAND);
   files.set("vendor/gsap.min.js", { copy: GSAP });
   for (const font of FONTS) files.set(`assets/fonts/${font.file}`, { copy: own(`./brand/fonts/${font.file}`) });

@@ -156,13 +156,41 @@ describe("transcript.json (F5)", () => {
     assert.deepEqual(transcriptJson(heard, []).map((word) => word.text), ["the", "BRIMM", "BRIMM,", "BRIMM.", "BRIMM's", "brimming"]);
     const files = projectFiles(clip({ words: heard }));
     assert.deepEqual(json(files, "transcript.json").map((word) => word.text).slice(1, 3), ["BRIMM", "BRIMM,"]);
-    assert.deepEqual(json(projectFiles(main()), "brimm/spellings.json").spellings.slice(0, 3), [{ wrong: "brim", right: "BRIMM" }, { wrong: "Brim", right: "BRIMM" }, { wrong: "BRIM", right: "BRIMM" }]);
   });
   it("applies the episode's spellings", () => {
     const spelled = transcriptJson(WORDS, [["Hormozy", "Hormozi"]]);
     assert.equal(spelled[2].text, "Hormozi,");
     assert.deepEqual(spelled.map(({ id, start, end }) => [id, start, end]), JSON.parse(GOLDEN.transcript).map(({ id, start, end }) => [id, start, end]));
     assert.equal(json(projectFiles(main()), "transcript.json")[2].text, "Hormozi,");
+  });
+});
+
+// The app makes a transcript of its own for every video it opens, and that one says "Brim": the notes send the agent to this file
+// for the names, so it holds the house's spellings as well as hers (A0, 2026-10-28).
+describe("brimm/spellings.json", () => {
+  /** The house's spellings as the file holds them: the company's name, however the transcriber wrote it. */
+  const HOUSE = [{ wrong: "brim", right: "BRIMM" }, { wrong: "Brim", right: "BRIMM" }, { wrong: "BRIM", right: "BRIMM" }];
+  const spellingsOf = (over) => json(projectFiles(main(over)), "brimm/spellings.json");
+
+  it("holds the house's spellings when she has none of her own", () => {
+    for (const spellings of [[], undefined]) assert.deepEqual(spellingsOf({ spellings }), { version: 1, spellings: HOUSE }, String(spellings));
+    assert.deepEqual(json(projectFiles(reel({ spellings: [] })), "brimm/spellings.json"), { version: 1, spellings: HOUSE });
+  });
+  it("lists hers first, as she gave them, and the house's after them", () => {
+    const hers = [["Hormozy", "Hormozi"], ["Sallie Holder", "Sallie Ogden"]];
+    const given = JSON.parse(JSON.stringify(hers));
+    assert.deepEqual(spellingsOf({ spellings: hers }), { version: 1, spellings: [{ wrong: "Hormozy", right: "Hormozi" }, { wrong: "Sallie Holder", right: "Sallie Ogden" }, ...HOUSE] });
+    assert.deepEqual(hers, given, "the list she gave is left as it was");
+  });
+  it("leaves out a house spelling of a word that hers already spell, so that hers win", () => {
+    assert.deepEqual(spellingsOf({ spellings: [["Brim", "Brimm"], ["Hormozy", "Hormozi"]] }).spellings, [
+      { wrong: "Brim", right: "Brimm" }, { wrong: "Hormozy", right: "Hormozi" }, { wrong: "brim", right: "BRIMM" }, { wrong: "BRIM", right: "BRIMM" }
+    ]);
+    // When hers spell all three, none of the house's is left.
+    assert.deepEqual(spellingsOf({ spellings: [["brim", "a"], ["Brim", "b"], ["BRIM", "c"]] }).spellings, [{ wrong: "brim", right: "a" }, { wrong: "Brim", right: "b" }, { wrong: "BRIM", right: "c" }]);
+  });
+  it("takes a word to be the same only as it is written, as the spellings are applied", () => {
+    assert.deepEqual(spellingsOf({ spellings: [["brim", "Brimm"]] }).spellings, [{ wrong: "brim", right: "Brimm" }, { wrong: "Brim", right: "BRIMM" }, { wrong: "BRIM", right: "BRIMM" }]);
   });
 });
 
