@@ -20,6 +20,36 @@ function setup() {
   return { home, awake, opts, done: () => rmSync(home, { recursive: true, force: true }) };
 }
 
+describe("a command run detached with a lock of its own", () => {
+  it("holds the lock it is given, not the episode's, and runningCommand reads the lock it is asked about", async () => {
+    const t = setup();
+    const own = join(t.home, "workcopy.lock");
+    let during = null;
+    const r = await runDetached({ ...t.opts, command: "workcopy", lock: own }, async () => {
+      during = [runningCommand(t.home, FOLDER, () => true, own), runningCommand(t.home, FOLDER, () => true)];
+      return { ok: true, made: [], failed: [], next: "" };
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(during, ["workcopy", ""]);
+    assert.equal(runningCommand(t.home, FOLDER, () => true, own), "");
+    t.done();
+  });
+  it("runs beside a run that holds the episode's lock", async () => {
+    const t = setup();
+    let ran = false;
+    await runDetached({ ...t.opts, command: "read", alive: () => true }, async () => {
+      const r = await runDetached({ ...t.opts, command: "workcopy", lock: join(t.home, "workcopy.lock"), alive: () => true }, async () => {
+        ran = true;
+        return { ok: true, made: [], failed: [], next: "" };
+      });
+      assert.equal(r.ok, true);
+      return { ok: true, made: [], failed: [], next: "" };
+    });
+    assert.equal(ran, true);
+    t.done();
+  });
+});
+
 describe("a command run detached", () => {
   it("runs the work holding the episode's lock, kept awake, and writes its result", async () => {
     const t = setup();

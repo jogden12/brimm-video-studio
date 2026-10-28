@@ -13,7 +13,7 @@ import { clearRuns } from "../filing.js";
 import { episodeWork, runsFolder, workFolder } from "../settings.js";
 import {
   rateOf, workCopySize, isHdr, workCopyArgs, workCopyFault, workCopyKey, workCopyPaths, workCopyFacts, workCopyLimits, workCopyNotes,
-  canNotBeUsed, hasFilters, makeWorkCopy, requestWorkCopy, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET
+  canNotBeUsed, hasFilters, makeWorkCopy, requestWorkCopy, workCopyLockOf, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET
 } from "../workcopy.js";
 
 /** What ffprobe writes of a video, cut down to what the tool reads: its picture (null for none), then its sounds in the order
@@ -972,11 +972,17 @@ describe("asking for the working copy", () => {
     const started = [];
     return { home, started, ctx: { home, alive, start: (cmd, args) => started.push([cmd, args]), settings: { checkout: "/checkout" } } };
   };
-  /** A run of `command` at work on the episode, as the detached run takes the episode's lock. */
+  /** A run of `command` at work on the episode: the working copy's run takes the working copy's own lock, and every other the
+      episode's. */
   const atWork = (home, command) => {
     mkdirSync(episodeWork(home, FOLDER), { recursive: true });
-    assert.equal(takeEpisodeLock(lockOf(home, FOLDER), command, () => true).taken, true);
+    const lock = command === "workcopy" ? workCopyLockOf(home, FOLDER) : lockOf(home, FOLDER);
+    assert.equal(takeEpisodeLock(lock, command, () => true).taken, true);
   };
+  it("has a lock of its own, beside the episode's", () => {
+    assert.equal(workCopyLockOf("/Users/sallie", FOLDER), join(episodeWork("/Users/sallie", FOLDER), "workcopy.lock"));
+    assert.notEqual(workCopyLockOf("/Users/sallie", FOLDER), lockOf("/Users/sallie", FOLDER));
+  });
   it("starts the detached run of the episode when none is at work on it, and returns at once", (c) => {
     const { ctx, started } = asking(c);
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: true, running: "" });
@@ -985,18 +991,18 @@ describe("asking for the working copy", () => {
   it("starts none for a second request while the first one runs", (c) => {
     const { ctx, home, started } = asking(c, (pid) => pid === process.pid);
     assert.equal(requestWorkCopy(ctx, { folder: FOLDER }).started, true);
-    // The run takes the episode's lock as it begins.
+    // The run takes the working copy's lock as it begins.
     atWork(home, "workcopy");
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: false, running: "workcopy" });
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER, fourK: true }), { started: false, running: "workcopy" });
     assert.equal(started.length, 1);
   });
-  it("starts none while another command is at work on the episode, and says which, for the caller to say", (c) => {
+  it("starts the run beside the reading and every other command at work on the episode: it writes no record", (c) => {
     for (const command of ["read", "bring", "finish", "ask"]) {
       const { ctx, home, started } = asking(c, (pid) => pid === process.pid);
       atWork(home, command);
-      assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: false, running: command });
-      assert.deepEqual(started, [], command);
+      assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: true, running: "" }, command);
+      assert.equal(started.length, 1, command);
     }
   });
   it("starts the run when the lock was left by a run that died, as every command does", (c) => {

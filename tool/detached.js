@@ -27,10 +27,11 @@ export function readResult(home, folder, command) {
   }
 }
 
-/** The lock's holder, { pid, command }, or null when there is no lock or it cannot be read. */
-function holder(home, folder) {
+/** A lock's holder, { pid, command }, or null when there is no lock or it cannot be read. The lock is the episode's unless another
+    is given. */
+function holder(home, folder, lock = lockOf(home, folder)) {
   try {
-    const held = JSON.parse(readFileSync(lockOf(home, folder), "utf8"));
+    const held = JSON.parse(readFileSync(lock, "utf8"));
     return held && Number.isInteger(held.pid) && typeof held.command === "string" ? held : null;
   } catch (e) {
     return null;
@@ -38,15 +39,16 @@ function holder(home, folder) {
 }
 
 /** The detached run at work on an episode on this Mac, { pid, command }, or null when none is: a lock whose run is no longer
-    running was left by a run that died, and counts as none. */
-export function runningRun(home, folder, alive = isRunning) {
-  const held = holder(home, folder);
+    running was left by a run that died, and counts as none. It is the run that holds the episode's lock, or `lock` when one is
+    given: a run with a lock of its own, as the working copy's (workcopy.js), runs beside the episode's. */
+export function runningRun(home, folder, alive = isRunning, lock = lockOf(home, folder)) {
+  const held = holder(home, folder, lock);
   return held && alive(held.pid) ? { pid: held.pid, command: held.command } : null;
 }
 
-/** The command a detached run is at for an episode on this Mac, or "" when none is (runningRun). */
-export function runningCommand(home, folder, alive = isRunning) {
-  const run = runningRun(home, folder, alive);
+/** The command a detached run is at for an episode on this Mac, or "" when none is (runningRun), by the episode's lock or `lock`. */
+export function runningCommand(home, folder, alive = isRunning, lock = lockOf(home, folder)) {
+  const run = runningRun(home, folder, alive, lock);
   return run ? run.command : "";
 }
 
@@ -165,8 +167,9 @@ export function releaseEpisodeLock(lock, text) {
     to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and with
     this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the run
     ends. An early result that cannot be written costs nothing: the final one is still written. */
-export async function runDetached({ home, folder, command, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
-  const lock = lockOf(home, folder);
+export async function runDetached({ home, folder, command, lock: own, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
+  // The episode's lock, or a lock of the command's own (`lock`), for a run that writes no record and so may run beside the others.
+  const lock = own ?? lockOf(home, folder);
   /** The error `e` as `clean` says it: the same error when that changes nothing, as for every episode today. */
   const cleaned = (e) => {
     const message = String(e && e.message ? e.message : e);
