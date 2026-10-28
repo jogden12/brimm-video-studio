@@ -82,6 +82,7 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, openInApp } from "./app.js";
 import { cliPath } from "./hyperframes.js";
+import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -328,11 +329,13 @@ function gateOf(ctx, e, records, said, inForce) {
   return null;
 }
 
-/** A detached run (`bring`, `finish` or `ask` with --now) that the gate ended before it began leaves a result in the gate's words,
-    as a run that failed does, so that "how far is it?" says why and not that nothing is running. The words name no folder or
-    file. A run already at work on the episode is left to leave its own. */
-async function leaveGateResult(ctx, found, command) {
-  await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
+/** A detached run (`bring`, `finish`, `ask`, `read` or `workcopy` with --now) that the gate ended before it began leaves a result
+    in the gate's words, as a run that failed does, so that "how far is it?" says why and not that nothing is running. The words
+    name no folder or file. A run already at work on the episode is left to leave its own. The working copy's run has a lock of
+    its own, `lock` (workcopy.js workCopyLockOf), so that the reading, which holds the episode's, does not stop its result being
+    left: every other run is left under the episode's. */
+async function leaveGateResult(ctx, found, command, lock) {
+  await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command, lock, alive: ctx.alive, keepAwake: () => {} }, async () => ({ ok: false, failed: [found.why] }));
 }
 
 /** An episode in Episodes by its folder's `name`, as findEpisode and the lists know it: { name, folder, read, inForce, records,
@@ -3207,6 +3210,59 @@ async function read(ctx, rest) {
   return result.ok ? 0 : 1;
 }
 
+/** The kinds of video the working copy is made for: a raw video, and an iPhone clip. A finished video is edited by her editor, and a
+    session's video reaches HyperFrames only as a clip of its own, never whole. */
+const WORK_COPY_KINDS = ["raw", "short video"];
+/** What a run of `workcopy` for a video of another kind leaves for its result, in the words a copy that cannot be made is refused in. */
+const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
+
+/** `workcopy --now "<episode folder>" [--4k]`, the detached run `kind` and `app` start (workcopy.js requestWorkCopy): it makes the
+    working copy of the episode's raw video, the video HyperFrames is given to edit (workcopy.js makeWorkCopy, which never throws),
+    in this Mac's own folder for the episode. It is detached alone, like `read`: it is in no help, and without --now and a folder it
+    prints the help and ends 2, as a command it does not know. The episode is found and gated as every command's is. `workcopy` is
+    in no gate list (architecture 2026-10-27, 6.2), so a video not yet answered, a video left alone, a session not cleared and a
+    video held beside a session are refused in the gate's own words, and the refusal is left as the run's result, as `read`'s is;
+    one a newer brimm-video wrote is named by its short id, and nothing is made or written. Past the gate it runs for a raw video
+    and an iPhone clip alone (WORK_COPY_KINDS): a video of any other kind leaves a result that says it can't be used, in words.
+    The run holds the working copy's own lock (workCopyLockOf), not the episode's, and writes no record, so that it runs beside
+    the reading `kind` starts at the same moment. `--4k` makes a copy of 4K. What it needs of this Mac it takes from ctx.deps, as
+    the other detached runs do, so that a test gives it stand-ins: `run` (for ffprobe), `tools` (ffmpeg and ffprobe, as
+    findPrograms finds them), `runGuarded` (ffmpeg under the watchdog) and `progress` (the panel's reporter, made as `finish`'s
+    is when none is given). Resolves 0 when the copy is made, or was before, and 1 when it is not. */
+async function workcopy(ctx, rest) {
+  if (rest[0] !== "--now" || !rest[1]) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const { flags } = flagsOf(rest.slice(2));
+  const found = findEpisode(ctx, rest[1]);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || notRead(ctx, found, rest[1]));
+    if (found.gate) await leaveGateResult(ctx, found, WORK_COPY_COMMAND, workCopyLockOf(ctx.home, found.name));
+    return 1;
+  }
+  if (found.read.newer) {
+    ctx.say(newerWhy(found.read.record));
+    return 1;
+  }
+  const { record } = found.read;
+  const tools = ctx.deps.tools || findPrograms();
+  const deps = {
+    run: ctx.deps.run || runProgram, tools, now: ctx.now, log: (line) => ctx.say(line),
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
+  };
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+    if (!WORK_COPY_KINDS.includes(recordKind(record))) return { ok: false, made: [], failed: [NOT_RAW_OR_CLIP], next: "" };
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video: join(found.folder, record.video.file), name: shownName(record), fourK: Boolean(flags["4k"]) }, deps);
+  });
+  if (result.taking || result.running) {
+    ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
+    return 1;
+  }
+  return result.ok ? 0 : 1;
+}
+
 /** The timeline a command names after the episode: "main", the default, or "reel <n>", in any case; and the words left. */
 function partFrom(words) {
   const at = words.findIndex((w, i) => String(w).toLowerCase() === "reel" && /^\d+$/.test(words[i + 1] || ""));
@@ -5896,8 +5952,8 @@ export async function guideCommand(ctx, rest) {
 }
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
-    and is in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+    and so is `workcopy` (`kind` and `app` start it): both are in no help. */
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

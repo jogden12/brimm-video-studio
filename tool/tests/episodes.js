@@ -82,6 +82,10 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     calls.push({ cmd, args });
     return stand[cmd] ? stand[cmd](args, asked) : { code: 0, stderr: "" };
   };
+  // ffmpeg under the watchdog (guard.js) is asked of the same stand-ins, and ends as the watchdog's own answer does. Were it left to
+  // the real watchdog, a program named "FFMPEG" would be found as ffmpeg on a Mac, whose file names are not case-sensitive, and run.
+  // A test that wants another end gives its own.
+  const runGuarded = async (cmd, args) => ({ signal: null, overMemory: false, outOfTime: false, peak: 0, stopped: "", ...(await run(cmd, args)) });
   writeSettings(home, { machine, root, checkout: "/checkout" });
   const ctx = contextFor({
     home, say: (line) => said.push(line), now: () => clock,
@@ -89,7 +93,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
     // No test asks launchctl whether this Mac's launch agent is at work: it is not, unless a test says it is.
     agentRunning: () => false,
-    run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
+    run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
     // No test reads this computer's own Claude settings: `behind` looks at the environment, the managed settings folder and the
