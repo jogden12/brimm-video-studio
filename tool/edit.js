@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The command line for episodes, which a Claude Code session on this Mac runs for the person editing: it lists the episodes and
-// what is waiting, opens one, shows its main timeline in Final Cut Pro through a copy of its own on this Mac, says what is
-// running, and imports a video again. Each command is a function of a context, `ctx`, that holds this Mac's settings and the
-// ways of doing things a test gives stand-ins for. Every file it puts into Dropbox goes by the rule (dropbox.js), and every
-// change to an episode is a new record (episode.js). Long work is started detached and returns at once (detached.js).
+// what is waiting, opens one, opens its main video in the HyperFrames app, shows its main timeline in Final Cut Pro through a
+// copy of its own on this Mac, says what is running, and imports a video again. Each command is a function of a context, `ctx`,
+// that holds this Mac's settings and the ways of doing things a test gives stand-ins for. Every file it puts into Dropbox goes
+// by the rule (dropbox.js), and every change to an episode is a new record (episode.js). Long work is started detached and
+// returns at once (detached.js).
 //
 //   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
 //                                         Mac's libraries
@@ -12,6 +13,8 @@
 //                                         reading (leave "<video>" and which "<video>" are its other two answers)
 //   node edit.js open "<episode>"         check its files are here, bring over those that are not, and show what is
 //                                         decided for it
+//   node edit.js app "<episode>"          the same claim as open's, and then its main video in the HyperFrames app,
+//                                         with its project made first (app.js)
 //   node edit.js push "<episode>" [main] [--no-hand-edits | --hand-edits]
 //                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
 //                                         library for the episode
@@ -36,7 +39,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
-import { effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { progressFolder, readRates, reporter } from "./progress.js";
@@ -77,6 +80,8 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, openInApp } from "./app.js";
+import { cliPath } from "./hyperframes.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -126,6 +131,11 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         check its files are here, bring over those that are not, claim it for this
                                         Mac, and show what is decided for it. Another Mac's claim refuses it, unless
                                         it is taken over
+  node edit.js app "<episode>" [--take-over]
+                                        open the episode's main video in HyperFrames, making its project first. Its
+                                        files are checked and brought over, and it is claimed for this Mac, as open
+                                        does; another Mac's claim refuses it, unless it is taken over. Only on a Mac
+                                        that Jason has set up for HyperFrames
   node edit.js push "<episode>" [main] [v<n>] [--no-hand-edits | --hand-edits] [--without-other-macs-changes]
                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
                                         library for the episode; with v<n>, version n as it was stored. Shown last in
@@ -1135,6 +1145,36 @@ export async function open(ctx, rest) {
   }
   offlineStep(ctx, found);
   return 0;
+}
+
+/** What `app` says when the pinned command line is not on this Mac: the installer puts it in the toolchain's folder (hyperframes.js
+    cliPath), once Jason has said yes to installing it. */
+const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
+
+/** `app "<episode>" [--take-over]`: open the episode's main video in the HyperFrames app, making its project first (app.js
+    openInApp; architecture 2026-10-27, 4.1). In order:
+    - the gate, as for every command that names an episode (episodeFor): a video not yet answered, a video left alone, a session
+      not cleared and a video held beside a session are refused in the gate's own words. `app` is in no gate list. This comes
+      first, whether or not this Mac is set up;
+    - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
+      the deps give openInApp), or it says so and ends with 1, having claimed nothing;
+    - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
+      HyperFrames";
+    - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
+      project, which is written as every command writes a record (save).
+    `ctx.deps.app` holds what a test gives openInApp in place of its defaults (cli, node, guidance, chat, spawn, env). */
+export async function app(ctx, rest) {
+  const { words, flags } = flagsOf(rest, []);
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found } = got;
+  if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
+  const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
+  if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: `open ${got.record.name.text} in HyperFrames` });
+  if (claim.code !== undefined) return claim.code;
+  const { record } = claim;
+  return openInApp(ctx, { found, record }, { env: ctx.deps.env, ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. Throws,
@@ -5857,7 +5897,7 @@ export async function guideCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and is in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

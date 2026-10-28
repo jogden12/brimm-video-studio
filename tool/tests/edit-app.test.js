@@ -1,0 +1,361 @@
+// `app "<episode>"`: opening an episode's main video in the HyperFrames app from Sallie's chat (plan PR 4; architecture 2026-10-27,
+// sections 4.1, 6.1, 6.2 and 7.2). edit.js is only the wiring here. It finds the episode through the gate, says whether this Mac is
+// set up for the app and has its command line, makes the claim and the bring that `open` makes (one function, claimAndBring), and
+// gives the episode to app.js's openInApp, which app.test.js tests on its own. These tests run all of it through editMain, with the
+// stand-in for the pinned command line (tests/stand-ins/hyperframes.mjs), so no test runs HyperFrames, the app, HeyGen or `claude`.
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { CLAIM_WAIT_MS, COMMAND_NAMES, HELP, editMain } from "../edit.js";
+import { NOT_SET_UP } from "../app.js";
+import { HELD } from "../gate.js";
+import { layoutOf, localStamp, recordFile, recordText } from "../episode.js";
+import { PIN, cliPath } from "../hyperframes.js";
+import { episodeWork, writeSettings } from "../settings.js";
+import { workCopyKey, workCopyPaths } from "../workcopy.js";
+import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
+import { episode } from "./phase4.js";
+
+const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
+const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
+const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
+
+/** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
+async function on(deps, ...argv) {
+  const said = [];
+  const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
+  return { code, said, text: said.join("\n") };
+}
+
+/** Nothing she reads holds a path, a flag or the name of a command. */
+const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|hyperframes\.mjs/;
+/** `app` as Claude runs it, once the words are given; and a check that every line it said, whichever way it ended, is plain. */
+async function app(deps, ...words) {
+  const r = await on(deps, "app", ...words);
+  for (const line of r.said) assert.doesNotMatch(line, PLAIN, line);
+  return r;
+}
+
+/** What the stand-in wrote down of each run of the pinned command line on this Mac: its arguments and the names of its environment. */
+function runsOf(t) {
+  const log = join(t.home, "hyperframes-stand-in.log");
+  return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
+}
+/** The names of the variables the pinned command line is run with (hyperframes.js childEnv): no chat's id among them. */
+const PINNED_ENV = ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"];
+
+const START = Date.parse("2026-10-20T15:00:00-05:00");
+const AT = "2026-10-20T15:00:00-05:00";
+const ANSWER = { state: "needs your answer", guess: "raw", seen: "wide, 0:23, no retakes", came: "camera" };
+const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "no" };
+const SESSION_MARK = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
+/** The records the gate decides by: an answered raw video, a video not yet answered, one left alone, a session whose mark is not
+    cleared, and one that is. */
+const RAW = { version: 3, kind: "raw", answer: ANSWERED };
+const UNANSWERED_RECORD = { version: 3, kind: null, answer: ANSWER, label: "Video of 20 Oct, 15:00 (Mac Studio)" };
+const LEFT_RECORD = { ...UNANSWERED_RECORD, answer: { ...ANSWER, state: "not for brimm-video" } };
+const SESSION_RECORD = { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-20", session: SESSION_MARK };
+const CLEARED_RECORD = { ...SESSION_RECORD, session: { ...SESSION_MARK, cleared: { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" } } };
+const HERS = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" };
+
+const WAITING = "This video is waiting for its answer: say what it is first.";
+const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
+const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
+const OPEN = "It's open in HyperFrames.";
+/** What `open` and `app` say, for the same claim, when the other Mac has the episode. */
+const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
+const WORKING_COPY = "the working copy's bytes";
+
+/** The made-up recording (phase4.js: its words, its cut plan and its Reel candidates, as the import files them), answered as `record`
+    says. `set`: this Mac's settings turn the app on. `copy`: the working copy of its video is made already. `open`: how the stand-in
+    answers `open` (opened, not-installed or open-failed). The pinned command line is the stand-in, given to `app` through the deps. */
+function world({ set = true, copy = true, open = "opened", record = RAW } = {}) {
+  const { t, found } = episode(record);
+  if (set) writeSettings(t.home, { app: "hyperframes" });
+  writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open }));
+  const raw = statSync(join(found.folder, "Pricing talk.mp4"));
+  const paths = workCopyPaths(t.home, FOLDER, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  if (copy) {
+    mkdirSync(dirname(paths.video), { recursive: true });
+    writeFileSync(paths.video, WORKING_COPY);
+    writeFileSync(paths.facts, JSON.stringify({ seconds: 23.423, fps: 30, width: 1280, height: 720, bytes: WORKING_COPY.length }));
+  }
+  t.ctx.deps.app = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE };
+  return { t, found, raw, paths, work: episodeWork(t.home, FOLDER) };
+}
+
+/** Have the stand-in wait do `then` on the claim's wait, as Dropbox would bring a change across meanwhile. */
+const duringTheWait = (t, then) => {
+  const wait = t.ctx.deps.wait;
+  t.ctx.deps.wait = async (ms) => {
+    await wait(ms);
+    if (ms === CLAIM_WAIT_MS) then();
+  };
+};
+
+describe("app: the command", () => {
+  it("is one of edit.js's commands, its usage is in the help, and with no episode it says the help and ends with 2, claiming nothing", async () => {
+    assert.ok(COMMAND_NAMES.includes("app"));
+    const lines = HELP.split("\n");
+    const at = lines.indexOf('  node edit.js app "<episode>" [--take-over]');
+    assert.ok(at >= 0, "the help has the usage line of app");
+    assert.match(lines[at + 1], /^ {40}open the episode's main video in HyperFrames, making its project first/);
+    const { t, found } = world();
+    const r = await on(t.ctx.deps, "app");
+    assert.deepEqual([r.code, r.said, reread(found).rev, t.waits, runsOf(t)], [2, [HELP], 1, [], []]);
+    t.done();
+  });
+});
+
+describe("app: the gate asks first, in its own words", () => {
+  it("refuses a video not yet answered, a video left alone and a session not cleared, whether or not this Mac is set up, and does nothing", async () => {
+    for (const [record, why] of [[UNANSWERED_RECORD, WAITING], [LEFT_RECORD, LEFT_ALONE], [SESSION_RECORD, NOT_FOR_SESSION]]) {
+      for (const set of [true, false]) {
+        const { t, found } = world({ record, set });
+        const before = listAll(found.folder);
+        const r = await app(t.ctx.deps, FOLDER);
+        assert.deepEqual([r.code, r.said], [1, [why]], `${record.label} ${set}`);
+        assert.deepEqual([reread(found).rev, listAll(found.folder), t.started, t.calls, t.waits, runsOf(t)], [1, before, [], [], [], []], `${record.label} ${set}`);
+        // It names no episode: not its folder, its name or its video's file.
+        for (const given of [FOLDER, "Pricing", "talk", "mp4"]) assert.ok(!r.text.includes(given), `${given} in ${r.text}`);
+        t.done();
+      }
+    }
+  });
+  it("refuses a session whether this Mac's training gate is on or off: app is in no list", async () => {
+    const { t, found } = world({ record: SESSION_RECORD });
+    const taught = { ...t.ctx.deps, settings: { ...t.ctx.settings, app: "hyperframes", sessionTeachings: { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: "sallie@example.com (BRIMM)", app: "sallie@example.com (BRIMM)" } } } };
+    const r = await app(taught, FOLDER);
+    assert.deepEqual([r.code, r.said, reread(found).rev, runsOf(t)], [1, [NOT_FOR_SESSION], 1, []]);
+    t.done();
+  });
+  it("refuses a video held beside a session, as every command outside the first list is", async () => {
+    const OLD = "e-20261010-a0a0a0";
+    const { t, found } = world({ record: { ...RAW, versionOf: OLD } });
+    episodeAs(t, { id: OLD, name: "2026-10-10 Coaching call (Mac Studio)", record: { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-10", name: { text: "Session, 2026-10-10", placeholder: false }, session: SESSION_MARK } });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said, reread(found).rev, runsOf(t)], [1, [HELD], 1, []]);
+    t.done();
+  });
+  it("runs for an answered raw video, a finished video, an iPhone clip and a session whose mark was cleared", async () => {
+    for (const [what, record] of [["a raw video", RAW], ["a finished video", { ...RAW, kind: "finished" }], ["an iPhone clip", { ...RAW, kind: "short video" }], ["a session whose mark was cleared", CLEARED_RECORD]]) {
+      const { t, found } = world({ record });
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [0, [OPEN]], what);
+      assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["main", "opened"]], what);
+      t.done();
+    }
+  });
+});
+
+describe("app: this Mac must be set up, and have the command line", () => {
+  it("says this Mac isn't set up for HyperFrames, past the gate, and claims nothing", async () => {
+    assert.equal(NOT_SET_UP, "This Mac isn't set up for HyperFrames yet: ask Jason.");
+    for (const settings of [{}, { app: "off" }]) {
+      const { t, found } = world({ set: false });
+      writeSettings(t.home, settings);
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [NOT_SET_UP]], JSON.stringify(settings));
+      assert.deepEqual([reread(found).rev, reread(found).editing, reread(found).app, t.waits, t.started, runsOf(t)], [1, null, undefined, [], [], []], JSON.stringify(settings));
+      t.done();
+    }
+  });
+  it("says the command line isn't on this Mac, once it is set up, and claims nothing", async () => {
+    const { t, found } = world();
+    delete t.ctx.deps.app;
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [NO_COMMAND_LINE]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing, reread(found).app, t.waits, t.started, runsOf(t)], [1, null, undefined, [], [], []]);
+    t.done();
+  });
+  it("runs the command line pinned in this Mac's toolchain folder when none is given", async () => {
+    const { t, found, work } = world();
+    // The toolchain's file is a one-line module that runs the stand-in, which is run by its own path, so that it finds its fixtures.
+    mkdirSync(dirname(cliPath(t.home)), { recursive: true });
+    writeFileSync(cliPath(t.home), `import ${JSON.stringify(pathToFileURL(STAND_IN).href)};\n`);
+    t.ctx.deps.app = { node: process.execPath, guidance: GUIDANCE };
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual(runsOf(t), [{ args: ["open", join(work, reread(found).app.projects[0].name), "--json"], env: PINNED_ENV }]);
+    t.done();
+  });
+});
+
+describe("app: the claim and the bring are open's", () => {
+  it("claims the episode, makes its project from the working copy, opens the app on it, and records it at layout 4", async () => {
+    const { t, found, raw, paths, work } = world();
+    const before = listAll(found.folder);
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    const record = reread(found);
+    // The claim, then the project: two records, the claim at the start and the project when the claim's twenty seconds are over.
+    assert.deepEqual([record.rev, record.version, layoutOf(record)], [3, 4, 4]);
+    assert.deepEqual(record.editing, { by: "Mac Studio", since: localStamp(new Date(START)) });
+    assert.deepEqual([t.waits, t.started], [[CLAIM_WAIT_MS], []]);
+    const later = localStamp(new Date(START + CLAIM_WAIT_MS));
+    assert.deepEqual(record.app, {
+      toolchain: PIN.version,
+      projects: [{
+        key: "main", name: "Pricing- what to charge- main 3fa9c1", madeAt: later, on: "Mac Studio",
+        from: { file: "Pricing talk.mp4", bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) },
+        workingCopy: { bytes: WORKING_COPY.length, seconds: 23.423, fps: 30 }, opened: [later], handover: false, fromSuggestion: null, state: "opened"
+      }]
+    });
+    // The project is in this Mac's own folder, made from the working copy, which was moved in. The episode's folder in Dropbox got
+    // the two records and nothing else, and its list of files is as it was.
+    const project = join(work, record.app.projects[0].name);
+    assert.equal(readFileSync(join(project, "media", "recording.mp4"), "utf8"), WORKING_COPY);
+    assert.ok(existsSync(join(project, "index.html")));
+    assert.ok(!existsSync(paths.video) && existsSync(paths.facts));
+    assert.deepEqual(listAll(found.folder).filter((file) => !before.includes(file)), ["record/0002.json", "record/0003.json"]);
+    assert.deepEqual(record.files, found.record.files);
+    assert.deepEqual(runsOf(t), [{ args: ["open", project, "--json"], env: PINNED_ENV }]);
+    t.done();
+  });
+  it("opens the same project again when it is said again, without a second claim or a second project", async () => {
+    const { t, found, work } = world();
+    await app(t.ctx.deps, FOLDER);
+    const made = readdirSync(work).sort();
+    const again = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([again.code, again.said], [0, [OPEN]]);
+    const record = reread(found);
+    assert.deepEqual(readdirSync(work).sort(), made);
+    assert.deepEqual([record.rev, t.waits, t.started], [4, [CLAIM_WAIT_MS], []]);
+    assert.deepEqual(record.app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing- what to charge- main 3fa9c1", 2, "opened"]]);
+    assert.deepEqual(runsOf(t).map((run) => run.args[0]), ["open", "open"]);
+    t.done();
+  });
+  it("is refused while the other Mac has the episode, in open's words, and does nothing", async () => {
+    const { t, found } = world({ record: { ...RAW, editing: HERS } });
+    const refused = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([refused.code, refused.said], [1, [THEIRS]]);
+    // open gives the same answer for the same claim.
+    const opened = await on(t.ctx.deps, "open", FOLDER);
+    assert.deepEqual([opened.code, opened.said], [1, [THEIRS]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, t.waits, t.started, runsOf(t)], [1, "Sallie's laptop", undefined, [], [], []]);
+    t.done();
+  });
+  it("takes the episode over from the other Mac with --take-over, as open --take-over does, and opens it", async () => {
+    const { t, found } = world({ record: { ...RAW, editing: HERS } });
+    const taken = await app(t.ctx.deps, FOLDER, "--take-over");
+    assert.deepEqual([taken.code, taken.said], [0, ["Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.", OPEN]]);
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.editing.by, record.app.projects.map((p) => p.state), t.waits], [3, "Mac Studio", ["opened"], [CLAIM_WAIT_MS]]);
+    t.done();
+  });
+  it("says what is wrong with the episode's files, in open's words, and opens nothing", async () => {
+    const { t, found } = world();
+    writeFileSync(join(found.folder, "Pricing talk.srt"), "x");
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`${FOLDER} is not whole in Dropbox:`, `  Pricing talk.srt is short: 1 bytes of ${found.record.files["Pricing talk.srt"]}`, `It is not opened. Say "what's waiting?" to see the episodes.`]]);
+    assert.deepEqual((await on(t.ctx.deps, "open", FOLDER)).said, r.said, "open gives the same answer for the same files");
+    assert.deepEqual([reread(found).rev, t.waits, t.started, runsOf(t)], [1, [], [], []]);
+    t.done();
+  });
+  it("brings the files that are not whole here before anything else, and says to say it again in its own words, as open says it in its", async () => {
+    const { t, found } = world();
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await app(t.ctx.deps, FOLDER);
+    const coming = (again) => `Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "${again}" again when it is done; "how far is it?" shows how far it has got.`;
+    assert.deepEqual([r.code, r.said], [0, [coming(`open ${NAME} in HyperFrames`)]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER]]);
+    assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [1, [], []]);
+    assert.deepEqual((await on(t.ctx.deps, "open", FOLDER)).said, [coming(`open ${NAME}`)]);
+    t.done();
+  });
+  it("brings the files for a take-over, and says to take it over again, as open does", async () => {
+    const { t, found } = world({ record: { ...RAW, editing: HERS } });
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await app(t.ctx.deps, FOLDER, "--take-over");
+    assert.deepEqual([r.code, r.said], [0, [`Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "take it over" again when it is done; "how far is it?" shows how far it has got.`]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over"]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by, t.waits, runsOf(t)], [1, "Sallie's laptop", [], []]);
+    t.done();
+  });
+  it("waits for the files the other Mac handed over, and claims nothing until they are here", async () => {
+    const { t, found } = world();
+    const share = "edit/from-final-cut/Pricing talk main v2 3fa9c1.mov";
+    const first = reread(found);
+    writeFileSync(recordFile(found.folder, 2), recordText({ ...first, rev: 2, files: { ...first.files, [share]: 9 }, released: { at: "2026-10-20T14:30:00-05:00", by: "Sallie's laptop", files: { ...first.files, [share]: 9 } } }));
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`Still arriving from Sallie's laptop: 1 file. Dropbox is bringing them over; say "open ${NAME} in HyperFrames" again when it is done.`]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, share]]);
+    assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [2, [], []]);
+    t.done();
+  });
+  it("stops with the claim's own words when Dropbox undid it, and goes through the next time", async () => {
+    const { t, found } = world();
+    let undid = false;
+    duringTheWait(t, () => {
+      if (undid) return;
+      undid = true;
+      rmSync(recordFile(found.folder, 2));
+    });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`Dropbox undid this Mac's claim on ${NAME}. Say "open ${NAME} in HyperFrames" again.`]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing, runsOf(t)], [1, null, []]);
+    const again = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([again.code, again.said], [0, [OPEN]]);
+    t.done();
+  });
+  it("stops, saying whose it is, when the other Mac claimed the episode during the wait", async () => {
+    const { t, found } = world();
+    duringTheWait(t, () => {
+      const mine = reread(found);
+      writeFileSync(recordFile(found.folder, mine.rev + 1), recordText({ ...mine, rev: mine.rev + 1, editing: { by: "Sallie's laptop", since: "2026-10-20T15:00:10-05:00" }, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`Sallie's laptop opened ${NAME} at the same time, and it is theirs. Say "take it over" if they are done with it.`]]);
+    assert.deepEqual(runsOf(t), []);
+    t.done();
+  });
+  it("warns that the other Mac cannot see the claim when this Mac seems offline, and goes on", async () => {
+    const { t } = world();
+    t.ctx.deps.online = async () => false;
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, ["This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.", OPEN]]);
+    t.done();
+  });
+});
+
+describe("app: the project, and what is said and recorded of it", () => {
+  it("asks for the working copy when there is none, says it is being made, and keeps the claim it made", async () => {
+    const { t, found } = world({ copy: false });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`The video for HyperFrames is being made. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
+    // Claimed, as the plan orders it (the claim, then the copy), and no project is recorded or opened.
+    assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
+    t.done();
+  });
+  it("keeps the project and says why when HyperFrames will not open, with no time it was opened in the record", async () => {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+      const { t, found, work } = world({ open });
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [words]], open);
+      const record = reread(found);
+      assert.deepEqual(record.app.projects.map((p) => [p.state, p.opened]), [["made", []]], open);
+      assert.ok(existsSync(join(work, record.app.projects[0].name, "index.html")), open);
+      assert.equal(record.rev, 3, open);
+      t.done();
+    }
+  });
+  it("hands her chat to the app only when this Mac's setting is on and the chat holds no session's words", async () => {
+    const asked = async (handover, chat) => {
+      const { t, found } = world();
+      if (handover) writeSettings(t.home, { appHandover: true });
+      t.ctx.deps.app.chat = () => chat;
+      const r = await app(t.ctx.deps, FOLDER);
+      const run = runsOf(t)[0];
+      const out = [r.code, r.said, run.env.includes("CLAUDE_CODE_SESSION_ID"), reread(found).app.projects[0].handover];
+      t.done();
+      return out;
+    };
+    assert.deepEqual(await asked(true, { sessionId: CHAT, held: false }), [0, ["It's open in HyperFrames, and it picks up this conversation."], true, true]);
+    assert.deepEqual(await asked(true, { sessionId: CHAT, held: true }), [0, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."], false, false]);
+    assert.deepEqual(await asked(false, { sessionId: CHAT, held: false }), [0, [OPEN], false, false]);
+  });
+});

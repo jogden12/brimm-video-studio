@@ -116,7 +116,9 @@ const TODAY_ASKED = {
   principles: [],
   ideas: [],
   // The guide, new since the switch: tests/edit-guide.test.js pins its words.
-  guide: []
+  guide: [],
+  // The app, new with Studio: tests/edit-app.test.js pins its words.
+  app: []
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1237,7 +1239,8 @@ describe("the walk: every command, for a video imported lightly from a file name
     teachings: [[label], [label, "--transcript-only"], []],
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
-    guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]]
+    guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
+    app: [[label], [], ["2026"], ["nothing fits this"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);
