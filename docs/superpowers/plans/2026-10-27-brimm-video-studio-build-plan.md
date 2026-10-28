@@ -369,7 +369,12 @@ And the suite passes whole, with the tests of a deleted module deleted with it a
 
 ## Open items
 
-- A0 is run only in part (its step 4 found the handed-over chat blank); its additions (`docs/phase-a0/additions.md`) and A0b are not run. PRs 4 to 7 each name the answer they wait for.
+- A0's checklist was run on 2026-10-28, and its results are in `~/BRIMM Video Work/A0 app test/results.md`:
+  - the handed-over chat was blank (step 4);
+  - the app's agent listed the brand kit's rules and not the project's notes, so BRIMM's working rules now go into the kit as well (step 10);
+  - exports go to `~/Downloads`, a link into Dropbox on the Mac Studio, and each leaves a note in the project's `renders/` (step 11).
+
+  Its additions (`docs/phase-a0/additions.md`, items 1 and 8 among them) and A0b are being run. PRs 4 to 7 each name the answer they wait for.
 - The Studio repo's `main` branch and its copy of the tag `brimm-video-v1` (Jason; see "Not here").
 - The questions Q1 to Q3 and decisions D1 to D10 of the spec. Decision D5 (a session clip's hand-off) needs brimm-operations as well.
 - Sallie's laptop is not on the light import, which PR 12 waits for (`docs/setup/sallies-laptop.md`).
