@@ -1002,6 +1002,25 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
     assert.deepEqual([r.code, r.text], [0, `${NEWEST}\n(Jason: her folder also allows, on this Mac: skill her-own, mcp-tool ${tool}.)`]);
     w.done();
   });
+  it("says the toolchain's line before the entries it adds, which stay last, when this Mac's app is on and the pinned command line is not in place", async () => {
+    const w = openWorld();
+    const tool = "mcp__4e8268a7-b354-4c23-ab7d-2076f0dc3000__opusclip_list_clips";
+    writeSettings(w.home, { app: "hyperframes", studioAllow: [{ type: "skill", name: "her-own" }, { type: "mcp-tool", name: tool }] });
+    const r = await behindOn(w);
+    const toolchain = "HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version 0.8.208, and this Mac has none; the installer puts the pinned one in place.)";
+    assert.deepEqual([r.code, r.text], [0, `${NEWEST}\n${toolchain}\n(Jason: her folder also allows, on this Mac: skill her-own, mcp-tool ${tool}.)`]);
+    w.done();
+  });
+  it("says nothing of the toolchain when the lock is loosened: the refusal comes first and ends the check, with git not asked", async () => {
+    const w = openWorld();
+    writeSettings(w.home, { app: "hyperframes" });
+    const r = await behindOn(w, { appSettings: { disableAllHooks: true } });
+    assert.equal(r.code, 1);
+    assert.ok(r.text.startsWith(LOCK_CHANGED), r.text);
+    assert.ok(!r.text.includes("HyperFrames' command line"), r.text);
+    assert.equal(r.g.calls.length, 0);
+    w.done();
+  });
   it("asks nothing of the processes, trust or the allowlist on a strict Mac", async () => {
     const w = openWorld();
     writeSettings(w.home, { lock: "strict", studioAllow: [{ type: "skill", name: "her-own" }] });

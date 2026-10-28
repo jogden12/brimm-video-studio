@@ -81,7 +81,7 @@ import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp } from "./app.js";
-import { cliPath } from "./hyperframes.js";
+import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
 import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -2480,7 +2480,10 @@ function refuseIfLoosened(lock, say) {
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
     checkout, and otherwise always ends with 0: a check that could not be made is said. With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
-    this Mac's settings add to what her folder allows, so that a change shows (design section 2). */
+    this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
+    on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
+    in this Mac's toolchain folder (hyperframes.js toolchainHolds and toolchainDiffers: none, another version, or the pinned version not
+    as the pin has it); it looks at a folder and runs nothing. It is not said when the lock refused first. */
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
@@ -2505,6 +2508,10 @@ async function behind(ctx) {
   const stale = studioStale(ctx);
   const folderLine = () => {
     if (stale) ctx.say(`Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    // On a Mac that opens episodes in the app, the pinned command line must be in its toolchain folder (architecture 6.1: `behind` also
+    // checks the toolchain). This needs no network either, so it is said whatever git answered. It is not said when the lock refused first.
+    const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
+    if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
     if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
     return 0;
   };

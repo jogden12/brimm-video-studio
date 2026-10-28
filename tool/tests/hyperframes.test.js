@@ -534,12 +534,18 @@ describe("the fixtures are what the pinned command line prints", () => {
 });
 
 describe("hyperframes.js", () => {
-  it("runs no program, reads nothing from the environment, and reads no disk but its pin file", () => {
+  it("runs no program, reads nothing from the environment, and reads no disk but its pin file and, in toolchainHolds alone, the toolchain's folder, which it only looks at", () => {
     const source = readFileSync(new URL("../hyperframes.js", import.meta.url), "utf8");
-    // All it imports: the two modules it builds on, and the two Node ones that make a path and read one file.
+    // All it imports: the two modules it builds on, and the two Node ones that make a path and read files.
     assert.deepEqual([...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort(), ["./scan.js", "./settings.js", "node:fs", "node:path"]);
     assert.doesNotMatch(source, /\bprocess\b|\bimport\(|\beval\(|\bfetch\(|\brequire\(/);
-    assert.equal(source.match(/readFileSync\(/g).length, 1);
+    // It reads twice: its pin file, and in toolchainHolds a file of the toolchain's folder; it looks at one more path, the program's.
+    // It writes, moves, removes and makes nothing, and starts nothing.
+    assert.equal(source.match(/readFileSync\(/g).length, 2);
     assert.match(source, /readFileSync\(new URL\("\.\/hyperframes\.pin\.json", import\.meta\.url\)/);
+    const holds = source.slice(source.indexOf("export function toolchainHolds"), source.indexOf("/** What a version looks like"));
+    assert.ok(holds.includes("readFileSync(join(dir, file)") && holds.includes("statSync(cliPath(home))"), holds);
+    assert.equal(source.match(/statSync\(/g).length, 1);
+    assert.doesNotMatch(source, /writeFileSync|appendFileSync|mkdirSync|renameSync|rmSync|unlinkSync|copyFileSync|chmodSync|symlinkSync|spawn|exec(?:Sync|File)?\(/);
   });
 });
