@@ -1,0 +1,10 @@
+{
+  "project": "/Users/sallie/BRIMM Video Work/Pricing talk/Pricing talk main 3fa9c1",
+  "opened": true,
+  "app": "the HyperFrames desktop app",
+  "handedOver": {
+    "engine": "claude",
+    "sessionId": "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04"
+  },
+  "catchUp": "npx hyperframes catch-up"
+}
