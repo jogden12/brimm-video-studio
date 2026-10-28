@@ -4,16 +4,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readOpen } from "../hyperframes.js";
 import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
+import { processTable } from "../chain.js";
 import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
+import { markChat } from "../held.js";
+import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { psText } from "./open-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
@@ -578,6 +582,174 @@ describe("app: opening an episode in HyperFrames", () => {
     it("takes a name that leads nowhere a folder is for a folder that is not here", async (c) => {
       const { e, record } = await madeHere(c);
       for (const name of ["", ".", "..", "../Pricing talk main 3fa9c1", "a/b"]) assert.equal(asked(e, changed(record, { on: "Sallie's laptop", name })), "Sallie's laptop", JSON.stringify(name));
+    });
+  });
+  describe("her chat, found by chatOf (plan PR 4, \"The chat\": no readable transcript, no handover, never guessed)", () => {
+    // No test here gives openInApp a chat(): it finds the chat itself, from the environment it is given, her folder for Claude and
+    // the transcript where Claude Code keeps it (loosened.js transcriptOf), and decides by held.js chatHeld. The stand-in's log says
+    // whether the chat's id reached the command line.
+    const PICKS_UP = "It's open in HyperFrames, and it picks up this conversation.";
+    const NEW_CHAT = "It's open in HyperFrames. It starts a new conversation.";
+    const NOT_FOUND = "This chat could not be found, so it stays here.";
+    const SESSION_WORDS = "This chat has held a client or group session's words, so it stays here.";
+    const VIDEOS_CHAT = "This video's chat stays here.";
+    /** The environment the chat's command runs in. The runner's own is never taken for it (it is often a Claude Code session's). */
+    const chatEnv = (more = {}) => ({ LANG: "en_US.UTF-8", CLAUDE_CODE_SESSION_ID: CHAT, ...more });
+    /** Her folder for Claude on this Mac, as its real path is looked up (a temporary folder is behind a link), and where Claude Code
+        keeps the transcripts of the chats started in it: its projects folder, a folder for her folder, a file for each chat. */
+    const studioOf = (e) => join(realpathSync.native(e.home), "BRIMM Video Studio");
+    const transcriptsOf = (e, config = join(e.home, ".claude")) => join(config, "projects", claudeDirName(studioOf(e)));
+    /** Her folder, and a made-up transcript of the chat `id` in it: a few lines, each with its message's uuid and time. */
+    function herChat(e, { folder = true, transcript = true, id = CHAT, config } = {}) {
+      if (folder) mkdirSync(studioOf(e), { recursive: true });
+      if (!transcript) return;
+      mkdirSync(transcriptsOf(e, config), { recursive: true });
+      const lines = [
+        { type: "user", uuid: "0d3c7f9a-1111-4aaa-8bbb-000000000001", timestamp: "2026-10-28T14:00:00.000Z", message: { role: "user", content: "open the Pricing talk in HyperFrames" } },
+        { type: "assistant", uuid: "0d3c7f9a-1111-4aaa-8bbb-000000000002", timestamp: "2026-10-28T14:00:05.000Z", message: { role: "assistant", content: "Opening it." } }
+      ];
+      writeFileSync(join(transcriptsOf(e, config), `${id}.jsonl`), lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+    }
+    /** Mark the chat as edit.js does before it prints a session's words (held.js markChat): its id, and the claude above it. */
+    const marked = (e) => markChat({
+      home: e.home, env: { CLAUDE_CODE_SESSION_ID: CHAT, CLAUDE_PID: "700" }, pid: 900, now: Date.parse("2026-10-28T14:30:00.000Z"),
+      table: processTable(psText([[1, 0, "/sbin/launchd"], [700, 1, "/opt/homebrew/bin/claude"], [800, 700, "/bin/zsh"], [900, 800, "node edit.js app"]]))
+    });
+    /** `app` with the setting on, and no chat() given: openInApp finds the chat itself, in `env`. */
+    const ask = (e, env, record = e.record) => openInApp(e.ctx, { found: e.found, record }, { ...e.deps, chat: undefined, env });
+    /** Whether the chat's id reached the pinned command line, by the stand-in's log of the one run it made. */
+    const reached = (e) => {
+      assert.equal(e.runs().length, 1, "the command line was run once");
+      return e.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID");
+    };
+    /** The handover did not happen: the id did not reach the command line, the record says so, and the words say why. */
+    function stays(e, why) {
+      assert.equal(reached(e), false);
+      assert.deepEqual(e.said, [NEW_CHAT, why]);
+      assert.equal(e.saved[0].app.projects[0].handover, false);
+      plain(e.said);
+    }
+    it("hands the chat over when its transcript is found and readable and nothing has marked it", async (c) => {
+      const e = episode(c, { handover: true });
+      herChat(e);
+      assert.equal(await ask(e, chatEnv()), 0);
+      assert.equal(reached(e), true);
+      assert.deepEqual(e.said, [PICKS_UP]);
+      assert.equal(e.saved[0].app.projects[0].handover, true);
+    });
+    it("does not hand over a chat that was marked with a session's words (markChat), and says that is why", async (c) => {
+      const e = episode(c, { handover: true });
+      herChat(e);
+      assert.deepEqual(marked(e), { tied: true });
+      assert.equal(await ask(e, chatEnv()), 0);
+      stays(e, SESSION_WORDS);
+    });
+    it("does not hand over a chat whose transcript is not at the path, her folder being there", async (c) => {
+      const e = episode(c, { handover: true });
+      herChat(e, { transcript: false });
+      assert.equal(await ask(e, chatEnv()), 0);
+      stays(e, NOT_FOUND);
+    });
+    it("does not hand over a chat when she has no folder for Claude on this Mac, though a transcript is where it would be", async (c) => {
+      const e = episode(c, { handover: true });
+      herChat(e, { folder: false });
+      assert.ok(existsSync(join(transcriptsOf(e), `${CHAT}.jsonl`)) && !existsSync(studioOf(e)));
+      assert.equal(await ask(e, chatEnv()), 0);
+      stays(e, NOT_FOUND);
+    });
+    it("does not hand over a chat whose id is not a chat's, whatever is in the files: such an id is never made into a path", async (c) => {
+      for (const id of ["not-a-chat", "5B1F0C8E-2D47-4A93-B6E1-7C9A3F2D8E04", "../5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04", `${CHAT}/../x`, `${CHAT}\n`, ""]) {
+        const e = episode(c, { handover: true });
+        herChat(e);
+        // A file of that very name, where the id can be one (the uppercase id, or "not-a-chat").
+        if (/^[\w-]+$/.test(id)) herChat(e, { id });
+        assert.equal(await ask(e, chatEnv({ CLAUDE_CODE_SESSION_ID: id })), 0, JSON.stringify(id));
+        stays(e, NOT_FOUND);
+      }
+    });
+    it("does not hand over when the environment holds no chat's id", async (c) => {
+      const e = episode(c, { handover: true });
+      herChat(e);
+      const { CLAUDE_CODE_SESSION_ID, ...without } = chatEnv();
+      assert.equal(await ask(e, without), 0);
+      stays(e, NOT_FOUND);
+    });
+    it("does not hand over a chat whose transcript is not a file that can be read: a folder, or a link, at its path", async (c) => {
+      for (const [what, put] of [
+        ["a folder", (path) => mkdirSync(path)],
+        ["a link", (path) => symlinkSync(join(path, "..", "elsewhere.jsonl"), path)]
+      ]) {
+        const e = episode(c, { handover: true });
+        herChat(e, { transcript: false });
+        mkdirSync(transcriptsOf(e), { recursive: true });
+        writeFileSync(join(transcriptsOf(e), "elsewhere.jsonl"), '{"type":"user","timestamp":"2026-10-28T14:00:00.000Z"}\n');
+        put(join(transcriptsOf(e), `${CHAT}.jsonl`));
+        assert.equal(await ask(e, chatEnv()), 0, what);
+        stays(e, NOT_FOUND);
+      }
+    });
+    it("looks for the transcript where Claude Code keeps its chats when that is not ~/.claude (CLAUDE_CONFIG_DIR), and nowhere else", async (c) => {
+      const e = episode(c, { handover: true });
+      const config = join(e.home, "Claude config");
+      herChat(e, { config });
+      assert.equal(await ask(e, chatEnv({ CLAUDE_CONFIG_DIR: config })), 0);
+      assert.equal(reached(e), true, "found in the folder the environment names");
+      const f = episode(c, { handover: true });
+      herChat(f);
+      assert.equal(await ask(f, chatEnv({ CLAUDE_CONFIG_DIR: join(f.home, "Claude config") })), 0);
+      stays(f, NOT_FOUND);
+    });
+    describe("the video it opens, with the setting on and a chat that is found, readable and unmarked", () => {
+      /** The mark a session carries, not cleared; and as `kind … --clear-session` leaves it, cleared by her click on a dialog. */
+      const MARK = { marked: "2026-10-20T15:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
+      const CLEARED = { ...MARK, cleared: { at: "2026-10-21T09:00:00-05:00", on: "Mac Studio", to: "raw", confirmed: "dialog" } };
+      const ANSWER = { state: "needs your answer", guess: "raw", seen: "wide, 0:23, no retakes", came: "camera" };
+      it("does not hand over for a session: a video answered as one, or one that carries a session's mark, whatever its kind says", async (c) => {
+        for (const [what, over] of [
+          ["a session", { kind: "session", session: MARK }],
+          ["a session with no mark", { kind: "session" }],
+          ["a video answered as another kind whose session mark is not cleared", { kind: "finished", session: MARK }],
+          ["a mark that cannot be read", { kind: "raw", session: "yes" }],
+          ["a mark whose clearing was not by her click", { kind: "raw", session: { ...MARK, cleared: { ...CLEARED.cleared, confirmed: "no" } } }]
+        ]) {
+          const e = episode(c, { handover: true });
+          herChat(e);
+          assert.equal(await ask(e, chatEnv(), { ...e.record, ...over }), 0, what);
+          stays(e, VIDEOS_CHAT);
+        }
+      });
+      it("does not hand over for a video not yet answered, or one left alone", async (c) => {
+        for (const [what, over] of [
+          ["not yet answered", { kind: null, answer: ANSWER }],
+          ["left alone", { kind: null, answer: { ...ANSWER, state: "not for brimm-video" } }]
+        ]) {
+          const e = episode(c, { handover: true });
+          herChat(e);
+          assert.equal(await ask(e, chatEnv(), { ...e.record, ...over }), 0, what);
+          stays(e, VIDEOS_CHAT);
+        }
+      });
+      it("hands over for a session whose mark was cleared, which is an ordinary video of its new kind (architecture 6.2)", async (c) => {
+        for (const [what, over] of [
+          ["a session cleared by saying it is a raw video, as --clear-session writes it", { kind: "raw", session: CLEARED }],
+          ["a session cleared by saying it is an iPhone clip", { kind: "short video", session: CLEARED }],
+          ["a record of kind session whose mark is cleared, which the gate lets through as a cleared one", { kind: "session", session: CLEARED }]
+        ]) {
+          const e = episode(c, { handover: true });
+          herChat(e);
+          assert.equal(await ask(e, chatEnv(), { ...e.record, ...over }), 0, what);
+          assert.equal(reached(e), true, what);
+          assert.deepEqual(e.said, [PICKS_UP], what);
+          assert.equal(e.saved[0].app.projects[0].handover, true, what);
+        }
+      });
+      it("still does not hand over a cleared session's chat when it was marked with the session's words", async (c) => {
+        const e = episode(c, { handover: true });
+        herChat(e);
+        marked(e);
+        assert.equal(await ask(e, chatEnv(), { ...e.record, kind: "raw", session: CLEARED }), 0);
+        stays(e, SESSION_WORDS);
+      });
     });
   });
   it("says this Mac is not set up for HyperFrames in words that hold no path", () => {

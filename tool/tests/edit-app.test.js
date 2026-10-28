@@ -785,4 +785,17 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.deepEqual(await asked(true, { sessionId: CHAT, held: true }), [0, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."], false, false]);
     assert.deepEqual(await asked(false, { sessionId: CHAT, held: false }), [0, [OPEN], false, false]);
   });
+  it("hands her chat over for a session whose mark was cleared, which is an ordinary video of its new kind (a session not cleared is the gate's)", async () => {
+    // A mark cleared by her click on a video answered as raw, as `kind … --clear-session` leaves the record, and on one that still says session.
+    for (const [what, record] of [["cleared, answered as a raw video", { ...RAW, session: CLEARED_RECORD.session }], ["cleared, the record still saying session", CLEARED_RECORD]]) {
+      const { t, found } = world({ record });
+      writeSettings(t.home, { appHandover: true });
+      t.ctx.deps.app.chat = () => ({ sessionId: CHAT, held: false });
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [0, ["It's open in HyperFrames, and it picks up this conversation."]], what);
+      assert.equal(runsOf(t)[0].env.includes("CLAUDE_CODE_SESSION_ID"), true, what);
+      assert.equal(reread(found).app.projects[0].handover, true, what);
+      t.done();
+    }
+  });
 });

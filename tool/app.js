@@ -32,6 +32,7 @@ import { basename, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
+import { sessionNotCleared } from "./gate.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -135,12 +136,21 @@ function readable(path) {
     session's words. It is held unless its transcript is found, in her folder's projects folder (loosened.js transcriptOf), and
     can be read, and chatHeld then says it holds none. chatHeld is given the `claude` above this process, found as markChat finds
     it, or "unknown" when none is found, which holds a chat that a mark could belong to. Anything that goes wrong holds the
-    chat: the handover is never guessed at. */
+    chat: the handover is never guessed at.
+    A chat that is not found is held, and has no id here: she has no folder for Claude on this Mac, the id is not a chat's, or
+    its transcript is not there or is not a file that can be read. handoverAllowed then says "no chat", and she is told that the
+    chat could not be found, which is what is true of it; "held" is for a chat that is found and holds a session's words. */
 function chatOf(home, env) {
   const sessionId = typeof env.CLAUDE_CODE_SESSION_ID === "string" ? env.CLAUDE_CODE_SESSION_ID : "";
+  const notFound = { sessionId: "", held: true };
+  let transcriptPath;
   try {
-    const transcriptPath = transcriptOf({ home, env, folder: realpathSync.native(studioFolder(home)), sessionId });
-    if (transcriptPath === null || !readable(transcriptPath)) return { sessionId, held: true };
+    transcriptPath = transcriptOf({ home, env, folder: realpathSync.native(studioFolder(home)), sessionId });
+  } catch {
+    return notFound;
+  }
+  if (transcriptPath === null || !readable(transcriptPath)) return notFound;
+  try {
     const table = readProcesses();
     const above = table === null ? null : claudeAbove(chainUp(processTable(table), process.pid));
     return { sessionId, held: chatHeld({ home, sessionId, transcriptPath, claude: above ? { pid: above.pid, start: above.start } : "unknown" }) };
@@ -336,7 +346,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const chat = wanted ? askChat() : { sessionId: "", held: true };
   const handover = handoverAllowed({
     setting: wanted, sessionId: chat.sessionId, held: chat.held,
-    episode: { session: record.kind === "session" || Boolean(record.session), unanswered: kindOf(record) === null }, project: { clip: false }
+    episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
   });
   const ran = spawn(node, [cli, "open", join(work, project.name), "--json"], {
     env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
