@@ -1497,8 +1497,14 @@ function ranLine(ctx, shown, r, clean, next, live = false) {
   const when = r.early
     ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "the late check of its copies is still to come" : "it stopped before the late check of its copies was made"}`
     : `ended ${ageText(ctx.now() - r.ended)} ago`;
-  return `${shown}: ${r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
+  return `${shown}: ${Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
 }
+
+/** What `status` says while the working copy of an episode is made, in the words `app` uses for it. */
+const WORK_COPY_RUNNING = "the video for HyperFrames is being made";
+/** How a result names the run that left it, where the name of its command is not a word a person says: the working copy's run
+    (workcopy.js) is "making the video for HyperFrames". Every other command is named by its own word. */
+const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames" };
 
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
@@ -1550,7 +1556,11 @@ export async function status(ctx, rest) {
     const clean = cleanFor(ctx, e);
     const run = runningRun(ctx.home, folder, ctx.alive);
     const command = run ? run.command : "";
+    // The working copy is made under a lock of its own, beside whatever holds the episode's (workcopy.js workCopyLockOf): its run
+    // is looked for there, and its progress is in the panel's files with the others', by its process.
+    const copying = runningRun(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder)) !== null;
     if (command) lines.push(`${shown}: ${command} is running.`);
+    if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
     let results = [];
     try {
       results = readdirSync(episodeWork(ctx.home, folder)).filter((n) => n.endsWith(".result.json")).sort();
@@ -1559,9 +1569,11 @@ export async function status(ctx, rest) {
     }
     for (const file of results) {
       const r = readResult(ctx.home, folder, file.replace(/\.result\.json$/, ""));
-      // The result of a command at work now is an older run's, and is not said; but the early result its own run wrote is.
+      // The result of a command at work now is an older run's, and is not said; but the early result its own run wrote is. The
+      // working copy's run is at work when its own lock says so, whatever holds the episode's.
       const own = Boolean(r) && r.early === true && Boolean(run) && r.command === command && r.pid === run.pid;
-      if (!r || (r.command === command && !own)) continue;
+      const atWork = Boolean(r) && (r.command === command || (copying && r.command === WORK_COPY_COMMAND));
+      if (!r || (atWork && !own)) continue;
       // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
       // left out.
       lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own));
