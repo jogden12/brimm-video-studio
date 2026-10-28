@@ -303,7 +303,7 @@ function brimmRules(kind) {
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
     "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.",
-    "- **Versions.** For each request, run `npx hyperframes history begin --who Claude --label \"<what she asked>\"` before the change and `npx hyperframes history end` after it, so that the list of versions reads in her words. When asked what has changed, or to go back, use `npx hyperframes history`.",
+    "- **Versions.** When asked what has changed, or to go back, use `npx hyperframes history`.",
     "- **When she is done.** Export on This Mac. Then she says \"hand it off\" in her Claude chat."
   ].join("\n");
 }
