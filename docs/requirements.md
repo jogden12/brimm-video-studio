@@ -46,6 +46,7 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   - **The brand guide's fonts and colours are current** (2026-10-28, when Jason shared the guide again). It is old: its two "with Sallie Holder" logos are never used.
   - **Josefin Sans replaces Sweet Sans Pro.** H0's font check on the Mac Studio said MISSING for Sweet Sans Pro: it never became active there, not even in TextEdit. Jason said "lets change it out" and picked Josefin Sans, from Google Fonts, on an answer card from a sheet of five faces set in the guide's three roles.
   - The test is written up as `docs/phase-h0/checklist.md`.
+- **The company's name, and end cards (2026-10-28, from A0).** Jason, word for word: "'Brim' or 'brim' should always be corrected to 'BRIMM'. 'The Brim' corrected to 'The BRIMM'." And an end card starts after the last words and never cuts the recording: in A0 the app laid one over his closing words and cut the last seconds.
 - **Versions with their changes (2026-10-27).** Reading the architecture, Jason said, word for word:
 
   > versioning is great. as new versions/edits are created, claude should keep track of what was changed or added in each version so that the user could ask for a list of versions so that they can see each version with a list of changes and then either go back to a previous version or request that certain aspects of the version be brought into a new edit. for example, use the title but delete the graphics from version 5 in the new version.

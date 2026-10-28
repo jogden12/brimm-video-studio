@@ -141,11 +141,16 @@ ${faces.join("\n")}
 
 // --- The words, and what Studio suggests by them ---
 
+/** The company's name as it is written, whatever the transcriber wrote: "brim", "Brim" and "BRIM" are BRIMM, so "the Brim" is
+    "the BRIMM" (Jason, 2026-10-28: "'Brim' or 'brim' should always be corrected to 'BRIMM'"). Whole words only: "brimming" stays.
+    Every project's words are spelled so, before the episode's own spellings, and its brimm/spellings.json lists them first. */
+export const HOUSE_SPELLINGS = Object.freeze([["brim", "BRIMM"], ["Brim", "BRIMM"], ["BRIM", "BRIMM"]].map((pair) => Object.freeze(pair)));
+
 /** transcript.json (F5): the list the pinned `transcribe` writes, {text, start, end, id} for each word in order, its ids "w0",
-    "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names and the episode's spellings
-    (final-transcript.js spelled). A word keeps its punctuation, its times and its id: a spelling changes its text alone. */
+    "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names, the house's spellings and the
+    episode's (final-transcript.js spelled). A word keeps its punctuation, its times and its id: a spelling changes its text alone. */
 export const transcriptJson = (words, spellings = []) =>
-  (Array.isArray(words) ? words : []).map((word, i) => ({ text: spelled(word.w, spellings ?? []), start: word.start, end: word.end, id: `w${i}` }));
+  (Array.isArray(words) ? words : []).map((word, i) => ({ text: spelled(word.w, [...HOUSE_SPELLINGS, ...(spellings ?? [])]), start: word.start, end: word.end, id: `w${i}` }));
 
 /** brimm/cut-suggestions.json (5.8): the phrases the cut plan cuts, as the rules decided and Claude changed them, each by the ids
     of its first and last words in transcript.json and those words' times: {n, from, to, start, end, kind, why, by}. The plan's
@@ -385,7 +390,7 @@ export function projectFiles(input) {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
   }
-  if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: (input.spellings ?? []).map(([wrong, right]) => ({ wrong, right })) }));
+  if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: [...HOUSE_SPELLINGS, ...(input.spellings ?? [])].map(([wrong, right]) => ({ wrong, right })) }));
   files.set("brimm/brand.md", BRAND);
   files.set("vendor/gsap.min.js", { copy: GSAP });
   for (const font of FONTS) files.set(`assets/fonts/${font.file}`, { copy: own(`./brand/fonts/${font.file}`) });

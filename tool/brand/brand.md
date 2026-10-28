@@ -6,6 +6,7 @@ For every video and graphic made in this project. It is The BRIMM's brand guide,
 
 - **The BRIMM** is Sallie Ogden's business strategy for women founders.
 - **The name on screen is Sallie Ogden.** Never "Sallie Holder", and never a logo that says it.
+- **The company's name is The BRIMM,** with BRIMM in capitals, in titles, captions and every word on screen. Whatever a transcript says, "Brim" or "brim" is BRIMM.
 - **The look:** light, airy and minimal, with white space. Backgrounds are mostly mist, smoke or dew. Navy carries the words.
 
 ## Colours
@@ -76,4 +77,5 @@ The logos chosen for this project are in `assets/logos/`, where it has them; the
 - **A box that holds words:** corners rounded to 15% of its height, and padding of about one and a half capital heights.
 - **Lines:** thin, and at most three in a graphic, each a shade darker than its background: light gray on dew, sand on mist, mist on smoke.
 - **Backgrounds:** mist, smoke or dew, and navy for a bold title card. A subtle texture is fine; a busy pattern is not.
+- **End cards:** An end card starts after the last words are said, never over them, and it never cuts the recording: the video runs to its end, and the card follows it.
 - **Upright Reels:** words and logos stay out of the top 14% and the bottom 35% of the frame.

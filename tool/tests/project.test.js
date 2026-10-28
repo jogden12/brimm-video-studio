@@ -124,6 +124,13 @@ describe("transcript.json (F5)", () => {
   it("is the list the pinned transcribe writes", () => {
     assert.equal(`${JSON.stringify(transcriptJson(WORDS, []), null, 2)}\n`.trim(), GOLDEN.transcript.trim());
   });
+  it("spells the company's name BRIMM in every project, whatever the transcriber wrote", () => {
+    const heard = [{ w: "the", start: 0, end: 0.2 }, { w: "brim", start: 0.2, end: 0.5 }, { w: "Brim,", start: 0.6, end: 0.9 }, { w: "BRIM.", start: 1, end: 1.3 }, { w: "brim's", start: 1.4, end: 1.8 }, { w: "brimming", start: 1.9, end: 2.4 }];
+    assert.deepEqual(transcriptJson(heard, []).map((word) => word.text), ["the", "BRIMM", "BRIMM,", "BRIMM.", "BRIMM's", "brimming"]);
+    const files = projectFiles(clip({ words: heard }));
+    assert.deepEqual(json(files, "transcript.json").map((word) => word.text).slice(1, 3), ["BRIMM", "BRIMM,"]);
+    assert.deepEqual(json(projectFiles(main()), "brimm/spellings.json").spellings.slice(0, 3), [{ wrong: "brim", right: "BRIMM" }, { wrong: "Brim", right: "BRIMM" }, { wrong: "BRIM", right: "BRIMM" }]);
+  });
   it("applies the episode's spellings", () => {
     const spelled = transcriptJson(WORDS, [["Hormozy", "Hormozi"]]);
     assert.equal(spelled[2].text, "Hormozi,");
@@ -237,6 +244,13 @@ describe("the notes for the agent (5.4)", () => {
     for (const gone of ["skills update", "publish", "npm run publish", "hyperframes.heygen.com", "catch-up", "upgrade", "registry"]) assert.ok(!kept.includes(gone), gone);
     for (const still of ["## Key Rules", "npx hyperframes docs <topic>", "npx hyperframes preview --background", "window.__timelines"]) assert.ok(kept.includes(still), still);
     assert.ok(notes.includes(kept.trim()));
+  });
+  it("give the brand's guide the company's name, and where an end card goes", () => {
+    const brand = projectFiles(main()).get("brimm/brand.md");
+    assert.match(brand, /The company's name is The BRIMM/);
+    assert.match(brand, /"Brim" or "brim" is BRIMM/);
+    assert.match(brand, /An end card starts after the last words/);
+    assert.match(brand, /never cuts the recording/);
   });
   it("begin a session clip's notes with its own rules", () => {
     const own = projectFiles(clip()).get("CLAUDE.md");
