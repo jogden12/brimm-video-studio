@@ -1029,7 +1029,9 @@ function withoutOwnAnswers(record, machine) {
     episode's record with this Mac editing it (read again, when the claim was just written), once every file is here and the
     episode is this Mac's; or { code }, the code the command ends with, once a line has said why it cannot go on. `takeOver` is
     the flag `--take-over`. `again` is what she says to try again, as the command that asked has it: `open Talk` for open, `open
-    Talk in HyperFrames` for app. The two give the same answer for the same claim but for that. In order:
+    Talk in HyperFrames` for app. `by` is the command that asked when it is not `open`, "app": the bring this starts is given it
+    (`bring … --asked-by app`), so that what that bring says to say next, once it has run, is `again` as well, and not open's.
+    The two give the same answer for the same claim but for that. In order:
     - a change Dropbox undid is said, and the record as it is now taken as this Mac's;
     - another Mac's claim refuses it at once, unless it is taken over (`--take-over`): nothing is looked at or brought over
       first, since on the Mac that is not editing an episode its files are online-only, and bringing them, raw video and all,
@@ -1044,8 +1046,11 @@ function withoutOwnAnswers(record, machine) {
       the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
       and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim. */
-async function claimAndBring(ctx, found, record, { takeOver = false, again }) {
+async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "" }) {
   const { say } = ctx;
+  // The bring it starts is told which command asked (`--asked-by`), when it is not `open`, so that what it says to say next, when
+  // it is done, is that command's: a bring started by `app` ends by sending her back to app, and not to open.
+  const askedBy = by ? ["--asked-by", by] : [];
   const gone = undone(record, ctx.home);
   if (gone) {
     say(gone);
@@ -1066,7 +1071,7 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again }) {
   // take-over does not wait: it goes by the record's own list. A take-over of a record nobody else has open is a plain open.
   const arriving = held ? [] : stillArriving(ctx, found, record);
   if (arriving.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: arriving });
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [...arriving, ...askedBy] });
     say(`Still arriving from ${record.released.by}: ${arriving.length} file${arriving.length === 1 ? "" : "s"}. Dropbox is bringing them over; say "${again}" again when it is done.`);
     return { code: 0 };
   }
@@ -1082,7 +1087,7 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again }) {
   const sayNext = held ? `Say "take it over" again` : `Say "${again}" again`;
   const coming = notHere(ctx, found, record);
   if (coming.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: held ? ["--take-over"] : [] });
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [...(held ? ["--take-over"] : []), ...askedBy] });
     say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. ${sayNext} when it is done; "how far is it?" shows how far it has got.`);
     return { code: 0 };
   }
@@ -1154,6 +1159,12 @@ export async function open(ctx, rest) {
     cliPath), once Jason has said yes to installing it. */
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 
+/** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
+    <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
+const openInAppWords = (name) => `open ${name} in HyperFrames`;
+/** Who `app` tells the bring it starts that it asked (`bring … --asked-by app`), so that the bring ends with `openInAppWords`. */
+const APP_ASKED = "app";
+
 /** `app "<episode>" [--take-over]`: open the episode's main video in the HyperFrames app, making its project first (app.js
     openInApp; architecture 2026-10-27, 4.1). In order:
     - the gate, as for every command that names an episode (episodeFor): a video not yet answered, a video left alone, a session
@@ -1174,7 +1185,7 @@ export async function app(ctx, rest) {
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: `open ${got.record.name.text} in HyperFrames` });
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openInApp(ctx, { found, record }, { env: ctx.deps.env, ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
@@ -1416,16 +1427,20 @@ async function pushVersion(ctx, found, part, v, answers) {
   return pushPart(ctx, found, { part, xml: readFileSync(at, "utf8"), told: [`It is v${v} as it was stored, shown again as a new version.`], ...answers });
 }
 
-/** `bring --now "<episode folder>" [--take-over]`, the detached run `open` starts: each file of the episode that is not whole
-    on this Mac is read to its end, so that Dropbox brings it over, and the result says which are whole now, and what to say
-    next: to open it, or, when a file did not come, why, and to open it to try again. The bring of a take-over (`--take-over`)
-    that brought every file also keeps whose claim it was for, and that what to say next, while that claim stands and her yes
-    to it is kept, is to take it over again: `status` says so only then (see nextOf). */
+/** `bring --now "<episode folder>" [--take-over] [--asked-by app]`, the detached run `open` and `app` start: each file of the episode
+    that is not whole on this Mac is read to its end, so that Dropbox brings it over, and the result says which are whole now, and
+    what to say next: to open it, or, when a file did not come, why, and to open it to try again. `--asked-by app` says that `app`
+    started it (claimAndBring), and then what to say next is to open it in HyperFrames, `open <name> in HyperFrames`, which runs
+    `app`; a bring that was told nobody, or any other command, says `open <name>`, as it always did. The bring of a take-over
+    (`--take-over`) that brought every file also keeps whose claim it was for, and that what to say next, while that claim stands
+    and her yes to it is kept, is to take it over again: `status` says so only then (see nextOf). */
 export async function bring(ctx, rest) {
   // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
   const [now, folder, ...after] = rest;
   const takeOver = after.includes("--take-over");
-  const only = after.filter((word) => word !== "--take-over");
+  const askedAt = after.indexOf("--asked-by");
+  const asker = askedAt === -1 ? "" : String(after[askedAt + 1] ?? "");
+  const only = after.filter((word, i) => word !== "--take-over" && !(askedAt !== -1 && (i === askedAt || i === askedAt + 1)));
   if (now !== "--now" || !folder) {
     ctx.say(HELP);
     return 2;
@@ -1455,7 +1470,9 @@ export async function bring(ctx, rest) {
     const still = wanted();
     const made = coming.filter((rel) => !still.includes(rel));
     for (const rel of still) if (!failed.some((f) => f.startsWith(`${rel} `))) failed.push(`${rel} is still not whole`);
-    const next = failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".`;
+    const next = asker === APP_ASKED
+      ? (failed.length ? `Some files of ${name} are not here yet. Say "${openInAppWords(name)}" to try again.` : `Every file of ${name} is here. Say "${openInAppWords(name)}" again.`)
+      : (failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".`);
     // A bring that failed says why, and to open it, take-over or not: it would most likely fail again the same way (a full
     // disk, Dropbox paused, the Mac offline), and a take-over is run again without asking her only to finish what she said
     // yes to, never to try again what failed.
