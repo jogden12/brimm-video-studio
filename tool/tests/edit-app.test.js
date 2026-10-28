@@ -331,6 +331,21 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
     t.done();
   });
+  it("opens the project from the working copy the run it asked for made, and asks for none again: the copy's key is the one app looks for", async () => {
+    const { t, found, work } = world({ copy: false });
+    const asked = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([asked.code, asked.said.length], [0, 1]);
+    const [, args] = t.started[0];
+    // The run `app` started is run as it would run, with ffprobe and ffmpeg's stand-ins; it makes the copy where app looks for it.
+    const made = await on(t.ctx.deps, ...args.slice(1));
+    assert.equal(made.code, 0, made.text);
+    const opened = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([opened.code, opened.said], [0, [OPEN]]);
+    assert.deepEqual(t.started.map(([, more]) => more.slice(1)), [["workcopy", "--now", FOLDER]]);
+    const project = join(work, reread(found).app.projects[0].name);
+    assert.equal(readFileSync(join(project, "media", "recording.mp4"), "utf8"), "a part of a Story");
+    t.done();
+  });
   it("keeps the project and says why when HyperFrames will not open, with no time it was opened in the record", async () => {
     for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
       const { t, found, work } = world({ open });
