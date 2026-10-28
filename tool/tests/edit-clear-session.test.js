@@ -12,7 +12,7 @@ import { CLAIM_WAIT_MS, editMain } from "../edit.js";
 import { dialogScript } from "../dialog.js";
 import { gated } from "../gate.js";
 import { episodeFault, localStamp, recordFile, recordText } from "../episode.js";
-import { episodeWork } from "../settings.js";
+import { episodeWork, writeSettings } from "../settings.js";
 import { lockOf, resultFile } from "../detached.js";
 import { setup, episodeFor, episodeAs, reread, FOLDER, ID, NAME } from "./episodes.js";
 
@@ -163,6 +163,8 @@ describe("kind --clear-session: asking on a dialog Claude cannot press", () => {
   it("clears the mark on her click: one write holding the new kind, the answer again, and the mark cleared by the dialog", async () => {
     for (const [word, kept, said] of KINDS) {
       const t = setup();
+      // This Mac's app is on, so the working copy is asked for beside the reading (and only then).
+      writeSettings(t.home, { app: "hyperframes" });
       const found = sessionOf(t, { session: { ...MARK, teachings: "transcript only" } });
       duringWaits(t, 1000, () => leaveResult(t));
       const d = dialogs(t, found, CLEAR_IT);

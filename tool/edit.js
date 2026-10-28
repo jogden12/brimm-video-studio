@@ -3251,6 +3251,13 @@ async function read(ctx, rest) {
 /** The kinds of video the working copy is made for: a raw video, and an iPhone clip. A finished video is edited by her editor, and a
     session's video reaches HyperFrames only as a clip of its own, never whole. */
 const WORK_COPY_KINDS = ["raw", "short video"];
+/** Whether `kind` asks for the working copy of a video it has just answered as `stored`, `record` being the record it wrote: only
+    when the copy will be used. It is made for a raw video and an iPhone clip (WORK_COPY_KINDS), on a Mac whose settings turn the app
+    on (settings.js appOf: on any other nothing opens a project, so the copy would never be used), and while the record holds no
+    main project in use (app.js isMain): that project's writer moved the copy into it and left only its facts, so asking again
+    would make a copy nobody opens. A project kept for the earlier kind in this very answer is not in use, so a change of kind asks
+    for the copy the new project is made from. */
+const copyWanted = (ctx, stored, record) => WORK_COPY_KINDS.includes(stored) && appOf(ctx.settings) !== "" && !(record.app?.projects ?? []).some(inUse);
 /** What a run of `workcopy` for a video of another kind leaves for its result, in the words a copy that cannot be made is refused in. */
 const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
 
@@ -4462,8 +4469,11 @@ function answerWhy(ctx, found, record, plan) {
     - and right after the reading, for a raw video and an iPhone clip whose video is whole on this Mac, the working copy of the
       video is asked for (workcopy.js requestWorkCopy): its detached run, `workcopy`, which makes the video HyperFrames is given
       to edit. It has a lock of its own, so it runs beside the reading and is not waited for, and a request while a run of it is
-      at work starts none. A finished video, a session, a video not whole on this Mac and a Mac whose readings are off start
-      none; `app` asks for the copy when `kind` could not. Nothing of it is said here: "how far is it?" says it.
+      at work starts none. It is asked for only when it will be used (copyWanted): on a Mac whose settings turn the app on, and
+      when the record this wrote has no main project in use, since that project's writer moved the copy into it. A project kept
+      for the earlier kind in this very answer is not in use, so a change of kind asks for a new copy. A finished video, a
+      session, a video not whole on this Mac, a Mac whose app is off and a Mac whose readings are off start none; `app` asks for
+      the copy when `kind` could not. Nothing of it is said here: "how far is it?" says it.
     A video answered as anything but a session is no longer one whose names are kept from the chat. */
 export async function kindCommand(ctx, rest) {
   const began = ctx.now();
@@ -4752,10 +4762,10 @@ async function answerKind(ctx, found, plan, began) {
   const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
   startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
   // The video HyperFrames is given to edit is made beside the reading, once, for a raw video and an iPhone clip whose video is whole
-  // on this Mac (architecture 2026-10-27, 5.7). It takes a lock of its own, so it does not wait for the reading, nor for the late
-  // check that holds a raw video's reading, and a request while a run of it is at work starts none. A video not here yet is made
-  // into one by `app`, which asks for it when it is not there.
-  if (WORK_COPY_KINDS.includes(stored) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
+  // on this Mac (architecture 2026-10-27, 5.7), when it will be used (copyWanted). It takes a lock of its own, so it does not wait
+  // for the reading, and a request while a run of it is at work starts none. A video not here yet is made into one by `app`, which
+  // asks for it when it is not there.
+  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
     return 0;
