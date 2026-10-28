@@ -260,6 +260,18 @@ describe("the notes for the agent (5.4)", () => {
     assert.equal(notes.split("\n")[0], "# The BRIMM: rules for this project");
     assert.match(notes.split("\n").slice(1, 4).join("\n"), /These rules come before everything below/);
   });
+  // In A0 the app's assistant said "the app told me it records every change on its own", and skipped the line that asked it to
+  // wrap each request in `history begin` and `history end`. The app keeps the history; what stays is asking it.
+  it("do not ask the agent to record each request in the history, and keep the line about asking the history what changed", () => {
+    for (const files of [projectFiles(main()), projectFiles(reel()), projectFiles(clip())]) {
+      for (const path of ["CLAUDE.md", "AGENTS.md"]) {
+        const text = files.get(path);
+        assert.doesNotMatch(text, /history\s+(?:begin|end)\b/, path);
+        assert.doesNotMatch(text, /--who\b|--label\b/, path);
+        assert.ok(text.split("\n").includes("- **Versions.** When asked what has changed, or to go back, use `npx hyperframes history`."), path);
+      }
+    }
+  });
   it("name every command the agent may not run, and send it to transcript.json", () => {
     for (const [name, c] of Object.entries(COMMANDS)) if (c.class !== "agent") assert.ok(rules.includes(`\`${name}\``), name);
     for (const name of ["skills", "publish", "cloud", "tts", "add"]) assert.ok(rules.includes(`\`${name}\``), name);
