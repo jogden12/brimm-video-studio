@@ -1,0 +1,191 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"title","type":"string","label":"Title","description":"The Reel&apos;s title, on screen for its first seconds.","default":"Price like you mean it"},
+    {"id":"cropX","type":"string","label":"Crop","description":"Where the upright frame sits across the wide picture: 0% is the left edge, 100% the right.","default":"50%"},
+    {"id":"family","type":"string","label":"Typeface","description":"The font family of the words.","default":"Josefin Sans"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="stylesheet" href="../brand.css" />
+    <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+    <style>
+      #root {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #000;
+      }
+      #clip {
+        position: absolute;
+        inset: 0;
+        width: 1080px;
+        height: 1920px;
+        object-fit: cover;
+        object-position: var(--cropX) 50%;
+      }
+      /* Meta's safe zone for an upright video leaves the top 14% (269 px) and the bottom 35% (672 px) clear, and the preset
+         research puts a caption's lowest edge 65% down, no wider than 64% (691 px). */
+      #title {
+        position: absolute;
+        top: 300px;
+        left: 90px;
+        right: 90px;
+        text-align: center;
+      }
+      #title span {
+        display: inline-block;
+        padding: 18px 30px 20px;
+        background: var(--navy);
+        color: var(--mist);
+        font-weight: 500;
+        font-size: 52px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        line-height: 1.2;
+      }
+      #captions {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 672px;
+        display: flex;
+        justify-content: center;
+      }
+      .group {
+        position: absolute;
+        bottom: 0;
+        max-width: 691px;
+        padding: 14px 26px 16px;
+        background: var(--navy);
+        color: var(--mist);
+        font-weight: 500;
+        font-size: 56px;
+        line-height: 1.2;
+        text-align: center;
+        visibility: hidden;
+        opacity: 0;
+      }
+      #end {
+        position: absolute;
+        inset: 0;
+        background: var(--navy);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+      }
+      #end .name {
+        color: var(--mist);
+        font-weight: 500;
+        font-size: 64px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      #end .brand {
+        margin-top: 20px;
+        color: var(--sand);
+        font-weight: 400;
+        font-size: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="reel"
+      data-start="0"
+      data-duration="60"
+      data-width="1080"
+      data-height="1920"
+    >
+      <video id="clip" src="../media/reel-source.mp4" data-start="0" data-duration="60" data-has-audio="true" playsinline></video>
+      <div id="title" class="brand-text"><span data-var-text="title">Price like you mean it</span></div>
+      <div id="captions" class="brand-text"></div>
+      <div id="end" class="brand-text">
+        <div class="name">Sallie Ogden</div>
+        <div class="brand">The BRIMM</div>
+      </div>
+    </div>
+
+    <script>
+      // Captions from transcript.json, the [{text, start, end}] word list that `hyperframes transcribe` writes: at most three
+      // words a group, a new group after a sentence or a pause of half a second, the word being said in sand.
+      window.__timelines = window.__timelines || {};
+      const END_CARD = 57;
+      const SAND = "#c1ad97";
+      const MIST = "#e8e3da";
+      const groupsOf = (words) => {
+        const groups = [];
+        let group = [];
+        words.forEach((word, i) => {
+          const before = words[i - 1];
+          const breakHere =
+            group.length === 3 || (before && (word.start - before.end > 0.5 || /[.?!]$/.test(before.text)));
+          if (group.length && breakHere) {
+            groups.push(group);
+            group = [];
+          }
+          group.push(word);
+        });
+        if (group.length) groups.push(group);
+        return groups;
+      };
+      const wordsOf = (list) => {
+        const words = [];
+        for (const raw of list) {
+          const text = String(raw.text || "").trim();
+          const start = Number(raw.start);
+          const end = Number(raw.end);
+          if (!text || !(end > start) || start >= END_CARD) continue;
+          if (/^[^\p{L}\p{N}]+$/u.test(text) && words.length) words[words.length - 1].text += text;
+          else words.push({ text, start, end });
+        }
+        return words;
+      };
+      (async () => {
+        const timeline = gsap.timeline({ paused: true });
+        const captions = document.getElementById("captions");
+        try {
+          const response = await fetch("../transcript.json");
+          const groups = groupsOf(wordsOf(await response.json()));
+          groups.forEach((group, g) => {
+            const next = groups[g + 1];
+            const last = group[group.length - 1];
+            const hide = Math.min(END_CARD, next && next[0].start - last.end < 0.3 ? next[0].start : last.end + 0.15);
+            const box = document.createElement("div");
+            box.className = "group";
+            group.forEach((word, w) => {
+              const span = document.createElement("span");
+              span.textContent = (w ? " " : "") + word.text;
+              box.appendChild(span);
+              const until = group[w + 1] ? group[w + 1].start : hide;
+              timeline.set(span, { color: SAND }, word.start);
+              timeline.set(span, { color: MIST }, until);
+            });
+            captions.appendChild(box);
+            timeline.set(box, { autoAlpha: 1 }, group[0].start);
+            timeline.set(box, { autoAlpha: 0 }, hide);
+          });
+        } catch (error) {
+          const box = document.createElement("div");
+          box.className = "group";
+          box.style.visibility = "visible";
+          box.style.opacity = "1";
+          box.textContent = "NO CAPTIONS: transcript.json could not be read";
+          captions.appendChild(box);
+        }
+        timeline.fromTo("#title", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 0.2);
+        timeline.to("#title", { opacity: 0, duration: 0.4, ease: "power2.in" }, 4.6);
+        timeline.fromTo("#end", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, END_CARD);
+        timeline.set({}, {}, 60);
+        window.__timelines.reel = timeline;
+      })();
+    </script>
+  </body>
+</html>

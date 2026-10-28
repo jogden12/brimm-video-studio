@@ -1,0 +1,66 @@
+/* The BRIMM's brand guide, for the H0 render test only (docs/phase-h0/checklist.md). The colours are the guide's
+   (docs/research/2026-10-13-video-presets/presets.md). The typeface is a variable of each composition, "family": Josefin Sans by
+   default, which Jason picked on 2026-10-26 in place of Sweet Sans Pro, or Varela, the guide's own alternate. Both are Google
+   Fonts' files as Fontsource packs them for npm. A family the renderer cannot find falls back to monospace on purpose, so a
+   missing font looks like a typewriter and cannot pass for the right one. */
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-300-normal.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("./node_modules/@fontsource/josefin-sans/files/josefin-sans-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Varela";
+  src: url("./node_modules/@fontsource/varela/files/varela-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
+:root {
+  --navy: #1f2d42;
+  --fog: #5c6d7e;
+  --light-gray: #9ea9b2;
+  --dew: #ced3d6;
+  --sand: #c1ad97;
+  --dune: #cebeac;
+  --mist: #e8e3da;
+  --smoke: #f8f7f5;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.brand-text {
+  font-family: var(--family), monospace;
+}
+
+/* The test mark: a sand square in the top-left corner for the whole of a graphic, with no animation, so the checklist can
+   find the frame a graphic starts and ends on. It is for H0 only. */
+.test-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 48px;
+  height: 48px;
+  background: var(--sand);
+}
