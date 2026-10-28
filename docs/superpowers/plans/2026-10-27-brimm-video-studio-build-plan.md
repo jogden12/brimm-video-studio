@@ -170,7 +170,7 @@ The second group (names here; each is a few lines):
 
 | Test | Asserts |
 |---|---|
-| `denyRules` has a rule for each denied command in each spelling | For `publish`: `Bash(npx hyperframes publish:*)`, `Bash(npx --yes hyperframes@0.8.208 publish:*)`, `Bash(hyperframes publish:*)`; and `Bash(npm run publish:*)` is there. None for a command of the other classes |
+| `denyRules` has a rule for each command the agent may not run, in each spelling | For `publish`: `Bash(npx hyperframes publish:*)`, `Bash(npx --yes hyperframes@0.8.208 publish:*)`, `Bash(hyperframes publish:*)`; and `Bash(npm run publish:*)` is there. The same for `open` and `catch-up`, which only `edit.js` runs. None for a command the agent may run |
 | `settingsFor("main")` holds the deny rules and four variables, and nothing else | `permissions` has `deny` only (no `allow`); `env` is exactly `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, `DISABLE_FEEDBACK_COMMAND=1`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` |
 | `settingsFor("clip")` also denies `WebFetch` and `WebSearch` | Both present; absent for `main` |
 | `childEnv` holds exactly these names | With a base holding `ANTHROPIC_API_KEY`, `HTTPS_PROXY`, `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `CLAUDE_CODE_SESSION_ID`: the result has `PATH`, `HOME`, `LANG`, `HYPERFRAMES_NO_TELEMETRY`, `HYPERFRAMES_SKIP_SKILLS` and none of those |
@@ -188,7 +188,7 @@ The words `readOpen` gives (proposed; they may change in review, the table is wh
 |---|---|
 | `opened: true`, no handover | "It's open in HyperFrames." |
 | `opened: true`, `handedOver` set | "It's open in HyperFrames, and it picks up this conversation." |
-| `opened: true`, handover wanted but refused | "It's open in HyperFrames. It starts a new conversation, because this chat has a session in it." |
+| `opened: true`, handover wanted but not made | "It's open in HyperFrames. It starts a new conversation." The reasons are `handoverAllowed`'s, so the caller adds the one that is true |
 | `not-installed` | "HyperFrames isn't installed on this Mac: ask Jason." |
 | `open-failed` | "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason." |
 | `unsupported-platform`, `handoff-unavailable` | "HyperFrames can't be opened from here: ask Jason." |
@@ -199,7 +199,7 @@ The words `readOpen` gives (proposed; they may change in review, the table is wh
   - `PIN`: read from `hyperframes.pin.json` (`version`, `integrity`; `gsap` is added in PR 2).
   - `toolchainDir(home)` is `<home>/BRIMM Video Work/.toolchain/hyperframes-<version>`; `cliPath(home)` is `<that>/node_modules/hyperframes/bin/hyperframes.mjs`. Use `workFolder` from `settings.js`.
   - `COMMANDS` is a table `{ name: { class, why } }` for the 43 (spec 5.5): `agent` for the 20, `edit` for `open` and `catch-up`, `denied` for the other 21. Neither `clean` nor `remove-background` is run by anyone.
-  - `commandsIn(help)` takes the lines between the first category header ("Getting Started:") and "Examples:" that match `/^  ([a-z][a-z-]+) {2,}\S/`.
+  - `commandsIn(help)` takes the lines from the first category header ("Getting Started:") to the end of the help that match `/^  ([a-z][a-z-]+) {2,}\S/`. The examples start with `$` and never match, and a command added after them is still found (the `frobnicate` test).
   - `unclassified(help)` is `commandsIn(help)` minus the keys of `COMMANDS`, in help order.
   - `denyRules()` and `settingsFor(kind)` as the table above. The rules are sorted so the file is the same every time.
   - `childEnv({ base, node, handover, sessionId })` builds the list; `PATH` is `dirname(node)`, `/usr/bin`, `/bin`.
