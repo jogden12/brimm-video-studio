@@ -20,7 +20,8 @@
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
 #                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro (optional now) and
 #                                    Claude Code's sign-in are here, what Jason does by hand for any that is not, and whether
-#                                    the HyperFrames command line is here or would be installed
+#                                    the HyperFrames command line is here or would be installed, with what would then be done
+#                                    about its Chrome and its doctor check
 #   ./install.sh --machine "Mac Studio" --drop Drop "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac's drop folder to BRIMM Video/Drop/<this Mac>, or back with --drop "Unedited
 #                                    Video". The Mac then watches the new folder, and the old one is no longer watched and is
@@ -43,7 +44,10 @@
 # installs or downloads. The model is the transcript tool's own, in the same place, so a Mac that has that tool has it
 # already. With --machine it also installs the HyperFrames command line that tool/hyperframes.pin.json pins, with npm and none of
 # the package's own scripts, into ~/BRIMM Video Work/.toolchain/hyperframes-<version>, unless that folder holds it already. It
-# stops, and takes that folder away again, if the download's integrity string is not the pin's. A finished video is moved, with
+# stops, and takes that folder away again, if the download's integrity string is not the pin's. It then has that command line
+# find or fetch the Chrome it renders with, with its own browser ensure, into ~/.cache/hyperframes/chrome, and stops, before
+# the Mac's drop folder, its settings and its launch agent are touched, if it cannot be had. Last it runs the command line's
+# own doctor, whose words are shown for Jason and which does not stop the setup. A finished video is moved, with
 # what was made of it, into a new folder named for the day, in the folder it was put in. It does not install Claude Code. A
 # folder that the transcript tool's launch agent watches already is refused: whichever of the two tools looked first would
 # file the video away. The launch agent is com.thebrimm.unedited, so a run replaces the one an earlier installer gave this Mac
@@ -99,6 +103,14 @@ OPEN_LOCK_CLAUDE="$(sed -n 's/^export const OPEN_LOCK_CLAUDE = "\([0-9][0-9.]*\)
 HYPERFRAMES_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",\{0,1\}$/\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"
 HYPERFRAMES_INTEGRITY="$(sed -n 's/^  "integrity": "\([^"]*\)",\{0,1\}$/\1/p' "$HERE/hyperframes.pin.json" 2>/dev/null || true)"
 TOOLCHAIN="$WORK/.toolchain/hyperframes-$HYPERFRAMES_VERSION"
+# The command line's program in that folder, the file node is given to run (hyperframes.js's cliPath): an absolute path, since the work
+# folder is under the home folder. It is never reached through npx.
+HYPERFRAMES_PROGRAM="$TOOLCHAIN/node_modules/hyperframes/bin/hyperframes.mjs"
+# Where the command line keeps the Chrome it renders with: its own copy of a Chrome Headless Shell, in the home folder's cache, on this Mac's
+# own disk and apart from any Chrome a person uses. The command line chooses it, and this only says so: it is read from the pinned package's
+# code (its CACHE_DIR is the home folder's .cache/hyperframes/chrome), and the H0 render test also found it there by hand on the Mac
+# Studio. Its `browser ensure` finds the Chrome there or fetches it there. When the pin moves, this is read again with the new package.
+CHROME_DIR="$HOME/.cache/hyperframes/chrome"
 
 say() { print -r -- "$@"; }
 
@@ -254,6 +266,14 @@ toolchain_here() {
 drop_toolchain() {
   [[ "$TOOLCHAIN" == "$WORK/.toolchain/hyperframes-"[0-9]* ]] || return 0
   rm -rf "$TOOLCHAIN"
+}
+# Runs the pinned HyperFrames command line with the arguments given, as the setup asks it twice (for its Chrome, and for its check):
+# by node and the program's absolute path in the toolchain, never through npx, which would run whatever hyperframes it found first
+# (spec 5.3). It is run in the variables hyperframes.js's childEnv gives it that never change, telemetry and the skills download off, as
+# npm is run with telemetry off in the step that installs the command line; node's folder leads the PATH, so that it is the node that
+# was checked. What it prints goes to the terminal as it comes, none of it is captured, and its exit status is this function's.
+run_hyperframes() {
+  env PATH="${node:h}:$PATH" HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_SKIP_SKILLS=1 "$node" "$HYPERFRAMES_PROGRAM" "$@"
 }
 
 # What unedited.js is told in the plist: --rules-only, when that was asked for here, and then each watched folder after its
@@ -615,6 +635,11 @@ if [[ -n "$machine" ]]; then
     say "  HyperFrames toolchain:  version $HYPERFRAMES_VERSION of its command line (not the app), to install in $TOOLCHAIN with npm, none of the package's own scripts run"
     say "  Its download is checked:  against the pin's integrity string, $HYPERFRAMES_INTEGRITY, in tool/hyperframes.pin.json. If they differ, the install stops, says so, and takes that folder away again"
   fi
+  # The Chrome the command line renders with, and its own check of this Mac, once it is in place: said here, whether the command line is
+  # here already or is to be installed, and run only by the real run (below), by the command line itself. This looks at neither: whether
+  # the right Chrome is in its cache is for its own browser ensure to say, and a print runs nothing of the command line.
+  say "  Its Chrome:  found, or fetched from storage.googleapis.com when it is not there, by the command line's own browser ensure, once the command line is in place: the Chrome Headless Shell it renders with, its own copy, kept in $CHROME_DIR (a Chrome you use is left alone). If it cannot be had, the setup stops there, before this Mac's drop folder, its settings and its launch agent are touched"
+  say "  Its doctor check:  the command line's own doctor, run last, right after its Chrome. Its words are shown for Jason to read on each Mac, the installer reads none of them, and it does not stop the setup. It may say that a newer version of the command line is out: that is expected, since the pin moves only by a pull request. Nothing it suggests is installed here"
   # Whether Claude Code is signed in, and on which plan. Its email and its organisation are never shown. And its version: her
   # folder's guard blocks a call when it cannot run only on Claude Code new enough for that (onFailure), so her folder is
   # written only then.
@@ -782,6 +807,30 @@ if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then
     exit 1
   fi
   say "The HyperFrames command line $HYPERFRAMES_VERSION is installed in $TOOLCHAIN, and what npm fetched carries the pin's integrity string."
+fi
+
+# For one of the two Macs, with the pinned command line in place and checked (installed above, or here already): the Chrome it renders with,
+# and then its own check of this Mac. Its `browser ensure` finds that Chrome in its own cache folder (CHROME_DIR) or fetches it there
+# once, and never turns to a Chrome a person uses. When the Chrome cannot be had the setup stops here, before this Mac's drop folder,
+# settings and launch agent are touched; the command line stays, installed and checked. Its `doctor` comes last and only shows what it
+# says: its words are for Jason, who reads them on each Mac, and nothing is read from them (there is no capture of its output), so
+# whatever status it ends with, the setup goes on. Both are run by run_hyperframes. Only a real run does this, on Jason's yes: a print
+# and a test never run the command line.
+if [[ -n "$machine" ]]; then
+  say ""
+  say "Having the HyperFrames command line find or fetch the Chrome it renders with. When it is not there already, it is fetched, once, from storage.googleapis.com into $CHROME_DIR."
+  if ! run_hyperframes browser ensure; then
+    say ""
+    say "The HyperFrames command line could not find or fetch its Chrome (what it said is above). The command line $HYPERFRAMES_VERSION stays in $TOOLCHAIN: it is installed, and was checked against the pin. Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed first stays. Check that this Mac is online and has room for the download, then run this again: the command line is here, so only its Chrome is asked for again."
+    exit 1
+  fi
+  say ""
+  say "Its own check of this Mac, doctor. What it says is for Jason to read, and it does not stop the setup:"
+  doctor_status=0
+  run_hyperframes doctor || doctor_status=$?
+  say ""
+  if (( doctor_status != 0 )); then say "doctor ended with status $doctor_status (what it said is above). That does not stop the setup."; fi
+  say "That is all doctor says. The setup reads none of it and installs nothing it suggests. Jason looks for a tick against Node.js, FFmpeg, FFprobe and Chrome; a cross against whisper-cpp, TTS, BGM or Docker is expected, and so is one against Version when a newer command line is out, since the pin moves only by a pull request."
 fi
 
 if [[ ! -f "$MODEL" ]]; then
