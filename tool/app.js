@@ -1,6 +1,7 @@
 // Opening an episode in the HyperFrames app (architecture 2026-10-27: sections 4.1, 4.8, 5.1, 5.2, 5.6, 5.7 and 7.1).
 //
-// edit.js finds the episode, asks the gate and claims it for this Mac, and then gives it to openInApp, which does the rest:
+// edit.js finds the episode, asks the gate, refuses an episode whose main project in use was made on another Mac and is not on this
+// one (projectOnAnotherMac), claims it for this Mac, and then gives it to openInApp, which does the rest:
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - a folder at the project's name that the record does not know, as a run whose record was not written leaves, is taken as the
@@ -69,6 +70,19 @@ export const isMain = (project) => project.key === "main" && project.state !== K
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
     Mac write, and is joined to a folder here. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
+
+/** The Mac a main project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
+    otherwise. A project's folder is in the Mac's own work folder, never in Dropbox, so the project of another Mac is not here, and
+    everything done in it (the app's history, what is in its folder) is there. Making a new project under its name would drop its
+    entry from the record and leave that Mac's work unreachable, so `app` refuses such an episode (edit.js), until a take-over can
+    rebuild the project from the snapshot (plan PR 11). The project of this Mac is not asked about: when its folder is gone it is made
+    again, under its own name (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads
+    nowhere a folder is, is a folder that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's. */
+export function projectOnAnotherMac(ctx, { found, record }) {
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  if (!earlier || typeof earlier.on !== "string" || earlier.on === "" || earlier.on === ctx.machine) return null;
+  return plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name)) ? null : earlier.on;
+}
 
 /** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. */
 function jsonIn(path) {
@@ -277,13 +291,14 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     nothing is made or started. If the recording is not the one it was made from (its size or its time is not what `from` says,
     and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
     replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
-    folder is not here is replaced by the folder at the name the project would get, when one is there that the record does not
-    know (adoptProject), and otherwise by a new project (makeProject), which is not made while Claude's reading of the episode is
-    at work (`read` holds its lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits:
-    one made before is opened, and a folder the record does not know is taken, whether or not the reading is at work.
-    A project kept for an earlier kind (KEPT) is none in use:
-    the next is made as any first one is, under the first name no project the record keeps has (nextMain), "main 2" after the
-    first, and the kept one keeps its folder, its name and its entry in the record.
+    folder is not here is replaced, when this Mac made it: by the folder at the name the project would get, when one is there
+    that the record does not know (adoptProject), and otherwise by a new project (makeProject). One that another Mac made is not
+    replaced: its work is on that Mac, and a new project under its name would drop its entry, so edit.js refuses it before the
+    claim (projectOnAnotherMac). A new project is not made while Claude's reading of the episode is at work (`read` holds its
+    lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
+    opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
+    kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
+    (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:

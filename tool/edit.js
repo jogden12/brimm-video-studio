@@ -80,7 +80,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
 import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -1164,6 +1164,11 @@ const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Ja
     words, named as its other lines name the video. */
 const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
 
+/** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
+    projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record, and a take-over
+    cannot rebuild it until the snapshot comes (plan PR 11). Named as app's other lines name the video. */
+const projectIsElsewhere = (name, on) => `${name}'s HyperFrames project is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
@@ -1180,6 +1185,10 @@ const APP_ASKED = "app";
       Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
+    - an episode whose main project in use was made on another Mac, and is not on this one, is refused (projectIsElsewhere; app.js
+      projectOnAnotherMac), with or without `--take-over`: it ends with 1 before anything is claimed or brought, nothing is asked
+      for or made, and no record is written, since a new project here would drop the other Mac's from the record. A project of
+      this Mac's own whose folder is gone is made again, as before;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
@@ -1194,6 +1203,8 @@ export async function app(ctx, rest) {
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
+  const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
+  if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;

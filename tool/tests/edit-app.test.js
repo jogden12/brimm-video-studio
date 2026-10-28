@@ -5,7 +5,7 @@
 // stand-in for the pinned command line (tests/stand-ins/hyperframes.mjs), so no test runs HyperFrames, the app, HeyGen or `claude`.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLAIM_WAIT_MS, COMMAND_NAMES, HELP, editMain } from "../edit.js";
@@ -570,6 +570,99 @@ describe("app: what the bring it starts says when it is done", () => {
       assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME}".`, asked.join(" "));
       t.done();
     }
+  });
+});
+
+describe("app: a project that is on another Mac is not made again here (plan PR 11 brings the snapshot)", () => {
+  const KEPT = "kept for an earlier kind";
+  const PROJECT_NAME = "Pricing- what to charge- main 3fa9c1";
+  const THERE = (on) => `${NAME}'s HyperFrames project is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+  /** The record of an episode whose main project was made on `on` (layout 4), as the record keeps it; `over` changes the project. */
+  const madeOn = (on, over = {}) => ({
+    ...RAW, version: 4,
+    app: { toolchain: PIN.version, projects: [{
+      key: "main", name: PROJECT_NAME, madeAt: "2026-10-19T10:00:00-05:00", on, from: { file: "Pricing talk.mp4", bytes: 13, modified: "2026-10-14T09:00:00-05:00" },
+      workingCopy: { bytes: WORKING_COPY.length, seconds: 23.423, fps: 30 }, opened: ["2026-10-19T10:05:00-05:00"], handover: false, fromSuggestion: null, state: "opened", ...over
+    }] }
+  });
+  /** What a refusal must leave as it was: the record whole, this Mac's work folder, the episode's folder, and everything started. */
+  const state = (t, found, work) => ({ record: reread(found), work: listAll(work), folder: listAll(found.folder), waits: t.waits, started: t.started, runs: runsOf(t) });
+  it("refuses, naming that Mac and saying to ask Jason, and does nothing: no claim, no bring, no working copy, no project, no record written", async () => {
+    for (const [what, extra] of [["an episode nobody has open", {}], ["an episode the other Mac has open", { editing: HERS }]]) {
+      const { t, found, work } = world({ record: { ...madeOn("Sallie's laptop"), ...extra } });
+      const before = state(t, found, work);
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [THERE("Sallie's laptop")]], what);
+      assert.deepEqual(state(t, found, work), before, what);
+      assert.equal(before.record.rev, 1, what);
+      assert.ok(!existsSync(join(work, PROJECT_NAME)), `${what}: no project is made`);
+      t.done();
+    }
+  });
+  it("refuses a take-over as well, with the claim as it was: the other Mac keeps the episode, and nothing is brought or made", async () => {
+    for (const [what, extra] of [["an episode nobody has open", {}], ["an episode the other Mac has open", { editing: HERS }]]) {
+      const { t, found, work } = world({ record: { ...madeOn("Sallie's laptop"), ...extra } });
+      const before = state(t, found, work);
+      const r = await app(t.ctx.deps, FOLDER, "--take-over");
+      assert.deepEqual([r.code, r.said], [1, [THERE("Sallie's laptop")]], what);
+      assert.deepEqual(state(t, found, work), before, what);
+      assert.deepEqual([reread(found).editing, t.started, t.waits, runsOf(t)], [extra.editing ?? null, [], [], []], what);
+      t.done();
+    }
+  });
+  it("refuses before it looks at the files, so that nothing is brought over for a project it will not open, and before the working copy is asked for", async () => {
+    for (const copy of [true, false]) {
+      const { t, found } = world({ record: madeOn("Sallie's laptop"), copy });
+      t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said, t.started, reread(found).rev], [1, [THERE("Sallie's laptop")], [], 1], `copy ${copy}`);
+      t.done();
+    }
+  });
+  it("names the Mac the project was made on, and the video as app's other lines name it", async () => {
+    const { t } = world({ record: { ...madeOn("Mac mini"), name: { text: "Budget talk", placeholder: false } } });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual(r.said, ["Budget talk's HyperFrames project is on Mac mini, with everything done in it, so it can't be opened on this Mac yet. Ask Jason."]);
+    t.done();
+  });
+  it("comes after the settings and the command line: a Mac not set up, or without the command line, says so first", async () => {
+    const off = world({ record: madeOn("Sallie's laptop"), set: false });
+    assert.deepEqual((await app(off.t.ctx.deps, FOLDER)).said, [NOT_SET_UP]);
+    off.t.done();
+    const bare = world({ record: madeOn("Sallie's laptop") });
+    delete bare.t.ctx.deps.app;
+    assert.deepEqual((await app(bare.t.ctx.deps, FOLDER)).said, [NO_COMMAND_LINE]);
+    bare.t.done();
+  });
+  it("makes this Mac's own project again, under its own name, when its folder is gone: the record keeps one entry, opened now", async () => {
+    const { t, found, work } = world({ record: madeOn("Mac Studio") });
+    assert.ok(!existsSync(join(work, PROJECT_NAME)));
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.equal(readFileSync(join(work, PROJECT_NAME, "media", "recording.mp4"), "utf8"), WORKING_COPY);
+    const later = localStamp(new Date(START + CLAIM_WAIT_MS));
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.name, p.on, p.madeAt, p.opened, p.state]), [["main", PROJECT_NAME, "Mac Studio", later, [later], "opened"]]);
+    t.done();
+  });
+  it("opens a project of the other Mac's whose folder is on this Mac, as it opens any whose folder is here", async () => {
+    const { t, found, work } = world({ record: madeOn("Sallie's laptop") });
+    mkdirSync(join(work, PROJECT_NAME), { recursive: true });
+    writeFileSync(join(work, PROJECT_NAME, "index.html"), "<html></html>");
+    // The recording is as the project was made from it (its size and its time), so nothing is said of it.
+    const made = Date.parse("2026-10-14T09:00:00-05:00") / 1000;
+    utimesSync(join(found.folder, "Pricing talk.mp4"), made, made);
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.on, p.opened.length, p.state]), [[PROJECT_NAME, "Sallie's laptop", 2, "opened"]]);
+    t.done();
+  });
+  it("is not asked of a project kept for an earlier kind, which is none in use: the next one is made, as \"main 2\"", async () => {
+    const { t, found, work } = world({ record: madeOn("Sallie's laptop", { state: KEPT }) });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.on, p.state]), [[PROJECT_NAME, "Sallie's laptop", KEPT], ["Pricing- what to charge- main 2 3fa9c1", "Mac Studio", "opened"]]);
+    assert.ok(existsSync(join(work, "Pricing- what to charge- main 2 3fa9c1", "index.html")));
+    t.done();
   });
 });
 

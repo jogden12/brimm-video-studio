@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readOpen } from "../hyperframes.js";
-import { openInApp, NOT_SET_UP } from "../app.js";
+import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
 import { episodeWork } from "../settings.js";
@@ -540,6 +540,45 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason."]);
     assert.ok(!existsSync(e.project));
     assert.deepEqual([e.saved, e.runs(), e.started], [[], [], []]);
+  });
+  describe("projectOnAnotherMac: the main project in use is another Mac's and is not here", () => {
+    /** The episode with its main project made and opened on this Mac, "Mac Studio", and the record that says so. */
+    async function madeHere(c) {
+      const e = episode(c);
+      assert.equal(await run(e), 0);
+      return { e, record: e.saved[0] };
+    }
+    /** The record with each project of it changed by `over`: as the other Mac's record would say it. */
+    const changed = (record, over) => ({ ...record, app: { ...record.app, projects: record.app.projects.map((p) => ({ ...p, ...over })) } });
+    const asked = (e, record) => projectOnAnotherMac(e.ctx, { found: e.found, record });
+    it("gives the name of the Mac the project was made on, when that is not this one and the project's folder is not on this Mac", async (c) => {
+      const { e, record } = await madeHere(c);
+      rmSync(e.project, { recursive: true });
+      assert.equal(asked(e, changed(record, { on: "Sallie's laptop" })), "Sallie's laptop");
+    });
+    it("gives null when this Mac made the project, whether or not its folder is still here", async (c) => {
+      const { e, record } = await madeHere(c);
+      assert.equal(asked(e, record), null);
+      rmSync(e.project, { recursive: true });
+      assert.equal(asked(e, record), null, "a project of this Mac's whose folder is gone is made again, under its own name");
+    });
+    it("gives null when the project's folder is on this Mac, whichever Mac made it", async (c) => {
+      const { e, record } = await madeHere(c);
+      assert.equal(asked(e, changed(record, { on: "Sallie's laptop" })), null);
+    });
+    it("gives null for a project kept for an earlier kind, which is none in use, and for a record with no project or no main one", async (c) => {
+      const { e, record } = await madeHere(c);
+      rmSync(e.project, { recursive: true });
+      assert.equal(asked(e, changed(record, { on: "Sallie's laptop", state: "kept for an earlier kind" })), null);
+      assert.equal(asked(e, changed(record, { on: "Sallie's laptop", key: "reel 1" })), null);
+      assert.equal(asked(e, { ...record, app: { ...record.app, projects: [] } }), null);
+      const { app, ...bare } = record;
+      assert.equal(asked(e, bare), null);
+    });
+    it("takes a name that leads nowhere a folder is for a folder that is not here", async (c) => {
+      const { e, record } = await madeHere(c);
+      for (const name of ["", ".", "..", "../Pricing talk main 3fa9c1", "a/b"]) assert.equal(asked(e, changed(record, { on: "Sallie's laptop", name })), "Sallie's laptop", JSON.stringify(name));
+    });
   });
   it("says this Mac is not set up for HyperFrames in words that hold no path", () => {
     assert.equal(NOT_SET_UP, "This Mac isn't set up for HyperFrames yet: ask Jason.");
