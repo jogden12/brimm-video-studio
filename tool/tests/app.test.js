@@ -68,8 +68,8 @@ describe("the HyperFrames stand-in", () => {
     s.run(["--version"]);
     s.run(["open", s.project, "--json"], { handover: true, sessionId: CHAT });
     assert.deepEqual(s.runs(), [
-      { args: ["--version"], env: ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] },
-      { args: ["open", s.project, "--json"], env: ["CLAUDE_CODE_SESSION_ID", "HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }
+      { args: ["--version"], env: ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] },
+      { args: ["open", s.project, "--json"], env: ["CLAUDE_CODE_SESSION_ID", "HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }
     ]);
   });
   it("answers nothing else, and ends with 2", (c) => {
@@ -148,7 +148,7 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.ok(!existsSync(e.paths.video), "the working copy was moved in, not copied");
     assert.ok(existsSync(e.paths.facts), "its facts stay where they were");
     assert.match(readFileSync(join(e.project, "transcript.json"), "utf8"), /"Sallie\."/);
-    assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }]);
+    assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }]);
     assert.equal(e.saved.length, 1);
     const next = e.saved[0];
     assert.equal(layoutOf(next), 4);
@@ -287,11 +287,113 @@ describe("app: opening an episode in HyperFrames", () => {
     const e = episode(c);
     const { asked } = await unwritten(e);
     const kept = { ...e.record, app: { toolchain: PIN.version, projects: [{ ...asked[0].app.projects[0], state: "kept for an earlier kind" }] } };
-    // What is done for a video whose kind she corrected is a later step; what matters here is that the kept project, whose folder
-    // has the name a new main project would get, is neither opened nor recorded again as the main one.
+    // The working copy is not there (the first project's writer moved it in), so it is asked for, as for any project that has none;
+    // what matters here is that the kept project is neither opened nor recorded again as the main one.
     await run(e, kept);
     assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"]], "only the first run opened it");
     assert.deepEqual(e.saved, []);
+  });
+  describe("a correction kept the first project, and the next is another folder (4.8)", () => {
+    const KEPT = "kept for an earlier kind";
+    const SECOND = "Pricing talk main 2 3fa9c1";
+    const THIRD = "Pricing talk main 3 3fa9c1";
+    /** The episode with its first project made and opened, and the record that says it is kept for an earlier kind, as `kind` writes it. */
+    async function keptOnce(c) {
+      const e = episode(c);
+      assert.equal(await run(e), 0);
+      const [first] = e.saved[0].app.projects;
+      const kept = { ...e.saved[0], app: { ...e.saved[0].app, projects: [{ ...first, state: KEPT }] } };
+      e.said.splice(0);
+      return { e, first, kept };
+    }
+    /** A working copy made again, as the run `kind` asked for makes one: the first project's writer moved the last into the project. */
+    const copyAgain = (e, text = "a second working copy") => writeFileSync(e.paths.video, text);
+    it("makes the next main project under the first name no project of the record has, \"main 2\", and records it as the main one, with the kept project untouched", async (c) => {
+      const { e, first, kept } = await keptOnce(c);
+      copyAgain(e);
+      const keptTree = treeOf(e.project);
+      assert.equal(await run(e, kept), 0);
+      const second = join(episodeWork(e.home, FOLDER), SECOND);
+      assert.ok(existsSync(join(second, "index.html")));
+      assert.equal(readFileSync(join(second, "media", "recording.mp4"), "utf8"), "a second working copy");
+      assert.equal(JSON.parse(readFileSync(join(second, "meta.json"), "utf8")).name, SECOND);
+      // The kept project keeps its own folder, as it was, and its own entry, with the state it was kept in; the new one is the main one.
+      assert.deepEqual(treeOf(e.project), keptTree);
+      assert.equal(e.saved.length, 2);
+      assert.deepEqual(e.saved[1].app.projects.map((p) => [p.key, p.name, p.state, p.opened.length]), [["main", first.name, KEPT, 1], ["main", SECOND, "opened", 1]]);
+      assert.deepEqual(e.saved[1].app.projects[0], { ...first, state: KEPT });
+      assert.equal(unreadable(e.saved[1]), "");
+      // It opened the new project, and said what it says of any: nothing of names, and no working copy was asked for.
+      assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", second, "--json"]]);
+      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames."], []]);
+      plain(e.said);
+    });
+    it("makes \"main 3\" after a third kind, and \"main 4\" after a fourth: the first name that no project of the record has", async (c) => {
+      const { e, kept } = await keptOnce(c);
+      copyAgain(e);
+      assert.equal(await run(e, kept), 0);
+      const twice = { ...e.saved[1], app: { ...e.saved[1].app, projects: e.saved[1].app.projects.map((p) => ({ ...p, state: KEPT })) } };
+      copyAgain(e, "a third working copy");
+      assert.equal(await run(e, twice), 0);
+      assert.deepEqual(e.saved[2].app.projects.map((p) => [p.name, p.state]), [["Pricing talk main 3fa9c1", KEPT], [SECOND, KEPT], [THIRD, "opened"]]);
+      assert.equal(readFileSync(join(episodeWork(e.home, FOLDER), THIRD, "media", "recording.mp4"), "utf8"), "a third working copy");
+      const thrice = { ...e.saved[2], app: { ...e.saved[2].app, projects: e.saved[2].app.projects.map((p) => ({ ...p, state: KEPT })) } };
+      copyAgain(e, "a fourth working copy");
+      assert.equal(await run(e, thrice), 0);
+      assert.deepEqual(e.saved[3].app.projects.map((p) => p.name).slice(-1), ["Pricing talk main 4 3fa9c1"]);
+      assert.equal(unreadable(e.saved[3]), "");
+    });
+    it("takes the name of a kept project of any state as taken, wherever it is in the record's list", async (c) => {
+      const { e, first, kept } = await keptOnce(c);
+      // The list holds a Reel's project first, the kept main project after it, and a main 2 project that is kept too.
+      const reelEntry = { ...first, key: "reel 1", name: "Pricing talk reel 1 3fa9c1", fromSuggestion: 1 };
+      const second = { ...first, name: SECOND, state: KEPT };
+      copyAgain(e);
+      assert.equal(await run(e, { ...kept, app: { ...kept.app, projects: [reelEntry, second, ...kept.app.projects] } }), 0);
+      assert.deepEqual(e.saved[1].app.projects.map((p) => p.name).slice(-1), [THIRD]);
+      assert.deepEqual(e.saved[1].app.projects.map((p) => p.name).slice(0, 3), ["Pricing talk reel 1 3fa9c1", SECOND, "Pricing talk main 3fa9c1"]);
+    });
+    it("keeps the name of a main project in use whose folder is gone: it is replaced, not kept, so its name is free", async (c) => {
+      const e = episode(c);
+      assert.equal(await run(e), 0);
+      rmSync(e.project, { recursive: true });
+      copyAgain(e);
+      assert.equal(await run(e, e.saved[0]), 0);
+      assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.state]), [["Pricing talk main 3fa9c1", "opened"]]);
+      assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), "a second working copy");
+    });
+    it("adopts a folder at the \"main 2\" name that the record does not know, as a run whose record was not written leaves one, and writes nothing over it", async (c) => {
+      const { e, first, kept } = await keptOnce(c);
+      copyAgain(e);
+      // The run that made main 2 opened the app and could not write the record.
+      const ended = await openInApp(e.ctx, { found: e.found, record: kept }, { ...e.deps, save: async () => 1 });
+      assert.equal(ended, 1);
+      const work = episodeWork(e.home, FOLDER);
+      const second = join(work, SECOND);
+      assert.ok(existsSync(join(second, "index.html")));
+      const before = [readdirSync(work).sort(), treeOf(second)];
+      e.said.splice(0);
+      // The next run is given the record as it was: it does not know the folder, which is at the name the next main project gets.
+      assert.equal(await run(e, kept), 0);
+      assert.deepEqual([readdirSync(work).sort(), treeOf(second)], before, "nothing is written again, and nothing over the folder that is there");
+      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames."], []], "no working copy is asked for");
+      assert.deepEqual(e.saved.at(-1).app.projects.map((p) => [p.name, p.state]), [[first.name, KEPT], [SECOND, "opened"]]);
+      assert.equal(unreadable(e.saved.at(-1)), "");
+      assert.deepEqual(e.runs().slice(-2).map((r) => r.args), [["open", second, "--json"], ["open", second, "--json"]]);
+    });
+    it("writes nothing over a folder at that name that it cannot take for a project, and opens nothing", async (c) => {
+      const { e, kept } = await keptOnce(c);
+      copyAgain(e);
+      const second = join(episodeWork(e.home, FOLDER), SECOND);
+      mkdirSync(second, { recursive: true });
+      writeFileSync(join(second, "notes.txt"), "a folder of someone's own");
+      rmSync(e.paths.facts);
+      assert.equal(await run(e, kept), 1);
+      assert.deepEqual(e.said, ["The HyperFrames project for Pricing talk is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason."]);
+      assert.deepEqual(treeOf(second), { "notes.txt": "a folder of someone's own" });
+      assert.equal(readFileSync(e.paths.video, "utf8"), "a second working copy", "the working copy is where it was");
+      assert.deepEqual([e.saved.length, e.runs().length, e.started], [1, 1, []]);
+    });
   });
   it("does not open a project folder it cannot read the working copy of, and says so", async (c) => {
     for (const [what, spoil] of [

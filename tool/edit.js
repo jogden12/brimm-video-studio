@@ -63,8 +63,8 @@ import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
-import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
-import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.js";
+import { findPrograms, askAgain, askBlocked, clockAt, importHold, keptList, banner } from "./unedited.js";
+import { readEpisodeNow, accountOf, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
@@ -80,9 +80,9 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, openInApp } from "./app.js";
-import { cliPath } from "./hyperframes.js";
-import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp } from "./app.js";
+import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
+import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -1159,6 +1159,11 @@ export async function open(ctx, rest) {
     cliPath), once Jason has said yes to installing it. */
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 
+/** What `app` says of a video answered as finished by her editor (architecture 2026-10-27, 4.3): it has no working copy and no
+    project, so there is nothing to open. The gate lets `app` through for such a video (it is in no list), so these are `app`'s own
+    words, named as its other lines name the video. */
+const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
+
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
@@ -1170,6 +1175,9 @@ const APP_ASKED = "app";
     - the gate, as for every command that names an episode (episodeFor): a video not yet answered, a video left alone, a session
       not cleared and a video held beside a session are refused in the gate's own words. `app` is in no gate list. This comes
       first, whether or not this Mac is set up;
+    - a video answered as finished by her editor has no HyperFrames project (architecture 4.3): `app` says so in its own words
+      (finishedHasNoProject) and ends with 1, before it looks at this Mac's settings, since nothing about this Mac changes it.
+      Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
@@ -1182,6 +1190,7 @@ export async function app(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found } = got;
+  if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
@@ -2471,7 +2480,10 @@ function refuseIfLoosened(lock, say) {
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
     checkout, and otherwise always ends with 0: a check that could not be made is said. With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
-    this Mac's settings add to what her folder allows, so that a change shows (design section 2). */
+    this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
+    on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
+    in this Mac's toolchain folder (hyperframes.js toolchainHolds and toolchainDiffers: none, another version, or the pinned version not
+    as the pin has it); it looks at a folder and runs nothing. It is not said when the lock refused first. */
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
@@ -2496,6 +2508,10 @@ async function behind(ctx) {
   const stale = studioStale(ctx);
   const folderLine = () => {
     if (stale) ctx.say(`Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    // On a Mac that opens episodes in the app, the pinned command line must be in its toolchain folder (architecture 6.1: `behind` also
+    // checks the toolchain). This needs no network either, so it is said whatever git answered. It is not said when the lock refused first.
+    const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
+    if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
     if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
     return 0;
   };
@@ -3242,8 +3258,58 @@ async function read(ctx, rest) {
 /** The kinds of video the working copy is made for: a raw video, and an iPhone clip. A finished video is edited by her editor, and a
     session's video reaches HyperFrames only as a clip of its own, never whole. */
 const WORK_COPY_KINDS = ["raw", "short video"];
+/** Whether `kind` asks for the working copy of a video it has just answered as `stored`, `record` being the record it wrote: only
+    when the copy will be used. It is made for a raw video and an iPhone clip (WORK_COPY_KINDS), on a Mac whose settings turn the app
+    on (settings.js appOf: on any other nothing opens a project, so the copy would never be used), and while the record holds no
+    main project in use (app.js isMain): that project's writer moved the copy into it and left only its facts, so asking again
+    would make a copy nobody opens. A project kept for the earlier kind in this very answer is not in use, so a change of kind asks
+    for the copy the new project is made from. */
+const copyWanted = (ctx, stored, record) => WORK_COPY_KINDS.includes(stored) && appOf(ctx.settings) !== "" && !(record.app?.projects ?? []).some(inUse);
 /** What a run of `workcopy` for a video of another kind leaves for its result, in the words a copy that cannot be made is refused in. */
 const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
+
+/** Wait, as a raw reading does (reading.js readEpisodeNow), while the import's late check of the episode's video is still to come
+    (unedited.js importHold): the working copy is made from the raw video as filed, whole and checked (architecture 2026-10-27, 5.7),
+    and that check may put the video in again. `kind` asks for the copy at once; the run does the waiting. Resolves { record }, the
+    episode's record as it is once nothing holds the video, or { why }, in the words the reading uses, when the run must end:
+    - a hold that clears by itself, an import of the video at work on either Mac, or this Mac's own late check of it before its time
+      with no problem found, is waited for: it is looked at again every READ_LOOK_MS, for READ_HOLD_MS at most. The wait is a step of
+      its own in the progress panel (WORK_COPY_WAIT_STEP), so that "how far is it?" says it, and it is ended before the copy begins;
+    - a hold that does not, an import that failed or stopped, a late check that found a problem, or one this Mac owes past its time
+      with no import at work to make it, ends the run at once with that hold's words (importHold's `why`), as the reading's ends;
+    - a wait that has run out ends it with the words of what still holds the video;
+    - after each wait the episode is found again, gate and all (findEpisode, as at the start of the run), since she may have said it is
+      something else meanwhile, or a session: a video that is no longer a raw video or an iPhone clip, or that the gate now refuses,
+      is made no copy of. The words are the gate's own, or NOT_RAW_OR_CLIP.
+    Nothing is written meanwhile: the run writes no record. `wait` is how it waits, `progress` the panel's reporter and `log` the
+    run's log. */
+async function waitForImport(ctx, { found, record, wait, progress, log }) {
+  const name = shownName(record);
+  let waited = 0;
+  let shown = false;
+  try {
+    for (;;) {
+      const hold = importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() });
+      if (!hold.why) return { record };
+      if (!hold.waits || waited >= READ_HOLD_MS) return { why: hold.why };
+      if (!shown) {
+        shown = true;
+        log(`${name}: the video for HyperFrames is made once the import has checked its copies.`);
+        progress.begin(name);
+        progress.step(WORK_COPY_WAIT_STEP);
+      }
+      await wait(READ_LOOK_MS);
+      waited += READ_LOOK_MS;
+      const again = findEpisode(ctx, found.name);
+      if (!again.read || !again.read.record) return { why: again.why || notRead(ctx, again, found.name) };
+      if (again.read.newer) return { why: newerWhy(again.read.record) };
+      if (!WORK_COPY_KINDS.includes(recordKind(again.read.record))) return { why: NOT_RAW_OR_CLIP };
+      record = again.read.record;
+    }
+  } finally {
+    if (shown) progress.end(false);
+  }
+}
 
 /** `workcopy --now "<episode folder>" [--4k]`, the detached run `kind` and `app` start (workcopy.js requestWorkCopy): it makes the
     working copy of the episode's raw video, the video HyperFrames is given to edit (workcopy.js makeWorkCopy, which never throws),
@@ -3253,6 +3319,9 @@ const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
     video held beside a session are refused in the gate's own words, and the refusal is left as the run's result, as `read`'s is;
     one a newer brimm-video wrote is named by its short id, and nothing is made or written. Past the gate it runs for a raw video
     and an iPhone clip alone (WORK_COPY_KINDS): a video of any other kind leaves a result that says it can't be used, in words.
+    Before it copies, it waits as a raw reading does while the import's late check of the video is still to come (waitForImport),
+    since the copy is made from the video as filed, whole and checked (architecture 5.7): the wait is a step in the progress
+    panel, and a hold that does not clear by itself ends the run with the reading's words for it.
     The run holds the working copy's own lock (workCopyLockOf), not the episode's, and writes no record, so that it runs beside
     the reading `kind` starts at the same moment. `--4k` makes a copy of 4K. What it needs of this Mac it takes from ctx.deps, as
     the other detached runs do, so that a test gives it stand-ins: `run` (for ffprobe), `tools` (ffmpeg and ffprobe, as
@@ -3281,9 +3350,13 @@ async function workcopy(ctx, rest) {
     progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
     ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
   };
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     if (!WORK_COPY_KINDS.includes(recordKind(record))) return { ok: false, made: [], failed: [NOT_RAW_OR_CLIP], next: "" };
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video: join(found.folder, record.video.file), name: shownName(record), fourK: Boolean(flags["4k"]) }, deps);
+    // `kind` asks for the copy at once; the video it is made from is whole and checked first (waitForImport).
+    const held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log });
+    if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video: join(found.folder, held.record.video.file), name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
@@ -4118,6 +4191,17 @@ const ANSWER_KEPT = { finished: "finished", raw: "raw", clip: "short video", ses
 /** What each kind is called to her, when she is told how a video is answered. */
 const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
 
+/** What `kind` says when a correction keeps the HyperFrames project that was made for the kind `was` (architecture 4.8), by the kind
+    `now` the video has become (as the record keeps it) and the video's `name`: the project is kept as it was; a raw video or an
+    iPhone clip is told how to make a new one, a finished video that it is not edited in HyperFrames, and a session what happens to a
+    project that holds its recording and its words. No path, flag or name of a command. */
+function keptProjectWords(was, now, name) {
+  const made = `Its HyperFrames project, made when it was answered as ${KIND_SAID[was]}, is kept as it was`;
+  if (now === "finished") return `${made}. A finished video is not edited in HyperFrames.`;
+  if (now === "session") return `${made}, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it.`;
+  return `${made}. Say "${openInAppWords(name)}" to make a new one.`;
+}
+
 const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
@@ -4442,8 +4526,13 @@ function answerWhy(ctx, found, record, plan) {
     - and right after the reading, for a raw video and an iPhone clip whose video is whole on this Mac, the working copy of the
       video is asked for (workcopy.js requestWorkCopy): its detached run, `workcopy`, which makes the video HyperFrames is given
       to edit. It has a lock of its own, so it runs beside the reading and is not waited for, and a request while a run of it is
-      at work starts none. A finished video, a session, a video not whole on this Mac and a Mac whose readings are off start
-      none; `app` asks for the copy when `kind` could not. Nothing of it is said here: "how far is it?" says it.
+      at work starts none. It is asked for at once, even while the reading waits for the import's late check: the run waits for
+      that check itself (waitForImport), as the reading does, before it makes the copy. It is asked for only when it will be used
+      (copyWanted): on a Mac whose settings turn the app on, and
+      when the record this wrote has no main project in use, since that project's writer moved the copy into it. A project kept
+      for the earlier kind in this very answer is not in use, so a change of kind asks for a new copy. A finished video, a
+      session, a video not whole on this Mac, a Mac whose app is off and a Mac whose readings are off start none; `app` asks for
+      the copy when `kind` could not. Nothing of it is said here: "how far is it?" says it.
     A video answered as anything but a session is no longer one whose names are kept from the chat. */
 export async function kindCommand(ctx, rest) {
   const began = ctx.now();
@@ -4619,6 +4708,12 @@ async function answerKind(ctx, found, plan, began) {
   const at = localStamp(new Date(ctx.now()));
   const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
   const next = { ...base, kind: stored, answer };
+  // A correction that changes the kind keeps the HyperFrames project made for the earlier kind, in the record that changes it
+  // (architecture 4.8): the main project in use is marked as made for that kind, so `app` no longer takes it for the main one and
+  // makes a new one. Nothing on disk is moved or removed here, and the same kind again changes nothing.
+  const kindWas = recordKind(base);
+  const keeps = kindWas !== null && kindWas !== stored && (base.app?.projects ?? []).some(inUse);
+  if (keeps) next.app = { ...base.app, projects: base.app.projects.map((p) => (inUse(p) ? { ...p, state: PROJECT_KEPT } : p)) };
   if (plan.clearSession) next.session = { ...base.session, cleared: { at, on: ctx.machine, to: stored, confirmed: "dialog" } };
   if (!handedOff(found.folder, base)) {
     // An answered video keeps the video it is a version of unless her answer names another, or none (--version-of none).
@@ -4684,6 +4779,7 @@ async function answerKind(ctx, found, plan, began) {
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
     if (!shown) say(cantOpen(next.name.text));
     if (owed.length) say(owedWords(next.name.text));
+    if (keeps) say(keptProjectWords(kindWas, stored, next.name.text));
     sayVersionsToMark(ctx, found, next);
     return 0;
   }
@@ -4694,6 +4790,7 @@ async function answerKind(ctx, found, plan, began) {
   }
   if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
   if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
+  if (keeps) say(keptProjectWords(kindWas, stored, name));
   // A mark cleared while another of its versions is still marked: it is held as a session, its names stay out of the chat, and
   // Claude reads nothing of it.
   if (plan.clearSession && linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
@@ -4724,10 +4821,11 @@ async function answerKind(ctx, found, plan, began) {
   const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
   startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
   // The video HyperFrames is given to edit is made beside the reading, once, for a raw video and an iPhone clip whose video is whole
-  // on this Mac (architecture 2026-10-27, 5.7). It takes a lock of its own, so it does not wait for the reading, nor for the late
-  // check that holds a raw video's reading, and a request while a run of it is at work starts none. A video not here yet is made
-  // into one by `app`, which asks for it when it is not there.
-  if (WORK_COPY_KINDS.includes(stored) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
+  // on this Mac (architecture 2026-10-27, 5.7), when it will be used (copyWanted). It takes a lock of its own, so it does not wait
+  // for the reading, and a request while a run of it is at work starts none. It is asked for at once, whether or not the import's
+  // late check of the video is still to come: its run waits for that itself (waitForImport). A video not here yet is made into one by
+  // `app`, which asks for it when it is not there.
+  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
     return 0;

@@ -648,7 +648,12 @@ describe("the installer's own text", () => {
     const two = asked("/Users/two", "fr_FR.UTF-8", "/usr/local/bin/node");
     const fixed = Object.entries(one).filter(([name, value]) => two[name] === value);
     assert.ok(fixed.some(([name, value]) => name === "HYPERFRAMES_NO_TELEMETRY" && value === "1"), `telemetry off is among them: ${JSON.stringify(fixed)}`);
-    assert.ok(fixed.length >= 2, JSON.stringify(fixed));
+    // The command line's own update check, its background install of a newer version and its install of a missing optional package are
+    // off too: nothing is installed on a Mac without Jason's yes, and the installer's own runs of the command line are no exception.
+    for (const name of ["HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL"]) {
+      assert.ok(fixed.some(([fixedName, value]) => fixedName === name && value === "1"), `${name} is among them: ${JSON.stringify(fixed)}`);
+    }
+    assert.ok(fixed.length >= 5, JSON.stringify(fixed));
     // Every one is given to the run, as the same value; and node's folder leads the PATH, as childEnv has it, so that it is the node checked.
     for (const [name, value] of fixed) assert.ok(fn.includes(` ${name}=${value} `), `${name}=${value}\n---\n${fn}`);
     assert.ok(fn.includes('env PATH="${node:h}:$PATH" '), fn);
@@ -667,7 +672,7 @@ describe("the installer's own text", () => {
       mkdirSync(join(dir, "home"));
       const log = join(dir, "log");
       // It ends with 3 for doctor and 0 for anything else, and writes down its arguments one to a line and the few variables.
-      writeFileSync(join(dir, "bin", "node"), `#!/bin/sh\n{\n  for a in "$@"; do printf 'arg:%s\\n' "$a"; done\n  printf 'telemetry:%s\\nskills:%s\\npath:%s\\nhome:%s\\n' "$HYPERFRAMES_NO_TELEMETRY" "$HYPERFRAMES_SKIP_SKILLS" "$PATH" "$HOME"\n} >> "$STAND_IN_LOG"\ncase "$*" in *" doctor") exit 3 ;; esac\nexit 0\n`);
+      writeFileSync(join(dir, "bin", "node"), `#!/bin/sh\n{\n  for a in "$@"; do printf 'arg:%s\\n' "$a"; done\n  printf 'telemetry:%s\\nskills:%s\\nupdates:%s\\nautoinstall:%s\\noptionalinstall:%s\\npath:%s\\nhome:%s\\n' "$HYPERFRAMES_NO_TELEMETRY" "$HYPERFRAMES_SKIP_SKILLS" "$HYPERFRAMES_NO_UPDATE_CHECK" "$HYPERFRAMES_NO_AUTO_INSTALL" "$HYPERFRAMES_NO_OPTIONAL_INSTALL" "$PATH" "$HOME"\n} >> "$STAND_IN_LOG"\ncase "$*" in *" doctor") exit 3 ;; esac\nexit 0\n`);
       chmodSync(join(dir, "bin", "node"), 0o755);
       const program = join(dir, "BRIMM Video Work", ".toolchain", `hyperframes-${PIN.version}`, "node_modules", "hyperframes", "bin", "hyperframes.mjs");
       const script = `set -euo pipefail\nnode=${JSON.stringify(join(dir, "bin", "node"))}\nHYPERFRAMES_PROGRAM=${JSON.stringify(program)}\n${functionOf("run_hyperframes")}run_hyperframes browser ensure\nprint -r -- "ensure: $?"\nended=0\nrun_hyperframes doctor || ended=$?\nprint -r -- "doctor: $ended"\n`;
@@ -676,8 +681,9 @@ describe("the installer's own text", () => {
       const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: join(dir, "home"), PATH: "/usr/bin:/bin", STAND_IN_LOG: log } });
       assert.deepEqual([r.status, r.stdout, r.stderr], [0, "ensure: 0\ndoctor: 3\n", ""]);
       const said = readFileSync(log, "utf8").trimEnd().split("\n");
-      const run = (command) => [`arg:${program}`, ...command.map((word) => `arg:${word}`), "telemetry:1", "skills:1"];
-      // Two runs, each handed the program whole and then the arguments, with both variables, and node's folder first on the PATH.
+      const run = (command) => [`arg:${program}`, ...command.map((word) => `arg:${word}`), "telemetry:1", "skills:1", "updates:1", "autoinstall:1", "optionalinstall:1"];
+      // Two runs, each handed the program whole and then the arguments, with all five variables (telemetry, the skills download, the
+      // update check, the background install and the install of a missing optional package off), and node's folder first on the PATH.
       const paths = said.filter((line) => line.startsWith("path:"));
       assert.equal(paths.length, 2, said.join("\n"));
       for (const path of paths) assert.equal(path, `path:${join(dir, "bin")}:/usr/bin:/bin`);

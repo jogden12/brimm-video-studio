@@ -70,6 +70,33 @@ describe("a project's name (5.1)", () => {
   it("is a number and the short id for a session's clip, never a name", () => {
     assert.equal(projectName({ clip: 3, id: ID, name: "Jane Doe" }), "Session clip 3 3fa9c1");
   });
+  it("has the part \"main 2\", \"main 3\" and on for the main video's later projects, which a correction of the kind makes (4.8), and \"main\" for the first", () => {
+    assert.equal(projectName({ name: "Pricing talk", part: "main", number: 2, id: ID }), "Pricing talk main 2 3fa9c1");
+    assert.equal(projectName({ name: "Pricing talk", part: "main", number: 3, id: ID }), "Pricing talk main 3 3fa9c1");
+    assert.equal(projectName({ name: "Pricing talk", part: "main", number: 12, id: ID }), "Pricing talk main 12 3fa9c1");
+    assert.equal(projectName({ name: "Pricing: what to charge?", part: "main", number: 2, id: ID }), "Pricing- what to charge- main 2 3fa9c1");
+    // The first project is the one without a number, whether the number is given as 1 or not given.
+    assert.equal(projectName({ name: "Pricing talk", part: "main", number: 1, id: ID }), projectName({ name: "Pricing talk", part: "main", id: ID }));
+    assert.equal(projectName({ name: "Pricing talk", part: "main", number: 1, id: ID }), "Pricing talk main 3fa9c1");
+  });
+  it("is different for each number, so that no later project can have the name of an earlier one", () => {
+    const names = [1, 2, 3, 4, 10, 11].map((number) => projectName({ name: "Pricing talk", part: "main", number, id: ID }));
+    assert.equal(new Set(names).size, names.length);
+  });
+  it("is numbered for the main video alone, and by a whole number from 1", () => {
+    for (const number of [0, -1, 1.5, "2", null, NaN, Infinity, {}]) assert.throws(() => projectName({ name: "Pricing talk", part: "main", number, id: ID }), /projectName/, String(number));
+    for (const number of [2, 3]) assert.throws(() => projectName({ name: "Pricing talk", part: { reel: 2 }, number, id: ID }), /projectName/, String(number));
+    assert.equal(projectName({ name: "Pricing talk", part: { reel: 2 }, number: 1, id: ID }), "Pricing talk reel 2 3fa9c1");
+  });
+  it("is that of the project's folder, its meta.json, its package and its facts, for a main project numbered 2", () => {
+    const files = projectFiles(main({ number: 2 }));
+    const name = "Pricing talk main 2 3fa9c1";
+    assert.deepEqual([json(files, "meta.json").id, json(files, "meta.json").name, json(files, "package.json").name, json(files, "brimm/facts.json").name, json(files, "brimm/facts.json").kind], [name, name, name, name, "main"]);
+    // The same files as the first project's, and the same set of paths: the name is the only thing that differs.
+    const first = projectFiles(main());
+    assert.deepEqual([...files.keys()], [...first.keys()]);
+    assert.equal(json(first, "meta.json").name, "Pricing talk main 3fa9c1");
+  });
 });
 
 describe("index.html (5.2, F4)", () => {

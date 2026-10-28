@@ -126,7 +126,12 @@ describe("every command of the pinned help is classified", () => {
 
 describe("the deny rules and the project's settings", () => {
   const spellings = (c) => [`Bash(npx hyperframes ${c}:*)`, `Bash(npx --yes hyperframes@0.8.208 ${c}:*)`, `Bash(hyperframes ${c}:*)`];
-  const ENV = { HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" };
+  // The command line's own update check, its background install of a newer version and its install of a missing optional package are
+  // off too (version 0.8.208 does each unless told not to): nothing is installed on a Mac without Jason's yes.
+  const ENV = {
+    HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1",
+    DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1"
+  };
 
   it("denyRules has a rule for each denied command in each spelling", () => {
     const rules = denyRules();
@@ -164,7 +169,7 @@ describe("the deny rules and the project's settings", () => {
     assert.ok(!denyRules().includes("Bash(anything:*)"));
   });
 
-  it("settingsFor(\"main\") holds the deny rules and four variables, and nothing else", () => {
+  it("settingsFor(\"main\") holds the deny rules and seven variables, and nothing else", () => {
     const settings = settingsFor("main");
     assert.deepEqual(Object.keys(settings), ["permissions", "env"]);
     assert.deepEqual(Object.keys(settings.permissions), ["deny"]);
@@ -177,7 +182,7 @@ describe("the deny rules and the project's settings", () => {
     const main = settingsFor("main");
     assert.ok(clip.permissions.deny.includes("WebFetch") && clip.permissions.deny.includes("WebSearch"));
     assert.ok(!main.permissions.deny.includes("WebFetch") && !main.permissions.deny.includes("WebSearch"));
-    // Everything main denies a clip denies, the rules are sorted, and the variables are the same four.
+    // Everything main denies a clip denies, the rules are sorted, and the variables are the same seven.
     assert.deepEqual(clip.permissions.deny.filter((rule) => rule !== "WebFetch" && rule !== "WebSearch"), main.permissions.deny);
     assert.deepEqual(clip.permissions.deny, [...clip.permissions.deny].sort());
     assert.deepEqual(clip.env, ENV);
@@ -207,12 +212,15 @@ describe("the environment the command line is run in", () => {
     NODE_OPTIONS: "--require /somewhere/evil.js", NODE_EXTRA_CA_CERTS: "/somewhere/ca.pem", SSH_AUTH_SOCK: "/tmp/agent.1", DYLD_INSERT_LIBRARIES: "/somewhere/lib.dylib",
     HYPERFRAMES_DESKTOP_PROJECT: "/somewhere", XDG_CONFIG_HOME: "/somewhere"
   };
-  const NAMES = ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"];
+  const NAMES = ["HOME", "HYPERFRAMES_NO_AUTO_INSTALL", "HYPERFRAMES_NO_OPTIONAL_INSTALL", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_NO_UPDATE_CHECK", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"];
 
   it("childEnv holds exactly these names", () => {
     const env = childEnv({ base: BASE, node: NODE });
     assert.deepEqual(Object.keys(env).sort(), NAMES);
-    assert.deepEqual(env, { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME, LANG: "en_GB.UTF-8", HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1" });
+    assert.deepEqual(env, {
+      PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME, LANG: "en_GB.UTF-8",
+      HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
+    });
     for (const gone of ["ANTHROPIC_API_KEY", "HTTPS_PROXY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID"]) assert.ok(!(gone in env), gone);
     assert.ok(!Object.keys(env).some((name) => /^ANTHROPIC_|PROXY/i.test(name)));
   });
@@ -526,12 +534,18 @@ describe("the fixtures are what the pinned command line prints", () => {
 });
 
 describe("hyperframes.js", () => {
-  it("runs no program, reads nothing from the environment, and reads no disk but its pin file", () => {
+  it("runs no program, reads nothing from the environment, and reads no disk but its pin file and, in toolchainHolds alone, the toolchain's folder, which it only looks at", () => {
     const source = readFileSync(new URL("../hyperframes.js", import.meta.url), "utf8");
-    // All it imports: the two modules it builds on, and the two Node ones that make a path and read one file.
+    // All it imports: the two modules it builds on, and the two Node ones that make a path and read files.
     assert.deepEqual([...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort(), ["./scan.js", "./settings.js", "node:fs", "node:path"]);
     assert.doesNotMatch(source, /\bprocess\b|\bimport\(|\beval\(|\bfetch\(|\brequire\(/);
-    assert.equal(source.match(/readFileSync\(/g).length, 1);
+    // It reads twice: its pin file, and in toolchainHolds a file of the toolchain's folder; it looks at one more path, the program's.
+    // It writes, moves, removes and makes nothing, and starts nothing.
+    assert.equal(source.match(/readFileSync\(/g).length, 2);
     assert.match(source, /readFileSync\(new URL\("\.\/hyperframes\.pin\.json", import\.meta\.url\)/);
+    const holds = source.slice(source.indexOf("export function toolchainHolds"), source.indexOf("/** What a version looks like"));
+    assert.ok(holds.includes("readFileSync(join(dir, file)") && holds.includes("statSync(cliPath(home))"), holds);
+    assert.equal(source.match(/statSync\(/g).length, 1);
+    assert.doesNotMatch(source, /writeFileSync|appendFileSync|mkdirSync|renameSync|rmSync|unlinkSync|copyFileSync|chmodSync|symlinkSync|spawn|exec(?:Sync|File)?\(/);
   });
 });
