@@ -82,7 +82,7 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, openInApp } from "./app.js";
 import { cliPath } from "./hyperframes.js";
-import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -4409,7 +4409,12 @@ function answerWhy(ctx, found, record, plan) {
       Mac's settings say readings are off: the answer is kept, since the gate runs on it. The record is read once more first, and
       must still be the answer. A raw video's reading waits for the import's late check, so it is not waited for here; any other is
       waited for, up to READ_WAIT_MS and COMMAND_BUDGET_MS from when this began, and what it found is said as `status` says a
-      result, or else a notice will come.
+      result, or else a notice will come;
+    - and right after the reading, for a raw video and an iPhone clip whose video is whole on this Mac, the working copy of the
+      video is asked for (workcopy.js requestWorkCopy): its detached run, `workcopy`, which makes the video HyperFrames is given
+      to edit. It has a lock of its own, so it runs beside the reading and is not waited for, and a request while a run of it is
+      at work starts none. A finished video, a session, a video not whole on this Mac and a Mac whose readings are off start
+      none; `app` asks for the copy when `kind` could not. Nothing of it is said here: "how far is it?" says it.
     A video answered as anything but a session is no longer one whose names are kept from the chat. */
 export async function kindCommand(ctx, rest) {
   const began = ctx.now();
@@ -4689,6 +4694,11 @@ async function answerKind(ctx, found, plan, began) {
   const previous = readResult(ctx.home, found.name, "read");
   const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
   startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
+  // The video HyperFrames is given to edit is made beside the reading, once, for a raw video and an iPhone clip whose video is whole
+  // on this Mac (architecture 2026-10-27, 5.7). It takes a lock of its own, so it does not wait for the reading, nor for the late
+  // check that holds a raw video's reading, and a request while a run of it is at work starts none. A video not here yet is made
+  // into one by `app`, which asks for it when it is not there.
+  if (WORK_COPY_KINDS.includes(stored) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
     return 0;
