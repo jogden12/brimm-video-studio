@@ -440,7 +440,7 @@ The project's folder name, its `meta.json` name and its title in the app are one
 | `brimm/facts.json` | The record | The kind, the name, the length, what the files are |
 | `brimm/cut-suggestions.json` | The cut plan, as Claude changed it | 5.8 |
 | `brimm/reel-suggestions.json` | `reels.json` | 5.8. Not in a session clip |
-| `brimm/spellings.json` | The episode's spellings, then the house's | So titles and captions are spelled as she says. The house's are "brim", "Brim" and "BRIM" as BRIMM, since the app makes a transcript of its own that says "Brim". Hers come first, and a house spelling of a word hers already spell is left out, so hers win |
+| `brimm/spellings.json` | The house's spellings, then the episode's | So titles and captions are spelled as she says, and the company's name always as BRIMM. The house's are "brim", "Brim" and "BRIM" as BRIMM, since the app makes a transcript of its own that says "Brim". They come first, as `transcript.json` applies them: the name is Jason's rule, and it wins |
 | `brimm/brand.md`, `assets/fonts/`, `assets/logos/` | The brand pack (`tool/brand/`) and the Assets folder in Dropbox | D4. Colours, type, rules; Josefin Sans in Light, Regular, Regular Italic and Medium, and Allison for an accent (open licences; Jason's of 2026-10-26 and 2026-10-28); the logos she chose, never a "with Sallie Holder" mark |
 | `vendor/gsap.min.js` | `tool/vendor/` | The version `init` uses (3.14.2), with its checksum in the pin file |
 
