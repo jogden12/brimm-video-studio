@@ -1167,7 +1167,7 @@ const finishedHasNoProject = (name) => `${name} was finished by your editor, so 
 /** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
     projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record, and a take-over
     cannot rebuild it until the snapshot comes (plan PR 11). Named as app's other lines name the video. */
-const projectIsElsewhere = (name, on) => `${name}'s HyperFrames project is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+const projectIsElsewhere = (name, on) => `The HyperFrames project for ${name} is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */

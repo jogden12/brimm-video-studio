@@ -197,7 +197,7 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.match(e.said[0], /^The video for HyperFrames is being made\./);
   });
   describe("while Claude is still reading the episode (a `read` run holds the episode's lock)", () => {
-    const STILL = 'Claude is still reading Pricing talk. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';
+    const STILL = 'Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';
     /** A run of `command` at work on the episode now, as a live process holds it: the lock is the episode's own, and this very
         process is the live one (the context's `alive`). */
     function atWork(e, command = "read") {

@@ -578,7 +578,7 @@ describe("app: what the bring it starts says when it is done", () => {
 describe("app: a project that is on another Mac is not made again here (plan PR 11 brings the snapshot)", () => {
   const KEPT = "kept for an earlier kind";
   const PROJECT_NAME = "Pricing- what to charge- main 3fa9c1";
-  const THERE = (on) => `${NAME}'s HyperFrames project is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+  const THERE = (on) => `The HyperFrames project for ${NAME} is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
   /** The record of an episode whose main project was made on `on` (layout 4), as the record keeps it; `over` changes the project. */
   const madeOn = (on, over = {}) => ({
     ...RAW, version: 4,
@@ -624,7 +624,7 @@ describe("app: a project that is on another Mac is not made again here (plan PR 
   it("names the Mac the project was made on, and the video as app's other lines name it", async () => {
     const { t } = world({ record: { ...madeOn("Mac mini"), name: { text: "Budget talk", placeholder: false } } });
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual(r.said, ["Budget talk's HyperFrames project is on Mac mini, with everything done in it, so it can't be opened on this Mac yet. Ask Jason."]);
+    assert.deepEqual(r.said, ["The HyperFrames project for Budget talk is on Mac mini, with everything done in it, so it can't be opened on this Mac yet. Ask Jason."]);
     t.done();
   });
   it("comes after the settings and the command line: a Mac not set up, or without the command line, says so first", async () => {
@@ -704,7 +704,7 @@ describe("app: the buttons Studio cannot control (architecture 3.3 and 5.9)", ()
 });
 
 describe("app: Claude's reading is not finished (architecture 4.1)", () => {
-  const STILL = `Claude is still reading ${NAME}. Say "open ${NAME} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+  const STILL = `Claude is still reading it. Say "open ${NAME} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
   /** The reading (`read`, a detached run) at work on the made-up episode now: it holds the episode's lock, and its process is alive. */
   function readingAtWork(t, command = "read") {
     mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });

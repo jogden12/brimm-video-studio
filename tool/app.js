@@ -55,7 +55,7 @@ export const KEPT = "kept for an earlier kind";
 
 const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
-const stillReading = (name) => `Claude is still reading ${name}. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
