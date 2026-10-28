@@ -47,7 +47,7 @@ const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTe
 /** What each command is given to name the made-up episode, as Claude runs it. `free` names none: it says it is held back. */
 const ASKED = {
   kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER], read: ["--now", FOLDER, "--kind", "finished", "--rev", "1"],
-  open: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["pick", FOLDER, "1"], reels: [FOLDER, "--no-play"],
+  workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["pick", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
   teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER]
@@ -249,8 +249,9 @@ describe("the gate, wherever a command names its episode", () => {
       t.done();
     }
   });
-  it("refuses the other detached runs' way in: bring --now and finish --now", async () => {
-    for (const [record, name, why] of [[UNANSWERED_RECORD, "bring", WAITING], [SESSION_RECORD, "bring", NOT_FOR_SESSION], [UNANSWERED_RECORD, "finish", WAITING], [SESSION_RECORD, "finish", TEACHINGS_OFF]]) {
+  it("refuses the other detached runs' way in: bring --now, finish --now and workcopy --now", async () => {
+    for (const [record, name, why] of [[UNANSWERED_RECORD, "bring", WAITING], [SESSION_RECORD, "bring", NOT_FOR_SESSION], [UNANSWERED_RECORD, "finish", WAITING], [SESSION_RECORD, "finish", TEACHINGS_OFF],
+      [UNANSWERED_RECORD, "workcopy", WAITING], [LEFT_RECORD, "workcopy", LEFT_ALONE], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION]]) {
       const t = setup();
       const found = episodeFor(t, { record });
       const r = await on(t.ctx.deps, name, "--now", FOLDER);
@@ -260,13 +261,15 @@ describe("the gate, wherever a command names its episode", () => {
   });
   it("leaves a result in the gate's words when a detached run is refused, as a run that failed does, naming no folder or file", async () => {
     for (const [record, name, why, argv] of [[UNANSWERED_RECORD, "bring", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "bring", NOT_FOR_SESSION, ["--now", FOLDER]], [UNANSWERED_RECORD, "finish", WAITING, ["--now", FOLDER]],
-      [SESSION_RECORD, "finish", TEACHINGS_OFF, ["--now", FOLDER]], [UNANSWERED_RECORD, "ask", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "ask", NOT_FOR_SESSION, ["--now", FOLDER]]]) {
+      [SESSION_RECORD, "finish", TEACHINGS_OFF, ["--now", FOLDER]], [UNANSWERED_RECORD, "ask", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "ask", NOT_FOR_SESSION, ["--now", FOLDER]],
+      [UNANSWERED_RECORD, "read", WAITING, ["--now", FOLDER, "--kind", "raw", "--rev", "1"]], [LEFT_RECORD, "workcopy", LEFT_ALONE, ["--now", FOLDER]], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION, ["--now", FOLDER]]]) {
       const t = setup();
       const found = episodeFor(t, { record });
       const r = await on(t.ctx.deps, name, ...argv);
       const result = readResult(t.home, FOLDER, name);
       assert.deepEqual([r.code, r.said, result && result.ok, result && result.failed, result && result.made], [1, [why], false, [why], []], `${name} ${why}`);
-      assert.deepEqual([existsSync(join(episodeWork(t.home, FOLDER), "episode.lock")), reread(found).rev], [false, 1], "the lock is let go");
+      // The working copy's run holds a lock of its own, and every other the episode's: neither is left.
+      assert.deepEqual([existsSync(join(episodeWork(t.home, FOLDER), "episode.lock")), existsSync(join(episodeWork(t.home, FOLDER), "workcopy.lock")), reread(found).rev], [false, false, 1], "the lock is let go");
       const text = readFileSync(join(episodeWork(t.home, FOLDER), `${name}.result.json`), "utf8");
       for (const given of [FOLDER, "Pricing", "mp4"]) assert.ok(!text.includes(given), `${given} in ${text}`);
       t.done();
@@ -570,6 +573,17 @@ describe("the gate, a record Dropbox is still bringing over", () => {
         assert.deepEqual([r.code, r.said, t.started], [1, [PENDING], []], `${record.kind} ${name}`);
         t.done();
       }
+    }
+  });
+  it("refuses them on a record of layout 4 too, which holds the app's projects", async () => {
+    const record = { ...FINISHED_RECORD, version: 4, app: { toolchain: "0.8.208", projects: [] } };
+    for (const name of ["open", "show"]) {
+      const t = setup();
+      const found = episodeFor(t, { record });
+      PENDING_FILE(found);
+      const r = await on(t.ctx.deps, name, ...ASKED[name]);
+      assert.deepEqual([r.code, r.said, t.started], [1, [PENDING], []], name);
+      t.done();
     }
   });
   it("refuses a finished video that is being corrected to a session while the record that says so is not whole, as it does one that this code rejects", async () => {

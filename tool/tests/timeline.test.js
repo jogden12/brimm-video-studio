@@ -846,13 +846,15 @@ describe("edit.js on the one version model: a render is a version, and only a pu
     assert.deepEqual([asked.code, asked.text], [1, 'Did you change anything in Final Cut since it was last shown (main v2)? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.']);
     pushed.t.done();
   });
-  it("says in the episodes and open lines whether the newest version was rendered or shown in Final Cut", async () => {
+  it("says in the episodes lines whether the newest version was rendered or shown in Final Cut, and says nothing of it in open", async () => {
     for (const [pushed, line] of [[[renderOn(0)], "Shown: v0 (rendered), on Mac Studio"], [[renderOn(0), pushOn(1)], "Shown: v1 (in Final Cut), on Mac Studio"], [[pushOn(2), renderOn(1, LAPTOP)], "Shown: v2 (in Final Cut), on Mac Studio"]]) {
       const { t } = answeredRaw(pushed);
       const listed = await on(t.ctx.deps, "episodes");
       assert.ok(listed.text.split("\n").includes(`    ${line}`), listed.text);
+      // open no longer says what was shown in Final Cut, nor how to show it there: the claim and the bring are all it keeps of that.
       const opened = await on(t.ctx.deps, "open", FOLDER);
-      assert.ok(opened.text.split("\n").includes(`${line}.`), opened.text);
+      assert.equal(opened.code, 0, opened.text);
+      assert.ok(!opened.text.split("\n").some((said) => said.startsWith("Shown") || /Final Cut|timeline/.test(said)), opened.text);
       t.done();
     }
   });

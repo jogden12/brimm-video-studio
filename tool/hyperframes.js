@@ -3,7 +3,8 @@
 // BRIMM runs one version of the command line, from a folder of its own on each Mac, by absolute path and never through npx, which
 // would run whatever `hyperframes` it found first (5.3). This file is everything Studio decides about it, as data or as a function
 // of data:
-//   - the pin, and where the toolchain is kept;
+//   - the pin, where the toolchain is kept, and whether what a Mac holds there is the pin (toolchainHolds, toolchainDiffers: `behind`
+//     says it);
 //   - what each of its commands is: one a project's agent may run, one only edit.js runs (the handover's), or one denied (5.5). The
 //     table is checked against the help the pinned version prints, so that a new pin cannot bring in a command nobody classified (F6);
 //   - the settings that deny a project's agent the commands it may not run, and the few variables the command line is run with (5.5,
@@ -11,9 +12,10 @@
 //   - when the app may take over her chat (F3, 5.6), and the arguments of `open`;
 //   - what `open` printed, and what the app's history holds, in her words (4.6, F7).
 //
-// Pure: nothing here runs a program or looks at a disk but this file's own pin, hyperframes.pin.json. The caller runs the program and
-// reads the history; a test gives it what the pinned version printed (tests/fixtures/hyperframes-<version>/).
-import { readFileSync } from "node:fs";
+// Pure: nothing here runs a program or looks at a disk but this file's own pin, hyperframes.pin.json, and toolchainHolds, which looks at
+// the toolchain's folder (and only looks). The caller runs the program and reads the history; a test gives it what the pinned version
+// printed (tests/fixtures/hyperframes-<version>/).
+import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { SESSION_ID } from "./scan.js";
 import { workFolder } from "./settings.js";
@@ -44,6 +46,53 @@ export const PIN = pinFrom(readFileSync(new URL("./hyperframes.pin.json", import
 export const toolchainDir = (home) => join(workFolder(home), ".toolchain", `hyperframes-${PIN.version}`);
 /** The command line's program in it, the file `node` is given to run (5.3). */
 export const cliPath = (home) => join(toolchainDir(home), "node_modules", "hyperframes", "bin", "hyperframes.mjs");
+
+/** What the folder of the pinned command line on a Mac holds, read as install.sh's toolchain_holds and toolchain_here read it (5.3):
+    { version, integrity, program }. `version` is the one in the folder's node_modules/hyperframes/package.json, and `integrity` the
+    string npm's lock file keeps for it (package-lock.json, packages["node_modules/hyperframes"].integrity); each is "" where it is
+    not there or is not shaped as a version (1.2.3) or as an integrity string (sha512-…==). `program` is whether cliPath is a file.
+    It only looks: it runs nothing, writes nothing, and never throws, whatever the folder holds; a home that is not an absolute
+    path holds nothing, since a relative one would be read from wherever the program runs. */
+export function toolchainHolds(home) {
+  const held = { version: "", integrity: "", program: false };
+  if (typeof home !== "string" || !isAbsolute(home)) return held;
+  const dir = toolchainDir(home);
+  const read = (file) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, file), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const fit = (value, shape) => (typeof value === "string" && shape.test(value) ? value : "");
+  try {
+    held.version = fit(read("node_modules/hyperframes/package.json")?.version, VERSION_SHAPE);
+    held.integrity = fit(read("package-lock.json")?.packages?.["node_modules/hyperframes"]?.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/);
+  } catch {
+    // What is shaped so that it cannot be looked into is not there.
+  }
+  try {
+    held.program = statSync(cliPath(home)).isFile();
+  } catch {
+    // No program, or one that cannot be looked at, is no program.
+  }
+  return held;
+}
+
+/** What a version looks like: three numbers and their points, as the installer takes one. */
+const VERSION_SHAPE = /^\d+\.\d+\.\d+$/;
+
+/** Whether what toolchainHolds read is the pin, and if not what it has, in the words Jason reads in `behind`: "" when the pinned
+    version is installed with its program and the pin's integrity string in the lock file (what install.sh's toolchain_here asks);
+    otherwise "none" when no version can be read or the program is missing, "version 1.2.3" when the version is another, and "version
+    1.2.3, but not as the pin has it" when it is the pinned one and only the integrity string differs or is missing. Anything that
+    is not what toolchainHolds gives is a toolchain that is not the pin ("none"). */
+export function toolchainDiffers(held) {
+  const { version, integrity, program } = held !== null && typeof held === "object" ? held : {};
+  if (typeof version !== "string" || !VERSION_SHAPE.test(version) || program !== true) return "none";
+  if (version !== PIN.version) return `version ${version}`;
+  return integrity === PIN.integrity ? "" : `version ${version}, but not as the pin has it`;
+}
 
 /** The table of commands from its rows, { name: { class, why } }, frozen. */
 const classify = (rows) => deepFreeze(Object.fromEntries(rows.map(([name, kind, why]) => [name, { class: kind, why }])));
@@ -138,8 +187,22 @@ export function denyRules() {
   return [...barred.flatMap((name) => SPELLINGS.map((spell) => `Bash(${spell(name)}:*)`)), "Bash(npm run publish:*)"].sort();
 }
 
-/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and four variables that turn off
-    the command line's telemetry and skills download and Claude Code's /feedback command and transcript-share survey. `kind` is
+/** What the command line does on its own unless it is told not to, and the variable that tells it (version 0.8.208, read in its
+    dist): it tells its makers of its use (HYPERFRAMES_NO_TELEMETRY), downloads skills (HYPERFRAMES_SKIP_SKILLS), fetches the
+    registry's newest version in the background to say there is one (HYPERFRAMES_NO_UPDATE_CHECK), can schedule a background install
+    of that newer version (HYPERFRAMES_NO_AUTO_INSTALL), and installs a package it finds missing when a feature needs it, an optional
+    one (HYPERFRAMES_NO_OPTIONAL_INSTALL: it then says the package is not installed, and the feature needs it). All five are off, in
+    each place the command line is run: Studio's own runs (childEnv), the app's agent's (settingsFor), and the installer's (install.sh
+    run_hyperframes, which a test holds to this list). The rule behind them is that nothing is installed on a Mac without Jason's yes:
+    a newer version comes by a pull request that moves the pin and then by the installer, and a feature whose optional package is
+    missing says so and is not given it (5.3). A new object each time. */
+const quiet = () => ({
+  HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
+});
+
+/** The settings of a project, to be written as its `.claude/settings.json` (5.5): the deny rules, and seven variables: the five that
+    turn off what the command line does on its own (quiet: its telemetry, skills download, update check, background install and
+    install of a missing optional package) and Claude Code's /feedback command and transcript-share survey. `kind` is
     "main" (an episode's, or a Reel's) or "clip" (a session's, which also denies the web: its words must not go anywhere, 5.4); any
     other throws. There is no `allow`: what the agent may run is what the app's own permissions give it. A new object each time. */
 export function settingsFor(kind) {
@@ -147,7 +210,7 @@ export function settingsFor(kind) {
   const deny = kind === "clip" ? [...denyRules(), "WebFetch", "WebSearch"].sort() : denyRules();
   return {
     permissions: { deny },
-    env: { HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" }
+    env: { ...quiet(), DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" }
   };
 }
 
@@ -156,7 +219,8 @@ const absolute = (path) => typeof path === "string" && isAbsolute(path);
 const isChat = (id) => typeof id === "string" && SESSION_ID.test(id);
 
 /** The environment the command line is run in (5.6): a list, not what Studio inherited. `PATH` is node's own folder, /usr/bin and
-    /bin; `HOME` and `LANG` come from `base` (LANG is en_US.UTF-8 when it has none); telemetry and the skills download are off. No
+    /bin; `HOME` and `LANG` come from `base` (LANG is en_US.UTF-8 when it has none); what it does on its own is off (quiet:
+    telemetry, the skills download, the update check, the background install and the install of a missing optional package). No
     key, nothing of Anthropic's, no proxy setting, and none of the variables by which `open` finds an agent's conversation to hand
     over (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID, GROK_SESSION_ID, F3). `CLAUDE_CODE_SESSION_ID` is added, as `sessionId`, only
     when `handover` is true and the id is a chat's: it is how the app is handed the chat, so whether it may be is handoverAllowed's
@@ -171,8 +235,7 @@ export function childEnv(options) {
     PATH: [dirname(node), "/usr/bin", "/bin"].join(":"),
     HOME: home,
     LANG: typeof base.LANG === "string" && base.LANG !== "" ? base.LANG : "en_US.UTF-8",
-    HYPERFRAMES_NO_TELEMETRY: "1",
-    HYPERFRAMES_SKIP_SKILLS: "1"
+    ...quiet()
   };
   if (handover === true && isChat(sessionId)) env.CLAUDE_CODE_SESSION_ID = sessionId;
   return env;

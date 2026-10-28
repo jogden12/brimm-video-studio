@@ -6,20 +6,22 @@
 // stand-in that is started and asserted, never run.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
 import { askBlocked, clockAt } from "../unedited.js";
-import { claimed, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
-import { episodeWork } from "../settings.js";
-import { lockOf, resultFile } from "../detached.js";
+import { claimed, layoutOf, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
+import { PIN } from "../hyperframes.js";
+import { episodeWork, writeSettings } from "../settings.js";
+import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
+import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { chainGapWords } from "../finish.js";
 import { writePending } from "../filing.js";
 import { writeStatus } from "../importing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
 import { notSessionCardOf } from "../receipts.js";
-import { setup, episodeFor, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
+import { setup, episodeFor, listAll, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -90,6 +92,8 @@ function addEpisode(t, { folder = OTHER_FOLDER, id = OTHER_ID, file = "Coaching 
 
 /** The words a detached `read` is started with: the folder, and the kind and rev the answer's record holds. */
 const readArgs = (kind, rev) => ["read", "--now", FOLDER, "--kind", kind, "--rev", String(rev)];
+/** The words a detached `workcopy` is started with, beside the reading of a raw video and of an iPhone clip: the folder alone. */
+const COPY_ARGS = ["workcopy", "--now", FOLDER];
 /** The lock `kind` and `leave` hold for an episode on this Mac, in its work folder. */
 const answerLock = (t) => join(episodeWork(t.home, FOLDER), "answer.lock");
 /** What every Mac's `alive` says in these tests: only the processes named, and always this one. */
@@ -180,12 +184,13 @@ describe("kind: an answered video, and the wrong answer for how it came", () => 
   });
   it("answers an answered record again with --again: the claim, the new answer, and the reading", async () => {
     const t = setup();
+    appOn(t);
     const found = episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: NAME, placeholder: false } } });
     const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
     assert.equal(r.code, 0, r.text);
     const record = reread(found);
     assert.deepEqual([record.kind, record.rev, record.answer.at, record.answer.by], ["raw", 3, AFTER_CLAIM, "Mac Studio"]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3)]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
     t.done();
   });
   it("answers a video left alone as an unanswered one, without --again", async () => {
@@ -487,14 +492,16 @@ describe("kind: a client or group session", () => {
 });
 
 describe("kind: the reading", () => {
-  it("starts one detached run named read, on the episode's folder, for a finished video, a clip and a raw video", async () => {
+  it("starts one detached run named read, on the episode's folder, for a finished video, a clip and a raw video, and for the last two the working copy's run after it", async () => {
     for (const word of ["finished", "clip", "raw"]) {
       const t = setup();
+      appOn(t);
       waiting(t);
       const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
       assert.equal(r.code, 0, `${word}: ${r.text}`);
-      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args.slice(1)]), [[process.execPath, readArgs(word === "clip" ? "short video" : word, 3)]], word);
-      assert.equal(t.started[0][1][0], "/checkout/tool/edit.js");
+      const copy = word === "finished" ? [] : [[process.execPath, COPY_ARGS]];
+      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args.slice(1)]), [[process.execPath, readArgs(word === "clip" ? "short video" : word, 3)], ...copy], word);
+      for (const [, args] of t.started) assert.equal(args[0], "/checkout/tool/edit.js");
       t.done();
     }
   });
@@ -604,6 +611,263 @@ describe("kind: the reading", () => {
   });
 });
 
+// A record that holds HyperFrames projects, as `app` writes them (layout 4), and the folders of those projects on this Mac: what `kind`
+// keeps, and asks the working copy for, by.
+const PROJECT = "Pricing- what to charge- main 3fa9c1";
+const REEL_PROJECT = "Pricing- what to charge- reel 1 3fa9c1";
+const KEPT_STATE = "kept for an earlier kind";
+/** A project of the record as `app` writes one: the main one, in use, unless `over` says otherwise. */
+const project = (over = {}) => ({
+  key: "main", name: PROJECT, madeAt: NOW, on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: NOW },
+  workingCopy: { bytes: 24, seconds: 23.423, fps: 30 }, opened: [NOW], handover: false, fromSuggestion: null, state: "opened", ...over
+});
+const reel = () => project({ key: "reel 1", name: REEL_PROJECT, fromSuggestion: 1 });
+const appOf = (...projects) => ({ toolchain: PIN.version, projects });
+/** The word she answers each kind by. */
+const WORD = { finished: "finished", raw: "raw", "short video": "clip", session: "session" };
+/** The made-up episode, answered as `kind`, holding the projects given, each with its folder on this Mac, in its work folder. */
+function answeredWith(t, kind, projects) {
+  const found = episodeFor(t, { record: { version: 4, kind, answer: ANSWERED, name: { text: NAME, placeholder: false }, ...(projects ? { app: appOf(...projects) } : {}) } });
+  for (const p of projects ?? []) {
+    const dir = join(episodeWork(t.home, FOLDER), p.name);
+    for (const [rel, text] of [["index.html", "<html></html>"], ["media/recording.mp4", "the working copy"], ["brimm/facts.json", "{}"], [".claude/settings.json", "{}"]]) {
+      mkdirSync(dirname(join(dir, rel)), { recursive: true });
+      writeFileSync(join(dir, rel), text);
+    }
+  }
+  return found;
+}
+/** Every file of this Mac's work folder for the episode, by its path, with what it holds: to see that nothing moved or went. */
+function workTree(t) {
+  const dir = episodeWork(t.home, FOLDER);
+  return Object.fromEntries(listAll(dir).filter((rel) => rel.split("/")[0] !== "answer.lock").map((rel) => [rel, readFileSync(join(dir, rel), "utf8")]));
+}
+
+/** This Mac's settings turn the app on, as `node settings.js set --app hyperframes` does: only then does `kind` ask for the working copy. */
+const appOn = (t) => writeSettings(t.home, { app: "hyperframes" });
+
+describe("kind: the working copy (plan PR 4)", () => {
+  /** What `kind` started, by its words, as the programs it started were given them. */
+  const startedBy = (t) => t.started.map(([, args]) => args.slice(1));
+  /** A run of the working copy at work on the made-up episode now, as a live process holds it: its lock is its own, and this very
+      process is the live one. */
+  function copyAtWork(t) {
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(workCopyLockOf(t.home, FOLDER), "workcopy", () => true).taken, true);
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+  }
+  it("starts the working copy's run once, right after the reading, for a raw video and for an iPhone clip whose video is whole on this Mac", async () => {
+    for (const [word, kept] of [["raw", "raw"], ["clip", "short video"]]) {
+      const t = setup();
+      appOn(t);
+      const found = waiting(t);
+      const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
+      assert.equal(r.code, 0, `${word}: ${r.text}`);
+      assert.deepEqual(startedBy(t), [readArgs(kept, 3), COPY_ARGS], word);
+      // Both are this checkout's edit.js, started detached on the episode's folder; the copy is asked for no 4K.
+      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args[0]]), [[process.execPath, "/checkout/tool/edit.js"], [process.execPath, "/checkout/tool/edit.js"]], word);
+      // `kind` only asks: it takes no lock for the copy, writes nothing for it, and the record is the answer's alone.
+      assert.deepEqual([existsSync(workCopyLockOf(t.home, FOLDER)), reread(found).rev, readdirSync(join(found.folder, "record"))], [false, 3, ["0001.json", "0002.json", "0003.json"]], word);
+      t.done();
+    }
+  });
+  it("starts a run that makes the copy where `app` looks for it, in this Mac's own folder for the episode", async () => {
+    const t = setup();
+    appOn(t);
+    const found = waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    const made = await on(t.ctx.deps, ...startedBy(t)[1]);
+    assert.equal(made.code, 0, made.text);
+    const raw = statSync(join(found.folder, "Pricing talk.mp4"));
+    const copy = workCopyPaths(t.home, FOLDER, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+    assert.deepEqual([existsSync(copy.video), existsSync(copy.facts), existsSync(workCopyLockOf(t.home, FOLDER))], [true, true, false]);
+    // It wrote nothing into the episode's folder in Dropbox: the record is the answer's alone.
+    assert.deepEqual([reread(found).rev, readdirSync(join(found.folder, "record"))], [3, ["0001.json", "0002.json", "0003.json"]]);
+    t.done();
+  });
+  it("says nothing of it: what she is told is what she was told before the working copy", async () => {
+    const t = setup();
+    waiting(t);
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    assert.deepEqual([r.code, r.said], [0, [STILL(LABEL)]]);
+    assert.doesNotMatch(r.text, /HyperFrames|working copy|workcopy/i);
+    t.done();
+  });
+  it("starts none for a finished video, which her editor edits", async () => {
+    const t = setup();
+    waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
+    assert.deepEqual(startedBy(t), [readArgs("finished", 3)]);
+    t.done();
+  });
+  it("starts none for a client or group session, which is marked and read only when its teachings are asked for", async () => {
+    const t = setup();
+    const found = waiting(t);
+    const r = await on(t.ctx.deps, "kind", LABEL, "session", "--private", "yes");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([reread(found).kind, t.started], ["session", []]);
+    t.done();
+  });
+  it("starts none for a video she leaves", async () => {
+    const t = setup();
+    waiting(t);
+    const r = await on(t.ctx.deps, "leave", LABEL);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
+  it("starts none, and no reading either, when this Mac's settings say readings are off", async () => {
+    for (const word of ["raw", "clip"]) {
+      const t = setup();
+      waiting(t);
+      const r = await on(withSettings(t, { readings: false }), "kind", LABEL, word, "--private", "no");
+      assert.deepEqual([r.code, r.said, t.started], [0, [`${LABEL}: answered. ${READINGS_OFF}`], []], word);
+      t.done();
+    }
+  });
+  it("starts none for a video that is not whole on this Mac yet, and starts the reading all the same: an iPhone clip's, and a raw video's read here", async () => {
+    for (const [word, kept, more] of [["clip", "short video", []], ["raw", "raw", ["--here"]]]) {
+      const t = setup();
+      waiting(t);
+      t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+      const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no", ...more);
+      assert.equal(r.code, 0, `${word}: ${r.text}`);
+      assert.deepEqual(startedBy(t), [readArgs(kept, 3)], word);
+      t.done();
+    }
+  });
+  it("starts none, nor anything else, for a raw video not on this Mac when she has not said to read it here", async () => {
+    const t = setup();
+    const found = waiting(t);
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    assert.equal(r.code, 1, r.text);
+    untouched(t, found);
+    t.done();
+  });
+  it("starts it once for two requests: the second finds the first run at work, and the reading is started again all the same", async () => {
+    const t = setup();
+    appOn(t);
+    const found = waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    // The run takes the working copy's own lock as it begins; the reading's lock is the episode's, and its run is not at work.
+    copyAtWork(t);
+    const again = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--again");
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual(startedBy(t), [readArgs("raw", 3), COPY_ARGS, readArgs("raw", reread(found).rev)]);
+    t.done();
+  });
+  it("starts it again when the run that held the lock died, as every command does", async () => {
+    const t = setup();
+    appOn(t);
+    waiting(t);
+    await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    copyAtWork(t);
+    t.ctx.deps.alive = () => false;
+    await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--again");
+    assert.equal(startedBy(t).filter((args) => args[0] === "workcopy").length, 2);
+    t.done();
+  });
+  it("asks for it at once beside a reading that waits for the import's late check: kind does not wait for the check, its run does (workcopy's tests)", async () => {
+    const t = setup();
+    appOn(t);
+    waiting(t);
+    writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: join(t.root, "Episodes", FOLDER), video: "Pricing talk.mp4", bytes: 1, seconds: 120, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    assert.match(r.said[0], /^Answered\. Claude reads it at /);
+    assert.deepEqual(startedBy(t), [readArgs("raw", 3), COPY_ARGS]);
+    t.done();
+  });
+
+  describe("only when the copy will be used", () => {
+    const copiesAsked = (t) => startedBy(t).filter((args) => args[0] === "workcopy");
+    const readsStarted = (t) => startedBy(t).filter((args) => args[0] === "read");
+    it("asks for none on a Mac whose app is off, which is the default: nothing there would use it", async () => {
+      for (const [what, set] of [["by default", null], ["set to off", { app: "off" }]]) {
+        for (const word of ["raw", "clip"]) {
+          const t = setup();
+          if (set) writeSettings(t.home, set);
+          waiting(t);
+          const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
+          assert.equal(r.code, 0, `${what} ${word}: ${r.text}`);
+          assert.deepEqual(startedBy(t), [readArgs(word === "clip" ? "short video" : word, 3)], `${what} ${word}: the reading alone`);
+          t.done();
+        }
+      }
+    });
+    it("asks for one on a Mac whose app is on, for a raw video and for an iPhone clip", async () => {
+      for (const [word, kept] of [["raw", "raw"], ["clip", "short video"]]) {
+        const t = setup();
+        appOn(t);
+        waiting(t);
+        const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
+        assert.equal(r.code, 0, `${word}: ${r.text}`);
+        assert.deepEqual(startedBy(t), [readArgs(kept, 3), COPY_ARGS], word);
+        t.done();
+      }
+    });
+    it("asks for none when the record already has a main project in use: its writer moved the copy in, and asking again would make one nobody uses", async () => {
+      for (const kind of ["raw", "short video"]) {
+        const t = setup();
+        appOn(t);
+        const found = answeredWith(t, kind, [project()]);
+        const r = await on(t.ctx.deps, "kind", NAME, WORD[kind], "--private", "no", "--again");
+        assert.equal(r.code, 0, `${kind}: ${r.text}`);
+        assert.deepEqual([copiesAsked(t), readsStarted(t)], [[], [readArgs(kind, reread(found).rev)]], kind);
+        assert.deepEqual(reread(found).app.projects.map((p) => p.state), ["opened"], kind);
+        t.done();
+      }
+    });
+    it("asks for one after a change of kind that kept the project in the same answer: the project is no longer in use, so the new one needs a copy", async () => {
+      for (const [was, now] of [["raw", "short video"], ["short video", "raw"]]) {
+        const t = setup();
+        appOn(t);
+        const found = answeredWith(t, was, [project()]);
+        const r = await on(t.ctx.deps, "kind", NAME, WORD[now], "--private", "no", "--again");
+        assert.equal(r.code, 0, `${was} to ${now}: ${r.text}`);
+        assert.deepEqual(reread(found).app.projects.map((p) => p.state), [KEPT_STATE], `${was} to ${now}`);
+        assert.deepEqual(startedBy(t), [readArgs(now, reread(found).rev), COPY_ARGS], `${was} to ${now}`);
+        t.done();
+      }
+    });
+    it("asks for one when the record holds a project kept earlier, or a Reel's, but none of the main video in use", async () => {
+      for (const projects of [[project({ state: KEPT_STATE })], [reel()], [project({ state: KEPT_STATE }), reel()]]) {
+        const t = setup();
+        appOn(t);
+        const found = answeredWith(t, "raw", projects);
+        const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
+        assert.equal(r.code, 0, r.text);
+        assert.deepEqual(copiesAsked(t), [COPY_ARGS], JSON.stringify(projects.map((p) => [p.key, p.state])));
+        assert.deepEqual(reread(found).app.projects.map((p) => p.state), projects.map((p) => p.state));
+        t.done();
+      }
+    });
+    it("asks for none for a finished video or a session, whether the app is on or not", async () => {
+      for (const set of [false, true]) {
+        for (const [word, priv] of [["finished", "no"], ["session", "yes"]]) {
+          const t = setup();
+          if (set) appOn(t);
+          waiting(t);
+          const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", priv);
+          assert.equal(r.code, 0, `${word} ${set}: ${r.text}`);
+          assert.deepEqual(copiesAsked(t), [], `${word} ${set}`);
+          t.done();
+        }
+      }
+    });
+    it("still asks for none of a video that is not whole on this Mac yet, with the app on", async () => {
+      const t = setup();
+      appOn(t);
+      waiting(t);
+      t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+      const r = await on(t.ctx.deps, "kind", LABEL, "clip", "--private", "no");
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual(copiesAsked(t), []);
+      t.done();
+    });
+  });
+});
+
 describe("kind: a raw reading waits for the import's late check", () => {
   /** A late check this Mac owes of the made-up episode, last copied `ago` milliseconds before the clock. */
   function owe(t, ago, over = {}) {
@@ -611,12 +875,13 @@ describe("kind: a raw reading waits for the import's late check", () => {
   }
   it("says when Claude reads it, starts the detached run, and does not wait for it, while this Mac's pending late check is due later", async () => {
     const t = setup();
+    appOn(t);
     waiting(t);
     owe(t, 5 * 60 * 1000);
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     const due = clockAt(Date.parse(AT) - 5 * 60 * 1000 + LATE_CHECK_MS);
     assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${due}, when the import has checked its copies.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3)]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
     assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
     t.done();
   });
@@ -630,23 +895,25 @@ describe("kind: a raw reading waits for the import's late check", () => {
   });
   it("says the latest time it can be, while an import of either Mac is still at work on the video", async () => {
     const t = setup();
+    appOn(t);
     const found = waiting(t);
     const bytes = found.record.video.bytes;
     writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual(r.said, [`Answered. Claude reads it at ${clockAt(Date.parse(AT) + CLAIM_WAIT_MS + LATE_CHECK_MS)}, when the import has checked its copies.`]);
-    assert.equal(t.started.length, 1);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
     assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
     t.done();
   });
   it("reads a finished video or a clip at once while the late check is still owed: they only add files", async () => {
     for (const word of ["finished", "clip"]) {
       const t = setup();
+      appOn(t);
       waiting(t);
       owe(t, 5 * 60 * 1000);
       const r = await on(t.ctx.deps, "kind", LABEL, word, "--private", "no");
       assert.deepEqual(r.said, [STILL(LABEL)], word);
-      assert.equal(t.started.length, 1, word);
+      assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs(word === "clip" ? "short video" : word, 3), ...(word === "clip" ? [COPY_ARGS] : [])], word);
       t.done();
     }
   });
@@ -664,6 +931,123 @@ describe("kind: a raw reading waits for the import's late check", () => {
     owe(t, 40 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." });
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual(r.said, [STILL(LABEL)]);
+    t.done();
+  });
+});
+
+describe("kind: a correction keeps the HyperFrames project made for the earlier kind (architecture 4.8)", () => {
+  /** What each kind is called to her. */
+  const SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
+  /** What `kind` is told to make a video `to`, again, and what it said of the project. */
+  const correct = (t, to, more = []) => on(t.ctx.deps, "kind", NAME, WORD[to], "--private", to === "session" ? "yes" : "no", "--again", ...more);
+  const mentions = (r) => r.said.filter((line) => line.includes("HyperFrames project"));
+  /** The words said of a project kept, by what the video is now. */
+  const keptWords = (was, now) => {
+    const made = `Its HyperFrames project, made when it was answered as ${SAID[was]}, is kept as it was.`;
+    if (now === "finished") return `${made} A finished video is not edited in HyperFrames.`;
+    if (now === "session") return `Its HyperFrames project, made when it was answered as ${SAID[was]}, is kept as it was, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it.`;
+    return `${made} Say "open ${NAME} in HyperFrames" to make a new one.`;
+  };
+  const CHANGES = [
+    ["raw", "short video"], ["short video", "raw"], ["raw", "finished"], ["short video", "finished"], ["finished", "raw"], ["finished", "short video"], ["raw", "session"], ["short video", "session"]
+  ];
+  it("marks the main project in use as kept for an earlier kind when the kind changes, and says so once, by the new kind", async () => {
+    for (const [was, now] of CHANGES) {
+      const t = setup();
+      const found = answeredWith(t, was, [project()]);
+      const before = workTree(t);
+      const r = await correct(t, now);
+      assert.equal(r.code, 0, `${was} to ${now}: ${r.text}`);
+      assert.deepEqual(mentions(r), [keptWords(was, now)], `${was} to ${now}`);
+      const record = reread(found);
+      assert.equal(record.kind, now);
+      assert.deepEqual(record.app, appOf(project({ state: KEPT_STATE })), `${was} to ${now}`);
+      assert.deepEqual([record.version, layoutOf(record)], [4, 4]);
+      // Nothing on disk is moved, changed or removed: the project's folder is as it was.
+      assert.deepEqual(workTree(t), before, `${was} to ${now}`);
+      t.done();
+    }
+  });
+  it("says the three sentences exactly: for raw and a clip how to make a new one, for a finished video that it is not edited here, for a session what to do", async () => {
+    const lines = [];
+    for (const [was, now] of [["finished", "raw"], ["raw", "short video"], ["raw", "finished"], ["short video", "session"]]) {
+      const t = setup();
+      answeredWith(t, was, [project()]);
+      lines.push(...mentions(await correct(t, now)));
+      t.done();
+    }
+    assert.deepEqual(lines, [
+      `Its HyperFrames project, made when it was answered as finished by your editor, is kept as it was. Say "open ${NAME} in HyperFrames" to make a new one.`,
+      `Its HyperFrames project, made when it was answered as raw with retakes, is kept as it was. Say "open ${NAME} in HyperFrames" to make a new one.`,
+      "Its HyperFrames project, made when it was answered as raw with retakes, is kept as it was. A finished video is not edited in HyperFrames.",
+      "Its HyperFrames project, made when it was answered as an iPhone clip, is kept as it was, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it."
+    ]);
+  });
+  it("says it with the lines the answer has, before the reading is waited for, and holds no path, flag or name of a command", async () => {
+    const t = setup();
+    answeredWith(t, "raw", [project()]);
+    const r = await correct(t, "finished");
+    assert.deepEqual(r.said, [keptWords("raw", "finished"), STILL(NAME)]);
+    for (const line of r.said) assert.doesNotMatch(line, /\/|--|\bnpx\b|\bnode\b|edit\.js|hyperframes\.mjs/, line);
+    t.done();
+  });
+  it("says it too when this Mac's readings are off, and the video is answered all the same", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    const r = await on(withSettings(t, { readings: false }), "kind", NAME, "finished", "--private", "no", "--again");
+    assert.deepEqual([r.code, r.said], [0, [keptWords("raw", "finished"), `${NAME}: answered. ${READINGS_OFF}`]]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[PROJECT, KEPT_STATE]]);
+    t.done();
+  });
+  it("changes nothing in app, and says nothing of a project, when the same kind is said again", async () => {
+    for (const kind of ["raw", "short video", "finished"]) {
+      const t = setup();
+      const found = answeredWith(t, kind, [project()]);
+      const before = workTree(t);
+      const r = await correct(t, kind);
+      assert.equal(r.code, 0, `${kind}: ${r.text}`);
+      assert.deepEqual(mentions(r), [], kind);
+      assert.deepEqual(reread(found).app, appOf(project()), kind);
+      assert.deepEqual(workTree(t), before, kind);
+      t.done();
+    }
+  });
+  it("keeps the project once: the next correction finds none in use, says nothing of one, and changes nothing in app", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    assert.equal((await correct(t, "finished")).code, 0);
+    const kept = reread(found).app;
+    const again = await correct(t, "raw");
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual(mentions(again), []);
+    assert.deepEqual(reread(found).app, kept);
+    assert.deepEqual(reread(found).app.projects.map((p) => p.state), [KEPT_STATE]);
+    t.done();
+  });
+  it("marks the main project alone: a Reel's project is left as it is, and a record with no project in use gets none and says nothing", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project(), reel()]);
+    const r = await correct(t, "finished");
+    assert.deepEqual(mentions(r), [keptWords("raw", "finished")]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["main", KEPT_STATE], ["reel 1", "opened"]]);
+    t.done();
+    for (const projects of [undefined, [], [reel()], [project({ state: KEPT_STATE })]]) {
+      const u = setup();
+      const there = answeredWith(u, "raw", projects);
+      const before = reread(there).app;
+      const said = await correct(u, "finished");
+      assert.equal(said.code, 0, said.text);
+      assert.deepEqual(mentions(said), [], JSON.stringify(projects));
+      assert.deepEqual(reread(there).app, before, JSON.stringify(projects));
+      u.done();
+    }
+  });
+  it("marks the project in the one write that records the new answer", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    await correct(t, "finished");
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.kind, record.app.projects[0].state, record.answer.state], [3, "finished", KEPT_STATE, "answered"]);
     t.done();
   });
 });
@@ -1084,11 +1468,12 @@ describe("kind and leave: one answer at a time on a Mac (fix round 1, 1)", () =>
   });
   it("refuses the same answer twice, and starts one reading", async () => {
     const t = setup();
+    appOn(t);
     const found = waiting(t);
     const { outer, inner } = await nested(t, ["raw", "--private", "no"], ["raw", "--private", "no"]);
     assert.deepEqual([inner.code, inner.said], [1, [BUSY]]);
     assert.equal(outer.code, 0, outer.text);
-    assert.deepEqual([reread(found).rev, t.started.length], [3, 1]);
+    assert.deepEqual([reread(found).rev, t.started.map(([, args]) => args.slice(1))], [3, [readArgs("raw", 3), COPY_ARGS]]);
     t.done();
   });
   it("refuses a leave started inside an answer's wait, and an answer started inside a leave's", async () => {
@@ -1193,9 +1578,10 @@ describe("kind and leave: one answer at a time on a Mac (fix round 1, 1)", () =>
   });
   it("starts the reading with the kind and the rev of the answer's record, so that its run can refuse a record that no longer says them", async () => {
     const t = setup();
+    appOn(t);
     const found = waiting(t);
     await on(t.ctx.deps, "kind", LABEL, "clip", "--private", "no");
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", "short video", "--rev", "3"]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", "short video", "--rev", "3"], COPY_ARGS]);
     assert.equal(reread(found).rev, 3);
     t.done();
   });

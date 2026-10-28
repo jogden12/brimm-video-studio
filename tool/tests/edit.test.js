@@ -235,7 +235,7 @@ describe("node edit.js open", () => {
   const NOTES = Array.from({ length: 15 }, (_, i) => `Note line ${i + 1}.`).join("\n") + "\n";
   /** An episode as the import leaves it, with Claude's notes and one Reel candidate. */
   const imported = (t) => t.episode("2026-10-13 Talk (Mac Studio)", { reels: [{ n: 1, status: "candidate", from: 61.2, to: 103.3, title: "Price like you mean it", why: "It stands alone.", files: ["Talk.reel-1.mp4"], pushed: [] }] }, { "Talk.mov": 5, "Talk.edit-notes.txt": NOTES.length, "edit/main.v0.fcpxml": 0 });
-  it("shows the name, the placeholder line, the title, the notes, the Reel candidates and the next step", async () => {
+  it("shows the name, the placeholder line, the title, the notes and the Reel candidates, and says nothing of Final Cut", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(join(path, "Talk.edit-notes.txt"), NOTES);
@@ -249,10 +249,11 @@ describe("node edit.js open", () => {
       "Claude's notes, the first lines:",
       ...Array.from({ length: 12 }, (_, i) => `  Note line ${i + 1}.`),
       "Reel candidates:",
-      '  1. "Price like you mean it", 0:42. It stands alone.',
-      "Not shown in Final Cut yet.",
-      'Say "show it in Final Cut" to see the main video there.'
+      '  1. "Price like you mean it", 0:42. It stands alone.'
     ]);
+    // The one line about keeping the episode on this Mac is Finder's, and is the last it says.
+    assert.match(r.said[r.said.length - 1], /^So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: /);
+    assert.ok(!/Final Cut/.test(r.text), r.text);
     t.done();
   });
   it("refuses an episode with a conflicted copy of its record or a timeline, naming it", async () => {

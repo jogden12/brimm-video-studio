@@ -133,7 +133,7 @@ describe("a day in the record", () => {
 
 describe("reading an episode's record", () => {
   it("keeps each record in record/, numbered with four digits", () => {
-    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 3, "/E/x/record/0007.json"]);
+    assert.deepEqual([RECORD_DIR, RECORD_VERSION, recordFile("/E/x", 7)], ["record", 4, "/E/x/record/0007.json"]);
   });
   it("gives back the record with the highest number, whole, with any field this version does not know kept as it was", () => {
     const t = setup();

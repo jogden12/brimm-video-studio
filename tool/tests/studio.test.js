@@ -193,6 +193,27 @@ describe("her folder's settings", () => {
     assert.doesNotMatch(row, /When it, or "how far is it\?", says/);
     assert.doesNotMatch(row, /says so only while/);
   });
+  it("have the skill open an episode in HyperFrames with app, and take it over by the rules it has for open, with app in open's place", () => {
+    // `app` begins with open's own claim and bring (edit.js claimAndBring): another Mac's claim refuses it in open's words, and a bring
+    // or a claim Dropbox undid ends in open's words too, to say "take it over" again. So her yes is asked for once, and the take-over
+    // is run again unasked only in the conversation she said yes in, exactly as for open (build plan PR 4, "The skill").
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const rowOf = (start) => skill.split("\n").filter((line) => line.startsWith(start));
+    const OPEN_HER = '| "Open the Pricing episode in HyperFrames" / "Open it in HyperFrames" |';
+    assert.equal(rowOf(OPEN_HER).length, 1, "the skill has not one row for opening an episode in HyperFrames");
+    const [app] = rowOf(OPEN_HER);
+    assert.ok(app.startsWith(`${OPEN_HER} \`app "<episode>"\`: it opens in HyperFrames on her Mac. If it says another Mac has it, ask her whether to take it over; if yes, \`app "<episode>" --take-over\`.`), app);
+    // Everything open's row says from its take-over on, with app run in open's place.
+    const [open] = rowOf('| "Open the Pricing episode" |');
+    assert.ok(open, "the skill has no row for opening an episode");
+    const takeOver = open.slice(open.indexOf("If it says another Mac has it"), open.lastIndexOf(" |"));
+    assert.ok(takeOver.includes("Never take an episode over unasked otherwise."), takeOver);
+    assert.ok(app.endsWith(`${takeOver.replaceAll('`open "<episode>"', '`app "<episode>"')} |`), app);
+    // The two rows are twins and neither runs the other's command: this one runs app, in the two forms the help gives it, and never open.
+    assert.doesNotMatch(app, /`open /);
+    assert.doesNotMatch(open, /`app /);
+    assert.deepEqual([...new Set([...app.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>"', 'app "<episode>" --take-over']);
+  });
   it("have the skill say which quotes a word with a $, a backtick, a backslash or a straight double quote goes in, and what to do when none will do", () => {
     // A straight double quote can be passed only in single quotes: the guard refuses it inside double quotes, escaped or not.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
@@ -384,7 +405,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     // The flags of the fork are among those checked, so that this cannot go blind.
-    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
+    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "app --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
       assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
     }
     // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).
@@ -422,6 +443,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const KNOWN_INERT = [
       'kind "<label>" finished --private no --not-a-session [--not-a-session]', // a camera video is no Zoom download
       'open "<episode>" --take-over [--take-over]', // no other Mac has the episode
+      'app "<episode>" --take-over [--take-over]', // this Mac is not set up for HyperFrames, which app says before it looks at a claim (and no other Mac has the episode)
       'finish "<episode>" --yes [--yes]', // the main video was never shown in Final Cut, which it says first
       'resolve "<episode>" --keep A [--keep]', // there is no conflict, whatever is kept
       'principles "<label>" edit 3 --name "<words>" [--name]' // teachings are not turned on in this world
@@ -468,7 +490,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     assert.ok(ran.length >= 60, `${ran.length} commands run`);
-    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"']) assert.ok(ran.includes(span), span);
+    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"', 'app "<episode>"', 'app "<episode>" --take-over']) assert.ok(ran.includes(span), span);
     assert.deepEqual(inert, KNOWN_INERT, "the flags that change nothing in these worlds are not the known ones");
   });
   it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
@@ -853,6 +875,14 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
     assert.equal(replaced.length, 11, replaced.join("\n"));
     for (const line of strictLines.filter((l) => !wordsTheCard(l))) assert.ok(open.has(line), `the open skill lacks the strict skill's line: ${line.slice(0, 90)}`);
     for (const line of replaced) assert.ok(!open.has(line), `the open skill still words the card itself: ${line.slice(0, 90)}`);
+  });
+  it("has the skill open an episode in HyperFrames in the very row the strict skill has, and run app in no other form", () => {
+    const rowOf = (skill) => skill.split("\n").filter((line) => line.startsWith('| "Open the Pricing episode in HyperFrames" / "Open it in HyperFrames" |'));
+    assert.equal(rowOf(strictSkill).length, 1, "the strict skill has not one row for opening an episode in HyperFrames");
+    assert.deepEqual(rowOf(openSkill()), rowOf(strictSkill));
+    const apps = (skill) => [...new Set(commandsIn(skill).filter((span) => span.split(" ")[0] === "app"))];
+    assert.deepEqual(apps(openSkill()), apps(strictSkill));
+    assert.deepEqual(apps(openSkill()), ['app "<episode>"', 'app "<episode>" --take-over']);
   });
   it("has the skill ask the card exactly as episodes prints it, and never word it itself", () => {
     const skill = openSkill();

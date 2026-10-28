@@ -1,7 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
-- **Status:** a proposal, for Jason's yes. Nothing in it is built, installed or turned on.
+- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 3 are merged, and PR 4 is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
 - **It rests on:**
   - the design accepted on 2026-10-27, `2026-10-27-brimm-video-with-the-hyperframes-app.md` (until it is merged, on the branch `claude/zealous-bell-esuqck` of brimm-video, or `claude/design-2026-10-27` of brimm-video-studio);
   - Jason's decisions in `docs/requirements.md`;
@@ -303,10 +303,10 @@ sequenceDiagram
 | 1 | Sallie | Drops the video in her drop folder | Unchanged |
 | 2 | The watcher | The light import: sound read, transcript with word times, cut plan, the video filed in `Episodes/` by the Dropbox rule, a label, "Ready" | Unchanged (`unedited.js`, `filing.js`) |
 | 3 | Sallie, in her chat | Answers the card: "Raw with retakes" | Unchanged (`kind`) |
-| 4 | Studio, in the background | Two detached jobs: Claude reads the words and the cut plan (cut decisions, notes, Reel suggestions, spelling offers); and the working copy is made, if the video is on this Mac | `reading.js` changed: no rough cut, no Final Cut file. `workcopy.js` new |
+| 4 | Studio, in the background | Two detached jobs: Claude reads the words and the cut plan (cut decisions, notes, Reel suggestions, spelling offers); and the working copy is made (if the video is on this Mac, this Mac is set up for the app, and the episode has no main project in use) | `reading.js` changed: no rough cut, no Final Cut file. `workcopy.js` new |
 | 5 | Sallie | Reads what Claude found; answers the spellings card | Unchanged |
 | 6 | Sallie | "Open it in HyperFrames" | `app "<episode>"`, new |
-| 7 | Studio | Claims the episode for this Mac, brings its files over if they are online-only, waits for the working copy, writes the project, opens the app, and says in plain words that it is open | `app.js`: today's claim and bring from `open`, then `project.js` and `hyperframes.js` |
+| 7 | Studio | Claims the episode for this Mac, brings its files over if they are online-only, asks for the working copy if it is not made, writes the project, opens the app, and says in plain words that it is open. The bring and the copy are detached runs, so `app` does not wait for them: it says what is being made, and tells her to say "open `<name>` in HyperFrames" again when it is done ("how far is it?" shows how far it has got), since a command has two minutes in the Code tab | `app.js`: today's claim and bring from `open`, then `project.js` and `hyperframes.js` |
 | 8 | Sallie and Framey, in the app | Cuts (the Script panel's suggestions, and Studio's in `brimm/cut-suggestions.json`), a name, a title card, music, captions, graphics. Each request is an entry in the project's history | Not Studio's |
 | 9 | Sallie, in her chat | "What did I do in HyperFrames?" | `app "<episode>" what-happened` reads `.hyperframes/app-history.jsonl` and says it in plain words |
 | 10 | Sallie | A Reel: asks the app ("Make Reel 2 from … to …"), or says "make Reel 2" in her chat | `app "<episode>" reel 2` makes a Reel project from suggestion 2 and opens it |
@@ -329,7 +329,7 @@ The same, with these differences:
 
 ### 4.3 A finished video from her editor, and Reels from it
 
-- **No app for the hand-off.** As today: drop, card "Finished by your editor", Claude's Reel suggestions and spelling offers, and the hand-off is written when the spelling card is answered, from the import's captions (`finishFinished`). No working copy, no project.
+- **No app for the hand-off.** As today: drop, card "Finished by your editor", Claude's Reel suggestions and spelling offers, and the hand-off is written when the spelling card is answered, from the import's captions (`finishFinished`). No working copy, no project: `app "<episode>"` for a finished video says "`<name>` was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames." and stops.
 - **A Reel she wants** goes to the app as a project of its own: `app "<episode>" reel 2`. Studio cuts that suggestion's stretch out of the original into the Reel project's working file (a short job for a Reel's length), writes the project, and opens it. The upright crop is the app's job; Studio offers the face positions it already finds (`brimm/face-track.json`, optional). `app … reel N` also marks the candidate as picked, which is what `reel pick` did, and `reel drop N` stays as the way to drop one (6.1).
 - **After the export,** `finish "<episode>" reels` writes the next revision of the hand-off under the same id, with the new Reels added and `main` as it was (section 8.7).
 - **OpusClip** is unchanged: it takes the episode's YouTube link, and Studio uploads nothing.
@@ -394,8 +394,8 @@ Section 8. In short: Studio takes the exports, transcribes them again on the Mac
 
 ### 4.8 Corrections
 
-- **"It's actually finished" (or raw, or an iPhone clip).** Today's `kind … --again`. A project that exists is kept, never deleted by Studio, and marked as made for the earlier kind; `app` offers a new one.
-- **A new version of a video** (`versions.js` fingerprint): a new revision of the episode, its own project. The old one is untouched.
+- **"It's actually finished" (or raw, or an iPhone clip).** Today's `kind … --again`. When it changes the kind, the main project that exists is kept, never deleted by Studio, and marked "kept for an earlier kind", in the record that changes the kind. Nothing on disk changes, and she is told so in one line. `app` makes a new main project the next time she asks, and does not offer it first. The new one is another folder, under the first name that no project of the record has: "main 2", then "main 3" and so on (5.1). Its `key` in the record stays "main"; the kept project keeps its own name, folder and entry.
+- **A new version of a video** (`versions.js` fingerprint): a new revision of the episode, made at the drop, with its own project. The old one is untouched. A recording that changed under a project, with no new drop, is not a new version: `app` says that the recording has changed since the project was made, and opens the project as it was, with the recording it was made from. It makes no second project in place.
 - **A spelling added later** is not pushed into an open project: the app may be editing it. It applies to the final transcripts at `finish`, and the chat tells her to ask the app's assistant to fix any caption already drawn.
 - **Asking Claude again** (`ask`) rewrites `brimm/` only while the project has never been opened. After that it says so and changes nothing in the project.
 
@@ -424,7 +424,7 @@ Section 8. In short: Studio takes the exports, transcribes them again on the Mac
     <project name>/                       a session clip's, e.g. "Session clip 3 3fa9c1"
 ```
 
-The project's folder name, its `meta.json` name and its title in the app are one name, built as `projectName` builds Final Cut's today (`<file-safe name> <part> <short id>`, without the version: versions are the app's). The app names an export after the project, so the record keeps the name and `finish` finds files by it, never by the episode's later name. A session's projects are named from its label and a number, never from a file.
+The project's folder name, its `meta.json` name and its title in the app are one name, built as `projectName` builds Final Cut's today (`<file-safe name> <part> <short id>`, without the version: versions are the app's). The app names an export after the project, so the record keeps the name and `finish` finds files by it, never by the episode's later name. The main video's later projects, which a correction of the kind makes (4.8), have the part "main 2", "main 3" and so on (`Pricing talk main 2 3fa9c1`): the first name that no project the record keeps has, so that a folder that is there, recorded or not, is never written over; one the record does not know, which a run that could not write its record left, is taken as the project it is. A session's projects are named from its label and a number, never from a file.
 
 ### 5.2 What goes in a project
 
@@ -450,8 +450,8 @@ Everything in a project is a file Studio chose to put there. The tests assert th
 
 - **Where:** `~/BRIMM Video Work/.toolchain/hyperframes-0.8.208/`, made by `npm install --prefix <that folder> --ignore-scripts --save-exact hyperframes@0.8.208`. Run as `node <that folder>/node_modules/hyperframes/bin/hyperframes.mjs <command>`. Never `npx`, which would run whatever `hyperframes` it finds first, including a planted `node_modules/.bin/hyperframes` in a project.
 - **Each project reaches it by a link,** `node_modules/.bin/hyperframes` pointing at the toolchain's `bin/hyperframes.mjs`. The notes, the scripts and the assistant's habits all say `npx hyperframes …`; with the link, `npx` finds the pinned version first and never goes to the network for another. Tested here on Linux with npm offline: `npx hyperframes --version`, `npx --no-install hyperframes --version` and `npm run` all answered 0.8.208. Whether the app and its assistant accept a project like that is A0b's question (15, item 8). Studio itself never uses `npx`; it calls the toolchain by absolute path. A snapshot leaves the link out and a take-over makes it again for that Mac's own toolchain.
-- **The pin** is `tool/hyperframes.pin.json`: the version, and the registry's integrity string for it (`sha512-a019TOERCx/qj9NtUc7D69gGPguXR97Vbs8CjUUq6KKS+FqlaUBob6CG2KT8ohHhHvHTc1K3mie2hyxZLqt+8w==` on 2026-10-27; 664 files, 23,243,606 bytes unpacked), and GSAP's version and checksum. The installer step checks the download against it.
-- **Installing it** is a step of `install.sh` (shown by `--print`, run only on Jason's yes, as for every install), together with the Chrome the command line renders with (`hyperframes browser`) and a `doctor` check. H0 (the render test of 2026-10-26) already did this by hand on the Mac Studio.
+- **The pin** is `tool/hyperframes.pin.json`: the version, and the registry's integrity string for it (`sha512-a019TOERCx/qj9NtUc7D69gGPguXR97Vbs8CjUUq6KKS+FqlaUBob6CG2KT8ohHhHvHTc1K3mie2hyxZLqt+8w==` on 2026-10-27; 664 files, 23,243,606 bytes unpacked), and GSAP's version and checksum. The installer step checks the download against it. The string covers the `hyperframes` package alone: its dependencies float at install, since it ships no shrinkwrap (the plan's open items ask Jason about a lock file).
+- **Installing it** is a step of `install.sh` (shown by `--print`, run only on Jason's yes, as for every install). After the toolchain, the command line's own `browser ensure` finds or fetches the Chrome it renders with: Chrome Headless Shell, from storage.googleapis.com, kept in `~/.cache/hyperframes/chrome`. If it cannot be had, the setup stops before the drop folder, the settings and the launch agent are touched. Then `doctor` runs: its words are shown for Jason and are not read, and it does not stop the setup. The installer's runs of the command line carry the same five `HYPERFRAMES_` variables as 5.6. H0 (the render test of 2026-10-26) already did this by hand on the Mac Studio. On a Mac whose settings turn the app on, `behind` looks at that folder as the installer's check does (the version installed, the integrity string npm's lock file keeps for it, the program), and says in one line, for Jason, when it is not the pin: none, another version, or the pinned version not as the pin has it. It runs and installs nothing.
 - **Moving the pin** is a pull request: new version and integrity, the fixtures of the new `--help`, `init` and `--json` outputs, and the classification of any new command (5.5).
 
 ### 5.4 The notes for the agent
@@ -478,7 +478,7 @@ Everything in a project is a file Studio chose to put there. The tests assert th
 | **Only `edit.js` runs (2)** | `open`, `catch-up` | They are the handover's (5.6) |
 | **Denied (21)** | `init`, `add`, `catalog`, `capture`, `present`, `publish`, `cloud`, `lambda`, `cloudrun`, `auth`, `feedback`, `telemetry`, `skills`, `models`, `browser`, `upgrade`, `benchmark`, `clean`, `transcribe`, `tts`, `remove-background` | Each uploads, publishes, signs in, fetches or installs from the network, generates a voice, changes the pin, or redoes what Studio did. `clean` is not scoped to one project: the command line's own code sweeps every known project's history and render leftovers, so neither the agent nor Studio runs it (retention deletes named paths instead, 7.4). `remove-background` waits for A0 to say it is wanted (its first use may download a model) |
 
-The classification is data in `tool/hyperframes.js`. `.claude/settings.json` is made from it: for each command the agent may not run (the 21 denied, and the 2 that only `edit.js` runs, by absolute path and outside the project's settings), a `Bash(…:*)` rule for each way the project's scripts and the notes spell it (`npx hyperframes <c>`, `npx --yes hyperframes@0.8.208 <c>`, `hyperframes <c>`), and a rule for `npm run publish`, though the project has no such script. The same file sets `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, `DISABLE_FEEDBACK_COMMAND=1` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`.
+The classification is data in `tool/hyperframes.js`. `.claude/settings.json` is made from it: for each command the agent may not run (the 21 denied, and the 2 that only `edit.js` runs, by absolute path and outside the project's settings), a `Bash(…:*)` rule for each way the project's scripts and the notes spell it (`npx hyperframes <c>`, `npx --yes hyperframes@0.8.208 <c>`, `hyperframes <c>`), and a rule for `npm run publish`, though the project has no such script. The same file sets `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, `HYPERFRAMES_NO_UPDATE_CHECK=1`, `HYPERFRAMES_NO_AUTO_INSTALL=1`, `HYPERFRAMES_NO_OPTIONAL_INSTALL=1`, `DISABLE_FEEDBACK_COMMAND=1` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`. The pinned version, by its own code, otherwise checks npm for a newer version, can install one in the background, and installs an optional package a feature needs. The three new variables stop each, since nothing is installed on a Mac without Jason's yes. They are also in the environment `app` runs the command line in (5.6) and in the installer's runs (5.3).
 
 A prefix rule can be sidestepped, so three things stand behind it: the project has no `publish` script and no credentials of its own; the notes say it in words; and A0 tries each (15). If A0 shows the app's assistant ignores the project's settings, the fallback is the app's own Settings, set by hand once per Mac, written in the guide.
 
@@ -488,30 +488,49 @@ A prefix rule can be sidestepped, so three things stand behind it: the project h
 node <toolchain>/node_modules/hyperframes/bin/hyperframes.mjs open <project folder> --json
 ```
 
-- **The environment** is a list, not what Studio inherited: `PATH` (node's folder, `/usr/bin`, `/bin`), `HOME`, `LANG`, `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, and `CLAUDE_CODE_SESSION_ID` only when the handover is allowed. No key, no `ANTHROPIC_*`, no proxy setting.
-- **The handover is allowed only when all of these hold:** this Mac's setting `appHandover` is on (default off); the id is a chat's (`SESSION_ID` in `scan.js`); `chatHeld` says the chat holds no session's words; the episode is not a session and not unanswered; the project is not a session clip. Otherwise the variable is left out and the answer says "opened without your chat".
-- **How `app` knows the chat is not held.** `app` runs inside the chat's own Bash call, so it has `CLAUDE_CODE_SESSION_ID`. It finds the chat's transcript with `transcriptOf` (today private to `loosened.js`, so exported or moved to `scan.js`) and the `claude` process above it as `markChat` does, and asks `chatHeld({ home, sessionId, transcriptPath, claude })`. `chatHeld` fails closed: with no readable transcript, on a Mac where any session has ever been marked, it answers "held". So when `app` cannot find the transcript the handover is refused, never guessed.
+- **Only a Mac set up for it.** `app` runs only where this Mac's settings turn it on (`node settings.js set --app hyperframes`; `--app off` turns it off again). It is off unless set. Otherwise `app` says "This Mac isn't set up for HyperFrames yet: ask Jason." and claims nothing.
+- **The environment** is a list, not what Studio inherited: `PATH` (node's folder, `/usr/bin`, `/bin`), `HOME`, `LANG`, `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, `HYPERFRAMES_NO_UPDATE_CHECK=1`, `HYPERFRAMES_NO_AUTO_INSTALL=1`, `HYPERFRAMES_NO_OPTIONAL_INSTALL=1` (the last three are explained in 5.5), and `CLAUDE_CODE_SESSION_ID` only when the handover is allowed. No key, no `ANTHROPIC_*`, no proxy setting. `app` runs the command line with a spawn of its own, since `run.js` takes no environment and is a copy from brimm-operations that does not change (8.8).
+- **The handover is allowed only when all of these hold:** this Mac's setting `appHandover` is on (`--app-handover on`; off unless set); the id is a chat's (`SESSION_ID` in `scan.js`); `chatHeld` says the chat holds no session's words; the episode is not a session whose mark is not cleared (one whose mark was cleared is an ordinary video, 6.2) and not unanswered; the project is not a session clip. Otherwise the variable is left out, and the answer says why (the table below).
+- **How `app` knows the chat is not held.** `app` runs inside the chat's own Bash call, so it has `CLAUDE_CODE_SESSION_ID`. It finds the chat's transcript with `transcriptOf` (exported from `loosened.js`) and the `claude` process above it as `markChat` does, and asks `chatHeld({ home, sessionId, transcriptPath, claude })`. `chatHeld` fails closed: with no readable transcript, on a Mac where any session has ever been marked, it answers "held". So when `app` cannot find the transcript the handover is refused, never guessed, and she is told that the chat could not be found.
 - **What comes back** (`--json`): `{project, opened, app, handedOver?}` on success; `{project, opened: false, reason, downloadUrl}` and exit 1 otherwise. The reasons and the words Sallie reads:
 
 | `reason` | Words |
 |---|---|
 | (opened) | "It's open in HyperFrames." |
+| (opened, her chat handed over) | "It's open in HyperFrames, and it picks up this conversation." |
+| (opened, her chat wanted and not handed over) | "It's open in HyperFrames. It starts a new conversation." Then one line on why: "This chat has held a client or group session's words, so it stays here." (the chat holds a session's words), "This chat could not be found, so it stays here." (no chat of hers is found), or "This video's chat stays here." (the episode is a session or unanswered, or the project is a clip) |
 | `not-installed` | "HyperFrames isn't installed on this Mac: ask Jason." |
 | `open-failed` | "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason." |
 | `unsupported-platform`, `handoff-unavailable` | "HyperFrames can't be opened from here: ask Jason." (not expected on a Mac) |
 
-- **The record** gets the time of each open. A failed open writes nothing.
+Whenever the app opened, a last line names the buttons Studio cannot control (3.3, 5.9): "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes." Nothing of them is said when it did not open.
+
+- **Before it asks the app,** and after the gate and the check above, `app` may stop or have something to say. These are its words:
+
+| When | Words |
+|---|---|
+| The pinned command line is not on this Mac | "HyperFrames' command line isn't on this Mac yet: ask Jason." Nothing is claimed |
+| The main project in use was made on another Mac and is not on this one | "The HyperFrames project for `<name>` is on `<Mac>`, with everything done in it, so it can't be opened on this Mac yet. Ask Jason." Nothing is claimed, brought or made, with or without `--take-over`, until the snapshot and the take-over's rebuild (plan PR 11) |
+| Claude's reading of the episode is still at work, and its project is not made yet | "Claude is still reading it. Say "open `<name>` in HyperFrames" again when it has finished; "how far is it?" shows how far it has got." Nothing is made, since the project is written from the reading and nothing writes it again later; the working copy is asked for if it is not there. A project made before is opened as usual |
+| The recording has changed since the project was made | "The recording of `<name>` has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from." It goes on and opens it |
+| Part of a project folder the record does not list cannot be read | "The HyperFrames project for `<name>` is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason." Nothing is opened |
+| The episode's words are not on this Mac | "The words of `<name>` are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason." Nothing is made or started |
+| The working copy is not made | "The video for HyperFrames is being made. Say "open `<name>` in HyperFrames" again when it is done; "how far is it?" shows how far it has got." It has asked for the copy, unless one is being made, and it does not wait for it: a command has two minutes in the Code tab |
+
+- **A project folder the record does not list.** A run that made the project and could not write the record leaves a folder at the project's name. The next `app` takes that folder as the project it is, and records it (state `made`, never opened, from the recording as it is now). It makes and starts nothing, and needs neither the episode's words nor a working copy. If part of the folder cannot be read, it says so (above) and opens nothing. A folder the record does list is its own, whatever it is kept for: a project kept for an earlier kind is never taken for the main one (4.8).
+- **The record** gets the project and the time of each open. A project that was made is kept and recorded whether or not the app opened: a failed open adds no time to `opened`, and a project just made stays in state `made`.
 
 ### 5.7 The working copy
 
-- **Made from** the raw video as filed (whole, checked), by ffmpeg, in the run's own folder first and then moved to `<episode folder>/working copy/<key>.mp4`, with its facts beside it, as a detached job with progress steps (`detached.js`, `progress.js`). It starts after `kind` when the video is on this Mac, and `app` starts it if it is not there and waits. It runs beside the reading, so it needs a lock of its own: `detached.js` keeps one lock for each episode today, and under it the copy would wait for the reading (plan, PR 4). The project's writer renames it into `media/recording.mp4` as its last step (the same disk, so nothing is copied), which is why no project ever holds a half-written video.
+- **Made from** the raw video as filed (whole, checked), by ffmpeg, in the run's own folder first and then moved to `<episode folder>/working copy/<key>.mp4`, with its facts beside it, as a detached job with progress steps (`detached.js`, `progress.js`). "Checked" is the import's late check of its copies, which may put the video in again: the run waits for it as a raw reading does (`importHold`, looking again every minute for half an hour at most), showing "Waiting for the import to check its copies" among what is running, and a late check that found a problem (or an import that failed or stopped) ends the run with the reading's own words. It starts after `kind` when the video is on this Mac, this Mac's settings turn the app on, and the record `kind` wrote has no main project in use (a project kept for the earlier kind in the same answer is not in use, so a change of kind asks for a new copy); `kind` asks for it at once, and the run does the waiting. `app` asks for it if it is not there, says it is being made, and tells her to say "open `<name>` in HyperFrames" again when it is done ("how far is it?" shows how far it has got). It does not wait for it: a command has two minutes in the Code tab. It runs beside the reading, so it holds a lock of its own, `workcopy.lock`, beside the episode's `episode.lock`: `detached.js` keeps one lock for each episode, and under it the copy would wait for the reading (plan, PR 4). The project's writer renames it into `media/recording.mp4` as its last step (the same disk, so nothing is copied), which is why no project ever holds a half-written video.
 - **Picture:** H.264 High, 8-bit 4:2:0, tagged BT.709; a constant frame rate; the longer side at most 1920. The rate is the source's when ffprobe's two rates (`r_frame_rate` and `avg_frame_rate`) agree, and 30 when they do not, which marks a variable-rate phone or Zoom file. That check is new code: `roughRate` returns the file's rate, or 30 when it has none, and does not test whether it is constant. 4K exports are a switch (`--4k` makes a 4K working copy) pending the answer to Q1.
 - **Sound:** AAC, 48 kHz; the stream `soundStream` picks, so an iPhone's APAC track is handled as it is now.
 - **HDR** is recognised from the picture's colour as `colourOf` reads it (BT.2020 primaries with an HLG or PQ transfer) and tone-mapped to standard colour. A clip that cannot be converted is refused in words, never used as it is. None of this exists today: `colourOf` only reads the two names, `fcpxml.js`'s `colorSpaceOf` maps HLG alone, and nothing converts. A0's recording is not HDR, so the converter is checked by eye on a real iPhone clip (risk 3).
 - **Under the watchdog.** ffmpeg runs under `runGuarded` (`guard.js`), the guard that exists because an ffmpeg once grew its memory without end: killed past 4 GB of memory (8 GB for a 4K copy) or past five minutes and twenty seconds for each second of video, limits set from measurements in plan PR 3. A Reel preview's 2 GB would be too tight for a 4K HDR copy. The rough cut itself runs unguarded today: only Reel previews have the guard.
 - **Not cut.** Its clock is the raw video's clock, so every time Studio and Claude have given stays true in the project.
-- **Idempotent:** keyed by the raw file's size and time, with a key of its own for a 4K copy. A changed raw video makes a new copy for a new project; a project that exists is never changed under the app (4.8).
+- **Idempotent:** keyed by the raw file's size and time, with a key of its own for a 4K copy. A new version of a video is a new revision with its own copy and project (4.8). A project that exists is never changed under the app: a recording that changed under it is said, and the project is opened as it was.
 - **Disk:** refused in words when less than twice the raw video's size is free.
+- **Said.** `status` ("how far is it?") looks for the copy's run under the copy's own lock. While the copy is made it says "`<name>`: the video for HyperFrames is being made."; a result of it reads "`<name>`: making the video for HyperFrames ended … ago".
 
 ### 5.8 What the app is given to start from
 
@@ -540,8 +559,8 @@ The app's buttons: Share, Render in the cloud, the Script panel's transcription,
 
 | Command | In Studio |
 |---|---|
-| `episodes`, `guide`, `kind`, `leave`, `which`, `read`, `status`, `retry`, `name`, `ask`, `release`, `behind`, `resolve`, `spell`, `bring` | Kept. `kind` also starts the working copy. `release` writes the snapshot, and stops using Final Cut's `unkeptParts` and `mediaIn`. `guide` gains states and stops using `newestIsRender`. `episodes` stops using `newestOf`. `spell` stops using `presetOf`. `behind` also checks the toolchain |
-| `open` | Claim and bring. The lines it prints about showing the timeline in Final Cut go. `app` does the same claim and bring first |
+| `episodes`, `guide`, `kind`, `leave`, `which`, `read`, `status`, `retry`, `name`, `ask`, `release`, `behind`, `resolve`, `spell`, `bring` | Kept. `kind` also starts the working copy, on a Mac set up for the app and for an episode with no main project in use; and when `--again` changes the kind, it marks the main project "kept for an earlier kind" (4.8). `release` writes the snapshot, and stops using Final Cut's `unkeptParts` and `mediaIn`. `guide` gains states and stops using `newestIsRender`. `episodes` stops using `newestOf`. `spell` stops using `presetOf`. `behind`, on a Mac set up for the app, also says when the toolchain is not the pin: "HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits.", with a line for Jason in brackets that names the pin and what the Mac has (the plan has the words) |
+| `open` | Claim and bring. The lines it prints about showing the timeline in Final Cut go. `app` does the same claim and bring first. A bring that `app` started ends by telling her to say "open `<name>` in HyperFrames"; `open`'s own words are unchanged |
 | `finish` | From the app's exports (section 8). Accepts an iPhone clip (4.2) |
 | `title` | Kept and changed. Today `title <episode> reel N` refuses a Reel nobody made in Final Cut (`notMade`, `notMadeWords`), so it must accept a Reel that `app … reel N` made |
 | `reels` | The candidates as text, with no previews. It stops using `clockFor`, and stops ending with "cut it in OpusClip" (`notMadeWords`) for a candidate `app` can make |
@@ -565,7 +584,7 @@ What a new command does need, or the suite fails:
 - a row in the README's command tables, when its usage is in `HELP` (`part-f-fixes.test.js`);
 - if the skill runs it, a skill span that names it (`studio.test.js` only checks that every command the skill runs exists; the skill is a subset and never runs `read`, `bring` or `free`).
 
-- **`app`** goes in no list. It runs for an answered ordinary video, and is refused for a session in the gate's own words ("This is a client or group session: that is not done for one."), which is the rule that nothing of a session reaches the app by default. A session she has corrected (mark cleared) becomes an ordinary video and `app` runs.
+- **`app`** goes in no list. It runs for an answered raw video or iPhone clip. For a finished video it passes the gate and then says it has no project and stops (4.3). It is refused for a session in the gate's own words ("This is a client or group session: that is not done for one."), which is the rule that nothing of a session reaches the app by default. A session she has corrected (mark cleared) becomes an ordinary video, and `app` goes by its new kind.
 - **`clips`** goes in `SESSION_TAUGHT`, so it runs for a session only once the training gate is on, and its `send` is narrowed by its words the way `reel` is (`reelWords`): a clip number, and the consent recorded for it. `agreedTo` (a Reel number and a day in `session.agreed`) is the model; clips get a list of their own so their numbers never meet a Reel idea's.
 - **`workcopy`** goes in no list either. It is run only detached, like `read`, and is never started for a session (a session clip's project has its own clip file).
 - A video one of whose other versions is a session not cleared is held (`heldGateFor`), so `app` is refused for it too, without any new code.
@@ -603,7 +622,7 @@ They fail on purpose when a command or a sentence changes without the others, so
 
 ### 7.1 Layout 4
 
-A record gains `app` once a project is made (F13). It holds numbers, names, states and times, never a session's words.
+A record gains `app` once a project is made (F13). It holds numbers, names, states and times, never a session's words. A record of layout 4 is a switched record still: the three checks of the switch's layout (`gateOf` and `findEpisode` in `edit.js`, `--from-plan` in `unedited.js`) take layout 3 or later (`ofTheSwitch`).
 
 ```json
 "app": {
@@ -618,7 +637,8 @@ A record gains `app` once a project is made (F13). It holds numbers, names, stat
 ```
 
 - `key` is `main`, `reel N` or `clip N`, the keys `parts.js` uses today for `main` and `reel N`.
-- `from` is what the working copy was made from: the raw file's name, size and modified time (5.7). If the file is different now, `app` says so and offers a new project (4.8).
+- `from` is what the working copy was made from: the raw file's name, size and modified time (5.7). If the file is different now, `app` says so and opens the project as it was (4.8).
+- `workingCopy.fps` is a number, as `workcopy.js` writes it in its facts, or a fraction written n/d, as the example has it.
 - `state`: `made`, `opened`, `exported`, `finished`, or `kept for an earlier kind`.
 - A Reel project's `fromSuggestion` is the suggestion's number, or `null` for a Reel made from times she gave: the rule `fromSuggestionOf` already follows.
 - A session's clips: `clips: [{ n, state, consent: { basis: "alone" | "client", day } }]`. The consent is a basis and a day, never who. A clip's title and point stay in its file beside the teachings, under the gate.
@@ -728,7 +748,7 @@ The handoff's table (its section 5), corrected by the import graph (F1). "Retire
 
 | Area | Modules | In Studio |
 |---|---|---|
-| Intake and records | `unedited.js`, `filing.js`, `importing.js`, `dropbox.js`, `episode.js`, `names.js`, `kinds.js`, `versions.js`, `settings.js`, `switch.js`, `install.sh`, `detached.js`, `progress.js`, `progress.swift` | **Kept.** `unedited.js` loses the full import's rough cut, upright version, clips and Final Cut file. `kinds.js` and `filing.js` take a Zoom download as a session. `episode.js` gains layout 4. `settings.js` gains `app`, `appHandover` and `heygenOptOut`. `install.sh` gains the toolchain step and treats Final Cut as optional |
+| Intake and records | `unedited.js`, `filing.js`, `importing.js`, `dropbox.js`, `episode.js`, `names.js`, `kinds.js`, `versions.js`, `settings.js`, `switch.js`, `install.sh`, `detached.js`, `progress.js`, `progress.swift` | **Kept.** `unedited.js` loses the full import's rough cut, upright version, clips and Final Cut file. `kinds.js` and `filing.js` take a Zoom download as a session. `episode.js` gains layout 4. `settings.js` gains `app`, `appHandover` and `heygenOptOut`. `install.sh` gains the toolchain, Chrome and doctor steps (5.3) and treats Final Cut as optional |
 | Transcript | `cuts.js`, `spelling.js`, `final-transcript.js`, `lib.js`, `run.js` | **Kept.** `cuts.js` loses the rough-cut functions only the rough cut used (`roughCutArgs`, `roughCaptions` and what only they call), in the last wave. `encodeArgs` stays while Story parts do |
 | Readings | `readings.js`, `reading.js`, `notes.js` | **Kept, changed.** `reading.js` loses `timelineFor`, the rough cut and the Final Cut file. `readings.js` gains clip suggestions for a session. `notes.js` loses Story parts if Q2 says so |
 | Sessions | `sessions.js`, `teachings.js`, `gate.js`, `dialog.js`, `held.js` | **Kept, changed** (4.4) |
@@ -761,7 +781,7 @@ The handoff's table (its section 5), corrected by the import graph (F1). "Retire
 
 The build plan has the detail. The rules:
 
-- **No test calls the app, HeyGen, the real command line or `claude`.** A stand-in command line (a small node script) answers `--version`, `open --json`, `catch-up --json` and `history --json` with the shapes in this document, from fixtures captured from the pinned version.
+- **No test calls the app, HeyGen, the real command line or `claude`.** A stand-in command line (a small node script) answers `--version`, `open --json`, `catch-up --json` and `history --json` with the shapes in this document, from fixtures captured from the pinned version. It is run in the environment of 5.6, which carries none of a test's variables, so it reads how to answer `open` (opened, not installed, failed) from a file in its HOME.
 - **The classification is walked:** a test reads the pinned version's `--help` (kept as a fixture) and fails for any command in none of the three classes (5.5), as `edit-labels.test.js` does for `edit.js`'s commands (every name must be in `TODAY_ASKED`).
 - **A golden project:** a fixture of the pinned command line's own `init --video` output, and a test that Studio's project has the same keys in `hyperframes.json`, `meta.json` and `package.json`, and the same structure in `index.html`. A change of pin makes it fail on purpose.
 - **The whole file list of a project is asserted** for each kind (main, Reel, session clip), so nothing arrives by accident.

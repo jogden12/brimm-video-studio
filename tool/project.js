@@ -51,16 +51,27 @@ const GSAP = own("./vendor/gsap.min.js");
 
 // --- The project's name ---
 
+/** The part of a project's name: "main" or "reel 2" (names.js partName), and for the main video's later projects "main 2", "main 3"
+    and on. A correction of the video's kind keeps the project made for the earlier kind (4.8), and the next is another folder,
+    which needs another name: `number` is which main project this is, from 1, and the first is "main", as it was before there was a
+    second. Only the main video has them: a number for another part, or one that is not a whole number from 1, throws. */
+function partWords(part, number) {
+  if (number === undefined || number === 1) return partName(part);
+  if (part !== "main" || !Number.isInteger(number) || number < 1) throw new Error(`projectName: only the main video's projects are numbered, from 1, and ${JSON.stringify(number)} is not one for ${JSON.stringify(part)}`);
+  return `main ${number}`;
+}
+
 /** The name of a project (5.1): its folder's, its meta.json's and its title in the app, which names an export after it. An
     episode's part is "<file-safe name> <part> <short id>", as "Pricing talk main 3fa9c1" or "Pricing talk reel 2 3fa9c1", with
-    no version, since versions are the app's. A session's clip is "Session clip <n> <short id>": from its number, never from a
+    no version, since versions are the app's. The main video's second project, made after a correction kept the first, is "Pricing
+    talk main 2 3fa9c1" (`number`: partWords). A session's clip is "Session clip <n> <short id>": from its number, never from a
     name, so that nothing a client is called reaches a folder, a file or the app. */
-export function projectName({ name, part, clip, id }) {
+export function projectName({ name, part, number, clip, id }) {
   if (clip !== undefined) {
     if (!Number.isInteger(clip) || clip < 1) throw new Error(`projectName: a session's clip has a number from 1, not ${JSON.stringify(clip)}`);
     return `Session clip ${clip} ${shortId(id)}`;
   }
-  return `${fileSafe(name)} ${partName(part)} ${shortId(id)}`;
+  return `${fileSafe(name)} ${partWords(part, number)} ${shortId(id)}`;
 }
 
 // --- index.html ---
@@ -363,7 +374,8 @@ const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
     `input` is {kind, id, facts, words, video, cli, guidance, createdAt}, and:
     - for an episode's part, `name` and, for a Reel, `part` ({reel: n}); its `spellings` ([wrong, right] pairs) and `logos`
       (the paths of the logos chosen, in the Assets folder);
-    - for the main video, the cut `plan` and the Reel candidates, `reels`;
+    - for the main video, the cut `plan` and the Reel candidates, `reels`, and `number`, which main project this is (projectName),
+      the first when it is not given;
     - for a session's clip, `clip`, its number. A clip has no spellings, suggestions or logos, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
@@ -375,7 +387,7 @@ export function projectFiles(input) {
   for (const key of ["video", "cli"]) if (!isAbsolute(String(input[key] ?? ""))) throw new Error(`projectFiles: ${key} must be an absolute path`);
   if (kind === "reel" && !Number.isInteger(input.part?.reel)) throw new Error("projectFiles: a Reel's project needs its part, {reel: n}");
   const episode = kind !== "clip";
-  const name = episode ? projectName({ name: input.name, part: kind === "main" ? "main" : input.part, id: input.id }) : projectName({ clip: input.clip, id: input.id });
+  const name = episode ? projectName({ name: input.name, part: kind === "main" ? "main" : input.part, number: kind === "main" ? input.number : undefined, id: input.id }) : projectName({ clip: input.clip, id: input.id });
   const what = kind === "main" ? `the main video of the episode “${fileSafe(input.name)}”` : kind === "reel" ? `Reel ${input.part.reel} of the episode “${fileSafe(input.name)}”` : `clip ${input.clip} of a session`;
   const transcript = transcriptJson(input.words, episode ? input.spellings : []);
 

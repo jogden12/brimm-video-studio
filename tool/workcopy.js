@@ -31,6 +31,10 @@ const GB = 1024 ** 3;
 /** The step of the work, as the progress panel says it. The job has this one only: the run is the copy being made. */
 export const WORK_COPY_STEP = "Making the video for HyperFrames";
 export const WORK_COPY_STEPS = [WORK_COPY_STEP];
+/** The step the progress panel shows while the run waits, before it makes the copy, for the import to have checked its copies of the
+    video (edit.js workcopy): "how far is it?" says it. It is no step of the work, so it is not among WORK_COPY_STEPS: it is of any
+    length, and the panel never measures it. */
+export const WORK_COPY_WAIT_STEP = "Waiting for the import to check its copies";
 /** What is said when the copy is made. */
 export const WORK_COPY_DONE = "Done";
 
@@ -275,19 +279,24 @@ export const workCopyLimits = (seconds, fourK = false) => ({ most: (fourK ? 8 : 
 // --- Asking for the copy ---
 
 /** The command a run of the job is: edit.js starts it detached, as `workcopy --now <folder>`, and runs it with runDetached, which
-    holds the episode's lock for as long as it works. */
+    holds the working copy's own lock (workCopyLockOf) for as long as it works. */
 export const WORK_COPY_COMMAND = "workcopy";
 
+/** The working copy's own lock for the episode in `folder` on this Mac, beside the episode's (detached.js lockOf). The run writes
+    no record, only files in the episode's folder of copies, so it runs beside the reading `kind` starts at the same moment, and
+    beside any other command: one working copy at a time is all this lock keeps. */
+export const workCopyLockOf = (home, folder) => join(episodeWork(home, folder), "workcopy.lock");
+
 /** Ask for the working copy of the episode in `folder` to be made: start its detached run (startDetached, which returns at once),
-    unless some run is at work on the episode, since the episode's lock lets one at a time work on it and a second would only find
-    the lock taken. { started: true, running: "" } when it was started, and { started: false, running } with the command at work
-    on the episode (runningCommand) when it was not: "workcopy" when the copy is being made already, which is the answer to a
-    second request, and another command when that has the episode, for the caller to say, or to wait for. A run whose lock was
-    left by one that died counts as none, as it does for every command. A request made in the moment before a run has taken the
-    lock starts a second run, which finds the lock taken and does nothing (runDetached). `fourK` is the switch for a copy of 4K,
-    which the run is given. `ctx` is what edit.js gives its commands: { home, alive, start, settings }. */
+    unless a run of it is at work already, since its lock lets one at a time make it and a second would only find the lock taken.
+    { started: true, running: "" } when it was started, and { started: false, running: "workcopy" } when the copy is being made
+    already, which is the answer to a second request. The reading and every other command hold the episode's lock, not this one,
+    so none of them stops it. A run whose lock was left by one that died counts as none, as it does for every command. A request
+    made in the moment before a run has taken the lock starts a second run, which finds the lock taken and does nothing
+    (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `ctx` is what edit.js gives its commands: {
+    home, alive, start, settings }. */
 export function requestWorkCopy(ctx, { folder, fourK = false }) {
-  const running = runningCommand(ctx.home, folder, ctx.alive);
+  const running = runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder));
   if (running) return { started: false, running };
   startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: fourK ? ["--4k"] : [] });
   return { started: true, running: "" };

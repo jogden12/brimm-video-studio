@@ -88,6 +88,8 @@ const TODAY_ASKED = {
   leave: [],
   which: [],
   read: [],
+  // `workcopy` is a detached run's alone too, which `kind` and `app` start: tests/edit-workcopy.test.js pins it.
+  workcopy: [],
   open: [[FOLDER], [NAME], [], ["Pricing"], ["nothing fits this"]],
   push: [[FOLDER], [], [FOLDER, "reel", "2"]],
   bring: [["--now", FOLDER], []],
@@ -116,7 +118,9 @@ const TODAY_ASKED = {
   principles: [],
   ideas: [],
   // The guide, new since the switch: tests/edit-guide.test.js pins its words.
-  guide: []
+  guide: [],
+  // The app, new with Studio: tests/edit-app.test.js pins its words.
+  app: []
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1211,6 +1215,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     leave: [[label], []],
     which: [[label], []],
     read: [["--now", LIGHT_FOLDER, "--kind", "finished", "--rev", "1"], ["--now", label, "--kind", "session", "--rev", "1"], [label], []],
+    workcopy: [["--now", LIGHT_FOLDER], ["--now", label], [label], []],
     open: [[label], [], ["2026"], ["nothing fits this"]],
     push: [[label], [label, "reel", "1"], []],
     bring: [["--now", LIGHT_FOLDER], ["--now", label], []],
@@ -1237,7 +1242,8 @@ describe("the walk: every command, for a video imported lightly from a file name
     teachings: [[label], [label, "--transcript-only"], []],
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
-    guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]]
+    guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
+    app: [[label], [], ["2026"], ["nothing fits this"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

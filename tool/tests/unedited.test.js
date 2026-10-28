@@ -19,7 +19,7 @@ import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { seenFile, writeSettings } from "../settings.js";
-import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone } from "../episode.js";
+import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone, recordFile } from "../episode.js";
 import { fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
@@ -5017,6 +5017,18 @@ describe("the light import", () => {
       assert.deepEqual([t.calls, t.guarded], [[], []]);
       t.done();
     }
+  });
+  it("refuses --from-plan of a light episode whose record holds the app's projects (layout 4), as one of the switch's layout", async () => {
+    const t = episodeImport();
+    await uneditedFolder(t.drop, t.deps);
+    answered(t, "Talk.mov");
+    const folder = t.episodeFolder();
+    const record = t.record();
+    writeFileSync(recordFile(folder, record.rev + 1), JSON.stringify({ ...record, rev: record.rev + 1, version: 4, app: { toolchain: "0.8.208", projects: [] } }));
+    assert.equal(t.record().version, 4);
+    const r = await videosFromPlan(join(folder, "Talk.mov"), t.deps);
+    assert.equal(r.message, "This episode was imported lightly: its videos are made when it is read, not from the plan.");
+    t.done();
   });
   it("says a newer brimm-video wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
     const NEWER = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
