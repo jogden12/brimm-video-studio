@@ -141,12 +141,76 @@ describe("app: the gate asks first, in its own words", () => {
     assert.deepEqual([r.code, r.said, reread(found).rev, runsOf(t)], [1, [HELD], 1, []]);
     t.done();
   });
-  it("runs for an answered raw video, a finished video, an iPhone clip and a session whose mark was cleared", async () => {
-    for (const [what, record] of [["a raw video", RAW], ["a finished video", { ...RAW, kind: "finished" }], ["an iPhone clip", { ...RAW, kind: "short video" }], ["a session whose mark was cleared", CLEARED_RECORD]]) {
+  it("runs for an answered raw video, an iPhone clip and a session whose mark was cleared", async () => {
+    for (const [what, record] of [["a raw video", RAW], ["an iPhone clip", { ...RAW, kind: "short video" }], ["a session whose mark was cleared", CLEARED_RECORD]]) {
       const { t, found } = world({ record });
       const r = await app(t.ctx.deps, FOLDER);
       assert.deepEqual([r.code, r.said], [0, [OPEN]], what);
       assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["main", "opened"]], what);
+      t.done();
+    }
+  });
+});
+
+describe("app: a finished video is not edited in HyperFrames (architecture 4.3)", () => {
+  const FINISHED = { ...RAW, kind: "finished" };
+  const NO_PROJECT = `${NAME} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
+  it("lets the gate through and then says it has no project, and stops: the words are app's own, not the gate's", async () => {
+    const { t } = world({ record: FINISHED });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [NO_PROJECT]]);
+    for (const gate of [WAITING, LEFT_ALONE, NOT_FOR_SESSION, HELD]) assert.notEqual(r.said[0], gate);
+    t.done();
+  });
+  it("claims nothing, brings nothing, asks for no working copy and writes no record, with the working copy made or not", async () => {
+    for (const copy of [true, false]) {
+      const { t, found, work } = world({ record: FINISHED, copy });
+      const before = [listAll(found.folder), listAll(work)];
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [NO_PROJECT]], `copy ${copy}`);
+      // No wait for a claim, no detached run (no bring, no working copy), no run of the command line, and the record as it was.
+      assert.deepEqual([reread(found).rev, reread(found).editing, reread(found).app, t.waits, t.started, runsOf(t)], [1, null, undefined, [], [], []], `copy ${copy}`);
+      assert.deepEqual([listAll(found.folder), listAll(work)], before, `copy ${copy}`);
+      t.done();
+    }
+  });
+  it("brings nothing of a video that is not whole on this Mac yet, which a raw video's app brings first", async () => {
+    const { t, found } = world({ record: FINISHED });
+    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said, t.started, reread(found).rev], [1, [NO_PROJECT], [], 1]);
+    t.done();
+  });
+  it("says it before it looks at this Mac's settings and its command line, since nothing about this Mac changes it", async () => {
+    for (const [what, set, withCli] of [["not set up", false, true], ["no command line", true, false], ["neither", false, false]]) {
+      const { t, found } = world({ record: FINISHED, set });
+      if (!withCli) delete t.ctx.deps.app;
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [NO_PROJECT]], what);
+      assert.deepEqual([reread(found).rev, t.waits, t.started, runsOf(t)], [1, [], [], []], what);
+      t.done();
+    }
+  });
+  it("says it also for the other Mac's episode, which it does not claim, and for the take-over it is asked", async () => {
+    for (const more of [[], ["--take-over"]]) {
+      const { t, found } = world({ record: { ...FINISHED, editing: HERS } });
+      const r = await app(t.ctx.deps, FOLDER, ...more);
+      assert.deepEqual([r.code, r.said], [1, [NO_PROJECT]], more.join(" "));
+      assert.deepEqual([reread(found).rev, reread(found).editing.by, t.waits, t.started, runsOf(t)], [1, "Sallie's laptop", [], [], []], more.join(" "));
+      t.done();
+    }
+  });
+  it("names the video by its name, as app's other lines do", async () => {
+    const { t } = world({ record: { ...FINISHED, name: { text: "Budget talk", placeholder: false } } });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual(r.said, ["Budget talk was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames."]);
+    t.done();
+  });
+  it("is said of a finished video alone: a raw video and an iPhone clip are opened, and a session not cleared is the gate's", async () => {
+    for (const [record, code, said] of [[RAW, 0, [OPEN]], [{ ...RAW, kind: "short video" }, 0, [OPEN]], [SESSION_RECORD, 1, [NOT_FOR_SESSION]]]) {
+      const { t } = world({ record });
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [code, said], String(record.kind));
       t.done();
     }
   });

@@ -1159,6 +1159,11 @@ export async function open(ctx, rest) {
     cliPath), once Jason has said yes to installing it. */
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 
+/** What `app` says of a video answered as finished by her editor (architecture 2026-10-27, 4.3): it has no working copy and no
+    project, so there is nothing to open. The gate lets `app` through for such a video (it is in no list), so these are `app`'s own
+    words, named as its other lines name the video. */
+const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
+
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
@@ -1170,6 +1175,9 @@ const APP_ASKED = "app";
     - the gate, as for every command that names an episode (episodeFor): a video not yet answered, a video left alone, a session
       not cleared and a video held beside a session are refused in the gate's own words. `app` is in no gate list. This comes
       first, whether or not this Mac is set up;
+    - a video answered as finished by her editor has no HyperFrames project (architecture 4.3): `app` says so in its own words
+      (finishedHasNoProject) and ends with 1, before it looks at this Mac's settings, since nothing about this Mac changes it.
+      Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
@@ -1182,6 +1190,7 @@ export async function app(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found } = got;
+  if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
