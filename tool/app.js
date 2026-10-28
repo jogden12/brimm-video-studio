@@ -1,6 +1,7 @@
 // Opening an episode in the HyperFrames app (architecture 2026-10-27: sections 4.1, 4.8, 5.1, 5.2, 5.6, 5.7 and 7.1).
 //
-// edit.js finds the episode, asks the gate and claims it for this Mac, and then gives it to openInApp, which does the rest:
+// edit.js finds the episode, asks the gate, refuses an episode whose main project in use was made on another Mac and is not on this
+// one (projectOnAnotherMac), claims it for this Mac, and then gives it to openInApp, which does the rest:
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - a folder at the project's name that the record does not know, as a run whose record was not written leaves, is taken as the
@@ -11,10 +12,15 @@
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
+//   - and Claude's reading must be over: the project is written from it (the cut plan and the Reel suggestions), and nothing writes
+//     it again afterwards, so a project made while `read` is still at work would keep an unfinished reading for good. While it is at
+//     work nothing is made, and she is told to say it again when it has finished. Only a new project waits for it: one made before
+//     is opened as it was, and so is a folder the record does not know;
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
-//   - what the command line printed is said in her words, and the record gets the project and the time it was opened (7.1). A record
+//   - what the command line printed is said in her words, and, whenever the app opened, a last line names the app's buttons that
+//     Studio cannot control (BUTTONS; 3.3 and 5.9). The record gets the project and the time it was opened (7.1). A record
 //     that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
@@ -25,7 +31,9 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
+import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
+import { sessionNotCleared } from "./gate.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -47,6 +55,7 @@ export const KEPT = "kept for an earlier kind";
 
 const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+const stillReading = (name) => `Claude is still reading ${name}. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
@@ -55,6 +64,10 @@ const STAYS = {
   "no chat": "This chat could not be found, so it stays here."
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
+/** The last line, whenever the app opened (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
+    is allowed with them: Share for invited people only, exports on This Mac and never in the cloud, and no HeyGen avatars or voices
+    without Jason's yes. It holds no path, no flag and no name of a command. */
+const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
 
 /** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind.
     edit.js `kind` asks it too, of a record that changes kind. */
@@ -63,6 +76,19 @@ export const isMain = (project) => project.key === "main" && project.state !== K
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
     Mac write, and is joined to a folder here. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
+
+/** The Mac a main project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
+    otherwise. A project's folder is in the Mac's own work folder, never in Dropbox, so the project of another Mac is not here, and
+    everything done in it (the app's history, what is in its folder) is there. Making a new project under its name would drop its
+    entry from the record and leave that Mac's work unreachable, so `app` refuses such an episode (edit.js), until a take-over can
+    rebuild the project from the snapshot (plan PR 11). The project of this Mac is not asked about: when its folder is gone it is made
+    again, under its own name (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads
+    nowhere a folder is, is a folder that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's. */
+export function projectOnAnotherMac(ctx, { found, record }) {
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  if (!earlier || typeof earlier.on !== "string" || earlier.on === "" || earlier.on === ctx.machine) return null;
+  return plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name)) ? null : earlier.on;
+}
 
 /** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. */
 function jsonIn(path) {
@@ -115,12 +141,21 @@ function readable(path) {
     session's words. It is held unless its transcript is found, in her folder's projects folder (loosened.js transcriptOf), and
     can be read, and chatHeld then says it holds none. chatHeld is given the `claude` above this process, found as markChat finds
     it, or "unknown" when none is found, which holds a chat that a mark could belong to. Anything that goes wrong holds the
-    chat: the handover is never guessed at. */
+    chat: the handover is never guessed at.
+    A chat that is not found is held, and has no id here: she has no folder for Claude on this Mac, the id is not a chat's, or
+    its transcript is not there or is not a file that can be read. handoverAllowed then says "no chat", and she is told that the
+    chat could not be found, which is what is true of it; "held" is for a chat that is found and holds a session's words. */
 function chatOf(home, env) {
   const sessionId = typeof env.CLAUDE_CODE_SESSION_ID === "string" ? env.CLAUDE_CODE_SESSION_ID : "";
+  const notFound = { sessionId: "", held: true };
+  let transcriptPath;
   try {
-    const transcriptPath = transcriptOf({ home, env, folder: realpathSync.native(studioFolder(home)), sessionId });
-    if (transcriptPath === null || !readable(transcriptPath)) return { sessionId, held: true };
+    transcriptPath = transcriptOf({ home, env, folder: realpathSync.native(studioFolder(home)), sessionId });
+  } catch {
+    return notFound;
+  }
+  if (transcriptPath === null || !readable(transcriptPath)) return notFound;
+  try {
     const table = readProcesses();
     const above = table === null ? null : claudeAbove(chainUp(processTable(table), process.pid));
     return { sessionId, held: chatHeld({ home, sessionId, transcriptPath, claude: above ? { pid: above.pid, start: above.start } : "unknown" }) };
@@ -222,6 +257,10 @@ function adoptProject(ctx, { found, record, at, projects }) {
     - Without the working copy, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
+    - While Claude's reading of the episode is at work (`read` holds the episode's lock), nothing is made: the project is written
+      from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). The working copy
+      is still asked for when it is not there, as above, and the one line she gets is the reading's: it is the one she waits for
+      (the copy is made meanwhile), and what she says again is the same.
     The project is written whole or not at all (project.js writeProject), and a folder of that name that is there already is never
     written over: it throws. Its name is the first that no project the record keeps has (nextMain), so after a correction of the
     kind it is "main 2", and a folder the record does not know at that name is taken before this (adoptProject): what is left to
@@ -236,9 +275,14 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   }
   const raw = statSync(join(found.folder, record.video.file));
   const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  const reading = runningCommand(home, found.name, ctx.alive) === "read";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(beingMade(record.name.text));
+    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text));
+    return { code: 0 };
+  }
+  if (reading) {
+    ctx.say(stillReading(record.name.text));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
@@ -262,10 +306,17 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     nothing is made or started. If the recording is not the one it was made from (its size or its time is not what `from` says,
     and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
     replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
-    folder is not here is replaced by the folder at the name the project would get, when one is there that the record does not
-    know (adoptProject), and otherwise by a new project (makeProject). A project kept for an earlier kind (KEPT) is none in use:
-    the next is made as any first one is, under the first name no project the record keeps has (nextMain), "main 2" after the
-    first, and the kept one keeps its folder, its name and its entry in the record.
+    folder is not here is replaced, when this Mac made it: by the folder at the name the project would get, when one is there
+    that the record does not know (adoptProject), and otherwise by a new project (makeProject). One that another Mac made is not
+    replaced: its work is on that Mac, and a new project under its name would drop its entry, so edit.js refuses it before the
+    claim (projectOnAnotherMac). A new project is not made while Claude's reading of the episode is at work (`read` holds its
+    lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
+    opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
+    kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
+    (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
+    What it says when the app opened is the command line's own words in hers, one line more about her chat when a handover was
+    wanted and not made, and last the line about the buttons Studio cannot control (BUTTONS); when the app did not open it says
+    the reason alone.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
@@ -303,7 +354,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const chat = wanted ? askChat() : { sessionId: "", held: true };
   const handover = handoverAllowed({
     setting: wanted, sessionId: chat.sessionId, held: chat.held,
-    episode: { session: record.kind === "session" || Boolean(record.session), unanswered: kindOf(record) === null }, project: { clip: false }
+    episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
   });
   const ran = spawn(node, [cli, "open", join(work, project.name), "--json"], {
     env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
@@ -312,6 +363,9 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
   ctx.say(read.words);
   if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
+  // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
+  // is open whether or not the record can be written below, so the reminder does not wait for it.
+  if (read.opened) ctx.say(BUTTONS);
 
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {
