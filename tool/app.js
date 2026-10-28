@@ -1,14 +1,18 @@
 // Opening an episode in the HyperFrames app (architecture 2026-10-27: sections 4.1, 4.8, 5.1, 5.2, 5.6, 5.7 and 7.1).
 //
 // edit.js finds the episode, asks the gate and claims it for this Mac, and then gives it to openInApp, which does the rest:
-//   - a project made before is opened again, and nothing is made or started (4.8);
+//   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
+//     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
+//   - a folder at the project's name that the record does not know, as a run whose record was not written leaves, is taken as the
+//     project it is and recorded: nothing is made or started for it either;
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
-//   - what the command line printed is said in her words, and the record gets the project and the time it was opened (7.1).
+//   - what the command line printed is said in her words, and the record gets the project and the time it was opened (7.1). A record
+//     that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
 // What it says goes into her chat, so it holds no path, no flag and no name of a command. What it touches beyond the episode's own
@@ -39,6 +43,8 @@ const KEPT = "kept for an earlier kind";
 
 const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
+const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
 const STAYS = {
   held: "This chat has held a client or group session's words, so it stays here.",
@@ -118,6 +124,78 @@ function chatOf(home, env) {
   }
 }
 
+/** What a JSON file holds, or null when there is no such file, it cannot be read, or it is not JSON. */
+function factsIn(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** A file's facts as stat gives them, or undefined when there is no such file or it cannot be looked at. */
+function statOf(path) {
+  try {
+    return statSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/** What the record keeps of a working copy, { bytes, seconds, fps }, from facts that hold them, or null when they do not hold what
+    the record needs (episode.js isAppProject): a size in bytes, a length in seconds above 0, and a frame rate. */
+function copyOf(facts) {
+  const { bytes, seconds, fps } = facts ?? {};
+  const rate = (typeof fps === "number" && Number.isFinite(fps) && fps > 0) || (typeof fps === "string" && /^[1-9]\d*\/[1-9]\d*$/.test(fps));
+  return Number.isInteger(bytes) && bytes >= 0 && typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && rate ? { bytes, seconds, fps } : null;
+}
+
+/** What the record keeps of the working copy a project holds, from the project's own brimm/facts.json (project.js), which has the
+    length and the rate but not the size, and from the size of the video in the project. null when either cannot be had. */
+function copyIn(dir) {
+  const video = statOf(join(dir, "media", "recording.mp4"));
+  return video?.isFile() ? copyOf({ ...factsIn(join(dir, "brimm", "facts.json")), bytes: video.size }) : null;
+}
+
+/** What a project was made from, as the record keeps it (7.1): the raw file's name, size and time, as stat gives them. */
+const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) });
+
+/** Whether the recording is not the one a project was made from (4.8): its size or its time is not what the project's `from` says.
+    The times are compared as moments, to the second the record keeps, and not as the text the record holds: that is written with
+    the offset the Mac's zone had on the day, so the same moment is other text once the clocks change. A recording that cannot be
+    looked at is no change that can be told, since a project is opened without it. */
+function changedSince(project, { found, record }) {
+  const raw = statOf(join(found.folder, record.video.file));
+  return raw !== undefined && (project.from.bytes !== raw.size || Date.parse(project.from.modified) !== Math.floor(raw.mtimeMs / 1000) * 1000);
+}
+
+/** The record's entry for a main project that is made and has never been opened. */
+const madeEntry = (ctx, { name, at, from, workingCopy }) => ({ key: "main", name, madeAt: at, on: ctx.machine, from, workingCopy, opened: [], handover: false, fromSuggestion: null, state: "made" });
+
+/** A folder at the name the main project would get that the record does not know, taken as the project it is: a run that made the
+    project and could not write the record leaves one, and the next run finds it here instead of making it again. Gives { project },
+    the record's entry for it as makeProject does (state "made", never opened, made now, from the raw video as it is), or { code } 1
+    when part of it cannot be read (then a line says so, and nothing is opened), or null when there is no such folder. Nothing is
+    asked for and nothing is written, so the words of the recording are not needed. The working copy it was made from is
+    described by the facts beside that copy (workcopy.js) when they are still there, which they are unless something took them
+    away, and otherwise by the project's own brimm/facts.json (project.js), with the size of the video in the project.
+    A folder the record lists is its own, whatever it is kept for: a project kept for an earlier kind has the name a new main
+    project would get (4.8), and is never taken for the main one. */
+function adoptProject(ctx, { found, record, at, projects }) {
+  const { home } = ctx;
+  const name = projectName({ name: record.name.text, part: "main", id: record.id });
+  const dir = join(episodeWork(home, found.name), name);
+  if (projects.some((p) => p.name === name) || !existsSync(dir)) return null;
+  const raw = statSync(join(found.folder, record.video.file));
+  const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir);
+  if (!workingCopy) {
+    ctx.say(notWhole(record.name.text));
+    return { code: 1 };
+  }
+  return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy }) };
+}
+
 /** Make the main video's project, if it can be made now: { project }, the record's entry for it (state "made", never opened), or
     { code }, when nothing was made and a line said why: the exit code to end with.
     - Without the episode's words there is nothing to start from, so nothing is made or started (1).
@@ -125,7 +203,8 @@ function chatOf(home, env) {
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
     The project is written whole or not at all (project.js writeProject), and a folder of that name that is there already is never
-    written over: it throws. */
+    written over: it throws. A folder the record does not know is taken before this (adoptProject), so what is left to throw is the
+    name of a project the record keeps for an earlier kind. */
 function makeProject(ctx, { found, record, at }, { cli, guidance }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
@@ -148,30 +227,28 @@ function makeProject(ctx, { found, record, at }, { cli, guidance }) {
     kind: "main", id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
-  return {
-    project: {
-      key: "main", name, madeAt: at, on: ctx.machine,
-      from: { file: record.video.file, bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) },
-      workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps },
-      opened: [], handover: false, fromSuggestion: null, state: "made"
-    }
-  };
+  return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
 }
 
 /** Open the episode's main video in the HyperFrames app, making its project first when it has none, and resolve the exit code: 0
     when the app opened on the project, or when the working copy is being made and she has been told to say it again; 1 when the
-    app did not open, or the episode's words are not on this Mac. It runs once edit.js has gated the episode and claimed it. A
-    project that is made stays, whether or not the app opened.
+    app did not open, or the episode's words are not on this Mac, or a project folder of this Mac cannot be read, or the record
+    could not be written. It runs once edit.js has gated the episode and claimed it. A project that is made stays, whether or not
+    the app opened.
     `ctx` is what edit.js gives a command, { home, machine, now, alive, say, start, settings }. `found` is { name, folder }: the
     name of the episode's folder, and its path in Episodes. `record` is the episode's record.
     The main project in the record's `app` whose folder is on this Mac is opened again, with one more time it was opened, and
-    nothing is made or started. A main project in the record whose folder is not here is replaced by a new one (makeProject).
+    nothing is made or started. If the recording is not the one it was made from (its size or its time is not what `from` says,
+    and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
+    replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
+    folder is not here is replaced by the folder at the name the project would get, when one is there that the record does not
+    know (adoptProject), and otherwise by a new project (makeProject).
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
-    - `save(next)` writes the episode's next record and resolves when it has. It is called once, after the app has been asked, so
-      a project that was made and not opened is recorded too, and what it resolves is not looked at: it says itself when it could
-      not write. It is checked first, so that nothing is made without it;
+    - `save(next)` writes the episode's next record and resolves 0 when it has, and anything else when it could not, having said
+      itself why: then the run ends with 1. It is called once, after the app has been asked, so a project that was made and not
+      opened is recorded too. It is checked first, so that nothing is made without it;
     - `cli` and `node`: the pinned command line's program (hyperframes.js cliPath), and the program that runs it (this one);
     - `guidance`: the path of the CLAUDE.md the pinned package ships, in the toolchain's folder;
     - `spawn` (spawnSync) runs the command line, and `env` (this process's) is where the chat's id and the LANG come from;
@@ -188,10 +265,13 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const earlier = projects.find(isMain);
 
   let project = earlier && plainName(earlier.name) && existsSync(join(work, earlier.name)) ? earlier : null;
-  if (!project) {
-    const made = makeProject(ctx, { found, record, at }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
-    if (made.code !== undefined) return made.code;
-    ({ project } = made);
+  if (project) {
+    // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
+    if (changedSince(project, { found, record })) ctx.say(recordingChanged(record.name.text));
+  } else {
+    const taken = adoptProject(ctx, { found, record, at, projects }) ?? makeProject(ctx, { found, record, at }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
+    if (taken.code !== undefined) return taken.code;
+    ({ project } = taken);
   }
 
   // A handover is looked into only where it is wanted: it is all the chat decides, and finding out can take a while.
@@ -217,6 +297,9 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     handover: project.handover || read.handedOver,
     state: read.opened && project.state === "made" ? "opened" : project.state
   };
-  await save({ ...record, app: { ...record.app, toolchain: PIN.version, projects: [...projects.filter((p) => !isMain(p)), updated] } });
+  // The app has been asked by now, so a record that could not be written ends the run with 1, whether or not the app opened: what the
+  // project is stays on this Mac, and the next run finds it again (adoptProject).
+  const written = await save({ ...record, app: { ...record.app, toolchain: PIN.version, projects: [...projects.filter((p) => !isMain(p)), updated] } });
+  if (written !== 0) return 1;
   return read.opened ? 0 : 1;
 }

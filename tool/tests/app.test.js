@@ -4,14 +4,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readOpen } from "../hyperframes.js";
 import { openInApp, NOT_SET_UP } from "../app.js";
 import { takeEpisodeLock } from "../detached.js";
-import { layoutOf, localStamp } from "../episode.js";
+import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 
@@ -123,8 +123,21 @@ function episode(c, { open = "opened", copy = true, words = true, handover = fal
   return { ...s, folder, raw, paths, said, started, saved, ctx, record, deps, project, found: { name: FOLDER, folder } };
 }
 const run = (e, record = e.record) => openInApp(e.ctx, { found: e.found, record }, e.deps);
+/** Run `app` once with a `save` that cannot write the record (edit.js's says why, and resolves 1; `code` is what this one resolves),
+    as a run is whose record was not written: it gives what the run ended with and each record it was asked to write. */
+async function unwritten(e, code = 1) {
+  const asked = [];
+  const ended = await openInApp(e.ctx, { found: e.found, record: e.record }, { ...e.deps, save: async (next) => (asked.push(next), code) });
+  return { ended, asked };
+}
 /** Nothing she reads holds a path, a flag or the name of a command. */
 const plain = (said) => said.forEach((line) => assert.doesNotMatch(line, /\/|--|\bnpx\b|\bnode\b|hyperframes\.mjs/, line));
+/** A project's folder as it is: every path in it, and the text of each file. */
+const treeOf = (dir) => Object.fromEntries(readdirSync(dir, { recursive: true }).sort().map((path) => [path, lstatSync(join(dir, path)).isFile() ? readFileSync(join(dir, path), "utf8") : null]));
+/** A whole record of the episode, so that the `app` a run writes can be read as the next command reads it (episode.js episodeFault). */
+const WHOLE = { ...newEpisode({ id: "e-20261028-3fa9c1", machine: "Mac Studio", at: "2026-10-28T09:00:00-04:00", video: { file: "Talk.mov", bytes: 20, seconds: 2.6, created: null }, kind: "raw", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
+/** What is wrong with the HyperFrames projects in a record `app` wrote: "" when the next command can read them. */
+const unreadable = (next) => episodeFault({ ...WHOLE, app: next.app });
 
 describe("app: opening an episode in HyperFrames", () => {
   it("makes the project from the working copy, opens it with the pinned command line in PR 1's environment, and records it", async (c) => {
@@ -159,6 +172,7 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]]);
     assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]]);
     assert.deepEqual(e.started, []);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", "It's open in HyperFrames."], "the recording is as it was, and nothing is said of it");
   });
   it("starts the working copy when there is none, says it is being made, and makes no project yet", async (c) => {
     const e = episode(c, { copy: false });
@@ -204,6 +218,141 @@ describe("app: opening an episode in HyperFrames", () => {
       assert.ok(existsSync(join(e.project, "index.html")), open);
       assert.deepEqual(e.saved[0].app.projects.map((p) => [p.state, p.opened]), [["made", []]], open);
     }
+  });
+  it("ends with 1 when the record cannot be written, after the project is made and the app has opened", async (c) => {
+    // edit.js's save says why it could not write and resolves 1; anything but 0 is a record that was not written.
+    for (const code of [1, undefined]) {
+      const e = episode(c);
+      const { ended, asked } = await unwritten(e, code);
+      assert.equal(ended, 1, String(code));
+      assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"]], String(code));
+      assert.deepEqual(e.said, ["It's open in HyperFrames."], String(code));
+      assert.deepEqual(asked.map((record) => record.app.projects.map((p) => p.state)), [["opened"]], String(code));
+      assert.ok(existsSync(join(e.project, "index.html")), `${code}: the project stays`);
+    }
+  });
+  it("opens a project folder the record does not know, as a run whose record was not written leaves one, and records it", async (c) => {
+    for (const [what, recordOf] of [
+      ["has no project", (e) => e.record],
+      ["has one whose folder is gone", (e, asked) => ({ ...e.record, app: { toolchain: PIN.version, projects: [{ ...asked[0].app.projects[0], name: "Pricing main 3fa9c1" }] } })]
+    ]) {
+      // The first run made the project and opened the app, and could not write the record.
+      const e = episode(c);
+      const { ended, asked } = await unwritten(e);
+      assert.equal(ended, 1, what);
+      const made = readdirSync(episodeWork(e.home, FOLDER)).sort();
+      // The working copy's facts stay where they were; here they differ from the project's own, to show which of them is read.
+      writeFileSync(e.paths.facts, JSON.stringify({ seconds: 2.6, fps: 29.97, width: 1920, height: 1080, bytes: 24 }));
+      e.said.splice(0);
+      // The second run is given the record as it was, which has no project (or one whose folder is gone), and the folder is there.
+      assert.equal(await run(e, recordOf(e, asked)), 0, what);
+      assert.deepEqual(e.started, [], `${what}: no working copy is asked for`);
+      assert.deepEqual(e.said, ["It's open in HyperFrames."], what);
+      assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), made, `${what}: no project is written again`);
+      assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]], what);
+      assert.equal(e.saved.length, 1, what);
+      assert.deepEqual(e.saved[0].app, {
+        toolchain: PIN.version,
+        projects: [{
+          key: "main", name: "Pricing talk main 3fa9c1", madeAt: localStamp(new Date(AT)), on: "Mac Studio",
+          from: { file: "Talk.mov", bytes: statSync(e.raw).size, modified: localStamp(new Date(statSync(e.raw).mtimeMs)) },
+          workingCopy: { bytes: 24, seconds: 2.6, fps: 29.97 }, opened: [localStamp(new Date(AT))], handover: false, fromSuggestion: null, state: "opened"
+        }]
+      }, what);
+      assert.equal(unreadable(e.saved[0]), "", what);
+      plain(e.said);
+    }
+  });
+  it("does not write the project again, nor move a working copy made meanwhile into it", async (c) => {
+    const e = episode(c);
+    await unwritten(e);
+    writeFileSync(e.paths.video, "a working copy made again");
+    assert.equal(await run(e), 0);
+    assert.equal(readFileSync(e.paths.video, "utf8"), "a working copy made again");
+    assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), "the working copy's bytes");
+    assert.deepEqual(e.started, []);
+    assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => [p.name, p.state])), [[["Pricing talk main 3fa9c1", "opened"]]]);
+  });
+  it("takes what the working copy is from the project's own facts when the copy's facts are gone too", async (c) => {
+    const e = episode(c);
+    await unwritten(e);
+    rmSync(e.paths.facts);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.started, []);
+    // brimm/facts.json holds the length and the rate; the size is that of the video in the project.
+    assert.deepEqual(e.saved[0].app.projects.map((p) => [p.name, p.workingCopy, p.state]), [["Pricing talk main 3fa9c1", { bytes: 24, seconds: 2.6, fps: 30 }, "opened"]]);
+    assert.equal(unreadable(e.saved[0]), "");
+  });
+  it("never takes a project the record keeps for an earlier kind for the main project", async (c) => {
+    const e = episode(c);
+    const { asked } = await unwritten(e);
+    const kept = { ...e.record, app: { toolchain: PIN.version, projects: [{ ...asked[0].app.projects[0], state: "kept for an earlier kind" }] } };
+    // What is done for a video whose kind she corrected is a later step; what matters here is that the kept project, whose folder
+    // has the name a new main project would get, is neither opened nor recorded again as the main one.
+    await run(e, kept);
+    assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"]], "only the first run opened it");
+    assert.deepEqual(e.saved, []);
+  });
+  it("does not open a project folder it cannot read the working copy of, and says so", async (c) => {
+    for (const [what, spoil] of [
+      ["its facts are gone", (e) => (rmSync(e.paths.facts), rmSync(join(e.project, "brimm", "facts.json")))],
+      ["its facts are not JSON", (e) => (writeFileSync(e.paths.facts, "{"), writeFileSync(join(e.project, "brimm", "facts.json"), "{"))],
+      ["its video is gone", (e) => (rmSync(e.paths.facts), rmSync(join(e.project, "media", "recording.mp4")))]
+    ]) {
+      const e = episode(c);
+      await unwritten(e);
+      spoil(e);
+      e.said.splice(0);
+      assert.equal(await run(e), 1, what);
+      assert.deepEqual(e.said, ["The HyperFrames project for Pricing talk is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason."], what);
+      assert.deepEqual([e.saved, e.started], [[], []], what);
+      assert.equal(e.runs().length, 1, `${what}: only the first run opened it`);
+      plain(e.said);
+    }
+  });
+  it("says when the recording has changed since the project was made, and opens the project as it was", async (c) => {
+    const CHANGED = "The recording of Pricing talk has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.";
+    for (const [what, change] of [
+      ["in its size", (e) => {
+        const { mtimeMs } = statSync(e.raw);
+        writeFileSync(e.raw, "the raw video, another take");
+        utimesSync(e.raw, mtimeMs / 1000, mtimeMs / 1000);
+      }],
+      ["in its time", (e) => {
+        const later = (statSync(e.raw).mtimeMs + 3600 * 1000) / 1000;
+        utimesSync(e.raw, later, later);
+      }]
+    ]) {
+      const e = episode(c);
+      await run(e);
+      const project = treeOf(e.project);
+      const folders = readdirSync(episodeWork(e.home, FOLDER)).sort();
+      change(e);
+      e.said.splice(0);
+      assert.equal(await run(e, e.saved[0]), 0, what);
+      assert.deepEqual(e.said, [CHANGED, "It's open in HyperFrames."], what);
+      assert.deepEqual(e.started, [], `${what}: no working copy is asked for`);
+      assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), folders, `${what}: no project is made`);
+      assert.deepEqual(treeOf(e.project), project, `${what}: nothing is replaced under the project`);
+      assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]], what);
+      const [first, again] = e.saved.map((record) => record.app.projects);
+      assert.deepEqual(again.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]], what);
+      assert.deepEqual(again[0].from, first[0].from, `${what}: the record still says what the project was made from`);
+      plain(e.said);
+    }
+  });
+  it("says nothing of the recording while it is as it was, however its time is written, or when it is not there to look at", async (c) => {
+    const e = episode(c);
+    await run(e);
+    const [made] = e.saved[0].app.projects;
+    // The same moment written in another zone, as a time written before the clocks changed is now.
+    const utc = new Date(Date.parse(made.from.modified)).toISOString().replace(/\.\d+Z$/, "Z");
+    assert.notEqual(utc, made.from.modified);
+    assert.equal(await run(e, { ...e.saved[0], app: { ...e.saved[0].app, projects: [{ ...made, from: { ...made.from, modified: utc } }] } }), 0);
+    // The recording is looked at only to compare it: a project opens without it.
+    rmSync(e.raw);
+    assert.equal(await run(e, e.saved[1]), 0);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", "It's open in HyperFrames.", "It's open in HyperFrames."]);
   });
   it("makes nothing without the words of the recording, and says why", async (c) => {
     const e = episode(c, { words: false });
