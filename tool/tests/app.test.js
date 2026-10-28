@@ -4,11 +4,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readOpen } from "../hyperframes.js";
+import { openInApp, NOT_SET_UP } from "../app.js";
+import { takeEpisodeLock } from "../detached.js";
+import { layoutOf, localStamp } from "../episode.js";
+import { episodeWork } from "../settings.js";
+import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
@@ -73,5 +78,141 @@ describe("the HyperFrames stand-in", () => {
       const r = s.run(args);
       assert.deepEqual([r.status, r.stdout], [2, ""], args.join(" "));
     }
+  });
+});
+
+// --- openInApp: the working copy, the project, the pinned open and the record ---
+
+const FOLDER = "2026-10-28 Pricing talk (Mac Studio)";
+const AT = Date.parse("2026-10-28T15:00:00-04:00");
+const WORDS = [{ w: "Pricing,", start: 0.5, end: 1.1 }, { w: "says", start: 1.2, end: 1.6 }, { w: "Sally.", start: 1.7, end: 2.5 }];
+const PLAN = { by: "rules", phrases: [{ id: "p1", start: 0.4, end: 1.15, text: "Pricing,", words: WORDS.slice(0, 1), keep: false, kind: "retake", why: "said again" }, { id: "p2", start: 1.15, end: 2.6, text: "says Sally.", words: WORDS.slice(1), keep: true, kind: "keep", why: "" }] };
+const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
+
+/** An episode on this Mac, as `app` finds it once the gate and the claim are past: its folder in Episodes with the raw video, its
+    words, its cut plan and its Reel candidates; this Mac's home with the stand-in's answers; and a context that collects what is
+    said, what is started and each record written. `copy` makes the working copy first, as the job would. */
+function episode(c, { open = "opened", copy = true, words = true, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
+  const s = standIn(c, { open });
+  const folder = join(s.home, "Dropbox", "BRIMM Video", "Episodes", FOLDER);
+  const raw = join(folder, "Talk.mov");
+  const write = (path, text) => {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, text);
+  };
+  write(raw, "the raw video's bytes");
+  if (words) write(join(folder, "Talk.words.json"), JSON.stringify(WORDS));
+  write(join(folder, "Talk.cut-plan.json"), JSON.stringify(PLAN));
+  write(join(folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 1, candidates: [] }));
+  const stat = statSync(raw);
+  const paths = workCopyPaths(s.home, FOLDER, workCopyKey({ bytes: stat.size, mtimeMs: stat.mtimeMs }));
+  if (copy) {
+    write(paths.video, "the working copy's bytes");
+    write(paths.facts, JSON.stringify({ seconds: 2.6, fps: 30, width: 1920, height: 1080, bytes: 24 }));
+  }
+  const said = [];
+  const started = [];
+  const saved = [];
+  const ctx = {
+    home: s.home, machine: "Mac Studio", now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
+    start: (cmd, args) => started.push(args.slice(1)), settings: { root: join(s.home, "Dropbox", "BRIMM Video"), checkout: "/checkout", app: "hyperframes", appHandover: handover }
+  };
+  const record = { id: "e-20261028-3fa9c1", rev: 4, kind: "raw", name: { text: "Pricing talk", placeholder: false }, video: { file: "Talk.mov", bytes: stat.size, seconds: 2.6 }, spellings: [["Sally", "Sallie"]], ...over };
+  const deps = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE, chat: () => chat, save: async (next) => (saved.push(next), 0) };
+  const project = join(episodeWork(s.home, FOLDER), "Pricing talk main 3fa9c1");
+  return { ...s, folder, raw, paths, said, started, saved, ctx, record, deps, project, found: { name: FOLDER, folder } };
+}
+const run = (e, record = e.record) => openInApp(e.ctx, { found: e.found, record }, e.deps);
+/** Nothing she reads holds a path, a flag or the name of a command. */
+const plain = (said) => said.forEach((line) => assert.doesNotMatch(line, /\/|--|\bnpx\b|\bnode\b|hyperframes\.mjs/, line));
+
+describe("app: opening an episode in HyperFrames", () => {
+  it("makes the project from the working copy, opens it with the pinned command line in PR 1's environment, and records it", async (c) => {
+    const e = episode(c);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+    assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), "the working copy's bytes");
+    assert.ok(!existsSync(e.paths.video), "the working copy was moved in, not copied");
+    assert.ok(existsSync(e.paths.facts), "its facts stay where they were");
+    assert.match(readFileSync(join(e.project, "transcript.json"), "utf8"), /"Sallie\."/);
+    assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: ["HOME", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_SKIP_SKILLS", "LANG", "PATH"] }]);
+    assert.equal(e.saved.length, 1);
+    const next = e.saved[0];
+    assert.equal(layoutOf(next), 4);
+    assert.deepEqual(next.app, {
+      toolchain: PIN.version,
+      projects: [{
+        key: "main", name: "Pricing talk main 3fa9c1", madeAt: localStamp(new Date(AT)), on: "Mac Studio",
+        from: { file: "Talk.mov", bytes: statSync(e.raw).size, modified: localStamp(new Date(statSync(e.raw).mtimeMs)) },
+        workingCopy: { bytes: 24, seconds: 2.6, fps: 30 }, opened: [localStamp(new Date(AT))], handover: false, fromSuggestion: null, state: "opened"
+      }]
+    });
+    assert.deepEqual(e.started, []);
+    plain(e.said);
+  });
+  it("opens the same project again, and makes no second project or working copy", async (c) => {
+    const e = episode(c);
+    await run(e);
+    const before = readdirSync(episodeWork(e.home, FOLDER)).sort();
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), before);
+    assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]]);
+    assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]]);
+    assert.deepEqual(e.started, []);
+  });
+  it("starts the working copy when there is none, says it is being made, and makes no project yet", async (c) => {
+    const e = episode(c, { copy: false });
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(e.said, ['The video for HyperFrames is being made. Say "open Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.']);
+    assert.ok(!existsSync(e.project));
+    assert.deepEqual([e.saved, e.runs()], [[], []]);
+  });
+  it("starts no second working copy while one is being made", async (c) => {
+    const e = episode(c, { copy: false });
+    mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.started, []);
+    assert.match(e.said[0], /^The video for HyperFrames is being made\./);
+  });
+  it("hands her chat to the app only when this Mac's setting is on and the chat holds no session's words", async (c) => {
+    const on = episode(c, { handover: true });
+    await run(on);
+    assert.deepEqual(on.said, ["It's open in HyperFrames, and it picks up this conversation."]);
+    assert.ok(on.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
+    assert.equal(on.saved[0].app.projects[0].handover, true);
+    const held = episode(c, { handover: true, chat: { sessionId: CHAT, held: true } });
+    await run(held);
+    assert.deepEqual(held.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."]);
+    assert.ok(!held.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
+    assert.equal(held.saved[0].app.projects[0].handover, false);
+    const noChat = episode(c, { handover: true, chat: { sessionId: "", held: true } });
+    await run(noChat);
+    assert.deepEqual(noChat.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat could not be found, so it stays here."]);
+    const off = episode(c, { handover: false });
+    await run(off);
+    assert.deepEqual(off.said, ["It's open in HyperFrames."]);
+    assert.ok(!off.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
+    plain([...on.said, ...held.said, ...noChat.said, ...off.said]);
+  });
+  it("keeps the project when HyperFrames will not open, records no time it opened, and says so in her words", async (c) => {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+      const e = episode(c, { open });
+      assert.equal(await run(e), 1, open);
+      assert.deepEqual(e.said, [words], open);
+      assert.ok(existsSync(join(e.project, "index.html")), open);
+      assert.deepEqual(e.saved[0].app.projects.map((p) => [p.state, p.opened]), [["made", []]], open);
+    }
+  });
+  it("makes nothing without the words of the recording, and says why", async (c) => {
+    const e = episode(c, { words: false });
+    assert.equal(await run(e), 1);
+    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason."]);
+    assert.ok(!existsSync(e.project));
+    assert.deepEqual([e.saved, e.runs(), e.started], [[], [], []]);
+  });
+  it("says this Mac is not set up for HyperFrames in words that hold no path", () => {
+    assert.equal(NOT_SET_UP, "This Mac isn't set up for HyperFrames yet: ask Jason.");
   });
 });

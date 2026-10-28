@@ -254,8 +254,8 @@ function userDenyHeld(user, facts) {
 
 /** Where Claude Code keeps the transcript of the chat `sessionId` started in her folder, `folder` (R30): in its projects folder
     ($CLAUDE_CONFIG_DIR/projects when that is set, else ~/.claude/projects), in her folder's own subfolder of it. null when she has no
-    folder, or the id is not a chat's id, which is never put into a path. */
-function transcriptOf({ home, env, folder, sessionId }) {
+    folder, or the id is not a chat's id, which is never put into a path. app.js asks it too, for the handover of her chat. */
+export function transcriptOf({ home, env, folder, sessionId }) {
   if (!folder || typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
   const projects = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, "projects") : join(home, ".claude", "projects");
   const file = join(projects, claudeDirName(folder), `${sessionId}.jsonl`);
