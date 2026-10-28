@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-10-27.
+- **Last updated:** 2026-10-28.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -41,7 +41,9 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   - **Generated media** is labelled for YouTube's disclosure question. No generated people who could pass as real, and never a generated Sallie, face or voice.
   - Nothing of it is built.
 - **Fonts come from Adobe Fonts or Google Fonts (2026-10-26).** Jason, word for word: "we will find a replacement font, available either through adobe or google fonts, if needed."
-  - Sinthya is on neither, so its replacement script is picked by eye: still open.
+  - Sinthya is on neither, so its replacement script was picked by eye: **Allison**, from Google Fonts (2026-10-28). Jason, word for word: "use allison to replace sinthya".
+  - **Josefin Sans Regular Italic is added** (2026-10-28), for a subtitle or a second voice, as the guide's samples set them. Jason: "Add the italic".
+  - **The brand guide's fonts and colours are current** (2026-10-28, when Jason shared the guide again). It is old: its two "with Sallie Holder" logos are never used.
   - **Josefin Sans replaces Sweet Sans Pro.** H0's font check on the Mac Studio said MISSING for Sweet Sans Pro: it never became active there, not even in TextEdit. Jason said "lets change it out" and picked Josefin Sans, from Google Fonts, on an answer card from a sheet of five faces set in the guide's three roles.
   - The test is written up as `docs/phase-h0/checklist.md`.
 - **Versions with their changes (2026-10-27).** Reading the architecture, Jason said, word for word:

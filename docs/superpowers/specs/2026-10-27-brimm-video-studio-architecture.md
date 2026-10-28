@@ -441,7 +441,7 @@ The project's folder name, its `meta.json` name and its title in the app are one
 | `brimm/cut-suggestions.json` | The cut plan, as Claude changed it | 5.8 |
 | `brimm/reel-suggestions.json` | `reels.json` | 5.8. Not in a session clip |
 | `brimm/spellings.json` | The episode's spellings | So titles and captions are spelled as she says |
-| `brimm/brand.md`, `assets/fonts/`, `assets/logos/` | The brand pack (`tool/brand/`) and the Assets folder in Dropbox | D4. Colours, type, rules; Josefin Sans in Light, Regular and Medium (open licence); the logos she chose, never a "with Sallie Holder" mark |
+| `brimm/brand.md`, `assets/fonts/`, `assets/logos/` | The brand pack (`tool/brand/`) and the Assets folder in Dropbox | D4. Colours, type, rules; Josefin Sans in Light, Regular, Regular Italic and Medium, and Allison for an accent (open licences; Jason's of 2026-10-26 and 2026-10-28); the logos she chose, never a "with Sallie Holder" mark |
 | `vendor/gsap.min.js` | `tool/vendor/` | The version `init` uses (3.14.2), with its checksum in the pin file |
 
 Everything in a project is a file Studio chose to put there. The tests assert the whole file list for each kind, so nothing arrives by accident.
