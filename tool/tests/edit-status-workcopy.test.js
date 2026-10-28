@@ -6,11 +6,13 @@
 // holds the name of a command. The command itself is edit-workcopy.test.js's.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resultFile } from "../detached.js";
+import { writePending } from "../filing.js";
 import { progressFolder } from "../progress.js";
-import { episodeWork } from "../settings.js";
+import { READ_LOOK_MS } from "../reading.js";
+import { episodeWork, pendingFolder } from "../settings.js";
 import { FOLDER, ID, NAME } from "./episodes.js";
 import { PLAIN, UNANSWERED, atWork, on, world } from "./workcopy-world.js";
 
@@ -59,6 +61,37 @@ describe("status: the working copy", () => {
     // Once it has ended there is no run, no progress and no lock, and what it left is said in its place.
     const after = await howFar(t);
     assert.deepEqual(after.said, [`${FOLDER}: ${MAKING} ended 0 minutes ago. Made: the video for HyperFrames.`]);
+    t.done();
+  });
+  it("says that it waits for the import's check, from the run's own progress, while the video is held, and then that it is made", async () => {
+    const { t, found } = world();
+    // The import's late check of the video is still to come: the run waits for it, as the reading does, and says so in the panel.
+    writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: "Pricing talk.mp4", bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    delete t.ctx.deps.progress;
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    const waited = t.ctx.deps.wait;
+    let mid = null;
+    t.ctx.deps.wait = async (ms) => {
+      if (ms === READ_LOOK_MS && mid === null) {
+        mid = await howFar(t);
+        // The import makes its late check, and takes its pending one away.
+        rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
+      }
+      await waited(ms);
+    };
+    const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(mid.said, ["Running on this Mac:", `  ${NAME}: Waiting for the import to check its copies`, `${FOLDER}: ${BEING_MADE}`]);
+    // Once it has ended there is no progress and no lock, and what it left is said in their place.
+    assert.deepEqual((await howFar(t)).said, [`${FOLDER}: ${MAKING} ended 0 minutes ago. Made: the video for HyperFrames.`]);
+    t.done();
+  });
+  it("says why the run ended, in the reading's words, when the import's late check found a problem", async () => {
+    const { t, found } = world();
+    writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: "Pricing talk.mp4", bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 20 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt", problem: "Pricing talk.srt is not whole in Dropbox." });
+    assert.equal((await on(t.ctx.deps, "workcopy", "--now", FOLDER)).code, 1);
+    const r = await howFar(t);
+    assert.deepEqual(r.said, [`${FOLDER}: ${MAKING} ended 0 minutes ago. Not done: The late check of this episode's import found a problem: Pricing talk.srt is not whole in Dropbox. Once it is put right, say "try it again" for Pricing talk.mp4 on Mac Studio, then say this again.`]);
     t.done();
   });
   it("says what the run left, in its words, once it has ended: what was made, or why it could not be", async () => {

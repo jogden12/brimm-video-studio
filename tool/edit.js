@@ -63,8 +63,8 @@ import { presetOf } from "./layers.js";
 import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf } from "./styles.js";
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
-import { findPrograms, askAgain, askBlocked, clockAt, keptList, banner } from "./unedited.js";
-import { readEpisodeNow, accountOf, READ_KINDS, rulesPlanKept } from "./reading.js";
+import { findPrograms, askAgain, askBlocked, clockAt, importHold, keptList, banner } from "./unedited.js";
+import { readEpisodeNow, accountOf, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
@@ -82,7 +82,7 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp } from "./app.js";
 import { cliPath } from "./hyperframes.js";
-import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -3261,6 +3261,49 @@ const copyWanted = (ctx, stored, record) => WORK_COPY_KINDS.includes(stored) && 
 /** What a run of `workcopy` for a video of another kind leaves for its result, in the words a copy that cannot be made is refused in. */
 const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
 
+/** Wait, as a raw reading does (reading.js readEpisodeNow), while the import's late check of the episode's video is still to come
+    (unedited.js importHold): the working copy is made from the raw video as filed, whole and checked (architecture 2026-10-27, 5.7),
+    and that check may put the video in again. `kind` asks for the copy at once; the run does the waiting. Resolves { record }, the
+    episode's record as it is once nothing holds the video, or { why }, in the words the reading uses, when the run must end:
+    - a hold that clears by itself, an import of the video at work on either Mac, or this Mac's own late check of it before its time
+      with no problem found, is waited for: it is looked at again every READ_LOOK_MS, for READ_HOLD_MS at most. The wait is a step of
+      its own in the progress panel (WORK_COPY_WAIT_STEP), so that "how far is it?" says it, and it is ended before the copy begins;
+    - a hold that does not, an import that failed or stopped, a late check that found a problem, or one this Mac owes past its time
+      with no import at work to make it, ends the run at once with that hold's words (importHold's `why`), as the reading's ends;
+    - a wait that has run out ends it with the words of what still holds the video;
+    - after each wait the episode is found again, gate and all (findEpisode, as at the start of the run), since she may have said it is
+      something else meanwhile, or a session: a video that is no longer a raw video or an iPhone clip, or that the gate now refuses,
+      is made no copy of. The words are the gate's own, or NOT_RAW_OR_CLIP.
+    Nothing is written meanwhile: the run writes no record. `wait` is how it waits, `progress` the panel's reporter and `log` the
+    run's log. */
+async function waitForImport(ctx, { found, record, wait, progress, log }) {
+  const name = shownName(record);
+  let waited = 0;
+  let shown = false;
+  try {
+    for (;;) {
+      const hold = importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() });
+      if (!hold.why) return { record };
+      if (!hold.waits || waited >= READ_HOLD_MS) return { why: hold.why };
+      if (!shown) {
+        shown = true;
+        log(`${name}: the video for HyperFrames is made once the import has checked its copies.`);
+        progress.begin(name);
+        progress.step(WORK_COPY_WAIT_STEP);
+      }
+      await wait(READ_LOOK_MS);
+      waited += READ_LOOK_MS;
+      const again = findEpisode(ctx, found.name);
+      if (!again.read || !again.read.record) return { why: again.why || notRead(ctx, again, found.name) };
+      if (again.read.newer) return { why: newerWhy(again.read.record) };
+      if (!WORK_COPY_KINDS.includes(recordKind(again.read.record))) return { why: NOT_RAW_OR_CLIP };
+      record = again.read.record;
+    }
+  } finally {
+    if (shown) progress.end(false);
+  }
+}
+
 /** `workcopy --now "<episode folder>" [--4k]`, the detached run `kind` and `app` start (workcopy.js requestWorkCopy): it makes the
     working copy of the episode's raw video, the video HyperFrames is given to edit (workcopy.js makeWorkCopy, which never throws),
     in this Mac's own folder for the episode. It is detached alone, like `read`: it is in no help, and without --now and a folder it
@@ -3269,6 +3312,9 @@ const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
     video held beside a session are refused in the gate's own words, and the refusal is left as the run's result, as `read`'s is;
     one a newer brimm-video wrote is named by its short id, and nothing is made or written. Past the gate it runs for a raw video
     and an iPhone clip alone (WORK_COPY_KINDS): a video of any other kind leaves a result that says it can't be used, in words.
+    Before it copies, it waits as a raw reading does while the import's late check of the video is still to come (waitForImport),
+    since the copy is made from the video as filed, whole and checked (architecture 5.7): the wait is a step in the progress
+    panel, and a hold that does not clear by itself ends the run with the reading's words for it.
     The run holds the working copy's own lock (workCopyLockOf), not the episode's, and writes no record, so that it runs beside
     the reading `kind` starts at the same moment. `--4k` makes a copy of 4K. What it needs of this Mac it takes from ctx.deps, as
     the other detached runs do, so that a test gives it stand-ins: `run` (for ffprobe), `tools` (ffmpeg and ffprobe, as
@@ -3297,9 +3343,13 @@ async function workcopy(ctx, rest) {
     progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
     ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
   };
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     if (!WORK_COPY_KINDS.includes(recordKind(record))) return { ok: false, made: [], failed: [NOT_RAW_OR_CLIP], next: "" };
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video: join(found.folder, record.video.file), name: shownName(record), fourK: Boolean(flags["4k"]) }, deps);
+    // `kind` asks for the copy at once; the video it is made from is whole and checked first (waitForImport).
+    const held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log });
+    if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video: join(found.folder, held.record.video.file), name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
@@ -4469,7 +4519,9 @@ function answerWhy(ctx, found, record, plan) {
     - and right after the reading, for a raw video and an iPhone clip whose video is whole on this Mac, the working copy of the
       video is asked for (workcopy.js requestWorkCopy): its detached run, `workcopy`, which makes the video HyperFrames is given
       to edit. It has a lock of its own, so it runs beside the reading and is not waited for, and a request while a run of it is
-      at work starts none. It is asked for only when it will be used (copyWanted): on a Mac whose settings turn the app on, and
+      at work starts none. It is asked for at once, even while the reading waits for the import's late check: the run waits for
+      that check itself (waitForImport), as the reading does, before it makes the copy. It is asked for only when it will be used
+      (copyWanted): on a Mac whose settings turn the app on, and
       when the record this wrote has no main project in use, since that project's writer moved the copy into it. A project kept
       for the earlier kind in this very answer is not in use, so a change of kind asks for a new copy. A finished video, a
       session, a video not whole on this Mac, a Mac whose app is off and a Mac whose readings are off start none; `app` asks for
@@ -4763,8 +4815,9 @@ async function answerKind(ctx, found, plan, began) {
   startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
   // The video HyperFrames is given to edit is made beside the reading, once, for a raw video and an iPhone clip whose video is whole
   // on this Mac (architecture 2026-10-27, 5.7), when it will be used (copyWanted). It takes a lock of its own, so it does not wait
-  // for the reading, and a request while a run of it is at work starts none. A video not here yet is made into one by `app`, which
-  // asks for it when it is not there.
+  // for the reading, and a request while a run of it is at work starts none. It is asked for at once, whether or not the import's
+  // late check of the video is still to come: its run waits for that itself (waitForImport). A video not here yet is made into one by
+  // `app`, which asks for it when it is not there.
   if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);

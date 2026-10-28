@@ -31,6 +31,10 @@ const GB = 1024 ** 3;
 /** The step of the work, as the progress panel says it. The job has this one only: the run is the copy being made. */
 export const WORK_COPY_STEP = "Making the video for HyperFrames";
 export const WORK_COPY_STEPS = [WORK_COPY_STEP];
+/** The step the progress panel shows while the run waits, before it makes the copy, for the import to have checked its copies of the
+    video (edit.js workcopy): "how far is it?" says it. It is no step of the work, so it is not among WORK_COPY_STEPS: it is of any
+    length, and the panel never measures it. */
+export const WORK_COPY_WAIT_STEP = "Waiting for the import to check its copies";
 /** What is said when the copy is made. */
 export const WORK_COPY_DONE = "Done";
 

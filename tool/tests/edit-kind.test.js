@@ -768,7 +768,7 @@ describe("kind: the working copy (plan PR 4)", () => {
     assert.equal(startedBy(t).filter((args) => args[0] === "workcopy").length, 2);
     t.done();
   });
-  it("starts it beside a reading that waits for the import's late check: the copy does not wait for it", async () => {
+  it("asks for it at once beside a reading that waits for the import's late check: kind does not wait for the check, its run does (workcopy's tests)", async () => {
     const t = setup();
     appOn(t);
     waiting(t);
