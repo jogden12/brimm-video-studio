@@ -80,7 +80,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, openInApp } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp } from "./app.js";
 import { cliPath } from "./hyperframes.js";
 import { WORK_COPY_COMMAND, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -4127,6 +4127,17 @@ const ANSWER_KEPT = { finished: "finished", raw: "raw", clip: "short video", ses
 /** What each kind is called to her, when she is told how a video is answered. */
 const KIND_SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
 
+/** What `kind` says when a correction keeps the HyperFrames project that was made for the kind `was` (architecture 4.8), by the kind
+    `now` the video has become (as the record keeps it) and the video's `name`: the project is kept as it was; a raw video or an
+    iPhone clip is told how to make a new one, a finished video that it is not edited in HyperFrames, and a session what happens to a
+    project that holds its recording and its words. No path, flag or name of a command. */
+function keptProjectWords(was, now, name) {
+  const made = `Its HyperFrames project, made when it was answered as ${KIND_SAID[was]}, is kept as it was`;
+  if (now === "finished") return `${made}. A finished video is not edited in HyperFrames.`;
+  if (now === "session") return `${made}, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it.`;
+  return `${made}. Say "${openInAppWords(name)}" to make a new one.`;
+}
+
 const BOTH_ANSWERS = "Say both answers: what it is, and whether it is a private session (--private yes or no).";
 const ANSWERS_DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ASK_IF_SESSION = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
@@ -4628,6 +4639,12 @@ async function answerKind(ctx, found, plan, began) {
   const at = localStamp(new Date(ctx.now()));
   const answer = { guess: null, seen: "", came: null, ...base.answer, state: "answered", by: ctx.machine, on: ctx.machine, at, private: given };
   const next = { ...base, kind: stored, answer };
+  // A correction that changes the kind keeps the HyperFrames project made for the earlier kind, in the record that changes it
+  // (architecture 4.8): the main project in use is marked as made for that kind, so `app` no longer takes it for the main one and
+  // makes a new one. Nothing on disk is moved or removed here, and the same kind again changes nothing.
+  const kindWas = recordKind(base);
+  const keeps = kindWas !== null && kindWas !== stored && (base.app?.projects ?? []).some(inUse);
+  if (keeps) next.app = { ...base.app, projects: base.app.projects.map((p) => (inUse(p) ? { ...p, state: PROJECT_KEPT } : p)) };
   if (plan.clearSession) next.session = { ...base.session, cleared: { at, on: ctx.machine, to: stored, confirmed: "dialog" } };
   if (!handedOff(found.folder, base)) {
     // An answered video keeps the video it is a version of unless her answer names another, or none (--version-of none).
@@ -4693,6 +4710,7 @@ async function answerKind(ctx, found, plan, began) {
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
     if (!shown) say(cantOpen(next.name.text));
     if (owed.length) say(owedWords(next.name.text));
+    if (keeps) say(keptProjectWords(kindWas, stored, next.name.text));
     sayVersionsToMark(ctx, found, next);
     return 0;
   }
@@ -4703,6 +4721,7 @@ async function answerKind(ctx, found, plan, began) {
   }
   if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
   if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
+  if (keeps) say(keptProjectWords(kindWas, stored, name));
   // A mark cleared while another of its versions is still marked: it is held as a session, its names stay out of the chat, and
   // Claude reads nothing of it.
   if (plan.clearSession && linksOf(ctx.root).sessionsBeside(next, found.folder).length) {

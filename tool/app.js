@@ -38,8 +38,9 @@ export const NOT_SET_UP = "This Mac isn't set up for HyperFrames yet: ask Jason.
 
 /** How long the command line may take to hand the project to the app, in milliseconds: it returns once the app has been asked. */
 const OPEN_MS = 60 * 1000;
-/** The state of a project that was made for a kind the episode is no longer (4.8): it is kept, and no longer the main project. */
-const KEPT = "kept for an earlier kind";
+/** The state of a project that was made for a kind the episode is no longer (4.8): it is kept, and no longer the main project.
+    edit.js `kind` writes it, in the record that changes the kind. */
+export const KEPT = "kept for an earlier kind";
 
 const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
@@ -52,8 +53,9 @@ const STAYS = {
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
 
-/** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind. */
-const isMain = (project) => project.key === "main" && project.state !== KEPT;
+/** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind.
+    edit.js `kind` asks it too, of a record that changes kind. */
+export const isMain = (project) => project.key === "main" && project.state !== KEPT;
 
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
     Mac write, and is joined to a folder here. */

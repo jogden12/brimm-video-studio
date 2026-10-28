@@ -7,10 +7,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
 import { askBlocked, clockAt } from "../unedited.js";
-import { claimed, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
+import { claimed, layoutOf, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
+import { PIN } from "../hyperframes.js";
 import { episodeWork } from "../settings.js";
 import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
@@ -20,7 +21,7 @@ import { writeStatus } from "../importing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
 import { notSessionCardOf } from "../receipts.js";
-import { setup, episodeFor, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
+import { setup, episodeFor, listAll, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -797,6 +798,151 @@ describe("kind: a raw reading waits for the import's late check", () => {
     owe(t, 40 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." });
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual(r.said, [STILL(LABEL)]);
+    t.done();
+  });
+});
+
+describe("kind: a correction keeps the HyperFrames project made for the earlier kind (architecture 4.8)", () => {
+  const PROJECT = "Pricing- what to charge- main 3fa9c1";
+  const REEL_PROJECT = "Pricing- what to charge- reel 1 3fa9c1";
+  const KEPT_STATE = "kept for an earlier kind";
+  /** A project of the record as `app` writes one: the main one, in use, unless `over` says otherwise. */
+  const project = (over = {}) => ({
+    key: "main", name: PROJECT, madeAt: NOW, on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: NOW },
+    workingCopy: { bytes: 24, seconds: 23.423, fps: 30 }, opened: [NOW], handover: false, fromSuggestion: null, state: "opened", ...over
+  });
+  const reel = () => project({ key: "reel 1", name: REEL_PROJECT, fromSuggestion: 1 });
+  const appOf = (...projects) => ({ toolchain: PIN.version, projects });
+  /** What each kind is called to her, and the word she answers it by. */
+  const SAID = { finished: "finished by your editor", raw: "raw with retakes", "short video": "an iPhone clip", session: "a client or group session" };
+  const WORD = { finished: "finished", raw: "raw", "short video": "clip", session: "session" };
+  /** The made-up episode, answered as `kind`, holding the projects given, each with its folder on this Mac, in its work folder. */
+  function answeredWith(t, kind, projects) {
+    const found = episodeFor(t, { record: { version: 4, kind, answer: ANSWERED, name: { text: NAME, placeholder: false }, ...(projects ? { app: appOf(...projects) } : {}) } });
+    for (const p of projects ?? []) {
+      const dir = join(episodeWork(t.home, FOLDER), p.name);
+      for (const [rel, text] of [["index.html", "<html></html>"], ["media/recording.mp4", "the working copy"], ["brimm/facts.json", "{}"], [".claude/settings.json", "{}"]]) {
+        mkdirSync(dirname(join(dir, rel)), { recursive: true });
+        writeFileSync(join(dir, rel), text);
+      }
+    }
+    return found;
+  }
+  /** Every file of this Mac's work folder for the episode, by its path, with what it holds: to see that nothing moved or went. */
+  function workTree(t) {
+    const dir = episodeWork(t.home, FOLDER);
+    return Object.fromEntries(listAll(dir).filter((rel) => rel.split("/")[0] !== "answer.lock").map((rel) => [rel, readFileSync(join(dir, rel), "utf8")]));
+  }
+  /** What `kind` is told to make a video `to`, again, and what it said of the project. */
+  const correct = (t, to, more = []) => on(t.ctx.deps, "kind", NAME, WORD[to], "--private", to === "session" ? "yes" : "no", "--again", ...more);
+  const mentions = (r) => r.said.filter((line) => line.includes("HyperFrames project"));
+  /** The words said of a project kept, by what the video is now. */
+  const keptWords = (was, now) => {
+    const made = `Its HyperFrames project, made when it was answered as ${SAID[was]}, is kept as it was.`;
+    if (now === "finished") return `${made} A finished video is not edited in HyperFrames.`;
+    if (now === "session") return `Its HyperFrames project, made when it was answered as ${SAID[was]}, is kept as it was, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it.`;
+    return `${made} Say "open ${NAME} in HyperFrames" to make a new one.`;
+  };
+  const CHANGES = [
+    ["raw", "short video"], ["short video", "raw"], ["raw", "finished"], ["short video", "finished"], ["finished", "raw"], ["finished", "short video"], ["raw", "session"], ["short video", "session"]
+  ];
+  it("marks the main project in use as kept for an earlier kind when the kind changes, and says so once, by the new kind", async () => {
+    for (const [was, now] of CHANGES) {
+      const t = setup();
+      const found = answeredWith(t, was, [project()]);
+      const before = workTree(t);
+      const r = await correct(t, now);
+      assert.equal(r.code, 0, `${was} to ${now}: ${r.text}`);
+      assert.deepEqual(mentions(r), [keptWords(was, now)], `${was} to ${now}`);
+      const record = reread(found);
+      assert.equal(record.kind, now);
+      assert.deepEqual(record.app, appOf(project({ state: KEPT_STATE })), `${was} to ${now}`);
+      assert.deepEqual([record.version, layoutOf(record)], [4, 4]);
+      // Nothing on disk is moved, changed or removed: the project's folder is as it was.
+      assert.deepEqual(workTree(t), before, `${was} to ${now}`);
+      t.done();
+    }
+  });
+  it("says the three sentences exactly: for raw and a clip how to make a new one, for a finished video that it is not edited here, for a session what to do", async () => {
+    const lines = [];
+    for (const [was, now] of [["finished", "raw"], ["raw", "short video"], ["raw", "finished"], ["short video", "session"]]) {
+      const t = setup();
+      answeredWith(t, was, [project()]);
+      lines.push(...mentions(await correct(t, now)));
+      t.done();
+    }
+    assert.deepEqual(lines, [
+      `Its HyperFrames project, made when it was answered as finished by your editor, is kept as it was. Say "open ${NAME} in HyperFrames" to make a new one.`,
+      `Its HyperFrames project, made when it was answered as raw with retakes, is kept as it was. Say "open ${NAME} in HyperFrames" to make a new one.`,
+      "Its HyperFrames project, made when it was answered as raw with retakes, is kept as it was. A finished video is not edited in HyperFrames.",
+      "Its HyperFrames project, made when it was answered as an iPhone clip, is kept as it was, and it holds the recording and its words: close it in HyperFrames, and ask Jason what to do with it."
+    ]);
+  });
+  it("says it with the lines the answer has, before the reading is waited for, and holds no path, flag or name of a command", async () => {
+    const t = setup();
+    answeredWith(t, "raw", [project()]);
+    const r = await correct(t, "finished");
+    assert.deepEqual(r.said, [keptWords("raw", "finished"), STILL(NAME)]);
+    for (const line of r.said) assert.doesNotMatch(line, /\/|--|\bnpx\b|\bnode\b|edit\.js|hyperframes\.mjs/, line);
+    t.done();
+  });
+  it("says it too when this Mac's readings are off, and the video is answered all the same", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    const r = await on(withSettings(t, { readings: false }), "kind", NAME, "finished", "--private", "no", "--again");
+    assert.deepEqual([r.code, r.said], [0, [keptWords("raw", "finished"), `${NAME}: answered. ${READINGS_OFF}`]]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[PROJECT, KEPT_STATE]]);
+    t.done();
+  });
+  it("changes nothing in app, and says nothing of a project, when the same kind is said again", async () => {
+    for (const kind of ["raw", "short video", "finished"]) {
+      const t = setup();
+      const found = answeredWith(t, kind, [project()]);
+      const before = workTree(t);
+      const r = await correct(t, kind);
+      assert.equal(r.code, 0, `${kind}: ${r.text}`);
+      assert.deepEqual(mentions(r), [], kind);
+      assert.deepEqual(reread(found).app, appOf(project()), kind);
+      assert.deepEqual(workTree(t), before, kind);
+      t.done();
+    }
+  });
+  it("keeps the project once: the next correction finds none in use, says nothing of one, and changes nothing in app", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    assert.equal((await correct(t, "finished")).code, 0);
+    const kept = reread(found).app;
+    const again = await correct(t, "raw");
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual(mentions(again), []);
+    assert.deepEqual(reread(found).app, kept);
+    assert.deepEqual(reread(found).app.projects.map((p) => p.state), [KEPT_STATE]);
+    t.done();
+  });
+  it("marks the main project alone: a Reel's project is left as it is, and a record with no project in use gets none and says nothing", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project(), reel()]);
+    const r = await correct(t, "finished");
+    assert.deepEqual(mentions(r), [keptWords("raw", "finished")]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["main", KEPT_STATE], ["reel 1", "opened"]]);
+    t.done();
+    for (const projects of [undefined, [], [reel()], [project({ state: KEPT_STATE })]]) {
+      const u = setup();
+      const there = answeredWith(u, "raw", projects);
+      const before = reread(there).app;
+      const said = await correct(u, "finished");
+      assert.equal(said.code, 0, said.text);
+      assert.deepEqual(mentions(said), [], JSON.stringify(projects));
+      assert.deepEqual(reread(there).app, before, JSON.stringify(projects));
+      u.done();
+    }
+  });
+  it("marks the project in the one write that records the new answer", async () => {
+    const t = setup();
+    const found = answeredWith(t, "raw", [project()]);
+    await correct(t, "finished");
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.kind, record.app.projects[0].state, record.answer.state], [3, "finished", KEPT_STATE, "answered"]);
     t.done();
   });
 });
