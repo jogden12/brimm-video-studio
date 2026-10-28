@@ -11,6 +11,10 @@
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
+//   - and Claude's reading must be over: the project is written from it (the cut plan and the Reel suggestions), and nothing writes
+//     it again afterwards, so a project made while `read` is still at work would keep an unfinished reading for good. While it is at
+//     work nothing is made, and she is told to say it again when it has finished. Only a new project waits for it: one made before
+//     is opened as it was, and so is a folder the record does not know;
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
@@ -25,6 +29,7 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
+import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
@@ -47,6 +52,7 @@ export const KEPT = "kept for an earlier kind";
 
 const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+const stillReading = (name) => `Claude is still reading ${name}. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
@@ -222,6 +228,10 @@ function adoptProject(ctx, { found, record, at, projects }) {
     - Without the working copy, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
+    - While Claude's reading of the episode is at work (`read` holds the episode's lock), nothing is made: the project is written
+      from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). The working copy
+      is still asked for when it is not there, as above, and the one line she gets is the reading's: it is the one she waits for
+      (the copy is made meanwhile), and what she says again is the same.
     The project is written whole or not at all (project.js writeProject), and a folder of that name that is there already is never
     written over: it throws. Its name is the first that no project the record keeps has (nextMain), so after a correction of the
     kind it is "main 2", and a folder the record does not know at that name is taken before this (adoptProject): what is left to
@@ -236,9 +246,14 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   }
   const raw = statSync(join(found.folder, record.video.file));
   const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  const reading = runningCommand(home, found.name, ctx.alive) === "read";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(beingMade(record.name.text));
+    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text));
+    return { code: 0 };
+  }
+  if (reading) {
+    ctx.say(stillReading(record.name.text));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
@@ -263,7 +278,10 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
     replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
     folder is not here is replaced by the folder at the name the project would get, when one is there that the record does not
-    know (adoptProject), and otherwise by a new project (makeProject). A project kept for an earlier kind (KEPT) is none in use:
+    know (adoptProject), and otherwise by a new project (makeProject), which is not made while Claude's reading of the episode is
+    at work (`read` holds its lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits:
+    one made before is opened, and a folder the record does not know is taken, whether or not the reading is at work.
+    A project kept for an earlier kind (KEPT) is none in use:
     the next is made as any first one is, under the first name no project the record keeps has (nextMain), "main 2" after the
     first, and the kept one keeps its folder, its name and its entry in the record.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`

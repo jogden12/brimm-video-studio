@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLAIM_WAIT_MS, COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { NOT_SET_UP } from "../app.js";
 import { HELD } from "../gate.js";
-import { readResult } from "../detached.js";
+import { lockOf, readResult } from "../detached.js";
 import { layoutOf, localStamp, recordFile, recordText } from "../episode.js";
 import { PIN, cliPath } from "../hyperframes.js";
 import { episodeWork, writeSettings } from "../settings.js";
@@ -568,6 +568,73 @@ describe("app: what the bring it starts says when it is done", () => {
       offline(t);
       assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, ...asked)).code, 0, asked.join(" "));
       assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME}".`, asked.join(" "));
+      t.done();
+    }
+  });
+});
+
+describe("app: Claude's reading is not finished (architecture 4.1)", () => {
+  const STILL = `Claude is still reading ${NAME}. Say "open ${NAME} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+  /** The reading (`read`, a detached run) at work on the made-up episode now: it holds the episode's lock, and its process is alive. */
+  function readingAtWork(t, command = "read") {
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command }));
+    t.ctx.deps.alive = (pid) => pid === 4242;
+  }
+  it("claims the episode, makes no project and opens nothing while `read` is at work: it says Claude is still reading and ends with 0", async () => {
+    const { t, found, paths, work } = world();
+    readingAtWork(t);
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [STILL]]);
+    // The claim is open's (the record at rev 2) and nothing more is written: no project in the record or in the work folder, nothing run.
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.editing.by, record.app, runsOf(t), t.started], [2, "Mac Studio", undefined, [], []]);
+    assert.deepEqual(readdirSync(work).sort(), ["episode.lock", "working copy"]);
+    assert.ok(existsSync(paths.video), "the working copy is where it was, not moved into a project");
+    t.done();
+  });
+  it("makes the project when it is said again after the reading has ended, and the claim is not made twice", async () => {
+    const { t, found, work } = world();
+    readingAtWork(t);
+    await app(t.ctx.deps, FOLDER);
+    t.ctx.deps.alive = () => false;
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [["Pricing- what to charge- main 3fa9c1", "opened"]]);
+    assert.ok(existsSync(join(work, "Pricing- what to charge- main 3fa9c1", "index.html")));
+    assert.deepEqual([reread(found).rev, t.waits], [3, [CLAIM_WAIT_MS]]);
+    t.done();
+  });
+  it("asks for the working copy when there is none, as it does without a reading, and says only that Claude is reading", async () => {
+    const { t, found } = world({ copy: false });
+    readingAtWork(t);
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [STILL]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual([reread(found).app, runsOf(t)], [undefined, []]);
+    t.done();
+  });
+  it("opens a project made before while `read` is at work: only a new project waits for the reading", async () => {
+    const { t, found, work } = world();
+    assert.equal((await app(t.ctx.deps, FOLDER)).code, 0);
+    const made = readdirSync(work).sort();
+    readingAtWork(t);
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual(readdirSync(work).sort(), [...made, "episode.lock"].sort());
+    assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing- what to charge- main 3fa9c1", 2, "opened"]]);
+    assert.deepEqual(runsOf(t).map((run) => run.args[0]), ["open", "open"]);
+    t.done();
+  });
+  it("makes the project as before when no reading is at work: a lock a dead run left, and another command at work, stop nothing", async () => {
+    for (const [what, alive, command] of [["a reading that died", () => false, "read"], ["a bring", (pid) => pid === 4242, "bring"]]) {
+      const { t, found, work } = world();
+      readingAtWork(t, command);
+      t.ctx.deps.alive = alive;
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [0, [OPEN]], what);
+      assert.deepEqual(reread(found).app.projects.map((p) => p.state), ["opened"], what);
+      assert.ok(existsSync(join(work, reread(found).app.projects[0].name, "index.html")), what);
       t.done();
     }
   });

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readOpen } from "../hyperframes.js";
 import { openInApp, NOT_SET_UP } from "../app.js";
-import { takeEpisodeLock } from "../detached.js";
+import { lockOf, takeEpisodeLock } from "../detached.js";
 import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
@@ -189,6 +189,84 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, []);
     assert.match(e.said[0], /^The video for HyperFrames is being made\./);
+  });
+  describe("while Claude is still reading the episode (a `read` run holds the episode's lock)", () => {
+    const STILL = 'Claude is still reading Pricing talk. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';
+    /** A run of `command` at work on the episode now, as a live process holds it: the lock is the episode's own, and this very
+        process is the live one (the context's `alive`). */
+    function atWork(e, command = "read") {
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), command, () => true).taken, true);
+    }
+    it("makes no project while the reading is at work: it says Claude is still reading, writes nothing and ends with 0", async (c) => {
+      const e = episode(c);
+      atWork(e);
+      const before = readdirSync(episodeWork(e.home, FOLDER)).sort();
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [STILL]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual([e.saved, e.runs(), e.started], [[], [], []]);
+      assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), before, "nothing is written beside the lock");
+      assert.equal(readFileSync(e.paths.video, "utf8"), "the working copy's bytes", "the working copy is where it was, not moved into a project");
+      plain(e.said);
+    });
+    it("asks for the working copy when there is none, exactly as it does without a reading, but says only that Claude is reading", async (c) => {
+      const e = episode(c, { copy: false });
+      atWork(e);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+      assert.deepEqual(e.said, [STILL]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual([e.saved, e.runs()], [[], []]);
+    });
+    it("makes the project the next time it is asked, once the reading has ended", async (c) => {
+      const e = episode(c);
+      atWork(e);
+      assert.equal(await run(e), 0);
+      rmSync(lockOf(e.home, FOLDER));
+      e.said.splice(0);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.ok(existsSync(join(e.project, "index.html")));
+      assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => p.state)), [["opened"]]);
+    });
+    it("makes the project as before when no reading is at work: a lock left by a reading that died, or another command at work, stops nothing", async (c) => {
+      for (const [what, hold] of [
+        ["a reading that died", (e) => (mkdirSync(episodeWork(e.home, FOLDER), { recursive: true }), writeFileSync(lockOf(e.home, FOLDER), JSON.stringify({ pid: 4242, command: "read" })))],
+        ["a bring", (e) => atWork(e, "bring")]
+      ]) {
+        const e = episode(c);
+        hold(e);
+        assert.equal(await run(e), 0, what);
+        assert.deepEqual(e.said, ["It's open in HyperFrames."], what);
+        assert.ok(existsSync(join(e.project, "index.html")), what);
+        assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => p.state)), [["opened"]], what);
+      }
+    });
+    it("opens a project made before while the reading is at work, and makes nothing: only a new project waits for the reading", async (c) => {
+      const e = episode(c);
+      assert.equal(await run(e), 0);
+      const before = readdirSync(episodeWork(e.home, FOLDER)).sort();
+      atWork(e);
+      e.said.splice(0);
+      assert.equal(await run(e, e.saved[0]), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), [...before, "episode.lock"].sort());
+      assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]]);
+      assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]]);
+    });
+    it("takes a project folder the record does not know while the reading is at work: the folder is there already, so nothing is made", async (c) => {
+      const e = episode(c);
+      const { ended } = await unwritten(e);
+      assert.equal(ended, 1);
+      const made = readdirSync(episodeWork(e.home, FOLDER)).sort();
+      atWork(e);
+      e.said.splice(0);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), [...made, "episode.lock"].sort());
+      assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => [p.name, p.state])), [[["Pricing talk main 3fa9c1", "opened"]]]);
+    });
   });
   it("hands her chat to the app only when this Mac's setting is on and the chat holds no session's words", async (c) => {
     const on = episode(c, { handover: true });
