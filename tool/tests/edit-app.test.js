@@ -66,6 +66,8 @@ const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To 
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";
+/** The line `app` ends with whenever the app opened: the buttons Studio cannot turn off (architecture 5.9). */
+const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
 /** What `open` and `app` say, for the same claim, when the other Mac has the episode. */
 const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
 const WORKING_COPY = "the working copy's bytes";
@@ -145,7 +147,7 @@ describe("app: the gate asks first, in its own words", () => {
     for (const [what, record] of [["a raw video", RAW], ["an iPhone clip", { ...RAW, kind: "short video" }], ["a session whose mark was cleared", CLEARED_RECORD]]) {
       const { t, found } = world({ record });
       const r = await app(t.ctx.deps, FOLDER);
-      assert.deepEqual([r.code, r.said], [0, [OPEN]], what);
+      assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]], what);
       assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["main", "opened"]], what);
       t.done();
     }
@@ -178,7 +180,7 @@ describe("app: after a correction of the kind, the next main project is another 
     assert.deepEqual(reread(found).app.projects, [{ ...first, state: KEPT }]);
     // She says it, and app makes the next project: its name is the first no project of the record has.
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     const second = join(work, "Pricing- what to charge- main 2 3fa9c1");
     assert.equal(readFileSync(join(second, "media", "recording.mp4"), "utf8"), "a part of a Story");
     assert.equal(JSON.parse(readFileSync(join(second, "meta.json"), "utf8")).name, "Pricing- what to charge- main 2 3fa9c1");
@@ -197,12 +199,12 @@ describe("app: after a correction of the kind, the next main project is another 
     await app(t.ctx.deps, FOLDER);
     await corrected(t, "raw");
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     const names = ["Pricing- what to charge- main 3fa9c1", "Pricing- what to charge- main 2 3fa9c1", "Pricing- what to charge- main 3 3fa9c1"];
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[names[0], KEPT], [names[1], KEPT], [names[2], "opened"]]);
     const made = readdirSync(work).sort();
     const again = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([again.code, again.said, readdirSync(work).sort()], [0, [OPEN], made]);
+    assert.deepEqual([again.code, again.said, readdirSync(work).sort()], [0, [OPEN, BUTTONS], made]);
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.opened.length]), [[names[0], 1], [names[1], 1], [names[2], 2]]);
     t.done();
   });
@@ -226,7 +228,7 @@ describe("app: after a correction of the kind, the next main project is another 
     assert.equal(reread(found).rev, rev, "the record was not written");
     const before = [readdirSync(work).sort(), treeOf(second)];
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual([readdirSync(work).sort(), treeOf(second)], before, "nothing was written over the folder that was there");
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [[first.name, KEPT], ["Pricing- what to charge- main 2 3fa9c1", "opened"]]);
     t.done();
@@ -288,7 +290,7 @@ describe("app: a finished video is not edited in HyperFrames (architecture 4.3)"
     t.done();
   });
   it("is said of a finished video alone: a raw video and an iPhone clip are opened, and a session not cleared is the gate's", async () => {
-    for (const [record, code, said] of [[RAW, 0, [OPEN]], [{ ...RAW, kind: "short video" }, 0, [OPEN]], [SESSION_RECORD, 1, [NOT_FOR_SESSION]]]) {
+    for (const [record, code, said] of [[RAW, 0, [OPEN, BUTTONS]], [{ ...RAW, kind: "short video" }, 0, [OPEN, BUTTONS]], [SESSION_RECORD, 1, [NOT_FOR_SESSION]]]) {
       const { t } = world({ record });
       const r = await app(t.ctx.deps, FOLDER);
       assert.deepEqual([r.code, r.said], [code, said], String(record.kind));
@@ -324,7 +326,7 @@ describe("app: this Mac must be set up, and have the command line", () => {
     writeFileSync(cliPath(t.home), `import ${JSON.stringify(pathToFileURL(STAND_IN).href)};\n`);
     t.ctx.deps.app = { node: process.execPath, guidance: GUIDANCE };
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(runsOf(t), [{ args: ["open", join(work, reread(found).app.projects[0].name), "--json"], env: PINNED_ENV }]);
     t.done();
   });
@@ -335,7 +337,7 @@ describe("app: the claim and the bring are open's", () => {
     const { t, found, raw, paths, work } = world();
     const before = listAll(found.folder);
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     const record = reread(found);
     // The claim, then the project: two records, the claim at the start and the project when the claim's twenty seconds are over.
     assert.deepEqual([record.rev, record.version, layoutOf(record)], [3, 4, 4]);
@@ -366,7 +368,7 @@ describe("app: the claim and the bring are open's", () => {
     await app(t.ctx.deps, FOLDER);
     const made = readdirSync(work).sort();
     const again = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([again.code, again.said], [0, [OPEN]]);
+    assert.deepEqual([again.code, again.said], [0, [OPEN, BUTTONS]]);
     const record = reread(found);
     assert.deepEqual(readdirSync(work).sort(), made);
     assert.deepEqual([record.rev, t.waits, t.started], [4, [CLAIM_WAIT_MS], []]);
@@ -387,7 +389,7 @@ describe("app: the claim and the bring are open's", () => {
   it("takes the episode over from the other Mac with --take-over, as open --take-over does, and opens it", async () => {
     const { t, found } = world({ record: { ...RAW, editing: HERS } });
     const taken = await app(t.ctx.deps, FOLDER, "--take-over");
-    assert.deepEqual([taken.code, taken.said], [0, ["Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.", OPEN]]);
+    assert.deepEqual([taken.code, taken.said], [0, ["Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.", OPEN, BUTTONS]]);
     const record = reread(found);
     assert.deepEqual([record.rev, record.editing.by, record.app.projects.map((p) => p.state), t.waits], [3, "Mac Studio", ["opened"], [CLAIM_WAIT_MS]]);
     t.done();
@@ -446,7 +448,7 @@ describe("app: the claim and the bring are open's", () => {
     assert.deepEqual([r.code, r.said], [1, [`Dropbox undid this Mac's claim on ${NAME}. Say "open ${NAME} in HyperFrames" again.`]]);
     assert.deepEqual([reread(found).rev, reread(found).editing, runsOf(t)], [1, null, []]);
     const again = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([again.code, again.said], [0, [OPEN]]);
+    assert.deepEqual([again.code, again.said], [0, [OPEN, BUTTONS]]);
     t.done();
   });
   it("stops, saying whose it is, when the other Mac claimed the episode during the wait", async () => {
@@ -464,7 +466,7 @@ describe("app: the claim and the bring are open's", () => {
     const { t } = world();
     t.ctx.deps.online = async () => false;
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, ["This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.", OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, ["This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.", OPEN, BUTTONS]]);
     t.done();
   });
 });
@@ -638,7 +640,7 @@ describe("app: a project that is on another Mac is not made again here (plan PR 
     const { t, found, work } = world({ record: madeOn("Mac Studio") });
     assert.ok(!existsSync(join(work, PROJECT_NAME)));
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.equal(readFileSync(join(work, PROJECT_NAME, "media", "recording.mp4"), "utf8"), WORKING_COPY);
     const later = localStamp(new Date(START + CLAIM_WAIT_MS));
     assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.name, p.on, p.madeAt, p.opened, p.state]), [["main", PROJECT_NAME, "Mac Studio", later, [later], "opened"]]);
@@ -652,17 +654,52 @@ describe("app: a project that is on another Mac is not made again here (plan PR 
     const made = Date.parse("2026-10-14T09:00:00-05:00") / 1000;
     utimesSync(join(found.folder, "Pricing talk.mp4"), made, made);
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.on, p.opened.length, p.state]), [[PROJECT_NAME, "Sallie's laptop", 2, "opened"]]);
     t.done();
   });
   it("is not asked of a project kept for an earlier kind, which is none in use: the next one is made, as \"main 2\"", async () => {
     const { t, found, work } = world({ record: madeOn("Sallie's laptop", { state: KEPT }) });
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.on, p.state]), [[PROJECT_NAME, "Sallie's laptop", KEPT], ["Pricing- what to charge- main 2 3fa9c1", "Mac Studio", "opened"]]);
     assert.ok(existsSync(join(work, "Pricing- what to charge- main 2 3fa9c1", "index.html")));
     t.done();
+  });
+});
+
+describe("app: the buttons Studio cannot control (architecture 3.3 and 5.9)", () => {
+  it("reminds her of them in a last line whenever the app opened, after the claim's lines and the chat's, and plainly", async () => {
+    assert.equal(BUTTONS, "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.");
+    const { t, found } = world();
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
+    // Each time it is opened, the one made before included.
+    const again = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([again.code, again.said], [0, [OPEN, BUTTONS]]);
+    assert.equal(reread(found).app.projects[0].opened.length, 2);
+    t.done();
+    const taken = world({ record: { ...RAW, editing: HERS } });
+    taken.t.ctx.deps.online = async () => false;
+    const over = await app(taken.t.ctx.deps, FOLDER, "--take-over");
+    assert.equal(over.said.at(-1), BUTTONS);
+    assert.deepEqual(over.said.slice(0, -1), ["Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.", "This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.", OPEN]);
+    taken.t.done();
+  });
+  it("does not say them when the app did not open, nor when it opened nothing: not installed, would not open, the video being made, a refusal", async () => {
+    for (const [what, options, code] of [
+      ["not installed", { open: "not-installed" }, 1],
+      ["would not open", { open: "open-failed" }, 1],
+      ["the video is being made", { copy: false }, 0],
+      ["a session not cleared", { record: SESSION_RECORD }, 1],
+      ["another Mac's episode", { record: { ...RAW, editing: HERS } }, 1]
+    ]) {
+      const { t } = world(options);
+      const r = await app(t.ctx.deps, FOLDER);
+      assert.equal(r.code, code, what);
+      assert.ok(!r.said.includes(BUTTONS), what);
+      t.done();
+    }
   });
 });
 
@@ -692,7 +729,7 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     await app(t.ctx.deps, FOLDER);
     t.ctx.deps.alive = () => false;
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.state]), [["Pricing- what to charge- main 3fa9c1", "opened"]]);
     assert.ok(existsSync(join(work, "Pricing- what to charge- main 3fa9c1", "index.html")));
     assert.deepEqual([reread(found).rev, t.waits], [3, [CLAIM_WAIT_MS]]);
@@ -713,7 +750,7 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     const made = readdirSync(work).sort();
     readingAtWork(t);
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [OPEN]]);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(readdirSync(work).sort(), [...made, "episode.lock"].sort());
     assert.deepEqual(reread(found).app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing- what to charge- main 3fa9c1", 2, "opened"]]);
     assert.deepEqual(runsOf(t).map((run) => run.args[0]), ["open", "open"]);
@@ -725,7 +762,7 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
       readingAtWork(t, command);
       t.ctx.deps.alive = alive;
       const r = await app(t.ctx.deps, FOLDER);
-      assert.deepEqual([r.code, r.said], [0, [OPEN]], what);
+      assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]], what);
       assert.deepEqual(reread(found).app.projects.map((p) => p.state), ["opened"], what);
       assert.ok(existsSync(join(work, reread(found).app.projects[0].name, "index.html")), what);
       t.done();
@@ -752,7 +789,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     const made = await on(t.ctx.deps, ...args.slice(1));
     assert.equal(made.code, 0, made.text);
     const opened = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([opened.code, opened.said], [0, [OPEN]]);
+    assert.deepEqual([opened.code, opened.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(t.started.map(([, more]) => more.slice(1)), [["workcopy", "--now", FOLDER]]);
     const project = join(work, reread(found).app.projects[0].name);
     assert.equal(readFileSync(join(project, "media", "recording.mp4"), "utf8"), "a part of a Story");
@@ -781,9 +818,9 @@ describe("app: the project, and what is said and recorded of it", () => {
       t.done();
       return out;
     };
-    assert.deepEqual(await asked(true, { sessionId: CHAT, held: false }), [0, ["It's open in HyperFrames, and it picks up this conversation."], true, true]);
-    assert.deepEqual(await asked(true, { sessionId: CHAT, held: true }), [0, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."], false, false]);
-    assert.deepEqual(await asked(false, { sessionId: CHAT, held: false }), [0, [OPEN], false, false]);
+    assert.deepEqual(await asked(true, { sessionId: CHAT, held: false }), [0, ["It's open in HyperFrames, and it picks up this conversation.", BUTTONS], true, true]);
+    assert.deepEqual(await asked(true, { sessionId: CHAT, held: true }), [0, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here.", BUTTONS], false, false]);
+    assert.deepEqual(await asked(false, { sessionId: CHAT, held: false }), [0, [OPEN, BUTTONS], false, false]);
   });
   it("hands her chat over for a session whose mark was cleared, which is an ordinary video of its new kind (a session not cleared is the gate's)", async () => {
     // A mark cleared by her click on a video answered as raw, as `kind … --clear-session` leaves the record, and on one that still says session.
@@ -792,7 +829,7 @@ describe("app: the project, and what is said and recorded of it", () => {
       writeSettings(t.home, { appHandover: true });
       t.ctx.deps.app.chat = () => ({ sessionId: CHAT, held: false });
       const r = await app(t.ctx.deps, FOLDER);
-      assert.deepEqual([r.code, r.said], [0, ["It's open in HyperFrames, and it picks up this conversation."]], what);
+      assert.deepEqual([r.code, r.said], [0, ["It's open in HyperFrames, and it picks up this conversation.", BUTTONS]], what);
       assert.equal(runsOf(t)[0].env.includes("CLAUDE_CODE_SESSION_ID"), true, what);
       assert.equal(reread(found).app.projects[0].handover, true, what);
       t.done();

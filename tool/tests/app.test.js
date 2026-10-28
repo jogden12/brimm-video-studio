@@ -21,6 +21,8 @@ import { psText } from "./open-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
+/** The line `app` ends with whenever the app opened: the buttons Studio cannot turn off (architecture 5.9). */
+const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
 
 /** A home folder for the stand-in, which reads how to answer `open` from a file there (`hyperframes-stand-in.json`) and writes each
     run it makes to another (`hyperframes-stand-in.log`): it is run in PR 1's environment, which carries no variable of a test's. */
@@ -147,7 +149,7 @@ describe("app: opening an episode in HyperFrames", () => {
   it("makes the project from the working copy, opens it with the pinned command line in PR 1's environment, and records it", async (c) => {
     const e = episode(c);
     assert.equal(await run(e), 0);
-    assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
     assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), "the working copy's bytes");
     assert.ok(!existsSync(e.paths.video), "the working copy was moved in, not copied");
     assert.ok(existsSync(e.paths.facts), "its facts stay where they were");
@@ -176,7 +178,7 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]]);
     assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]]);
     assert.deepEqual(e.started, []);
-    assert.deepEqual(e.said, ["It's open in HyperFrames.", "It's open in HyperFrames."], "the recording is as it was, and nothing is said of it");
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, "It's open in HyperFrames.", BUTTONS], "the recording is as it was, and nothing is said of it");
   });
   it("starts the working copy when there is none, says it is being made, and makes no project yet", async (c) => {
     const e = episode(c, { copy: false });
@@ -230,7 +232,7 @@ describe("app: opening an episode in HyperFrames", () => {
       rmSync(lockOf(e.home, FOLDER));
       e.said.splice(0);
       assert.equal(await run(e), 0);
-      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
       assert.ok(existsSync(join(e.project, "index.html")));
       assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => p.state)), [["opened"]]);
     });
@@ -242,7 +244,7 @@ describe("app: opening an episode in HyperFrames", () => {
         const e = episode(c);
         hold(e);
         assert.equal(await run(e), 0, what);
-        assert.deepEqual(e.said, ["It's open in HyperFrames."], what);
+        assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS], what);
         assert.ok(existsSync(join(e.project, "index.html")), what);
         assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => p.state)), [["opened"]], what);
       }
@@ -254,7 +256,7 @@ describe("app: opening an episode in HyperFrames", () => {
       atWork(e);
       e.said.splice(0);
       assert.equal(await run(e, e.saved[0]), 0);
-      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
       assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), [...before, "episode.lock"].sort());
       assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]]);
       assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length, p.state]), [["Pricing talk main 3fa9c1", 2, "opened"]]);
@@ -267,7 +269,7 @@ describe("app: opening an episode in HyperFrames", () => {
       atWork(e);
       e.said.splice(0);
       assert.equal(await run(e), 0);
-      assert.deepEqual(e.said, ["It's open in HyperFrames."]);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
       assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), [...made, "episode.lock"].sort());
       assert.deepEqual(e.saved.map((record) => record.app.projects.map((p) => [p.name, p.state])), [[["Pricing talk main 3fa9c1", "opened"]]]);
     });
@@ -275,22 +277,68 @@ describe("app: opening an episode in HyperFrames", () => {
   it("hands her chat to the app only when this Mac's setting is on and the chat holds no session's words", async (c) => {
     const on = episode(c, { handover: true });
     await run(on);
-    assert.deepEqual(on.said, ["It's open in HyperFrames, and it picks up this conversation."]);
+    assert.deepEqual(on.said, ["It's open in HyperFrames, and it picks up this conversation.", BUTTONS]);
     assert.ok(on.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
     assert.equal(on.saved[0].app.projects[0].handover, true);
     const held = episode(c, { handover: true, chat: { sessionId: CHAT, held: true } });
     await run(held);
-    assert.deepEqual(held.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."]);
+    assert.deepEqual(held.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here.", BUTTONS]);
     assert.ok(!held.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
     assert.equal(held.saved[0].app.projects[0].handover, false);
     const noChat = episode(c, { handover: true, chat: { sessionId: "", held: true } });
     await run(noChat);
-    assert.deepEqual(noChat.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat could not be found, so it stays here."]);
+    assert.deepEqual(noChat.said, ["It's open in HyperFrames. It starts a new conversation.", "This chat could not be found, so it stays here.", BUTTONS]);
     const off = episode(c, { handover: false });
     await run(off);
-    assert.deepEqual(off.said, ["It's open in HyperFrames."]);
+    assert.deepEqual(off.said, ["It's open in HyperFrames.", BUTTONS]);
     assert.ok(!off.runs()[0].env.includes("CLAUDE_CODE_SESSION_ID"));
     plain([...on.said, ...held.said, ...noChat.said, ...off.said]);
+  });
+  describe("the buttons Studio cannot control (architecture 3.3 and 5.9)", () => {
+    it("ends what it says with them whenever the app opened: after the opening, and after what it says of her chat", async (c) => {
+      for (const [what, options, first] of [
+        ["no handover asked", {}, ["It's open in HyperFrames."]],
+        ["her chat handed over", { handover: true }, ["It's open in HyperFrames, and it picks up this conversation."]],
+        ["her chat wanted and kept", { handover: true, chat: { sessionId: CHAT, held: true } }, ["It's open in HyperFrames. It starts a new conversation.", "This chat has held a client or group session's words, so it stays here."]]
+      ]) {
+        const e = episode(c, options);
+        assert.equal(await run(e), 0, what);
+        assert.deepEqual(e.said, [...first, BUTTONS], what);
+        assert.equal(e.said.at(-1), "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.", what);
+        plain(e.said);
+      }
+    });
+    it("says them each time the app is opened, the project made before included", async (c) => {
+      const e = episode(c);
+      await run(e);
+      await run(e, e.saved[0]);
+      assert.equal(e.said.filter((line) => line === BUTTONS).length, 2);
+    });
+    it("says them when the app opened and the record could not be written, since the app is open all the same", async (c) => {
+      const e = episode(c);
+      const { ended } = await unwritten(e);
+      assert.equal(ended, 1);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+    });
+    it("does not say them when the app did not open, or when nothing was opened because the video or the reading is not ready", async (c) => {
+      for (const [what, make] of [
+        ["not installed", () => episode(c, { open: "not-installed" })],
+        ["would not open", () => episode(c, { open: "open-failed" })],
+        ["the video is being made", () => episode(c, { copy: false })],
+        ["no words", () => episode(c, { words: false })],
+        ["Claude is still reading", () => {
+          const e = episode(c);
+          mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+          assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+          return e;
+        }]
+      ]) {
+        const e = make();
+        await run(e);
+        assert.equal(e.said.length, 1, what);
+        assert.ok(!e.said.includes(BUTTONS), what);
+      }
+    });
   });
   it("keeps the project when HyperFrames will not open, records no time it opened, and says so in her words", async (c) => {
     for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
@@ -308,7 +356,7 @@ describe("app: opening an episode in HyperFrames", () => {
       const { ended, asked } = await unwritten(e, code);
       assert.equal(ended, 1, String(code));
       assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"]], String(code));
-      assert.deepEqual(e.said, ["It's open in HyperFrames."], String(code));
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS], String(code));
       assert.deepEqual(asked.map((record) => record.app.projects.map((p) => p.state)), [["opened"]], String(code));
       assert.ok(existsSync(join(e.project, "index.html")), `${code}: the project stays`);
     }
@@ -329,7 +377,7 @@ describe("app: opening an episode in HyperFrames", () => {
       // The second run is given the record as it was, which has no project (or one whose folder is gone), and the folder is there.
       assert.equal(await run(e, recordOf(e, asked)), 0, what);
       assert.deepEqual(e.started, [], `${what}: no working copy is asked for`);
-      assert.deepEqual(e.said, ["It's open in HyperFrames."], what);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS], what);
       assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), made, `${what}: no project is written again`);
       assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", e.project, "--json"]], what);
       assert.equal(e.saved.length, 1, what);
@@ -407,7 +455,7 @@ describe("app: opening an episode in HyperFrames", () => {
       assert.equal(unreadable(e.saved[1]), "");
       // It opened the new project, and said what it says of any: nothing of names, and no working copy was asked for.
       assert.deepEqual(e.runs().map((r) => r.args), [["open", e.project, "--json"], ["open", second, "--json"]]);
-      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames."], []]);
+      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames.", BUTTONS], []]);
       plain(e.said);
     });
     it("makes \"main 3\" after a third kind, and \"main 4\" after a fourth: the first name that no project of the record has", async (c) => {
@@ -458,7 +506,7 @@ describe("app: opening an episode in HyperFrames", () => {
       // The next run is given the record as it was: it does not know the folder, which is at the name the next main project gets.
       assert.equal(await run(e, kept), 0);
       assert.deepEqual([readdirSync(work).sort(), treeOf(second)], before, "nothing is written again, and nothing over the folder that is there");
-      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames."], []], "no working copy is asked for");
+      assert.deepEqual([e.said, e.started], [["It's open in HyperFrames.", BUTTONS], []], "no working copy is asked for");
       assert.deepEqual(e.saved.at(-1).app.projects.map((p) => [p.name, p.state]), [[first.name, KEPT], [SECOND, "opened"]]);
       assert.equal(unreadable(e.saved.at(-1)), "");
       assert.deepEqual(e.runs().slice(-2).map((r) => r.args), [["open", second, "--json"], ["open", second, "--json"]]);
@@ -514,7 +562,7 @@ describe("app: opening an episode in HyperFrames", () => {
       change(e);
       e.said.splice(0);
       assert.equal(await run(e, e.saved[0]), 0, what);
-      assert.deepEqual(e.said, [CHANGED, "It's open in HyperFrames."], what);
+      assert.deepEqual(e.said, [CHANGED, "It's open in HyperFrames.", BUTTONS], what);
       assert.deepEqual(e.started, [], `${what}: no working copy is asked for`);
       assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).sort(), folders, `${what}: no project is made`);
       assert.deepEqual(treeOf(e.project), project, `${what}: nothing is replaced under the project`);
@@ -536,7 +584,7 @@ describe("app: opening an episode in HyperFrames", () => {
     // The recording is looked at only to compare it: a project opens without it.
     rmSync(e.raw);
     assert.equal(await run(e, e.saved[1]), 0);
-    assert.deepEqual(e.said, ["It's open in HyperFrames.", "It's open in HyperFrames.", "It's open in HyperFrames."]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, "It's open in HyperFrames.", BUTTONS, "It's open in HyperFrames.", BUTTONS]);
   });
   it("makes nothing without the words of the recording, and says why", async (c) => {
     const e = episode(c, { words: false });
@@ -625,7 +673,7 @@ describe("app: opening an episode in HyperFrames", () => {
     /** The handover did not happen: the id did not reach the command line, the record says so, and the words say why. */
     function stays(e, why) {
       assert.equal(reached(e), false);
-      assert.deepEqual(e.said, [NEW_CHAT, why]);
+      assert.deepEqual(e.said, [NEW_CHAT, why, BUTTONS]);
       assert.equal(e.saved[0].app.projects[0].handover, false);
       plain(e.said);
     }
@@ -634,7 +682,7 @@ describe("app: opening an episode in HyperFrames", () => {
       herChat(e);
       assert.equal(await ask(e, chatEnv()), 0);
       assert.equal(reached(e), true);
-      assert.deepEqual(e.said, [PICKS_UP]);
+      assert.deepEqual(e.said, [PICKS_UP, BUTTONS]);
       assert.equal(e.saved[0].app.projects[0].handover, true);
     });
     it("does not hand over a chat that was marked with a session's words (markChat), and says that is why", async (c) => {
@@ -739,7 +787,7 @@ describe("app: opening an episode in HyperFrames", () => {
           herChat(e);
           assert.equal(await ask(e, chatEnv(), { ...e.record, ...over }), 0, what);
           assert.equal(reached(e), true, what);
-          assert.deepEqual(e.said, [PICKS_UP], what);
+          assert.deepEqual(e.said, [PICKS_UP, BUTTONS], what);
           assert.equal(e.saved[0].app.projects[0].handover, true, what);
         }
       });

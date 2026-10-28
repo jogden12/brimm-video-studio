@@ -19,7 +19,8 @@
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
-//   - what the command line printed is said in her words, and the record gets the project and the time it was opened (7.1). A record
+//   - what the command line printed is said in her words, and, whenever the app opened, a last line names the app's buttons that
+//     Studio cannot control (BUTTONS; 3.3 and 5.9). The record gets the project and the time it was opened (7.1). A record
 //     that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
@@ -63,6 +64,10 @@ const STAYS = {
   "no chat": "This chat could not be found, so it stays here."
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
+/** The last line, whenever the app opened (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
+    is allowed with them: Share for invited people only, exports on This Mac and never in the cloud, and no HeyGen avatars or voices
+    without Jason's yes. It holds no path, no flag and no name of a command. */
+const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
 
 /** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind.
     edit.js `kind` asks it too, of a record that changes kind. */
@@ -309,6 +314,9 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
+    What it says when the app opened is the command line's own words in hers, one line more about her chat when a handover was
+    wanted and not made, and last the line about the buttons Studio cannot control (BUTTONS); when the app did not open it says
+    the reason alone.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
@@ -355,6 +363,9 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
   ctx.say(read.words);
   if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
+  // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
+  // is open whether or not the record can be written below, so the reminder does not wait for it.
+  if (read.opened) ctx.say(BUTTONS);
 
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {
