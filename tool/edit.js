@@ -35,7 +35,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, layoutOf, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
 import { effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -303,7 +303,7 @@ function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
-  if (inForce && (lightImport(ctx.settings) || layoutOf(inForce) === 3) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
+  if (inForce && (lightImport(ctx.settings) || ofTheSwitch(inForce)) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const on = teachingsOn(ctx.settings, ctx.now());
   const lapsed = teachingsLapsed(ctx.settings, ctx.now());
   for (const record of records.filter(recordShaped)) {
@@ -572,9 +572,9 @@ export function findEpisode(ctx, said) {
   if (fits.length === 1) {
     const e = fits[0];
     hideNames(ctx, e);
-    // A record of the switch's layout (3) may be a light import's, whose folder and file are named for a client: an error nobody
-    // foresaw names none of it (editMain).
-    if (ctx.hidden && e.records.some((r) => recordShaped(r) && layoutOf(r) === 3)) ctx.hidden.switched = true;
+    // A record of the switch's layout (3) or a later one may be a light import's, whose folder and file are named for a client:
+    // an error nobody foresaw names none of it (editMain).
+    if (ctx.hidden && e.records.some((r) => recordShaped(r) && ofTheSwitch(r))) ctx.hidden.switched = true;
     return gateOf(ctx, e, known(e), said, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };

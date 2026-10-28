@@ -6,15 +6,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, writeEpisode, recordFile, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
 import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
 const REEL = { n: 2, status: "picked", from: 1, to: 9, title: "t", why: "", files: [], pushed: [] };
 
 describe("the record's layout", () => {
-  it("is 3 at most here, and 2 only once a record holds a layer of phase 4", () => {
-    assert.equal(RECORD_VERSION, 3);
+  it("is 4 at most here, and 2 only once a record holds a layer of phase 4", () => {
+    assert.equal(RECORD_VERSION, 4);
     assert.equal(layoutOf(BASE), 1);
     assert.equal(layoutOf({ ...BASE, reels: [{ ...REEL, captions: true }] }), 1);
     for (const more of [
@@ -49,9 +49,50 @@ describe("the record's layout", () => {
     assert.equal(episodeFault({ ...BASE, brand: { logo: "/Users/x/logo.png" } }), "its logo cannot be read");
     assert.equal(episodeFault({ ...BASE, main: { ...BASE.main, graphics: [{ id: "g1", picture: "media/..", at: 3, for: 2, place: "corner" }] } }), "its main video cannot be read");
     assert.equal(episodeFault({ ...BASE, brand: { logo: "media/." } }), "its logo cannot be read");
-    assert.equal(episodeFault({ ...BASE, version: 4 }), "it is version 4, and this brimm-video reads versions 1 to 3");
+    assert.equal(episodeFault({ ...BASE, version: 5 }), "it is version 5, and this brimm-video reads versions 1 to 4");
     assert.equal(faultFor(2)({ ...BASE, version: 3 }), "it is version 3, and this brimm-video reads versions 1 to 2");
     assert.equal(faultFor(2)({ ...BASE, version: 2 }), "");
+  });
+});
+
+describe("layout 4: the HyperFrames projects of an episode (architecture 7.1)", () => {
+  const RAW = { ...BASE, kind: "raw", version: 3 };
+  const PROJECT = {
+    key: "main", name: "Pricing talk main 3fa9c1", madeAt: "2026-10-27T15:42:00-04:00", on: "Sallie's laptop",
+    from: { file: "raw.mp4", bytes: 3300000000, modified: "2026-10-27T09:12:00-04:00" },
+    workingCopy: { bytes: 2100000000, seconds: 2412.6, fps: 30 },
+    opened: ["2026-10-27T15:43:10-04:00"], handover: false, fromSuggestion: null, state: "opened"
+  };
+  const APP = { toolchain: "0.8.208", projects: [PROJECT] };
+  it("is written only once the record holds `app`", () => {
+    assert.equal(layoutOf(RAW), 3);
+    assert.equal(layoutOf({ ...RAW, app: APP }), 4);
+    assert.equal(layoutOf({ ...BASE, app: APP }), 4);
+  });
+  it("reads a whole `app`, with a Reel's project from a suggestion and the spec's frame rate as written", () => {
+    const reel = { ...PROJECT, key: "reel 2", name: "Pricing talk reel 2 3fa9c1", fromSuggestion: 2, state: "made", opened: [] };
+    assert.equal(episodeFault({ ...RAW, version: 4, app: APP }), "");
+    assert.equal(episodeFault({ ...RAW, version: 4, app: { ...APP, projects: [PROJECT, reel, { ...reel, key: "clip 3", workingCopy: { ...PROJECT.workingCopy, fps: "30/1" } }] } }), "");
+  });
+  it("refuses an `app` it cannot read, project by project", () => {
+    for (const bad of [
+      { key: "reel 0" }, { key: "Main" }, { name: "" }, { madeAt: "yesterday" }, { on: "" },
+      { from: { ...PROJECT.from, file: "../raw.mp4" } }, { from: { ...PROJECT.from, bytes: -1 } }, { workingCopy: { ...PROJECT.workingCopy, seconds: "40" } },
+      { workingCopy: { ...PROJECT.workingCopy, fps: 0 } }, { opened: "2026-10-27T15:43:10-04:00" }, { handover: "no" }, { fromSuggestion: 0 }, { state: "lost" }
+    ]) {
+      assert.equal(episodeFault({ ...RAW, version: 4, app: { ...APP, projects: [{ ...PROJECT, ...bad }] } }), "its HyperFrames projects cannot be read", JSON.stringify(bad));
+    }
+    assert.equal(episodeFault({ ...RAW, version: 4, app: { projects: [PROJECT] } }), "its HyperFrames projects cannot be read");
+    assert.equal(episodeFault({ ...RAW, version: 4, app: { ...APP, projects: {} } }), "its HyperFrames projects cannot be read");
+  });
+  it("is of the switch, as layout 3 is: what is said of a switched record holds for it too", () => {
+    assert.equal(ofTheSwitch(BASE), false);
+    assert.equal(ofTheSwitch({ ...BASE, spellings: [["Sally", "Sallie"]] }), false);
+    assert.equal(ofTheSwitch(RAW), true);
+    assert.equal(ofTheSwitch({ ...RAW, app: APP }), true);
+  });
+  it("is refused by a Mac that knows layout 3, and changes nothing there", () => {
+    assert.equal(faultFor(3)({ ...RAW, version: 4, app: APP }), "it is version 4, and this brimm-video reads versions 1 to 3");
   });
 });
 

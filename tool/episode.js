@@ -25,10 +25,12 @@ export const RECORD_DIR = "record";
     Layout 3 (the switch) adds the video that is not yet answered, which has no kind; the kinds finished, raw and session;
     `answer`, `label`, `fingerprint`, `versionOf`, `session` and `reading`; and a version of a timeline that was rendered, not
     handed to Final Cut, which may be version 0.
-    A record is written at layout 2 or 3 only once it holds one of them (layoutOf), so an episode that none of them has
+    Layout 4 (Studio) adds `app`: the HyperFrames projects made of the episode, with the toolchain's version (architecture
+    2026-10-27, 7.1). It holds numbers, names, states and times, never a session's words.
+    A record is written at layout 2, 3 or 4 only once it holds one of them (layoutOf), so an episode that none of them has
     touched is still read by a Mac that knows layout 1 alone, and one that holds them is refused there, never changed by code
     that would drop them. */
-export const RECORD_VERSION = 3;
+export const RECORD_VERSION = 4;
 /** The name of a record file: its number, with four digits. */
 const RECORD_NAME = /^(\d{4})\.json$/;
 /** The record file of one rev, in an episode's folder. */
@@ -146,6 +148,21 @@ const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isT
 /** A field of layout 3 that may be missing or null, and is checked when it is there. */
 const optional = (v, ok) => v === undefined || v === null || ok(v);
 
+/** The states of a HyperFrames project (layout 4, architecture 7.1). */
+const APP_STATES = ["made", "opened", "exported", "finished", "kept for an earlier kind"];
+/** A working copy's frame rate: a number, as workcopy.js's facts give it, or a fraction as ffprobe writes one, "30/1". */
+const isRate = (v) => (isNumber(v) && v > 0) || (typeof v === "string" && /^[1-9]\d*\/[1-9]\d*$/.test(v));
+/** One HyperFrames project of an episode (layout 4): its key ("main", "reel N" or "clip N"), its name, when and on which Mac it
+    was made, what its working copy was made from (the raw file's name, size and time) and what that copy is, when it was opened,
+    whether her chat was handed over, the Reel suggestion it came from, and its state. */
+const isAppProject = (p) => isObject(p) && /^(?:main|reel [1-9]\d*|clip [1-9]\d*)$/.test(p.key) && isText(p.name) && isTime(p.madeAt) && isText(p.on)
+  && isObject(p.from) && isText(p.from.file) && !/[/\\]/.test(p.from.file) && isCount(p.from.bytes) && isTime(p.from.modified)
+  && isObject(p.workingCopy) && isCount(p.workingCopy.bytes) && isNumber(p.workingCopy.seconds) && p.workingCopy.seconds > 0 && isRate(p.workingCopy.fps)
+  && Array.isArray(p.opened) && p.opened.every(isTime) && typeof p.handover === "boolean"
+  && (p.fromSuggestion === null || (Number.isInteger(p.fromSuggestion) && p.fromSuggestion >= 1)) && APP_STATES.includes(p.state);
+/** The HyperFrames projects of an episode (layout 4): the pinned toolchain's version, and each project. */
+const isApp = (x) => isObject(x) && isText(x.toolchain) && Array.isArray(x.projects) && x.projects.every(isAppProject);
+
 /** The kind of a record as a person means it: "raw", "finished", "session" or "short video", or null while the video waits for
     its answer. An "episode" is a raw recording imported before the switch. */
 export function kindOf(r) {
@@ -187,11 +204,16 @@ function filesName(r) {
     one that was rendered); otherwise 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
     preset, a Reel's captions turned off, or the logo's picture); and 1 while it holds none. */
 export function layoutOf(r) {
-  const layered = (x) => Boolean(x) && (["texts", "graphics", "cuts"].some((k) => Array.isArray(x[k]) && x[k].length > 0) || x.logo === true || Boolean(x.preset) || x.captions === false);
+  if (r.app !== undefined && r.app !== null) return 4;
+  const layered =(x) => Boolean(x) && (["texts", "graphics", "cuts"].some((k) => Array.isArray(x[k]) && x[k].length > 0) || x.logo === true || Boolean(x.preset) || x.captions === false);
   const withHow = (x) => Boolean(x) && Array.isArray(x.pushed) && x.pushed.some((p) => isObject(p) && p.how !== undefined);
   if (!["episode", "short video"].includes(r.kind) || Boolean(r.answer) || Boolean(r.session) || Boolean(r.reading) || Boolean(r.versionOf) || withHow(r.main) || (r.reels || []).some(withHow)) return 3;
   return (r.spellings || []).length > 0 || layered(r.main) || (r.reels || []).some(layered) || Boolean(r.brand && r.brand.logo) ? 2 : 1;
 }
+
+/** Whether a record is of the switch's layout (3) or a later one (4, which adds the app's projects): what is said of a switched
+    record, as a light import's that may be named for a client, holds for every layout from the switch on. */
+export const ofTheSwitch = (r) => layoutOf(r) >= 3;
 
 /** Whether she has answered the card about a video (layout 3): its `answer` says "answered". A video from before the switch has no
     answer. This is what the switch's reading of times and its list of Reel suggestions turn on, and not layoutOf, which turns
@@ -288,7 +310,8 @@ export const faultFor = (known) => (r) => {
     [r.fingerprint === undefined || typeof r.fingerprint === "string", "its fingerprint cannot be read"],
     [optional(r.versionOf, isText), "which episode it is a version of cannot be read"],
     [optional(r.session, isSession), "its session mark cannot be read"],
-    [optional(r.reading, isReading), "its reading by Claude cannot be read"]
+    [optional(r.reading, isReading), "its reading by Claude cannot be read"],
+    [optional(r.app, isApp), "its HyperFrames projects cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";

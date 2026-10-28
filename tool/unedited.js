@@ -62,7 +62,7 @@ import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
-import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, layoutOf } from "./episode.js";
+import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, ofTheSwitch } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
@@ -1845,7 +1845,7 @@ export async function videosFromPlan(file, deps) {
   if (existsSync(join(folder, RECORD_DIR))) {
     const { record, newer } = readEpisode(folder, { pastCopies: true });
     if (newer) return stop(NEWER_STOP);
-    if (record && layoutOf(record) === 3) {
+    if (record && ofTheSwitch(record)) {
       log(`${name}: ${LIGHT_REFUSAL} Nothing was made.`);
       return { ok: false, name, made: [], stopped: true, message: LIGHT_REFUSAL };
     }

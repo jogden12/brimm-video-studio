@@ -572,6 +572,17 @@ describe("the gate, a record Dropbox is still bringing over", () => {
       }
     }
   });
+  it("refuses them on a record of layout 4 too, which holds the app's projects", async () => {
+    const record = { ...FINISHED_RECORD, version: 4, app: { toolchain: "0.8.208", projects: [] } };
+    for (const name of ["open", "show"]) {
+      const t = setup();
+      const found = episodeFor(t, { record });
+      PENDING_FILE(found);
+      const r = await on(t.ctx.deps, name, ...ASKED[name]);
+      assert.deepEqual([r.code, r.said, t.started], [1, [PENDING], []], name);
+      t.done();
+    }
+  });
   it("refuses a finished video that is being corrected to a session while the record that says so is not whole, as it does one that this code rejects", async () => {
     for (const next of ['{"version":3,"id"', JSON.stringify({ version: 3, rev: 2, id: "bad id", kind: "session" }), ""]) {
       const t = setup();
