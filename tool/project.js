@@ -147,22 +147,27 @@ ${faces.join("\n")}
 export const transcriptJson = (words, spellings = []) =>
   (Array.isArray(words) ? words : []).map((word, i) => ({ text: spelled(word.w, spellings ?? []), start: word.start, end: word.end, id: `w${i}` }));
 
-const timeOf = (word) => `${word.start}/${word.end}`;
-
 /** brimm/cut-suggestions.json (5.8): the phrases the cut plan cuts, as the rules decided and Claude changed them, each by the ids
-    of its first and last words in transcript.json and those words' times: {n, from, to, start, end, kind, why, by}. A phrase's
-    words are found in the transcript by their times, which come from the same words; a cut with no words (a silence) is left
-    out, since it has no ids to give. `by` is who decided the plan, "rules" unless the plan says otherwise. */
+    of its first and last words in transcript.json and those words' times: {n, from, to, start, end, kind, why, by}. The plan's
+    phrases split the episode's words in order (cuts.js phrasesOf), and a word's id is its place in them, so each phrase's words
+    are found by counting, never by their times, which two words can share. A plan that does not hold the transcript's words, as
+    many of them, is refused: its ids would be wrong. A phrase with no words (a silence) has no ids to give and is left out. `by`
+    is who decided the plan, "rules" unless the plan says otherwise. */
 export function cutSuggestions(plan, transcript) {
-  const byTime = new Map(transcript.map((word) => [timeOf(word), word]));
+  const phrases = Array.isArray(plan?.phrases) ? plan.phrases : [];
+  const count = (phrase) => (Array.isArray(phrase.words) ? phrase.words.length : 0);
+  const held = phrases.reduce((sum, phrase) => sum + count(phrase), 0);
+  if (phrases.length && held !== transcript.length) throw new Error(`cutSuggestions: the cut plan holds ${held} words and the transcript ${transcript.length}: they must be the same words`);
   const suggestions = [];
-  for (const phrase of Array.isArray(plan?.phrases) ? plan.phrases : []) {
-    if (phrase.keep !== false) continue;
-    const said = (Array.isArray(phrase.words) ? phrase.words : []).map((word) => byTime.get(timeOf(word))).filter(Boolean);
-    if (!said.length) continue;
-    const first = said[0];
-    const last = said[said.length - 1];
-    suggestions.push({ n: suggestions.length + 1, from: first.id, to: last.id, start: first.start, end: last.end, kind: phrase.kind, why: phrase.why, by: plan.by || "rules" });
+  let at = 0;
+  for (const phrase of phrases) {
+    const n = count(phrase);
+    if (phrase.keep === false && n > 0) {
+      const first = transcript[at];
+      const last = transcript[at + n - 1];
+      suggestions.push({ n: suggestions.length + 1, from: first.id, to: last.id, start: first.start, end: last.end, kind: phrase.kind, why: phrase.why, by: plan.by || "rules" });
+    }
+    at += n;
   }
   return { version: 1, clock: "recording", suggestions };
 }
@@ -413,16 +418,18 @@ export function assertSafe(files) {
 const moves = (value) => value !== null && typeof value === "object" && "move" in value;
 
 /** Write a project's file set (projectFiles) to `dir`, whole or not at all (5.7). Nothing is written when a path is unsafe
-    (assertSafe), and a folder that is there already is refused and left as it is. The project is made in `stage`, the run's own
-    folder on the same disk: every text, copy and link first, then the working copy renamed in, so nothing is copied, and then the
-    whole folder renamed into place. On any failure the working copy is renamed back to where it was and the half-made folder is
-    removed; if the working copy cannot be put back, the folder is left and the error says where it is. `fs` is node:fs, which a
-    test replaces to make a step fail. Gives `dir`. */
-export function writeProject(dir, files, { stage, fs = nodeFs } = {}) {
+    (assertSafe), and a folder that is there already is refused and left as it is. The project is made beside `dir`, in a folder
+    of its own named "<project name> <8 characters>.part": every text, copy and link first, then the working copy renamed in, so
+    nothing is copied, and then the whole folder renamed into place. It is made there, on the same disk, and never in a run's own
+    folder, which its run removes when it ends, so that a working copy that cannot be put back is never removed with it. On any
+    failure the working copy is renamed back to where it was and the half-made folder is removed; if the working copy cannot be
+    put back, the half-made folder is left beside the project's and the error says where the working copy is. `fs` is node:fs,
+    which a test replaces to make a step fail. Gives `dir`. */
+export function writeProject(dir, files, { fs = nodeFs } = {}) {
   assertSafe(files);
-  if (!isAbsolute(String(dir ?? "")) || !isAbsolute(String(stage ?? ""))) throw new Error("writeProject: the project's folder and the run's folder must be absolute paths");
+  if (!isAbsolute(String(dir ?? ""))) throw new Error("writeProject: the project's folder must be an absolute path");
   if (fs.existsSync(dir)) throw new Error(`A project is already at ${dir}: it is left as it is.`);
-  const building = join(stage, `${basename(dir)} ${randomUUID().slice(0, 8)}.part`);
+  const building = join(dirname(dir), `${basename(dir)} ${randomUUID().slice(0, 8)}.part`);
   const moved = [];
   try {
     fs.mkdirSync(building, { recursive: true });
@@ -442,7 +449,6 @@ export function writeProject(dir, files, { stage, fs = nodeFs } = {}) {
       fs.renameSync(value.move, to);
       moved.push({ from: value.move, to });
     }
-    fs.mkdirSync(dirname(dir), { recursive: true });
     fs.renameSync(building, dir);
     return dir;
   } catch (error) {

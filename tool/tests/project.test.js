@@ -146,6 +146,24 @@ describe("what the app is given to start from (5.8)", () => {
     }
     assert.deepEqual(json(projectFiles(main()), "brimm/cut-suggestions.json").suggestions.map((s) => [s.from, s.to]), [["w0", "w0"]]);
   });
+  it("gives each word of a cut its own id, by its place, even when two words share their times", () => {
+    const words = [{ w: "So", start: 1, end: 1.5 }, { w: "uh,", start: 1.5, end: 1.5 }, { w: "um,", start: 1.5, end: 1.5 }, { w: "pricing.", start: 1.5, end: 2 }];
+    const plan = {
+      by: "claude",
+      phrases: [
+        { id: "p1", start: 0.9, end: 1.5, text: "So", words: words.slice(0, 1), keep: true, kind: "keep", why: "" },
+        { id: "p2", start: 1.5, end: 1.5, text: "uh, um,", words: words.slice(1, 3), keep: false, kind: "false start", why: "said before the words" },
+        { id: "p3", start: 1.5, end: 2.1, text: "pricing.", words: words.slice(3), keep: true, kind: "keep", why: "" }
+      ]
+    };
+    assert.deepEqual(cutSuggestions(plan, transcriptJson(words, [])).suggestions.map((s) => [s.from, s.to, s.by]), [["w1", "w2", "claude"]]);
+  });
+  it("reads a cut plan back from its file the same", () => {
+    assert.deepEqual(cutSuggestions(JSON.parse(JSON.stringify(PLAN)), transcript), cutSuggestions(PLAN, transcript));
+  });
+  it("refuses a cut plan whose words are not the transcript's", () => {
+    assert.throws(() => cutSuggestions(PLAN, transcriptJson(WORDS.slice(1), [])), /words/);
+  });
   it("brimm/reel-suggestions.json has stretches, ids, title, first and last words, and why", () => {
     assert.deepEqual(reelSuggestions(REELS, transcript), {
       version: 1, clock: "recording",
@@ -241,7 +259,7 @@ describe("assertSafe (5.2)", () => {
 });
 
 describe("writeProject (5.7)", () => {
-  /** A scratch folder holding a working copy, the run's own folder, and a logo, with the file set of a main project for them. */
+  /** A scratch folder holding a working copy and a logo, with the file set of a main project for them, to go in its episode's folder. */
   function scratch() {
     const root = fs.mkdtempSync(join(tmpdir(), "brimm-project-"));
     const video = join(root, "working copy", "k.mp4");
@@ -250,8 +268,18 @@ describe("writeProject (5.7)", () => {
     fs.mkdirSync(join(root, "logos"));
     fs.writeFileSync(join(root, "logos", "mark.svg"), "<svg/>");
     const files = projectFiles(main({ video, logos: [join(root, "logos", "mark.svg")] }));
-    return { root, video, files, dir: join(root, "Episode", "Pricing talk main 3fa9c1"), stage: join(root, ".runs", "run-1") };
+    const episode = join(root, "Episode");
+    return { root, video, files, episode, dir: join(episode, "Pricing talk main 3fa9c1") };
   }
+  /** node:fs, with the rename of the finished folder into place refused, and, when `stuck`, the working copy's way back too. */
+  const refusing = (dir, video, stuck = false) => ({
+    ...fs,
+    renameSync: (from, to) => {
+      if (to === dir) throw new Error("the rename was refused");
+      if (stuck && to === video) throw new Error("the way back is gone");
+      return fs.renameSync(from, to);
+    }
+  });
   /** node:fs, with writeFileSync and copyFileSync failing after `n` files. */
   const failingAfter = (n) => {
     let made = 0;
@@ -262,46 +290,58 @@ describe("writeProject (5.7)", () => {
     return { ...fs, writeFileSync: counted(fs.writeFileSync), copyFileSync: counted(fs.copyFileSync) };
   };
 
-  it("moves the video in, not copies it, and writes the rest", () => {
-    const { root, video, files, dir, stage } = scratch();
-    writeProject(dir, files, { stage });
+  it("moves the video in, not copies it, and writes the rest, building beside the project's folder", () => {
+    const { root, video, files, episode, dir } = scratch();
+    writeProject(dir, files);
     assert.ok(!fs.existsSync(video));
     assert.equal(fs.readFileSync(join(dir, "media", "recording.mp4"), "utf8"), "the working copy's bytes");
     assert.equal(fs.readFileSync(join(dir, "CLAUDE.md"), "utf8"), files.get("CLAUDE.md"));
     assert.equal(fs.readlinkSync(join(dir, "node_modules", ".bin", "hyperframes")), CLI);
     assert.equal(fs.readFileSync(join(dir, "assets", "logos", "mark.svg"), "utf8"), "<svg/>");
-    assert.deepEqual(fs.readdirSync(stage), []);
+    assert.deepEqual(fs.readdirSync(episode), ["Pricing talk main 3fa9c1"]);
     fs.rmSync(root, { recursive: true, force: true });
   });
   it("writes whole or not at all: a failure after the third file leaves no folder and the video where it was", () => {
-    const { root, video, files, dir, stage } = scratch();
-    assert.throws(() => writeProject(dir, files, { stage, fs: failingAfter(3) }), /the disk is full/);
+    const { root, video, files, episode, dir } = scratch();
+    assert.throws(() => writeProject(dir, files, { fs: failingAfter(3) }), /the disk is full/);
     assert.ok(!fs.existsSync(dir));
     assert.equal(fs.readFileSync(video, "utf8"), "the working copy's bytes");
-    assert.deepEqual(fs.existsSync(stage) ? fs.readdirSync(stage) : [], []);
+    assert.deepEqual(fs.readdirSync(episode), []);
     fs.rmSync(root, { recursive: true, force: true });
   });
   it("puts the video back when the folder cannot be put in place", () => {
-    const { root, video, files, dir, stage } = scratch();
-    const refusing = { ...fs, renameSync: (from, to) => { if (to === dir) throw new Error("the rename was refused"); return fs.renameSync(from, to); } };
-    assert.throws(() => writeProject(dir, files, { stage, fs: refusing }), /the rename was refused/);
+    const { root, video, files, episode, dir } = scratch();
+    assert.throws(() => writeProject(dir, files, { fs: refusing(dir, video) }), /the rename was refused/);
     assert.ok(!fs.existsSync(dir));
     assert.equal(fs.readFileSync(video, "utf8"), "the working copy's bytes");
+    assert.deepEqual(fs.readdirSync(episode), []);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  it("leaves the video beside the project's folder, and says where, when it cannot be put back", () => {
+    const { root, video, files, episode, dir } = scratch();
+    let said = "";
+    assert.throws(() => writeProject(dir, files, { fs: refusing(dir, video, true) }), (error) => {
+      said = error.message;
+      return /could not be put back/.test(said);
+    });
+    const at = said.slice(said.lastIndexOf(" is at ") + " is at ".length);
+    assert.ok(at.startsWith(`${episode}/`), at);
+    assert.equal(fs.readFileSync(at, "utf8"), "the working copy's bytes");
     fs.rmSync(root, { recursive: true, force: true });
   });
   it("refuses a folder that exists, and leaves it alone", () => {
-    const { root, video, files, dir, stage } = scratch();
+    const { root, video, files, dir } = scratch();
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(join(dir, "theirs.txt"), "kept");
-    assert.throws(() => writeProject(dir, files, { stage }), /already/);
+    assert.throws(() => writeProject(dir, files), /already/);
     assert.deepEqual(fs.readdirSync(dir), ["theirs.txt"]);
     assert.ok(fs.existsSync(video));
     fs.rmSync(root, { recursive: true, force: true });
   });
   it("refuses a file set with an unsafe path before it touches anything", () => {
-    const { root, video, files, dir, stage } = scratch();
-    assert.throws(() => writeProject(dir, new Map([...files, ["../escaped.txt", "x"]]), { stage }));
-    assert.ok(!fs.existsSync(dir) && !fs.existsSync(stage) && fs.existsSync(video));
+    const { root, video, files, episode, dir } = scratch();
+    assert.throws(() => writeProject(dir, new Map([...files, ["../escaped.txt", "x"]])));
+    assert.ok(!fs.existsSync(episode) && fs.existsSync(video));
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

@@ -467,7 +467,7 @@ Everything in a project is a file Studio chose to put there. The tests assert th
    - for each request, `npx hyperframes history begin --who Claude --label "<what she asked>"`, and `history end` (`begin` refuses to run without `--who`), so the list of versions reads in her words (if `history` is still there);
    - when she is done: export on This Mac, then say "hand it off" in her Claude chat.
 2. **This project:** the kind, the name, what each file is; times are on the working copy's clock, which is the raw video's clock, so every time in `brimm/` is true here.
-3. **HyperFrames' own guidance,** the text the pinned package ships (`dist/templates/_shared/CLAUDE.md`), kept as a fixture, with these lines taken out: `skills update`, `publish`, `npm run publish`, and the links that send the agent to its documentation host.
+3. **HyperFrames' own guidance,** the text the pinned package ships (`dist/templates/_shared/CLAUDE.md`), kept as a fixture, with these lines taken out: `skills update`, `publish`, `npm run publish`, and the links that send the agent to its documentation host; and, since PR 2, any that names a command the agent may not run (5.5), such as `catch-up`, `upgrade` or `init`, and the registry. A paragraph that says one goes whole; in a list or a block of code, its line goes.
 4. **For a session clip, first of all:** it is a clip of a private client session; nothing goes anywhere; no Share, no cloud render, no Script panel transcription; no web.
 
 ### 5.5 The command line's 43 commands, classified
