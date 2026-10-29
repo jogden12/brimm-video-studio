@@ -248,6 +248,19 @@ describe("8. again: the Reels taken before stay as they were", () => {
     const r = await lines(w, { yes: true });
     assert.deepEqual(r, ["Reel 2: kept as the last finish made it.", `${NAME} has no Reel exported since its hand-off was made, as revision 2, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`]);
   });
+  it("says why, when a Reel's title was changed since it was handed off: the new title goes in once the Reel is exported again (the review's M1)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const retitled = await on(w.t.ctx.deps, "title", FOLDER, "reel", "2", "--words", "A new title");
+    assert.equal(retitled.code, 0, retitled.said.join("\n"));
+    const r = await lines(w, { yes: true });
+    assert.deepEqual(r, ["Reel 2: kept as the last finish made it.", `${NAME} has no Reel exported since its hand-off was made, as revision 2, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels". Reel 2 has a new title since its hand-off was made: it goes in once you export Reel 2 again.`]);
+    assert.equal(handoffIn(found).reels[0].title, "Know your costs", "the title on the exported picture is the hand-off's until the Reel is exported again");
+    // The Reel exported again takes the new title in.
+    exportOf(w, "reel 2", { start: [14, 10, 0], text: "the Reel exported again" });
+    assert.equal(handoffIn((await finished(w)).found).reels[0].title, "A new title");
+  });
 });
 
 describe("9. the Dropbox rule, and the record", () => {
@@ -590,11 +603,18 @@ describe("11. the words", () => {
       exported(again, "reel 2");
       const done = await finished(again);
       all.push(...done.result.failed, done.result.next, ...(await lines(again, { yes: true })));
+      // And one whose Reel was given a new title since.
+      const retitled = await make();
+      exported(retitled, "reel 2");
+      await finished(retitled);
+      rewrite(retitled, (now) => ({ reels: now.reels.map((r) => (r.n === 2 ? { ...r, title: "A new title" } : r)) }));
+      all.push(...(await lines(retitled, { yes: true })));
       // One that is wider than it is tall.
       const wide = await make({ programs: { FFPROBE: probeFor(() => ({ picture: { width: 1920, height: 1080, color_primaries: "bt709", color_transfer: "bt709" } })) } });
       exported(wide, "reel 2");
       all.push(...(await finishNow(wide.t.ctx, await asked(wide))).failed);
-      assert.ok(all.filter(Boolean).length >= 8, all.join("\n"));
+      assert.ok(all.filter(Boolean).length >= 10, all.join("\n"));
+      assert.ok(all.some((line) => line && line.includes("has a new title since its hand-off was made")), "the sentence of a new title is walked");
       assert.deepEqual(problemsIn(all.filter(Boolean), names), []);
       assert.ok(all.some((line) => line && line.includes('Say "hand off the Reels" again')), "it says what to say again in the words of this form");
     });

@@ -34,6 +34,7 @@ describe("14. what pins them: the help, the README and the spec", () => {
       "one that is not in the folder at all is not, and she is told to ask Jason",
       "is not made again without them",
       "the spelling reaches the Reels it holds too",
+      "the new title goes in once the Reel is exported again",
       "a Reel whose word times cannot be read keeps its captions",
       "`--take`, `--final` and `--without`",
       'say "hand off the Reels"'
@@ -45,6 +46,7 @@ describe("14. what pins them: the help, the README and the spec", () => {
     const reels = section("### 8.7 Reels of a finished video", "### 8.8 What must not change");
     assert.ok(reels.includes("it says it is not there, and to ask Jason"), "8.7 says a hand-off that is not there is not brought");
     assert.ok(reels.includes("The spelling reaches the Reels the hand-off holds as well"), "8.7 says a spelling reaches the Reels held");
+    assert.ok(reels.includes("that the new title goes in once the Reel is exported again"), "8.7 says what a changed title waits for");
     assert.ok(reels.includes('Reel 2\'s captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".'), "8.7 gives the words that say a Reel keeps its captions");
     assert.ok(reels.includes("is not made again, since the new one would hold none"), "8.7 says a spelling does not make a hand-off again without its Reels");
     for (const words of ["The hand-off on file is its base, and it never writes the first", "`nextHandoff`", "Numbers.", "`expectRev`", "The late check puts nothing back over a later write.", "A spelling later"]) assert.ok(reels.includes(words), `${words} in 8.7`);

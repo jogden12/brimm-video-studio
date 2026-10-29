@@ -38,7 +38,24 @@ export const lostReelsWords = (name) => `${name}'s hand-off is not there or cann
 /** No Reel project is in the record. */
 export const noReelWords = (name) => `${name} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`;
 /** No Reel is taken from an export: every one is kept as the hand-off has it, or there is none. */
-export const nothingNewWords = (name, revision) => `${name} has no Reel exported since its hand-off was made, as revision ${revision}, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`;
+export const nothingNewWords = (name, revision, retitled = []) => `${name} has no Reel exported since its hand-off was made, as revision ${revision}, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".${retitled.length ? ` ${newTitleWords(retitled)}` : ""}`;
+/** The Reels (`ns`, their numbers) that were given a new title since the hand-off was made: the title in the hand-off is the one on the exported
+    picture, so the new one goes in when the Reel is exported again. Said with the words that there is nothing new, which would not say why. */
+const newTitleWords = (ns) => {
+  const reels = ns.map((n) => `Reel ${n}`);
+  const said = reels.length < 2 ? reels.join("") : `${reels.slice(0, -1).join(", ")} and ${reels[reels.length - 1]}`;
+  return ns.length === 1 ? `${said} has a new title since its hand-off was made: it goes in once you export ${said} again.` : `${said} have new titles since their hand-off was made: they go in once you export each again.`;
+};
+/** The numbers of the Reels that the hand-off holds (`held`, its `reels`) whose title in the record (`recordReels`) is another, trimmed. A Reel
+    with no title in the record has none to change to (the quick part asks for one), and a Reel the hand-off does not hold is none. */
+export function retitledReels(held, recordReels) {
+  const records = Array.isArray(recordReels) ? recordReels : [];
+  return (Array.isArray(held) ? held : []).filter((reel) => {
+    const now = records.find((r) => r && r.n === reel.n);
+    const title = now && typeof now.title === "string" ? now.title.trim() : "";
+    return title !== "" && title !== reel.title;
+  }).map((reel) => reel.n);
+}
 /** What she is told of the Reels (`ns`, their numbers) whose captions keep the spelling they were made with after a spelling is made: it
     cannot be put into them, or taken out, from what is kept of them. The way back is a fresh export. */
 export function keepOldWords(ns) {

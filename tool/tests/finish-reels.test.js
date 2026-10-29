@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, unusableWords } from "../finish-reels.js";
+import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, retitledReels, unusableWords } from "../finish-reels.js";
 import { reelsBase } from "../finish.js";
 
 const NAME = "Pricing: what to charge?";
@@ -95,6 +95,21 @@ describe("the parts of the last finish that a hand-off still holds", () => {
   });
 });
 
+describe("the Reels whose title was changed since the hand-off was made (the review's M1)", () => {
+  const held = [{ n: 1, title: "The opening" }, { n: 2, title: "Know your costs" }, { n: 5, title: "Say it again" }];
+  it("are those the hand-off holds whose title in the record is another, with the number of each", () => {
+    const record = [{ n: 1, title: "The opening" }, { n: 2, title: "Know your costs, again" }, { n: 3, title: "Not handed off" }, { n: 5, title: "Say it better" }];
+    assert.deepEqual(retitledReels(held, record), [2, 5]);
+  });
+  it("are none when the titles are the same, the record has none, or the Reel is not in the record", () => {
+    assert.deepEqual(retitledReels(held, [{ n: 1, title: "The opening" }, { n: 2, title: " Know your costs " }]), [], "a title is compared trimmed, as the quick part reads one");
+    assert.deepEqual(retitledReels(held, [{ n: 1, title: "" }, { n: 2 }, { n: 5, title: "   " }]), [], "a Reel with no title in the record is asked for one, never taken as a change");
+    assert.deepEqual(retitledReels(held, []), []);
+    assert.deepEqual(retitledReels(held, undefined), []);
+    assert.deepEqual(retitledReels(undefined, [{ n: 1, title: "x" }]), []);
+  });
+});
+
 describe("the words she reads", () => {
   it("are these, and hold no path, flag or command", () => {
     const said = [
@@ -106,6 +121,8 @@ describe("the words she reads", () => {
       [lostReelsWords(NAME), `${NAME}'s hand-off is not there or cannot be read, so a new one would leave out the Reels it holds. Nothing was written. Ask Jason.`],
       [noReelWords(NAME), `${NAME} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`],
       [nothingNewWords(NAME, 3), `${NAME} has no Reel exported since its hand-off was made, as revision 3, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`],
+      [nothingNewWords(NAME, 3, [2]), `${NAME} has no Reel exported since its hand-off was made, as revision 3, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels". Reel 2 has a new title since its hand-off was made: it goes in once you export Reel 2 again.`],
+      [nothingNewWords(NAME, 3, [2, 5]), `${NAME} has no Reel exported since its hand-off was made, as revision 3, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels". Reel 2 and Reel 5 have new titles since their hand-off was made: they go in once you export each again.`],
       [keepOldWords([2]), `Reel 2's captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".`],
       [keepOldWords([2, 3]), `Reel 2's and Reel 3's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
       [keepOldWords([1, 2, 5]), `Reel 1's, Reel 2's and Reel 5's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
