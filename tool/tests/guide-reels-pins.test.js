@@ -44,10 +44,11 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
       // The hand-off is read as a regular file alone, on a Mac whose settings say version 2 (review F4 and F5).
       "Its hand-off is read as a regular file alone, so that a pipe where it should be is never waited for and a link there is read as unreadable, though `finish` follows one; this holds on a Mac whose settings say hand-off version 2: on any other, `writesV2For` first reads each hand-off of `final/` and `history/` with a plain read, as it does for every command that asks it.",
-      'A video she has set aside ("that one is all done") stays set aside',
-      "only when the video has a hand-off and a Reel project on this Mac"
+      // A video she set aside is read for nothing of its Reels (review F6 and F9).
+      'A video she has set aside ("that one is all done") stays set aside, and nothing of its Reel projects or Downloads is read for it. For any other, Downloads is read only when the video has a hand-off and a Reel project on this Mac'
     ]) assert.ok(first.includes(words), words);
-    assert.ok(row('| `guide "<video>" done').includes("nothing noted skips these, and a finished video's Reels not yet handed off do not"));
+    // Her word is taken (review F8): the Reels are not among the steps nothing noted skips.
+    assert.ok(row('| `guide "<video>" done').includes("nothing noted skips these. A finished video's Reels not yet handed off are not among them: her word that she is done with the video is taken, and the guide says nothing of them after it"));
     assert.ok(row("| `tool/guide.js`, `tool/guide-note.js`").includes("where a raw video and an iPhone clip are in HyperFrames and a finished video's Reels are exported"));
   });
   it("says in the README's paragraph on the Reels of a video her editor finished that the guide tells her to hand them off", () => {
@@ -86,7 +87,8 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "a hand-off that went to the page under another id, and a Reel number another version of the video gave under the same id (8.7). That command says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until Jason has settled it.",
       "Its finish is running. The panel shows how far it is.",
       "before the BRIMM Ops page's steps and before done",
-      "after her word that the video is finished: that stands"
+      "after her word that the video is finished: that stands",
+      "A video she has said is finished is read for nothing of its Reels."
     ]) assert.ok(four.includes(words), `${words} in 4.5`);
     assert.ok(section(spec, "### 6.1 Commands", "### 6.2 ").includes("`guide` gains states (4.5), a finished video's Reels among them,"), "6.1 names the stage in the guide's row");
     assert.ok(section(spec, "### 6.1 Commands", "### 6.2 ").includes("the guide sends her there too, once a Reel is exported (4.5)"), "6.1 says the guide sends her to the Reels form");
