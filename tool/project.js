@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clockText, heardWords, insideTheirTime, keptWords } from "./clock.js";
+import { clockText, heardWords, insideTheirTime } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
@@ -168,7 +168,10 @@ export const HOUSE_SPELLINGS = Object.freeze([["brim", "BRIMM"], ["Brim", "BRIMM
     (cuts.js wordsOf), so a word after a pause starts in the pause: A0 (2026-10-28) found the app's agent trusting the app's own
     transcript over this one for that. Each word starts halfway into the time it was given (clock.js insideTheirTime) and, where
     the cut plan's `phrases` are given, no earlier than the phrase it ends in, which starts on the pause's end (clock.js
-    heardWords). Only the main video has a cut plan: a Reel's words and a clip's are moved inside their time and no more. */
+    heardWords). The main video's words and a Reel's are placed by the cut plan's phrases, a Reel's by the plan of the recording it is
+    cut from, on the recording's clock, before they are chosen and moved to its own (reelWords): the phrases place the starts and
+    cut nothing. A clip has no cut plan, and its words are moved inside their time and no more, as are the words of anything
+    given no phrases. */
 export const saidWords = (words, phrases = []) => heardWords(insideTheirTime(Array.isArray(words) ? words : []), Array.isArray(phrases) ? phrases : []);
 
 /** A time to the thousandth of a second: a sum such as 1.2 - 1.15 comes to 0.04999999999999982. */
@@ -177,15 +180,23 @@ const thousandth = (seconds) => Math.round(seconds * 1000) / 1000;
 /** Whether `stretch` is a stretch of the recording: { start, end } in seconds, from 0 at the earliest, ending after it starts. */
 const isStretch = (stretch) => stretch !== null && typeof stretch === "object" && Number.isFinite(stretch.start) && Number.isFinite(stretch.end) && stretch.start >= 0 && stretch.end > stretch.start;
 
-/** The words of the recording that a Reel's stretch holds, on the Reel's own clock (architecture 4.3, 5.2): the words that end
-    inside the stretch (clock.js keptWords, as the hand-off places a suggestion's words), each with the stretch's start taken
-    off its times, since the Reel's video is that stretch and its first moment is 0. A word the transcriber started before the
-    stretch, in the pause that came before it, starts at 0. `words` are {w, start, end} in seconds of the recording; none for words
-    that are not a list or a stretch that is not one. */
+/** The words of the recording that a Reel's stretch holds, on the Reel's own clock (architecture 4.3, 5.2): the words whose middle
+    is inside the stretch, each with the stretch's start taken off its times, since the Reel's video is that stretch and its first
+    moment is 0. A word's middle, and not its end as the hand-off takes a suggestion's words (clock.js keptWords), because the
+    stretch ends where a phrase does and a word's end is the transcriber's, which may be a few hundredths past it: where two
+    phrases touch, the word across their edge is the last of the first, and its caption must not be lost. A word that only
+    touches an edge of the stretch, the end of the one before or the start of the one after, is not one of its words. A word the
+    transcriber started before the stretch, in the pause that came before it, starts at 0, and one that ends past the stretch
+    ends at its end. `words` are {w, start, end} in seconds of the recording, already placed as they are said (saidWords): a
+    word's start is moved no further here. None for words that are not a list or a stretch that is not one. */
 export function reelWords(words, stretch) {
   if (!Array.isArray(words) || !isStretch(stretch)) return [];
   const length = thousandth(stretch.end - stretch.start);
-  return keptWords(words, [stretch]).map((word) => ({ ...word, start: Math.max(0, thousandth(word.start - stretch.start)), end: Math.min(length, thousandth(word.end - stretch.start)) }));
+  const inside = (word) => {
+    const middle = (word.start + word.end) / 2;
+    return middle >= stretch.start && middle <= stretch.end;
+  };
+  return words.filter(inside).map((word) => ({ ...word, start: Math.max(0, thousandth(word.start - stretch.start)), end: Math.min(length, thousandth(word.end - stretch.start)) }));
 }
 
 /** brimm/face-track.json (architecture 4.3): where the faces are in a Reel's video, from what the face finder (faces.swift)
@@ -449,8 +460,10 @@ const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
     - for the main video, the cut `plan` and the Reel candidates, `reels`, and `number`, which main project this is (projectName),
       the first when it is not given;
     - for a Reel, its `stretch` of the recording, { start, end } in seconds (a Reel's video is that stretch, cut by workcopy.js, and
-      its words are the recording's words in it, on its own clock: reelWords), and the `faces` the face finder printed of its video,
-      { every, stills }, if any were looked for (faceTrack: a file only when one holds a face). No cut or Reel suggestions;
+      its words are the recording's words in it, on its own clock: reelWords), the cut `plan` of the recording, by whose phrases the
+      words are placed as the main video's are, before they are chosen (it may be none: the words are then only moved inside their
+      time), and the `faces` the face finder printed of its video, { every, stills }, if any were looked for (faceTrack: a file only
+      when one holds a face). No cut or Reel suggestions are written, and the plan cuts nothing;
     - for a session's clip, `clip`, its number. A clip has no spellings, suggestions or logos, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
@@ -465,8 +478,10 @@ export function projectFiles(input) {
   const episode = kind !== "clip";
   const name = episode ? projectName({ name: input.name, part: kind === "main" ? "main" : input.part, number: kind === "main" ? input.number : undefined, id: input.id }) : projectName({ clip: input.clip, id: input.id });
   const what = kind === "main" ? `the main video of the episode “${fileSafe(input.name)}”` : kind === "reel" ? `Reel ${input.part.reel} of the episode “${fileSafe(input.name)}”` : `clip ${input.clip} of a session`;
-  const said = kind === "reel" ? reelWords(input.words, input.stretch) : input.words;
-  const transcript = transcriptJson(saidWords(said, kind === "main" ? input.plan?.phrases : []), episode ? input.spellings : []);
+  // The words are placed as they are said on the recording's clock, by the cut plan's phrases for the main video and a Reel (a
+  // clip has none), and only then does a Reel choose its own and move them to its clock: no second halving.
+  const placed = saidWords(input.words, kind === "clip" ? [] : input.plan?.phrases);
+  const transcript = transcriptJson(kind === "reel" ? reelWords(placed, input.stretch) : placed, episode ? input.spellings : []);
   const track = kind === "reel" ? faceTrack(input.faces) : null;
 
   const files = new Map();

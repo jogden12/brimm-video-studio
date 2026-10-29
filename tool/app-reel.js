@@ -21,8 +21,9 @@
 //     not wait for it (a command has two minutes in the Code tab). It is cut from the recording and not from the working copy
 //     because the working copy is moved into the main project, which the app may hold open, and a finished video has none. Beside
 //     it the run keeps the faces it found in it, if it found any;
-//   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words on
-//     the Reel's own clock, no cut or Reel suggestions, and the face positions only when the finder found some;
+//   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words,
+//     placed by the cut plan's phrases as the main project's are and then chosen and put on the Reel's own clock, no cut or Reel
+//     suggestions (the plan cuts nothing of a Reel), and the face positions only when the finder found some;
 //   - the app is opened on it (app.js openProjectInApp), and one record write holds the project (`key` "reel <n>", `fromSuggestion` <n>)
 //     and the Reel marked picked, which is what `reel pick` did and what parts.js and the hand-off read.
 // A project that was made is kept, whether or not the app opened.
@@ -38,7 +39,7 @@ import { cliPath } from "./hyperframes.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE, readReels, reelEntries } from "./reels.js";
 import { episodeWork } from "./settings.js";
-import { changedSince, copyIn, factsIn, fromOf, guidanceOf, logosIn, noWords, notWhole, openProjectInApp, plainName, recordingChanged, wordsIn } from "./app.js";
+import { changedSince, copyIn, factsIn, fromOf, guidanceOf, jsonIn, logosIn, noWords, notWhole, openProjectInApp, plainName, recordingChanged, wordsIn } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy } from "./workcopy.js";
 
 /** The kinds of video a Reel's video is made for (architecture 4.3): a raw video, and a video finished by her editor. A short video
@@ -178,9 +179,11 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
   // What was cut is what the copy's facts say (its end held to the video's); the suggestion's stretch is what it was asked to cut.
   const stretch = facts.stretch ?? asked;
+  // The cut plan places the words' starts, as it does the main video's (project.js saidWords); it cuts nothing of the Reel, and with
+  // none the words are only moved inside their time.
   writeProject(dir, projectFiles({
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
-    faces: factsIn(copy.faces), video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
+    plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), faces: factsIn(copy.faces), video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   const project = madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } });
   return { project, stretch, candidate: listed.candidate };

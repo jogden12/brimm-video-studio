@@ -51,7 +51,7 @@ function standIn(c, { open = "opened" } = {}) {
     words and the list of Reel suggestions a reading wrote (`reels`: the candidates, or null for none); this Mac's home with the
     stand-in's answers; and a context that collects what is said, what is started and each record written. `copy` makes the Reel's
     video first, as the job would, and `faces` the faces found in it. */
-function episode(c, { open = "opened", copy = true, faces = false, words = true, reels = CANDIDATES, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
+function episode(c, { open = "opened", copy = true, faces = false, words = true, plan = null, reels = CANDIDATES, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
   const s = standIn(c, { open });
   const folder = join(s.home, "Dropbox", "BRIMM Video", "Episodes", FOLDER);
   const raw = join(folder, "Talk.mov");
@@ -61,6 +61,8 @@ function episode(c, { open = "opened", copy = true, faces = false, words = true,
   };
   write(raw, "the raw video's bytes");
   if (words) write(join(folder, "Talk.words.json"), JSON.stringify(WORDS));
+  // The cut plan the import wrote beside the words, when the test gives one: its phrases place the words' starts, and cut nothing.
+  if (plan !== null) write(join(folder, "Talk.cut-plan.json"), typeof plan === "string" ? plan : JSON.stringify({ by: "rules", phrases: plan }));
   if (reels) write(join(folder, "reels.json"), JSON.stringify(reelsFile({ video: "Talk.mov", by: "read", made: "2026-10-28T09:00:00-04:00", candidates: reels })));
   const stat = statSync(raw);
   const paths = reelCopyPaths(s.home, FOLDER, 2, reelCopyKey({ bytes: stat.size, mtimeMs: stat.mtimeMs }, STRETCH));
@@ -126,6 +128,23 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
     assert.equal(unreadable(next), "", "the next command can read the record");
     assert.deepEqual(e.started, []);
     plain(e.said);
+  });
+  it("places the Reel's words by the cut plan's phrases, as the main project's are placed: a word after a pause starts where the phrase does", async (c) => {
+    // "says" is given 1.2 to 1.6, so it starts halfway in, at 1.4; the phrase it ends in starts on the pause's end, at 1.5. The Reel
+    // starts at 1.15 in the recording, so "says" is at 0.35 of the Reel's clock, and not at 0.25. The plan cuts nothing: every word
+    // the stretch holds is there.
+    const e = episode(c, { plan: [{ id: "p1", start: 0.4, end: 1.15 }, { id: "p2", start: 1.5, end: 2.6 }] });
+    assert.equal(await run(e), 0);
+    const transcript = JSON.parse(readFileSync(join(e.project, "transcript.json"), "utf8"));
+    assert.deepEqual(transcript.map((word) => [word.text, word.start, word.end]), [["says", 0.35, 0.45], ["Sallie.", 0.95, 1.35]]);
+  });
+  it("moves the Reel's words only inside their time when the episode has no cut plan, and when its cut plan cannot be used", async (c) => {
+    for (const plan of [null, JSON.stringify({ by: "rules" }), JSON.stringify(null), JSON.stringify({ phrases: "none" })]) {
+      const e = episode(c, { plan });
+      assert.equal(await run(e), 0, String(plan));
+      const transcript = JSON.parse(readFileSync(join(e.project, "transcript.json"), "utf8"));
+      assert.deepEqual(transcript.map((word) => [word.text, word.start]), [["says", 0.25], ["Sallie.", 0.95]], String(plan));
+    }
   });
   it("offers the face positions in the project only when the finder found some", async (c) => {
     const found = episode(c, { faces: true });

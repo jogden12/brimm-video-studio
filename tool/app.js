@@ -100,8 +100,9 @@ export function projectOnAnotherMac(ctx, { found, record }, key = "main") {
   return plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name)) ? null : earlier.on;
 }
 
-/** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. */
-function jsonIn(path) {
+/** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. (app-reel.js reads
+    the cut plan with it, as the main video's project does.) */
+export function jsonIn(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {

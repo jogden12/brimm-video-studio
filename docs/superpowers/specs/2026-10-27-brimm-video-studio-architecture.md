@@ -445,7 +445,7 @@ The project's folder name, its `meta.json` name and its title in the app are one
 |---|---|---|
 | `index.html` | Studio's template | One `<video>` for the working copy; `data-width`, `data-height`, `data-duration` from the working copy's facts; GSAP from `vendor/` |
 | `media/recording.mp4` | The raw video | 5.7. For a Reel: its stretch of the recording, cut by `workcopy --reel` (5.7) |
-| `transcript.json` | The episode's words, with its spellings | F5. For a session clip: the clip's own words, names muted. For a Reel: the recording's words that end inside its stretch, on the stretch's own clock from 0 (`reelWords`), ids from `w0` |
+| `transcript.json` | The episode's words, with its spellings | F5. For a session clip: the clip's own words, names muted. For a Reel: the recording's words, placed by the cut plan's phrases as the main video's are (the plan cuts nothing), and of those the ones whose middle is inside its stretch (a word's end may be a few hundredths past the stretch's, where two phrases touch), on the stretch's own clock from 0 (`reelWords`), ids from `w0` |
 | `meta.json`, `hyperframes.json`, `package.json` | Studio's template | `package.json` has the scripts `dev`, `check` and `render` (each runs `hyperframes <command>`), and no `publish` |
 | `node_modules/.bin/hyperframes` | A link to the toolchain's `bin/hyperframes.mjs` | 5.3. Makes `npx hyperframes …` and `npm run …` run the pinned version with no network |
 | `CLAUDE.md`, `AGENTS.md` | 5.4 | The same text in both |

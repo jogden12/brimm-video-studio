@@ -191,13 +191,20 @@ describe("the words as they are said (F5)", () => {
     const [cut] = json(files, "brimm/cut-suggestions.json").suggestions;
     assert.deepEqual([cut.from, cut.to, cut.start, cut.end], ["w2", "w3", 2, 2.9]);
   });
-  it("are moved inside their time only in a Reel's project and a clip's, whose words no cut plan of the main video speaks for", () => {
-    // (The Reel's stretch here is the first three seconds of the recording, so its clock is the recording's own.)
-    assert.deepEqual(starts(projectFiles(reel({ words: given, plan, stretch: { start: 0, end: 3 } }))), [0.2, 0.65, 1.65, 2.65]);
+  it("are placed by the cut plan's phrases in a Reel's project too, as the main project's are, and moved inside their time only in a clip's, which has no plan", () => {
+    // (The Reel's stretch here is the first three seconds of the recording, so its clock is the recording's own.) "Next" is said at 2 s.
+    assert.deepEqual(starts(projectFiles(main({ words: given, plan, spellings: [] }))), [0.2, 0.65, 2, 2.65]);
+    assert.deepEqual(starts(projectFiles(reel({ words: given, plan, stretch: { start: 0, end: 3 } }))), [0.2, 0.65, 2, 2.65]);
     assert.deepEqual(starts(projectFiles(clip({ words: given }))), [0.2, 0.65, 1.65, 2.65]);
   });
-  it("start a word after a long pause on the pause's end: \"Instagram\" of the A0 recording, which the app's transcript has at 121.82 s", () => {
-    // What whisper.cpp wrote (-ojf, with -dtw) and ffmpeg printed (silencedetect) for 3 seconds of the A0 test recording.
+  it("are moved inside their time and no more in a Reel's project given no plan, or a plan with no phrases to place them by", () => {
+    for (const over of [{ plan: undefined }, { plan: null }, { plan: {} }, { plan: { by: "rules", phrases: "none" } }]) {
+      assert.deepEqual(starts(projectFiles(reel({ words: given, stretch: { start: 0, end: 3 }, ...over }))), [0.2, 0.65, 1.65, 2.65], JSON.stringify(over));
+    }
+  });
+  /** What whisper.cpp wrote (-ojf, with -dtw) and ffmpeg printed (silencedetect) for 3 seconds of the A0 test recording: the words as
+      an episode keeps them, and the cut plan's phrases, which start on a pause's end. */
+  const a0 = () => {
     const told = { transcription: [{ offsets: { from: 119330, to: 122700 }, tokens: [
       { text: " newsletter", offsets: { from: 119330, to: 120060 }, t_dtw: 12038 },
       { text: " section", offsets: { from: 120060, to: 120680 }, t_dtw: 12090 },
@@ -207,22 +214,52 @@ describe("the words as they are said (F5)", () => {
     ] }] };
     const printed = "[silencedetect @ 0x6000] silence_start: 121.07\n[silencedetect @ 0x6000] silence_end: 121.8 | silence_duration: 0.73\n";
     const words = wordsOf(told);
+    return { words, plan: { by: "rules", phrases: phrasesOf(words, pausesOf(printed)) } };
+  };
+  it("start a word after a long pause on the pause's end: \"Instagram\" of the A0 recording, which the app's transcript has at 121.82 s", () => {
+    const { words, plan } = a0();
     assert.equal(words[2].start, 120.9, "wordsOf starts \"Instagram\" where \"section,\" ended: in the pause");
-    const made = json(projectFiles(main({ words, plan: { by: "rules", phrases: phrasesOf(words, pausesOf(printed)) }, spellings: [] })), "transcript.json");
+    const made = json(projectFiles(main({ words, plan, spellings: [] })), "transcript.json");
     // The app's transcript has "section," at 120.58 and "captions" at 122.34.
     assert.deepEqual(made.map(({ text, start, end }) => [text, start, end]), [["newsletter", 119.855, 120.38], ["section,", 120.64, 120.9], ["Instagram", 121.8, 122.08], ["captions", 122.34, 122.6]]);
+  });
+  it("start it there in a Reel's project too: the same moment of the recording as in the main project's, less where the Reel starts", () => {
+    const { words, plan } = a0();
+    const inMain = json(projectFiles(main({ words, plan, spellings: [] })), "transcript.json");
+    const round = (seconds) => Math.round(seconds * 1000) / 1000;
+    // A Reel that starts before the pause, and one that starts on its end, where "Instagram" begins.
+    for (const start of [119.5, 121.8]) {
+      const inReel = json(projectFiles(reel({ words, plan, stretch: { start, end: 122.7 }, spellings: [] })), "transcript.json");
+      const wanted = inMain.filter((word) => (word.start + word.end) / 2 >= start).map(({ text, start: at, end }) => [text, Math.max(0, round(at - start)), round(end - start)]);
+      assert.deepEqual(inReel.map(({ text, start: at, end }) => [text, at, end]), wanted, `a Reel from ${start}`);
+      assert.equal(inReel.find((word) => word.text === "Instagram").start, Math.max(0, round(121.8 - start)));
+    }
   });
 });
 
 describe("a Reel's words and clock (architecture 4.3 and 5.2; plan PR 5)", () => {
-  it("are the words that end inside its stretch, on the stretch's own clock: its start taken off the times", () => {
-    // "Pricing," ends at 1.1, before the stretch starts at 1.15, and "Later" ends after it ends at 4.05.
+  it("are the words whose middle is inside its stretch, on the stretch's own clock: its start taken off the times", () => {
+    // "Pricing," is said before the stretch starts at 1.15, and "Later" after it ends at 4.05.
     const said = reelWords([...WORDS, { w: "Later", start: 4.05, end: 4.4 }], STRETCH);
     assert.deepEqual(said.map(({ w, start, end }) => [w, start, end]), [["says", 0.05, 0.45], ["Hormozy,", 0.55, 1.35], ["is", 1.55, 1.75], ["a", 1.85, 1.95], ["skill.", 2.05, 2.85]]);
   });
   it("start a word that began before the stretch at its first moment, and give no word for words that are not given", () => {
-    assert.deepEqual(reelWords([{ w: "Okay,", start: 1, end: 1.3 }], STRETCH), [{ w: "Okay,", start: 0, end: 0.15 }]);
+    assert.deepEqual(reelWords([{ w: "Okay,", start: 1, end: 1.5 }], STRETCH), [{ w: "Okay,", start: 0, end: 0.35 }]);
     for (const words of [null, undefined, {}, "words"]) assert.deepEqual(reelWords(words, STRETCH), []);
+  });
+  it("keep a word whose end is a little past the stretch's end when its middle is inside it: where two phrases touch, the word across their edge is the last of the first", () => {
+    // The last word of a stretch that ends at 55.466 ends at 55.481 (the transcriber's end and the phrase's end differ by 15 ms).
+    const said = reelWords([{ w: "so", start: 54.4, end: 54.7 }, { w: "far.", start: 54.9, end: 55.481 }], { start: 54, end: 55.466 });
+    assert.deepEqual(said.map(({ w, start, end }) => [w, start, end]), [["so", 0.4, 0.7], ["far.", 0.9, 1.466]]);
+  });
+  it("leave out a word that only touches an edge of the stretch: the end of the one before it, or the start of the one after", () => {
+    const said = reelWords([{ w: "Before.", start: 0.9, end: 1.16 }, { w: "In.", start: 2, end: 2.4 }, { w: "After", start: 4.04, end: 4.5 }], STRETCH);
+    assert.deepEqual(said.map(({ w, start, end }) => [w, start, end]), [["In.", 0.85, 1.25]]);
+  });
+  it("keep the last word of a Reel in transcript.json where the stretch ends a little before the word does", () => {
+    const words = [{ w: "Hello,", start: 1.2, end: 1.6 }, { w: "world.", start: 1.6, end: 2.1 }];
+    const made = json(projectFiles(reel({ words, plan: undefined, stretch: { start: 1.15, end: 2.085 }, spellings: [] })), "transcript.json");
+    assert.deepEqual(made.map(({ text, start, end }) => [text, start, end]), [["Hello,", 0.25, 0.45], ["world.", 0.7, 0.935]]);
   });
   it("are what transcript.json of a Reel's project holds: ids from w0, the spellings applied, each start moved halfway into its time", () => {
     const made = json(projectFiles(reel()), "transcript.json");
