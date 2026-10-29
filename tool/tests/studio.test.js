@@ -488,6 +488,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const SESSION = { label: "Session, 2026-10-14", record: { version: 3, kind: "session", answer: ANSWERED, label: "Video of 14 Oct, 09:12 (Mac Studio)", name: { text: "Session, 2026-10-14", placeholder: false }, session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } } };
     const KNOWN_INERT = [
       'kind "<label>" finished --private no --not-a-session [--not-a-session]', // a camera video is no Zoom download
+      'finish "<video>" --as-it-is [--as-it-is]', // the made-up video is no iPhone clip she answered: the flag is for that clip's hand-off alone
       'open "<episode>" --take-over [--take-over]', // no other Mac has the episode
       'app "<episode>" --take-over [--take-over]', // this Mac is not set up for HyperFrames, which app says before it looks at a claim (and no other Mac has the episode)
       'app "<episode>" reel 2 --take-over [--take-over]', // the same, for a Reel

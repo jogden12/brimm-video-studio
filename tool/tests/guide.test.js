@@ -109,7 +109,7 @@ describe("the BRIMM Ops page's steps", () => {
   });
 });
 
-const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null, source: null };
+const BASE = { name: "Pricing talk (3fa9c1)", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "finished", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, app: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null, source: null };
 const NONE = { version: 1, handoffs: {}, finished: {} };
 const NOW = Date.parse("2026-10-25T12:00:00-05:00");
 const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, readyAt: "", ...over } });
@@ -147,7 +147,15 @@ const STAGE_ROWS = [
   [{ reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
   [{ offersAnswered: false }, "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
   [{ v2: false }, "waits-v2", V1],
-  [{ kind: "short video" }, "handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.'],
+  // A finished video's hand-off is written when its spellings are answered; an iPhone clip's is not (plan PR 7, F5): it is edited in
+  // HyperFrames and exported, or handed off as it is, and on a Mac that hands off version 1 it waits for version 2.
+  [{ kind: "finished" }, "handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.'],
+  [{ kind: "short video" }, "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  // Review, minor 2: a clip opened in HyperFrames and exported is handed off in version 1 too, so only handing it off as it is waits for
+  // version 2 on a Mac that hands off version 1; and the offer of HyperFrames is left out where this Mac's settings have the app off.
+  [{ kind: "short video", v2: false }, "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
+  [{ kind: "short video", app: false }, "clip-next", 'Say "hand it off" to hand it off as it is.'],
+  [{ kind: "short video", app: false, v2: false }, "waits-v2", V1],
   [RAW({ finishRunning: true, placeholder: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [RAW({ placeholder: true }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
   [RAW(), "show", 'Ask for any changes in your own words, then say "show it in Final Cut".'],

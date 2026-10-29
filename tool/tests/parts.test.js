@@ -2,7 +2,7 @@
 // recorded at each push, and what finish must ask before it starts. Plain data: no disk.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { partsOf, kindOf, lookFor, firstWordsMatch } from "../parts.js";
+import { partsOf, kindOf, lookFor, firstWordsMatch, unkeptParts } from "../parts.js";
 
 const push = (v, project, at = "2026-10-20T10:00:00-05:00") => ({ v, at, on: "Mac Studio", file: `edit/x.v${v}.mac-studio.fcpxml`, project });
 const RECORD = {
@@ -171,6 +171,26 @@ describe("lookFor", () => {
     assert.deepEqual(got.asks, []);
     assert.equal(got.parts[0].video.where, "the other Mac");
     assert.equal(got.parts[1].kept, true);
+  });
+});
+
+describe("unkeptParts: the hand work only this Mac's Final Cut library holds", () => {
+  const pushedHere = (v, project) => push(v, project);
+  const EDITED_HERE = { main: { pushed: [pushedHere(5, MAIN5)] }, reels: [{ n: 1, pushed: [pushedHere(1, REEL1)] }], finished: null };
+  it("names a part pushed on this Mac that the last finish kept in no export and answered no hand edits for none", () => {
+    assert.deepEqual(unkeptParts(EDITED_HERE, "Mac Studio"), ["the main video", "Reel 1"]);
+  });
+  it("does not name a part the last finish took from HyperFrames: its project is the edit, and the library holds nothing of it", () => {
+    const finished = { parts: { main: { v: 5, file: `final/${MAIN5}.mp4`, project: "Pricing- what to charge- main 3fa9c1" }, "reel 1": { v: 1, file: "final/r1.mov", export: "final/r1.fcpxmld" } } };
+    assert.deepEqual(unkeptParts({ ...EDITED_HERE, finished }, "Mac Studio"), []);
+    assert.deepEqual(unkeptParts({ ...EDITED_HERE, finished: { parts: { main: finished.parts.main } } }, "Mac Studio"), ["Reel 1"]);
+  });
+  it("does not name a part whose last finish took a project, whichever version was pushed here", () => {
+    const finished = { parts: { main: { file: "x.mp4", project: "P", v: 2 } } };
+    assert.deepEqual(unkeptParts({ main: { pushed: [pushedHere(5, MAIN5)] }, reels: [], finished }, "Mac Studio"), []);
+  });
+  it("names no part pushed only on the other Mac", () => {
+    assert.deepEqual(unkeptParts({ main: { pushed: [{ ...pushedHere(5, MAIN5), on: "Sallie's laptop" }] }, reels: [], finished: null }, "Mac Studio"), []);
   });
 });
 

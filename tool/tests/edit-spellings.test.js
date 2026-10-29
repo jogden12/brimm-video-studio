@@ -545,21 +545,30 @@ describe("spell … add, with several pairs", () => {
 });
 
 describe("spell … offers, for an iPhone clip", () => {
-  it("writes the hand-off, kind short video, with its main video and no suggestions and no Reels", async () => {
+  // Plan PR 7, item 4: the card records her answer and the spellings and writes no hand-off. `finish` makes it, from the clip's HyperFrames
+  // export or, asked, as it is (edit-finish-clip.test.js, which holds the hand-off this test used to check).
+  it("records the answer and the spellings, writes no hand-off, and says how to go on", async () => {
     const { t, found } = await readOf("short video");
+    // This Mac's settings have the app off here, so the offer of HyperFrames is left out (review, minor 2); with it on, both ways are said.
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${WRITTEN(1)}`);
+    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. Say "hand it off" to hand it off as it is.`);
+    const record = reread(found);
+    assert.deepEqual([record.spellings, record.offers.answered.applied, record.finished], [[["Ogdin", "Ogden"]], ["Ogdin"], null]);
+    assert.equal(existsSync(join(found.folder, "final")), false);
+    assert.deepEqual(t.calls, []);
+    t.done();
+  });
+  it("writes the hand-off when it is handed off as it is, with the spelling in its captions", async () => {
+    const { t, found } = await readOf("short video");
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "offers", "1")).code, 0);
+    const r = await on(t.ctx.deps, "finish", FOLDER, "--as-it-is");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.text, `Handed off as it is. ${WRITTEN(1)}`);
     const handoff = handoffIn(found);
     assert.equal(handoffFaultV2(handoff), "");
     assert.deepEqual(handoff.video, { id: ID, kind: "short video", name: NAME, recorded: "2026-10-14", recordedFrom: "video" });
-    assert.equal(handoff.main.file, VIDEO);
     assert.match(handoff.main.srt, /Sallie Ogden\./);
-    assert.deepEqual(["suggestions" in handoff, "reels" in handoff, handoff.session], [false, false, null]);
-    const contract = fixture("short-video");
-    assert.deepEqual([Object.keys(handoff), Object.keys(handoff.video), Object.keys(handoff.main)], [Object.keys(contract), Object.keys(contract.video), Object.keys(contract.main).filter((key) => key !== "onPicture")]);
-    assert.deepEqual(listAll(join(found.folder, "final")), [HANDOFF, "Pricing talk.srt", "Pricing talk.transcript.txt"]);
-    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", HANDOFF)] }]);
     t.done();
   });
 });
