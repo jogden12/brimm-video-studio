@@ -141,8 +141,17 @@ export function opsText(handoff, step, again) {
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
       the app (HyperFrames) on.
-    - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning`; and
-      `shownSinceFinish`, when it was shown in Final Cut again since its finish.
+    - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning` (an iPhone clip's too);
+      and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
+      them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
+    - For a raw video and an iPhone clip (plan PR 10): `way`, how `finish` goes for it (edit.js finishWay): "hyperframes" (a main project
+      in use), "unopened" (a raw video with neither a project nor a push, on a Mac set up for the app), "clip" (an iPhone clip the app
+      has not opened), "final cut" or "finished"; the first two are the HyperFrames way (viaApp). `copy`, while this Mac's run makes
+      the video for HyperFrames, and null otherwise: { left, usual }, the seconds left as the panel's run says (null when it says none)
+      and the seconds it usually takes by the speed this Mac measured (copyIn; null while not known). `project`, the main project in use
+      when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported }, whether the record says
+      the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none), and
+      whether it has an export that began after its last change.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
@@ -187,6 +196,17 @@ export function roughIn(rates, seconds) {
   const speeds = READING_STEPS.map((step) => rates[step]);
   if (!(seconds > 0) || !speeds.every((s) => Number.isFinite(s) && s > 0)) return null;
   return Math.round(speeds.reduce((sum, s) => sum + s * seconds, 0));
+}
+
+/** The step of the working copy's run whose speed progress.js learns, as it learns the reading's (workcopy.js WORK_COPY_STEP, which a
+    test holds this to): the seconds it takes for each second of video. */
+export const COPY_STEP = "Making the video for HyperFrames";
+
+/** Seconds the video for HyperFrames takes to make for a recording `seconds` long, by the speed this Mac measured (`rates`,
+    progress.js readRates), rounded. Null while the speed, or the recording's length, is not known. */
+export function copyIn(rates, seconds) {
+  const speed = rates[COPY_STEP];
+  return seconds > 0 && Number.isFinite(speed) && speed > 0 ? Math.round(speed * seconds) : null;
 }
 
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
@@ -251,14 +271,40 @@ function sessionNext(facts, notes, now) {
   return toDo("session-done", 'Every item is decided. Say "done" to write its hand-off.');
 }
 
+/** Whether a video goes the HyperFrames way (plan PR 10): edit.js reads `way` from the record as `finish` does (finishWay). "hyperframes"
+    is a main project in use, and "unopened" a raw video with neither a project nor a push on a Mac set up for the app. Any other
+    way, or none given, is the Final Cut way of a raw video, whose stages stay until the retirement's wave 4 (the ruling of PR 10). */
+const viaApp = (facts) => facts.way === "hyperframes" || facts.way === "unopened";
+
+/** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
+    usually takes, by the speed this Mac measured, else no time. */
+function copyStep({ left, usual }) {
+  const time = left != null ? `, ${aboutLeft(left)} left` : "";
+  const often = left == null && usual != null ? ` It usually takes ${aboutLeft(usual)}.` : "";
+  return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);
+}
+
+/** The next step of a video on the HyperFrames way (plan PR 10): its main project, if one is here, says where it is. Exported, it waits
+    for its hand-off; opened and not exported, she edits it, and the time of her last request there is said when the app's history
+    has one; made and never opened, or not made yet, she opens it, unless the video for it is still being made. */
+function appStep(facts) {
+  const project = facts.project;
+  if (project && project.exported) return toDo("exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.');
+  if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+  if (!project && facts.copy) return copyStep(facts.copy);
+  return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
+}
+
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
-    finish, then its hand-off's BRIMM Ops steps. */
+    finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep), unless a raw video
+    goes the Final Cut way, which keeps its stages. */
 function videoNext(facts, notes, now) {
   const raw = facts.kind === "raw";
+  const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
-  if (raw && facts.finishRunning) return toDo("finish-running", "Its finish is running. The panel shows how far it is.");
+  if ((raw || clip) && facts.finishRunning) return toDo("finish-running", "Its finish is running. The panel shows how far it is.");
   if (facts.handoff) {
-    if (raw && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
+    if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     return opsStep(facts, notes, now) || { done: true };
   }
   if (facts.reading !== "done") {
@@ -270,11 +316,13 @@ function videoNext(facts, notes, now) {
   if (!facts.offersAnswered) return toDo("spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.');
   if (raw) {
     if (facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
+    if (viaApp(facts)) return appStep(facts);
     if (!facts.shownInFinalCut) return toDo("show", 'Ask for any changes in your own words, then say "show it in Final Cut".');
     return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
   }
   // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
-  if (facts.kind === "short video") return clipStep(facts);
+  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app.
+  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy ? copyStep(facts.copy) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }
@@ -378,9 +426,9 @@ export const WAIT_MS = 90000;
 export const POLL_MS = 5000;
 
 /** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
-    and Claude's reading. `guide wait` and `guide tell` wait only while a video is at one. A running finish is not among them:
-    the guide cannot tell a finish that failed from one not begun. */
-export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading"];
+    Claude's reading, and the video for HyperFrames being made. `guide wait` and `guide tell` wait only while a video is at one. A
+    running finish is not among them: the guide cannot tell a finish that failed from one not begun. */
+export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"];
 
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
     come or gone, a stage passed or an import's next step changes it; a name, which holds the size of a file still coming in, and
@@ -431,7 +479,7 @@ const READ_IT = "Claude has read it.";
 export function told(was, seen, now) {
   if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
   if (now.next.done) return videoLines(now)[0];
-  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : "reading");
+  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
   if (on(now) && on(now) === on(was)) return null;
   const { facts, next } = now;
   if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;
