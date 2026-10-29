@@ -3,6 +3,7 @@
 // record's list of files; it runs no program and writes nothing here but the project it rebuilds. Every folder is a temporary one.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fsModule from "node:fs";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, listedBy, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
+  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, listedBy, markerText, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
   timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
@@ -462,6 +463,31 @@ describe("a project's marker: which snapshot it was last rebuilt from or handed 
     utimesSync(join(folder, "app-snapshot", time, MAIN, "index.html"), new Date(BASE), new Date(BASE));
     return { folder, newest: snapshotOf({ [`app-snapshot/${time}/${MAIN}/index.html`]: 6 }, MAIN), dir: join(folder, "work", MAIN) };
   }
+  it("is read only when it is a regular file, as exports.js reads the app's files: a named pipe or a link in its place is none, and nothing waits for a writer (plan PR 10, review I1)", (c) => {
+    const dir = join(scratch(c), "project");
+    mkdirSync(dir, { recursive: true });
+    // In a child process with a time limit: a reader that opens a pipe without O_NONBLOCK waits for a writer that never comes.
+    const asked = (path) => JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `import { readMarker, markerAsItIs } from ${JSON.stringify(new URL("../snapshot.js", import.meta.url).href)}; console.log(JSON.stringify([readMarker(process.argv[1]), markerAsItIs(process.argv[1])]));`, path], { encoding: "utf8", timeout: 15000 }));
+    execFileSync("mkfifo", [join(dir, MARKER)]);
+    assert.deepEqual(asked(dir), [null, null], "a pipe where the marker should be");
+    rmSync(join(dir, MARKER));
+    put(dir, "elsewhere.json", markerText(T1, "Mac Studio"));
+    symlinkSync(join(dir, "elsewhere.json"), join(dir, MARKER));
+    assert.deepEqual(asked(dir), [null, null], "a link where the marker should be");
+    rmSync(join(dir, MARKER));
+    writeMarker(dir, T1, "Mac Studio");
+    assert.deepEqual(asked(dir), [{ snapshot: T1, by: "Mac Studio" }, markerText(T1, "Mac Studio")], "and a marker that is a file is read as before");
+  });
+  it("is written over a pipe or a link that is in its place, and a stale file beside it that is a pipe is not written into", (c) => {
+    const dir = join(scratch(c), "project");
+    mkdirSync(dir, { recursive: true });
+    execFileSync("mkfifo", [join(dir, MARKER)]);
+    execFileSync("mkfifo", [join(dir, `${MARKER}.writing`)]);
+    execFileSync(process.execPath, ["--input-type=module", "-e", `import { writeMarker } from ${JSON.stringify(new URL("../snapshot.js", import.meta.url).href)}; writeMarker(process.argv[1], ${JSON.stringify(T1)}, "Mac Studio");`, dir], { encoding: "utf8", timeout: 15000 });
+    assert.deepEqual(readMarker(dir), { snapshot: T1, by: "Mac Studio" });
+    assert.equal(lstatSync(join(dir, MARKER)).isFile(), true);
+    assert.equal(existsSync(join(dir, `${MARKER}.writing`)), false);
+  });
   it("is a dot-file in the project's folder, written whole beside it and read back, and a snapshot never holds it", (c) => {
     const dir = join(scratch(c), "project");
     put(dir, "index.html", "<html>");

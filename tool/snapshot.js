@@ -25,7 +25,7 @@
 // here, never handed over) is judged by the times of its files (behindSnapshot), as before.
 //
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
-import { lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordFile, recordNumbers } from "./episode.js";
 import { settingsText, writeProject } from "./project.js";
@@ -174,7 +174,8 @@ export function listedBy(folder, paths) {
   for (const n of recordNumbers(folder)) {
     let rev = null;
     try {
-      rev = JSON.parse(readFileSync(recordFile(folder, n), "utf8"));
+      const text = readRegular(recordFile(folder, n));
+      rev = text === null ? null : JSON.parse(text);
     } catch (e) {
       rev = null;
     }
@@ -301,10 +302,32 @@ export function behindSnapshot(local, there) {
     record does not say. */
 export const MARKER = ".brimm-snapshot.json";
 
-/** What a project's marker says, { snapshot, by }, or null when there is none, it cannot be read, or it names no snapshot. */
+/** The flags by which a file in a project (the app's folder, which its agent can write in) is opened to be read: no link is followed, and no
+    wait is made on a file that is not a regular one. A pipe where the file should be has no writer, and opening it as a plain read waits for
+    one for good (plan PR 10, review I1: exports.js readRegular reads the app's files the same way). */
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+const NON_BLOCK = constants.O_NONBLOCK ?? 0;
+
+/** The text of the file at `path` when it is a regular file; null for anything else (a link, a folder, a pipe, a file that is not there or
+    cannot be read). It is looked at once it is open, so that what is read is the very file that was looked at. */
+function readRegular(path) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : null;
+  } catch (e) {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** What a project's marker says, { snapshot, by }, or null when there is none, it is not a regular file, it cannot be read, or it names no snapshot. */
 export function readMarker(dir) {
   try {
-    const told = JSON.parse(readFileSync(join(dir, MARKER), "utf8"));
+    const text = readRegular(join(dir, MARKER));
+    if (text === null) return null;
+    const told = JSON.parse(text);
     if (told === null || typeof told !== "object" || timeOf(told.snapshot) === null) return null;
     return { snapshot: told.snapshot, by: typeof told.by === "string" ? told.by : "" };
   } catch (e) {
@@ -320,13 +343,10 @@ export function writeMarker(dir, snapshot, by = "") {
   putMarkerText(dir, markerText(snapshot, by));
 }
 
-/** What a project's marker file holds, as text, or null when there is none: for putting it back as it was (putMarkerText). */
+/** What a project's marker file holds, as text, or null when there is none (or it is not a regular file): for putting it back as it was
+    (putMarkerText). */
 export function markerAsItIs(dir) {
-  try {
-    return readFileSync(join(dir, MARKER), "utf8");
-  } catch (e) {
-    return null;
-  }
+  return readRegular(join(dir, MARKER));
 }
 
 /** Put a project's marker file back as `text` says (markerAsItIs), whole, or take it away when `text` is null. Throws when it cannot. */
@@ -336,8 +356,11 @@ export function putMarkerText(dir, text) {
     rmSync(file, { force: true });
     return;
   }
+  // Written beside it under another name, then renamed over it (over a pipe or a link that is in its place, which the rename replaces): the name
+  // beside it is cleared first and made new ("wx"), so that a pipe left there is not written into, which would wait for a reader for good.
   try {
-    writeFileSync(`${file}.writing`, text);
+    rmSync(`${file}.writing`, { force: true });
+    writeFileSync(`${file}.writing`, text, { flag: "wx" });
     renameSync(`${file}.writing`, file);
   } catch (e) {
     rmSync(`${file}.writing`, { force: true });
