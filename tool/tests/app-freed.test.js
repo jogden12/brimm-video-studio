@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openInApp } from "../app.js";
+import { changedSince, openInApp } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
@@ -180,11 +180,56 @@ describe("app: a project whose video has been taken away is not made again, and 
       assert.deepEqual([e.said, e.runs().length, e.saved.length, treeOf(e.project), existsSync(e.paths.video)], [[NOT_THE_SAME], e.opened, 1, before, true], JSON.stringify(facts));
     }
   });
+  it("does not put back a copy whose size is not the size its own facts give: it is not whole, and it stays where it is", async (c) => {
+    for (const bytes of [REMADE.length + 1, REMADE.length - 1, 0]) {
+      const e = await freed(c);
+      madeAgain(e, { ...FACTS, bytes });
+      const before = treeOf(e.project);
+      assert.equal(await run(e, e.saved[0]), 1, String(bytes));
+      assert.deepEqual([e.said, e.runs().length, e.saved.length, treeOf(e.project), existsSync(e.paths.video)], [[NOT_PUT_BACK], e.opened, 1, before, true], String(bytes));
+      plain(e.said);
+    }
+  });
+  it("checks a copy's size after its width, height and length: a copy that fails both is not the same", async (c) => {
+    const e = await freed(c);
+    madeAgain(e, { ...FACTS, width: 640, height: 360, bytes: REMADE.length + 9 });
+    assert.equal(await run(e, e.saved[0]), 1);
+    assert.deepEqual(e.said, [NOT_THE_SAME]);
+  });
   it("puts back a copy that is within a second of the project's length: the job itself allows that much", async (c) => {
     const e = await freed(c);
     madeAgain(e, { ...FACTS, seconds: 2.6 + 0.9, bytes: REMADE.length });
     assert.equal(await run(e, e.saved[0]), 0, e.said.join("\n"));
     assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), REMADE);
+  });
+  it("says the project cannot be opened when it says nothing readable of the recording it was made from, with a copy or without", async (c) => {
+    for (const from of [undefined, null, "Talk.mov", 7, {}, { file: "Talk.mov" }]) {
+      for (const copy of [false, true]) {
+        const e = await freed(c);
+        if (copy) madeAgain(e);
+        const record = { ...e.saved[0], app: { ...e.saved[0].app, projects: e.saved[0].app.projects.map((p) => ({ ...p, from })) } };
+        const before = treeOf(e.project);
+        assert.equal(await run(e, record), 1, `${JSON.stringify(from)} ${copy}`);
+        assert.deepEqual([e.said, e.started, e.runs().length, e.saved.length, treeOf(e.project)], [[CHANGED], [], e.opened, 1, before], `${JSON.stringify(from)} ${copy}`);
+      }
+    }
+  });
+  it("counts a project that says nothing readable of its recording as changed, when the recording is there to compare, and as not when it is not", async (c) => {
+    const e = episode(c);
+    assert.equal(await run(e), 0);
+    const [project] = e.saved[0].app.projects;
+    assert.equal(changedSince(project, e), false);
+    for (const from of [undefined, null, "Talk.mov", 7, [], {}, { file: "Talk.mov" }]) assert.equal(changedSince({ ...project, from }, e), true, JSON.stringify(from));
+    rmSync(e.raw);
+    for (const from of [undefined, null, project.from]) assert.equal(changedSince({ ...project, from }, e), false, `no recording: ${JSON.stringify(from)}`);
+  });
+  it("opens a project whose video is there as it was when it says nothing readable of its recording, and says the recording changed", async (c) => {
+    const e = episode(c);
+    assert.equal(await run(e), 0);
+    e.said.splice(0);
+    const record = { ...e.saved[0], app: { ...e.saved[0].app, projects: e.saved[0].app.projects.map((p) => ({ ...p, from: undefined })) } };
+    assert.equal(await run(e, record), 0);
+    assert.deepEqual(e.said, [`The recording of ${NAME} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`, "It's open in HyperFrames.", BUTTONS]);
   });
   it("opens nothing, and leaves the copy, when the project's facts cannot be read to check it against", async (c) => {
     for (const unreadable of [(e) => rmSync(join(e.project, "brimm", "facts.json")), (e) => writeFileSync(join(e.project, "brimm", "facts.json"), "not json"), (e) => writeFileSync(join(e.project, "brimm", "facts.json"), JSON.stringify({ seconds: 2.6 }))]) {

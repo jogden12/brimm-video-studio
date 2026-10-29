@@ -225,10 +225,15 @@ const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.size, mod
 /** Whether the recording is not the one a project was made from (4.8): its size or its time is not what the project's `from` says.
     The times are compared as moments, to the second the record keeps, and not as the text the record holds: that is written with
     the offset the Mac's zone had on the day, so the same moment is other text once the clocks change. A recording that cannot be
-    looked at is no change that can be told, since a project is opened without it. */
+    looked at is no change that can be told, since a project is opened without it. A project that says nothing readable of the
+    recording it was made from (no `from`, or one that is no record of a file) may have been made from another: it counts as changed,
+    and the record, which two Macs write, is never taken to hold what it does not. */
 export function changedSince(project, { found, record }) {
   const raw = statOf(join(found.folder, record.video.file));
-  return raw !== undefined && (project.from.bytes !== raw.size || Date.parse(project.from.modified) !== Math.floor(raw.mtimeMs / 1000) * 1000);
+  if (raw === undefined) return false;
+  const from = project?.from;
+  if (from === null || typeof from !== "object") return true;
+  return from.bytes !== raw.size || Date.parse(from.modified) !== Math.floor(raw.mtimeMs / 1000) * 1000;
 }
 
 /** The record's entry for a main project that is made and has never been opened. */
@@ -328,7 +333,8 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     - The copy must be the size and the length the project was made at, to the second, as its own brimm/facts.json says (project.js):
       its page, its words and their times were made from that video. Facts that cannot be read are no check, so a project whose facts
       cannot be read is not opened (notWhole), nor a copy whose facts cannot (notPutBack), and a copy of another size or length is left
-      where it is, with the project (notTheSame): all 1.
+      where it is, with the project (notTheSame): all 1. And the file must be as large as its own facts say, as the job leaves it: one
+      that is not is not whole (notPutBack).
     - Then the copy is renamed into media/recording.mp4, on the same disk, as the writer put it there, so that the project never holds
       a half-written video; its facts stay beside it. A rename that fails leaves the copy where it was (notPutBack, 1).
     `rename` is how a file is moved: a test gives another. */
@@ -364,6 +370,11 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   }
   if (made.width !== was.width || made.height !== was.height || Math.abs(made.seconds - was.seconds) > 1) {
     ctx.say(notTheSame(name));
+    return { code: 1 };
+  }
+  // The copy's own facts say how large it is when the job puts it in place whole; a file of another size is not that copy.
+  if (statOf(copy.video)?.size !== workingCopy.bytes) {
+    ctx.say(notPutBack(name));
     return { code: 1 };
   }
   try {

@@ -192,13 +192,16 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         into its folder, and let it go. When this Mac pushed a part last, it asks first
                                         whether it was changed in Final Cut since: --no-hand-edits says it was not,
                                         --hand-edits-stay that the changes stay in this Mac's library
-  node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode and what it
-                                        rendered, to give the room back. Its project and everything done in it stay, and app
-                                        makes the video again. It refuses while the other Mac has the episode, while
-                                        HyperFrames is running, while something is at work on the episode, and when the
-                                        recording is not in the episode as the project was made from it: the video could not
-                                        be made again. It takes no flag. Deleting a Final Cut library by command is not
-                                        built: free "<episode>" library says so
+  node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode's main
+                                        project and what it rendered for every project, to give the room back. Their projects
+                                        and everything done in them stay, and app makes the main video again; a Reel's video
+                                        and a kept project's stay, since nothing can make them again yet. It refuses while the
+                                        other Mac has the episode, while HyperFrames is running or cannot be told, while
+                                        something is at work on the episode, while a video HyperFrames rendered may be kept
+                                        nowhere else (the episode is not handed off yet), and when the recording is not in the
+                                        episode as the project was made from it: the video could not be made again. It takes
+                                        no flag. Deleting a Final Cut library by command is not built: free "<episode>"
+                                        library says so
   node edit.js captions "<episode>" reel <n> on|off
                                         a Reel's running captions, in its caption style; its title on screen stays
   node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
@@ -2943,7 +2946,8 @@ const LIBRARY_HELD_BACK = "Deleting an episode's Final Cut library by command co
       that is, since this command deletes files;
     - the gate, as for every command that names an episode (episodeFor): `free` is in no gate list (architecture 6.2), so a video not
       yet answered, a video left alone, a session not cleared and a video held beside a session are refused in the gate's own words;
-    - free.js freeEpisode, which refuses before it takes anything, takes named paths in this Mac's work folder, and writes no record.
+    - free.js freeEpisode, which refuses before it takes anything, takes named paths in this Mac's work folder (the video of the main
+      project in use, the renders of every project but a session clip's, and the folder of copies), and writes no record.
       `ctx.deps.running` is how a test says whether HyperFrames is running; it asks pgrep otherwise. */
 async function free(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);

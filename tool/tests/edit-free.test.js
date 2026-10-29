@@ -94,8 +94,9 @@ function world({ set = true, record = RAW } = {}) {
 }
 
 /** The made-up episode with its project really made by `app` and then worked in as the app and its agent do: a composition, the app's
-    history, renders (with the note an export leaves), and an export in a stand-in Downloads and one in the episode's final/. */
-async function worked(options) {
+    history, renders (with the note an export leaves), and an export in a stand-in Downloads and one in the episode's final/, with
+    its hand-off beside it (`handedOff: false` leaves that out). */
+async function worked({ handedOff = true, ...options } = {}) {
   const w = world(options);
   assert.equal((await on(w.t.ctx.deps, "app", FOLDER)).code, 0);
   const [project] = reread(w.found).app.projects;
@@ -108,6 +109,8 @@ async function worked(options) {
   writeFileSync(w.exported, "an export in Downloads");
   mkdirSync(join(w.found.folder, "final"), { recursive: true });
   writeFileSync(join(w.found.folder, "final", "Pricing talk main.mp4"), "an export in final");
+  // The episode is handed off, as one she frees is: a video in renders/ may be the only copy of it until it is.
+  if (handedOff) writeFileSync(join(w.found.folder, "final", "Pricing- what to charge-.brimm-ops.json"), "{}");
   w.t.started.length = 0;
   return { ...w, project, at };
 }
@@ -280,17 +283,57 @@ describe("free: an episode HyperFrames was opened on", () => {
     assert.deepEqual((await on(never.t.ctx.deps, "free", FOLDER)).said, [NOTHING]);
     never.t.done();
   });
-  it("does not take a project made for an earlier kind out of the record: it is freed like the other, and its text files stay", async () => {
-    const w = await worked();
+  it("takes the renders of a project made for an earlier kind and leaves its video, and says so in the last line; its text files stay and the record is not changed", async () => {
+    const w = await worked({ handedOff: false });
     assert.equal((await on(w.t.ctx.deps, "kind", NAME, "clip", "--private", "no", "--again")).code, 0);
     const kept = reread(w.found).app.projects[0];
     assert.equal(kept.state, "kept for an earlier kind");
+    // A render in it is a video, and the episode is not handed off: it stays until it is, so the test takes that out of the way.
+    rmSync(join(w.work, kept.name, "renders", "draft.mp4"));
+    const before = treeOf(join(w.work, kept.name));
     const r = await plain(w.t.ctx.deps, "free", FOLDER);
     assert.equal(r.code, 0, r.text);
-    assert.equal(existsSync(join(w.work, kept.name, "media", "recording.mp4")), false);
+    assert.equal(r.said.at(-1), "The video of a Reel, or of a project kept for an earlier kind, stays: it can't be made again yet.");
+    // The folder of copies goes too, with the facts the first copy left in it: that is the video made for HyperFrames.
+    assert.equal(r.said[0].startsWith(`Took away the video made for HyperFrames and what HyperFrames rendered for ${NAME}. That gave back `), true, r.said[0]);
+    assert.equal(readFileSync(join(w.work, kept.name, "media", "recording.mp4"), "utf8"), WORKING_COPY);
+    assert.equal(existsSync(join(w.work, kept.name, "renders")), false);
     assert.equal(existsSync(join(w.work, kept.name, "index.html")), true);
+    const after = treeOf(join(w.work, kept.name));
+    assert.deepEqual(Object.keys(before).filter((rel) => !(rel in after)).sort(), ["renders", "renders/draft_2026-10-20_16-00.meta.json", "renders/frames", "renders/frames/0001.png"]);
     assert.deepEqual(reread(w.found).app.projects, [kept]);
     w.t.done();
+  });
+  it("takes nothing, and says why, while a video HyperFrames rendered is in a project and the episode is not handed off", async () => {
+    const w = await worked({ handedOff: false });
+    const before = [treeOf(w.work), listAll(w.found.folder), reread(w.found).rev];
+    const r = await plain(w.t.ctx.deps, "free", FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`HyperFrames made a video for ${NAME} that may be kept nowhere else, and the episode is not handed off yet. Nothing was taken away. Hand it off first, or keep that video somewhere else, then ask again.`]]);
+    assert.deepEqual([treeOf(w.work), listAll(w.found.folder), reread(w.found).rev], before);
+    w.t.done();
+  });
+  it("says it cannot tell, and takes nothing, when nothing says whether HyperFrames is open", async () => {
+    const w = await worked();
+    const before = treeOf(w.work);
+    const r = await plain({ ...w.t.ctx.deps, running: async () => { throw new Error("pgrep is not there"); } }, "free", FOLDER);
+    assert.deepEqual([r.code, r.said, treeOf(w.work)], [1, ["I can't tell whether HyperFrames is open. Quit it if it is, then ask again. Nothing was taken away."], before]);
+    w.t.done();
+  });
+});
+
+describe("free: Sallie's chat does not run it", () => {
+  const SKILLS = ["SKILL.md", "SKILL-open.md"];
+  const skill = (name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8");
+  it("is named in neither skill: no row, no command in backticks, no line that runs it (architecture 6.2: the skill never runs free)", () => {
+    for (const name of SKILLS) {
+      const text = skill(name);
+      assert.ok(text.length > 1000, `${name} was read`);
+      assert.doesNotMatch(text, /`free[ `]/, `${name} runs free`);
+      assert.doesNotMatch(text, /edit\.js free\b/, `${name} names edit.js free`);
+      assert.doesNotMatch(text, /\bfree "</, `${name} gives free an episode`);
+      // The line about freeing space says it is not ready, and sends her to Jason.
+      assert.match(text, /freeing space: "That isn't ready yet; ask Jason\."/, name);
+    }
   });
 });
 
