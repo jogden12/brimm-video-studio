@@ -6,7 +6,7 @@
 // HeyGen or `claude`: the pinned command line is the stand-in of tests/stand-ins/hyperframes.mjs.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NOT_SET_UP } from "../app.js";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
@@ -431,6 +431,19 @@ describe("app: a project older than its snapshot is neither opened nor handed ov
     assert.deepEqual(filesBelow(w.dirOf("main")), before);
     assert.deepEqual(runsOf({ home: w.t.home }), []);
     assert.equal(w.t.started.length, starts, "no video is asked for");
+    w.t.done();
+  });
+  it("is put right, until a way is built, by moving the older folder away by hand: the project is then rebuilt from the other Mac's newer snapshot, with what it changed", async () => {
+    const w = await worked();
+    assert.deepEqual((await app(w.t.ctx.deps, FOLDER)).said, [OLDER]);
+    renameSync(w.dirOf("main"), join(w.t.dir, "older copy of the project"));
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.said[0], /^The HyperFrames project for Pricing: what to charge\? is rebuilt on this Mac from what Sallie's laptop handed over at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. What HyperFrames kept of its history stays on Sallie's laptop\.$/);
+    assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
+    madeCopy({ home: w.t.home }, w.found);
+    const opened = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([opened.code, opened.said], [0, [BACK, OPEN, BUTTONS]]);
     w.t.done();
   });
   it("is not handed over again by that Mac, whatever it was told before: nothing is written", async () => {
