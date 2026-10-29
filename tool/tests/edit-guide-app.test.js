@@ -16,7 +16,7 @@ import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
 import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
-import { workCopyLockOf } from "../workcopy.js";
+import { WORK_COPY_WAIT_STEP, workCopyLockOf } from "../workcopy.js";
 import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
@@ -147,6 +147,46 @@ describe("the guide while the video for HyperFrames is made", () => {
     panel(w, { pid: 1, left: 600 });
     assert.equal(await line(w), says(`The video for HyperFrames is being made, less than a minute left. ${AFTER}`));
     rmSync(join(progressFolder(w.t.home), `${process.pid}.json`));
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. It usually takes about 4 minutes. ${AFTER}`));
+    w.t.done();
+  });
+  it("says no usual time while the run waits for the import to check its copies: it has not begun (review I3a)", async () => {
+    const w = guideWorld({ kind: "short video", projects: null });
+    atWork(w.t, "workcopy");
+    // 1 second of work for each second of the recording's 23: the usual time would be "less than a minute", of a run that waits.
+    speeds(w, 1);
+    panel(w, { step: WORK_COPY_WAIT_STEP, n: null, of: null, percent: null, left: null, total: null });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    // Nor before its first step has begun, when its panel still says it is starting.
+    panel(w, { step: "Starting", n: null, of: 1, percent: null, left: null, total: null });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    // Once it makes the copy, with no time of its own yet, the usual time stands.
+    panel(w, { percent: null, left: null });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. It usually takes less than a minute. ${AFTER}`));
+    w.t.done();
+  });
+  it("says no usual time of a Reel's video, which shares the lock, has two steps, and is not the recording's length (review I3b)", async () => {
+    const w = guideWorld({ projects: null });
+    atWork(w.t, "workcopy");
+    speeds(w, 10);
+    // Step 1 of 2 with 8 seconds left of it and no total: the time left is dropped, and the main video's usual time must not stand in for it.
+    panel(w, { n: 1, of: 2, percent: 90, left: 8, total: null });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    // Just begun, with no time of its own: still not the main video's.
+    panel(w, { n: 1, of: 2, percent: null, left: null, total: null });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    w.t.done();
+  });
+  it("says no usual time once the panel's own time has run out: at the end of the run, or long after the panel wrote it (review I3c)", async () => {
+    const w = guideWorld({ projects: null });
+    atWork(w.t, "workcopy");
+    speeds(w, 10);
+    panel(w, { percent: 100, left: 0 });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    panel(w, { left: 180, updated: w.t.now() - 400000 });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. ${AFTER}`));
+    // Before it has said any time (ffmpeg has not said how far it is), the usual time stands.
+    panel(w, { percent: null, left: null });
     assert.equal(await line(w), says(`The video for HyperFrames is being made. It usually takes about 4 minutes. ${AFTER}`));
     w.t.done();
   });

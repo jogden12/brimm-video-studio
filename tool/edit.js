@@ -90,7 +90,7 @@ import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, op
 import { historyTail, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
-import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -6100,7 +6100,11 @@ function guideReading(ctx, e, r, kind, running, rates) {
     is the seconds left as the panel's file for that very process says (panelRuns), as of when the panel last wrote it, with the time
     since taken off; null when it says none, or the time has run out. `usual` is how long the step usually takes, by the speed this Mac
     measured for it (`rates`, guide.js copyIn) and the recording's length, null while either is not known. A Reel's video is made under
-    the same lock, and is not told from the main video's. */
+    the same lock, and the lock does not say whose the video is (a project here is the main video's, and `project` goes first), so the
+    panel's file for the process says what it can (review I3): `usual` is said of a run that is making a copy of the main video's own shape,
+    the step of the copy and it alone (`of` 1: a Reel's has a second step, and a recording's length is not its length), that has begun (it
+    does not wait for the import to check its copies, WORK_COPY_WAIT_STEP) and that has told no time of its own that has run out (at its end
+    its time is 0). With no panel file at all, as before the run has begun one, it is said. */
 function guideCopy(ctx, e, r, rates) {
   const run = runningRun(ctx.home, e.name, ctx.alive, workCopyLockOf(ctx.home, e.name));
   if (!run) return null;
@@ -6108,7 +6112,9 @@ function guideCopy(ctx, e, r, rates) {
   const since = panel && Number.isFinite(panel.updated) ? Math.max(0, ctx.now() - panel.updated) / 1000 : 0;
   const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
   const left = panel ? readyIn({ left: fresh(panel.left), total: fresh(panel.total), n: panel.n, of: panel.of }) : null;
-  return { left, usual: copyIn(rates, r.video && r.video.seconds) };
+  const mainCopy = !panel || (panel.step === WORK_COPY_STEP && panel.of === 1);
+  const toldTime = Boolean(panel) && (Number.isFinite(panel.left) || Number.isFinite(panel.total));
+  return { left, usual: left === null && mainCopy && !toldTime ? copyIn(rates, r.video && r.video.seconds) : null };
 }
 
 /** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when
