@@ -1,13 +1,16 @@
-// finish, the detached part (spec section 5, steps 3 to 9). The quick part, in edit.js, found Final Cut's files and asked what
-// it had to; it wrote what it was told in finish.asked.json, on this Mac's own disk, and started this. This part waits until
-// each finished video is whole, checks its shape, transcribes it again as the transcript tool does, cuts the parts of a
-// Story from a finished Reel of more than a minute, and copies everything into the episode's final/ folder by the Dropbox
-// rule, the hand-off last. Then it writes the record, shows the hand-off in Finder, and at least 15 minutes after the last
-// copy checks the copies again; only when they are whole does it delete from From Final Cut what it took from there.
+// finish, the detached part (spec section 5, steps 3 to 9). The quick part, in edit.js, found Final Cut's files, or HyperFrames' exports
+// (exports.js), and asked what it had to; it wrote what it was told in finish.asked.json, on this Mac's own disk, and started this. This
+// part waits until each finished video is whole, checks its shape, transcribes it again as the transcript tool does, cuts the parts of a
+// Story from a finished Reel of more than a minute, and copies everything into the episode's final/ folder by the Dropbox rule, the
+// hand-off last. Then it writes the record, shows the hand-off in Finder, and at least 15 minutes after the last copy checks the copies
+// again; only when they are whole does it delete from From Final Cut, or from Downloads, what it took from there.
+// A part is HyperFrames' when its entry in finish.asked.json names a `project`: its video is the export (no export of the edit goes with
+// it), a Dropbox placeholder is brought over, its sound and colour are checked too, and what is removed after the late check is only a
+// file in Downloads that has an export's name for that project (architecture 8.1 and 8.2). The other parts are Final Cut's, as they were.
 // Nothing here asks anything: what a person must check is said in the result, which status shows.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import { probeArgs, factsOf, pauseArgs, pausesOf } from "./cuts.js";
+import { probeArgs, factsOf, colourOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled, stampedText } from "./lib.js";
 import { firstWordsMatch } from "./parts.js";
@@ -15,7 +18,9 @@ import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final
 import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
-import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, LATE_CHECK_MS } from "./dropbox.js";
+import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
+import { KEPT as PROJECT_KEPT } from "./app.js";
+import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
@@ -33,8 +38,10 @@ import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFil
     finish stops: ten minutes. */
 const LOOK_MS = 5000;
 const MOST_LOOKS = 120;
-/** The steps of a finish, as the progress panel counts them. */
-const STEPS = ["Waiting for Final Cut's files", "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"];
+/** The steps of a finish, as the progress panel counts them. The first says what is waited for: Final Cut's files, HyperFrames' exports,
+    or, when a finish takes both, the finished videos. */
+const WAITING = { "final cut": "Waiting for Final Cut's files", hyperframes: "Waiting for HyperFrames' exports", both: "Waiting for the finished videos" };
+const stepsFor = (waiting) => [WAITING[waiting], "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"];
 
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 const stem = (name) => basename(name, extname(name));
@@ -54,8 +61,8 @@ const sizeOf = (file) => {
     return 0;
   }
 };
-/** A picture's shape, in words. */
-const shapeOf = (w, h) => (h > w ? "upright" : w > h ? "wider than it is tall" : "square");
+/** Where a file was when it changed, as a person is told it: " in From Final Cut", " in Downloads", or nothing for any other folder. */
+const inPlace = (video) => (video.where === "From Final Cut" ? " in From Final Cut" : video.where === "Downloads" ? " in Downloads" : "");
 
 /** The words of captions, said evenly over each caption: the best that can be done for a video whose word times are missing. */
 function wordsOfCaptions(srt) {
@@ -77,37 +84,42 @@ function filesIn(dir, from = dir) {
   return out;
 }
 
-/** What ffprobe says of a file, or null when it cannot read it, as of a file Final Cut has not finished writing. */
+/** What ffprobe says of a file, or null when it cannot read it, as of a file Final Cut has not finished writing. The facts of cuts.js
+    factsOf, and `colour` too: { primaries, transfer } as the picture is tagged, or null when it has no tags (cuts.js colourOf). */
 async function probe(file, work, my) {
   const out = join(work, `facts-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
   const ended = await my.run(my.tools.ffprobe, probeArgs(file, out));
-  const facts = ended.code === 0 && existsSync(out) ? factsOf(readFileSync(out, "utf8")) : null;
+  const printed = ended.code === 0 && existsSync(out) ? readFileSync(out, "utf8") : "";
+  const facts = printed ? factsOf(printed) : null;
   rmSync(out, { force: true });
-  return facts;
+  return facts ? { ...facts, colour: colourOf(printed) } : null;
 }
 
 /** Wait until a finished video is whole: its size the same twice, LOOK_MS apart, its blocks all on this Mac, and ffprobe able
-    to read it with a length. {facts}, or {why} after ten minutes of waiting. */
-async function whole(file, work, my) {
+    to read it with a length. {facts}, or {why} after ten minutes of waiting. An export of HyperFrames' (`app`) may be a file Dropbox
+    holds only as a placeholder, for Downloads is a link into Dropbox on the Mac Studio: it is read through once, which brings it
+    down (dropbox.js readThrough), and {why} says so when that cannot be done. */
+async function whole(file, work, my, { app = false } = {}) {
   const sizes = [sizeOf(file)];
+  let brought = false;
   for (let look = 0; look < MOST_LOOKS; look++) {
     await my.wait(LOOK_MS);
     sizes.push(sizeOf(file));
-    if (!settled(sizes) || !my.isWhole(file)) continue;
+    if (!settled(sizes)) continue;
+    if (!my.isWhole(file)) {
+      if (!app || brought) continue;
+      brought = true;
+      try {
+        await my.readAll(file);
+      } catch (e) {
+        return { why: `Dropbox could not bring ${basename(file)} over to this Mac (${String(e.message).replace(/\.$/, "")}). Say "hand it off" again.` };
+      }
+      if (!my.isWhole(file)) continue;
+    }
     const facts = await probe(file, work, my);
     if (facts && facts.duration) return { facts };
   }
-  return { why: `${basename(file)} is still being written by Final Cut. Say finish again when its Share is done.` };
-}
-
-/** What is wrong with a finished video's shape for its part, or "". A Reel is upright. The main video has the raw video's
-    shape, so a short upright video's main video is upright. */
-function shapeFault(part, name, facts, raw) {
-  const shape = shapeOf(facts.width, facts.height);
-  if (part.reel) return shape === "upright" ? "" : `${name} is ${shape}, and a Reel is upright.`;
-  if (!raw || !raw.width || !raw.height) return "";
-  const want = shapeOf(raw.width, raw.height);
-  return shape === want ? "" : `${name} is ${shape}, and the main video has the raw video's shape: ${want}.`;
+  return { why: app ? `${basename(file)} is still being written. Say "hand it off" again when HyperFrames has finished exporting it.` : `${basename(file)} is still being written by Final Cut. Say finish again when its Share is done.` };
 }
 
 /** The words a part is expected to start with: the first phrase kept, as the cut plan and the part's own cuts leave it (phase
@@ -653,7 +665,7 @@ export async function finishNow(ctx, found, deps = {}) {
   const result = () => ({ ok: failed.length === 0, made, failed, next: next.join(" ") });
   // The programs, the clock's waits and the clone, as this Mac has them unless a test gives others.
   const tools = ctx.deps.tools || findPrograms();
-  const my = { run: ctx.deps.run || runProgram, tools, model: tools.model, wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole };
+  const my = { run: ctx.deps.run || runProgram, tools, model: tools.model, wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole, readAll: ctx.deps.readAll || readThrough };
   const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
   const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
   // The run's own folder is on the same disk as Dropbox, so what is made in it can be cloned in.
@@ -688,17 +700,24 @@ export async function finishNow(ctx, found, deps = {}) {
       failed.push(refused);
       return result();
     }
-    progress.begin(shownName(record));
-    progress.steps(STEPS);
     const before = (record.finished && record.finished.parts) || {};
-    const parts = asked.parts.map((p) => ({ ...p, path: p.video ? join(p.video.dir, p.video.name) : "" }));
+    // A part is HyperFrames' when the quick part gave it a project: its video is the export of that project.
+    const parts = asked.parts.map((p) => ({ ...p, app: Boolean(p.project), path: p.video ? join(p.video.dir, p.video.name) : "" }));
+    // What the first step waits for: HyperFrames' exports, Final Cut's files, or, when a finish takes both, the finished videos.
+    const news = parts.filter((p) => !p.kept);
+    const asking = news.length ? news : parts;
+    const waiting = asking.every((p) => p.app) ? "hyperframes" : asking.some((p) => p.app) ? "both" : "final cut";
+    // What to say again when it must be said again, in the words of the way the finish went.
+    const sayAgain = parts.every((p) => p.app) ? 'Say "hand it off" again.' : "Say finish again.";
+    progress.begin(shownName(record));
+    progress.steps(stepsFor(waiting));
 
     // Each new finished video whole, and its facts. Then the video, and its export, are taken into the run's own folder as
     // clones, with their sizes and times: everything after works from what was taken.
-    progress.step("Waiting for Final Cut's files");
+    progress.step(WAITING[waiting]);
     const clone = ctx.deps.clone || cloneFile;
-    for (const part of parts.filter((p) => !p.kept)) {
-      const got = await whole(part.path, work, my);
+    for (const part of news) {
+      const got = await whole(part.path, work, my, { app: part.app });
       if (got.why) {
         failed.push(got.why);
         continue;
@@ -711,7 +730,7 @@ export async function finishNow(ctx, found, deps = {}) {
       // The facts of what was taken, which is what goes into final/.
       const facts = await probe(part.copy, work, my);
       if (!facts || !facts.duration) {
-        failed.push(`${part.video.name} could not be read once it was taken. Say finish again.`);
+        failed.push(`${part.video.name} could not be read once it was taken. ${sayAgain}`);
         continue;
       }
       part.facts = facts;
@@ -724,12 +743,18 @@ export async function finishNow(ctx, found, deps = {}) {
     }
     if (failed.length) return result();
 
-    // Its shape, before anything is transcribed.
+    // Its shape, before anything is transcribed; for an export of HyperFrames', its sound too, which is stopped, and its colour, which is
+    // said for a person to look at and stops nothing (architecture 8.2).
     progress.step("Checking the files");
     const plan = readJson(join(found.folder, `${stem(record.video.file)}.cut-plan.json`));
-    for (const part of parts.filter((p) => !p.kept)) {
+    for (const part of news) {
       const wrong = shapeFault(part, part.video.name, part.facts, plan && plan.facts);
       if (wrong) failed.push(wrong);
+      if (!part.app) continue;
+      const silent = soundFault(part.facts, part.video.name);
+      if (silent) failed.push(silent);
+      const colour = colourNote(part.facts.colour, part.video.name);
+      if (colour) next.push(colour);
     }
     if (failed.length) return result();
 
@@ -759,7 +784,9 @@ export async function finishNow(ctx, found, deps = {}) {
       }
       Object.assign(part, { srt: heard.srt, txt: heard.txt, words: heard.words, wav: heard.wav });
       if (heard.untimed) next.push(`Word times are missing for ${part.name}: ${heard.untimed}.`);
-      const expected = expectedWords(part, record, plan);
+      // A Reel of HyperFrames' made from a suggestion is expected to start with the suggestion's words, which the quick part wrote down;
+      // its main video is not checked, which she may start anywhere. A Final Cut part starts as the cut plan says.
+      const expected = part.app ? String(part.expected || "") : expectedWords(part, record, plan);
       const opening = captionsOf(heard.srt).map((c) => c.text).join(" ");
       if (expected && !firstWordsMatch(expected, opening)) {
         const first = (captionsOf(heard.srt)[0] || { text: "" }).text;
@@ -811,7 +838,10 @@ export async function finishNow(ctx, found, deps = {}) {
       // BRIMM Ops takes a Reel's title for the words in its picture, so one is never made up: the quick part asks for it.
       if (!title) failed.push(`Reel ${p.reel} has no title on screen. Say what it says, and finish again.`);
       const timed = Boolean(p.words && main.words);
-      return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, main.seconds, { spacing: timed }), srt: p.srt, fromSuggestion: fromSuggestionOf({ ...reel, n: p.reel }) };
+      // A Reel of HyperFrames' says the suggestion its project was made from: a number, or null for times she gave. Any other Reel's is the
+      // record's (handoff-v2.js fromSuggestionOf).
+      const fromSuggestion = p.app ? (Number.isInteger(p.fromSuggestion) ? p.fromSuggestion : null) : fromSuggestionOf({ ...reel, n: p.reel });
+      return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, main.seconds, { spacing: timed }), srt: p.srt, fromSuggestion };
     });
     if (failed.length) return result();
     const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
@@ -832,8 +862,8 @@ export async function finishNow(ctx, found, deps = {}) {
 
     // Nothing is copied when a file taken has changed since: the hand-off would then not describe what is in final/.
     for (const part of parts.filter((p) => !p.reused)) {
-      const where = part.video.where === "From Final Cut" ? " in From Final Cut" : "";
-      if (!unchanged(part.path, part.snap)) failed.push(`${part.video.name} changed${where} while finish was working on it. Say finish again.`);
+      const where = inPlace(part.video);
+      if (!unchanged(part.path, part.snap)) failed.push(`${part.video.name} changed${where} while finish was working on it. ${part.app ? 'Say "hand it off" again.' : "Say finish again."}`);
       if (part.export && !unchanged(part.exportPath, part.exportSnap)) failed.push(`${part.export.name} changed${where} while finish was working on it. Say finish again.`);
     }
     if (failed.length) return result();
@@ -843,7 +873,7 @@ export async function finishNow(ctx, found, deps = {}) {
     const now = readEpisode(found.folder);
     const held = now.record ? heldElsewhere(now.record, ctx.machine) : null;
     if (held) failed.push(`${held.by} has ${record.name.text} open now, so nothing was copied into final/. Finish it there, or take it over and say finish again.`);
-    else if (!now.record || now.record.rev !== asked.rev) failed.push("The episode changed while finish was working, so nothing was copied into final/. Say finish again.");
+    else if (!now.record || now.record.rev !== asked.rev) failed.push(`The episode changed while finish was working, so nothing was copied into final/. ${sayAgain}`);
     if (failed.length) return result();
 
     // Into final/, by the rule, from what was taken: each new video, its transcripts, its Story parts and its export, and the
@@ -864,7 +894,12 @@ export async function finishNow(ctx, found, deps = {}) {
     try {
       for (const part of parts.filter((p) => !p.reused)) {
         put(part.copy, part.name);
-        if (part.video.where === "From Final Cut") taken.push({ path: part.path, snap: part.snap, name: part.video.name });
+        if (part.video.where === "From Final Cut") taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "From Final Cut" });
+        // An export taken from Downloads is removed there only if its name is an export's name for the project (architecture 8.1, the
+        // originals): the app's own record, which can be written in a project by the app's agent, or her word, may have led to a file
+        // with another name, and that is left where it is. An export from another folder, from what the other Mac released, or from the
+        // project's renders is never removed.
+        else if (part.app && part.video.where === "Downloads" && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });
         for (const ending of [".srt", ".transcript.txt", ".words.json"]) {
           const from = join(part.dir, stem(part.name) + ending);
           if (existsSync(from)) put(from, stem(part.name) + ending);
@@ -905,15 +940,21 @@ export async function finishNow(ctx, found, deps = {}) {
       const own = `final/${stem(part.name)}.`;
       listed = Object.fromEntries(Object.entries(listed).filter(([path]) => !path.startsWith(own) || path in files));
       const words = `final/${stem(part.name)}.words.json`;
+      // A part of HyperFrames' says its project, and has neither an export of the edit nor "no hand edits": the project is the edit, and
+      // the export is the video (architecture 8.4).
       finishedParts[part.key] = {
         v: versionOf(record, part, part.name), file: `final/${part.name}`, bytes: part.video.bytes, seconds: part.seconds, source: { bytes: part.video.bytes, mtimeMs: part.video.mtimeMs },
         ...(words in files ? { words } : {}), ...(part.story && part.story.length ? { story: part.story.map((f) => `final/${basename(f)}`) } : {}),
-        ...(part.export ? { export: `final/${part.export.name}` } : { noHandEdits: true })
+        ...(part.app ? { project: part.project } : part.export ? { export: `final/${part.export.name}` } : { noHandEdits: true })
       };
     }
     const finishedReels = new Map(parts.filter((p) => p.reel).map((p) => [p.reel, p]));
+    // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none).
+    const projectsDone = new Set(parts.filter((p) => p.app).map((p) => p.key));
+    const apps = record.app && Array.isArray(record.app.projects) && projectsDone.size ? { app: { ...record.app, projects: record.app.projects.map((p) => (projectsDone.has(p.key) && p.state !== PROJECT_KEPT ? { ...p, state: "finished" } : p)) } } : {};
     const nextRecord = {
       ...record,
+      ...apps,
       finished: { revision, at: localStamp(new Date(ctx.now())), on: ctx.machine, handoff: `final/${handoffName}`, parts: finishedParts },
       reels: (record.reels || []).map((r) => (finishedReels.has(r.n) ? { ...r, status: "finished", final: { file: `final/${finishedReels.get(r.n).name}`, seconds: finishedReels.get(r.n).seconds } } : r)),
       files: { ...listed, ...files },
@@ -953,7 +994,7 @@ export async function finishNow(ctx, found, deps = {}) {
       recordWritten = true;
     } catch (e) {
       written = false;
-      failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}.${listWhatFinalHolds()} Say finish again.`);
+      failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}.${listWhatFinalHolds()} ${sayAgain}`);
     }
 
     // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish. On an
@@ -988,20 +1029,21 @@ export async function finishNow(ctx, found, deps = {}) {
       }
       const now = readEpisode(found.folder);
       holds = Boolean(now.record && now.record.finished && now.record.finished.revision === revision);
-      if (!holds) failed.push(now.record ? "The episode's record no longer holds this finish: the other Mac changed it. Say finish again." : `The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. Say finish again.`);
+      if (!holds) failed.push(now.record ? `The episode's record no longer holds this finish: the other Mac changed it. ${sayAgain}` : `The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. ${sayAgain}`);
     }
     if (problems.length) {
       failed.push(...problems);
-      next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole at the late check.");
+      if (parts.some((p) => !p.app && !p.reused)) next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole at the late check.");
+      if (taken.some((file) => file.place === "Downloads")) next.push("The exports it took from Downloads are kept there, because a copy in final/ was not whole at the late check.");
     } else if (written && holds) {
       for (const file of taken) {
         if (unchanged(file.path, file.snap)) rmSync(file.path, { recursive: true, force: true });
-        else next.push(`${file.name} changed in From Final Cut after it was taken, so it is kept there.`);
+        else next.push(`${file.name} changed in ${file.place} after it was taken, so it is kept there.`);
       }
     }
 
     next.push("To save space on this Mac, make the episode's folder online-only: in Finder, Control-click it and choose Make online-only.");
-    next.push("Final Cut's render files can be freed with File > Delete Generated Library Files.");
+    if (parts.some((p) => !p.app)) next.push("Final Cut's render files can be freed with File > Delete Generated Library Files.");
     ended = failed.length === 0;
     return result();
   } catch (e) {

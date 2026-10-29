@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { downloadsFolder, episodeWork } from "../settings.js";
 import { turnsOf } from "../hyperframes.js";
-import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound } from "../exports.js";
+import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound, isExportOf, shapeFault, soundFault, colourNote } from "../exports.js";
 
 const MAIN = "Pricing- what to charge- main 3fa9c1";
 const fixture = (name) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/exports/${name}`, import.meta.url), "utf8");
@@ -673,5 +673,63 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
       assert.deepEqual([got.unreadable, got.input.downloads.files], [true, []], code);
     }
     w.done();
+  });
+});
+
+describe("E4. the checks of an export (shapeFault, soundFault, colourNote)", () => {
+  const upright = { width: 1080, height: 1920 };
+  const wide = { width: 1920, height: 1080 };
+  it("says a Reel is upright, and names the file when it is not", () => {
+    assert.equal(shapeFault({ reel: 2 }, "A.mp4", upright, wide), "");
+    assert.equal(shapeFault({ reel: 2 }, "A.mp4", wide, wide), "A.mp4 is wider than it is tall, and a Reel is upright.");
+    assert.equal(shapeFault({ reel: 2 }, "A.mp4", { width: 1080, height: 1080 }, wide), "A.mp4 is square, and a Reel is upright.");
+  });
+  it("gives the main video the raw video's shape, a wide one's wide and an upright clip's upright", () => {
+    assert.equal(shapeFault({ key: "main" }, "A.mp4", wide, wide), "");
+    assert.equal(shapeFault({ key: "main" }, "A.mp4", upright, upright), "");
+    assert.equal(shapeFault({ key: "main" }, "A.mp4", upright, wide), "A.mp4 is upright, and the main video has the raw video's shape: wider than it is tall.");
+    assert.equal(shapeFault({ key: "main" }, "A.mp4", wide, upright), "A.mp4 is wider than it is tall, and the main video has the raw video's shape: upright.");
+  });
+  it("asks nothing of the main video's shape when the raw video's is not known", () => {
+    for (const raw of [null, undefined, {}, { width: 0, height: 0 }]) assert.equal(shapeFault({ key: "main" }, "A.mp4", upright, raw), "");
+  });
+  it("wants sound, and says how to get it", () => {
+    assert.equal(soundFault({ sound: true }, "A.mp4"), "");
+    assert.equal(soundFault({ sound: false }, "A.mp4"), "A.mp4 has no sound. Export it again from HyperFrames with its sound.");
+    assert.equal(soundFault(null, "A.mp4"), "A.mp4 has no sound. Export it again from HyperFrames with its sound.");
+  });
+  it("says nothing of BT.709, and nothing of tags that are not HDR", () => {
+    assert.equal(colourNote({ primaries: "bt709", transfer: "bt709" }, "A.mp4"), "");
+    assert.equal(colourNote({ primaries: "smpte170m", transfer: "smpte170m" }, "A.mp4"), "");
+    assert.equal(colourNote({ primaries: "bt2020", transfer: "bt709" }, "A.mp4"), "");
+    assert.equal(colourNote({ primaries: "bt709", transfer: "" }, "A.mp4"), "");
+  });
+  it("mentions a file with no colour tags, and goes on", () => {
+    assert.equal(colourNote(null, "A.mp4"), "A.mp4 has no colour tags: check by eye that its colours look right.");
+  });
+  it("names HDR colour, HLG or PQ with BT.2020, and what to do if it looks wrong", () => {
+    const hdr = "A.mp4 is tagged as HDR colour, which most players show washed out: check it by eye, and export it again in standard colour if it looks wrong.";
+    assert.equal(colourNote({ primaries: "bt2020", transfer: "arib-std-b67" }, "A.mp4"), hdr);
+    assert.equal(colourNote({ primaries: "bt2020", transfer: "smpte2084" }, "A.mp4"), hdr);
+  });
+  it("holds no path, no flag and no command name in what it says", () => {
+    for (const text of [shapeFault({ reel: 1 }, "A 2026-10-20 13.56.mp4", wide, wide), soundFault(null, "A.mp4"), colourNote(null, "A.mp4"), colourNote({ primaries: "bt2020", transfer: "smpte2084" }, "A.mp4")]) assert.doesNotMatch(text, /\/|--|~|\bedit\.js\b|\bnode\b/, text);
+  });
+});
+
+describe("E6. isExportOf: a name the app makes for the project", () => {
+  it("is true for the project's export names, composed or decomposed, with a copy mark and any ending that is read", () => {
+    assert.equal(isExportOf(`${MAIN} 2026-10-20 13.56.mp4`, MAIN), true);
+    assert.equal(isExportOf(`${MAIN} 2026-10-20 13.56 (1).mov`, MAIN), true);
+    assert.equal(isExportOf("Café talk main 3fa9c1 2026-10-20 13.56.mp4".normalize("NFD"), "Café talk main 3fa9c1"), true);
+    assert.equal(isExportOf("Café talk main 3fa9c1 2026-10-20 13.56.mp4", "Café talk main 3fa9c1".normalize("NFD")), true);
+  });
+  it("is false for another project's name, a name the app does not make, and a project that only begins the same", () => {
+    assert.equal(isExportOf(`${MAIN} 2026-10-20 13.56.mp4`, "Pricing- what to charge- reel 2 3fa9c1"), false);
+    assert.equal(isExportOf("final.mp4", MAIN), false);
+    assert.equal(isExportOf(`${MAIN} 2.mp4`, MAIN), false);
+    assert.equal(isExportOf(`${MAIN} 2 2026-10-20 13.56.mp4`, MAIN), false);
+    assert.equal(isExportOf(`${MAIN} 2026-10-20 13.56.mp4`, ""), false);
+    assert.equal(isExportOf(null, MAIN), false);
   });
 });

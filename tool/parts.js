@@ -149,6 +149,8 @@ export function unkeptParts(record, machine) {
     if (!here.length) return false;
     const newest = Math.max(...here.map((p) => p.v));
     const kept = done[part.key];
+    // A part the last finish took from HyperFrames' project is not in the library: the project is its edit (architecture 8.4).
+    if (kept && kept.project) return false;
     if (!kept || !(kept.export || kept.noHandEdits)) return true;
     const finishedV = Number.isInteger(kept.v) ? kept.v : (pushed.find((p) => nfc(p.project) === nfc(stem(String(kept.file).split("/").pop()))) || {}).v;
     return !(finishedV >= newest);

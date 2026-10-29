@@ -19,8 +19,9 @@ export const ZONE = fixedZone(-300);
 export const ms = (hours, minutes, seconds = 0) => ZONE.ms(2026, 10, 20, hours, minutes, seconds);
 /** The names of the made-up episode's projects, as project.js gives them (and as `app` and `app … reel 2` record them). */
 export const MAIN = projectName({ name: NAME, part: "main", id: ID });
+export const REEL1 = projectName({ name: NAME, part: { reel: 1 }, id: ID });
 export const REEL2 = projectName({ name: NAME, part: { reel: 2 }, id: ID });
-export const PROJECT_OF = { main: MAIN, "reel 2": REEL2 };
+export const PROJECT_OF = { main: MAIN, "reel 1": REEL1, "reel 2": REEL2 };
 /** An export's name as the app makes it: the project's name, the day, the time its export began to the minute, and the ending. */
 export const named = (project, when, ending = "mp4") => `${project} 2026-10-20 ${when}.${ending}`;
 export const AT = "2026-10-20T15:00:00-05:00";
@@ -29,15 +30,16 @@ export const ANSWERED = { state: "answered", guess: null, seen: "", came: "camer
 /** One project of the record (architecture 7.1), opened and not yet exported. */
 export const entry = (key, over = {}) => ({
   key, name: PROJECT_OF[key], madeAt: AT, on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: "2026-10-14T09:00:00-05:00" },
-  workingCopy: { bytes: 16, seconds: 23.423, fps: 30 }, opened: ["2026-10-20T13:00:00-05:00"], handover: false, fromSuggestion: key === "main" ? null : 2, state: "opened", ...over
+  workingCopy: { bytes: 16, seconds: 23.423, fps: 30 }, opened: ["2026-10-20T13:00:00-05:00"], handover: false, fromSuggestion: key === "main" ? null : Number(key.slice(5)), state: "opened", ...over
 });
 
-/** What the stand-in for ffprobe says of an export: the main video is wide and 11.878 seconds long, Reel 2 upright and 75 seconds (long
-    enough for Story parts), with sound and standard colour. `over` changes a file's facts by its name. */
+/** What the stand-in for ffprobe says of an export: the main video is wide and 11.878 seconds long, Reel 1 upright and 7.7 seconds, Reel 2
+    upright and 75 seconds (long enough for Story parts), with sound and standard colour. `over` changes a file's facts by its name. */
 export const probeFor = (over = () => ({})) => (args) => {
   const file = args[args.length - 1];
-  const reel = /reel[ -]2/.test(file);
-  const facts = { picture: reel ? { width: 1080, height: 1920, color_primaries: "bt709", color_transfer: "bt709" } : { width: 1280, height: 720, color_primaries: "bt709", color_transfer: "bt709" }, sound: { sample_rate: "48000", channels: 2 }, duration: reel ? "75.000000" : "11.878000", ...over(file) };
+  const reel = /reel[ -]\d/.test(file);
+  const seconds = /reel[ -]2/.test(file) ? "75.000000" : reel ? "7.700000" : "11.878000";
+  const facts = { picture: reel ? { width: 1080, height: 1920, color_primaries: "bt709", color_transfer: "bt709" } : { width: 1280, height: 720, color_primaries: "bt709", color_transfer: "bt709" }, sound: { sample_rate: "48000", channels: 2 }, duration: seconds, ...over(file) };
   writeFileSync(args[args.indexOf("-o") + 1], probed(facts));
   return { code: 0, stderr: "" };
 };
@@ -69,7 +71,7 @@ export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, 
 /** An export of `key`'s project that began at `start` ([hours, minutes, seconds]), saved in Downloads under the name the app gives
     it, ending two minutes later, with the record the app leaves in the project's renders/ (A0's fixture, with the names filled in).
     `ending`, `text`, `name` and `record: false` change the file and its record. Gives { path, name, began }. */
-export function exportOf(w, key, { start = key === "main" ? [13, 56, 40] : [14, 3, 12], ending = "mp4", text = `the export of ${key}`, name, record = true, folder = w.downloads } = {}) {
+export function exportOf(w, key, { start = key === "main" ? [13, 56, 40] : key === "reel 1" ? [14, 0, 30] : [14, 3, 12], ending = "mp4", text = `the export of ${key}`, name, record = true, folder = w.downloads } = {}) {
   const [hours, minutes, seconds] = start;
   const two = (n) => String(n).padStart(2, "0");
   const fileName = name ?? named(PROJECT_OF[key], `${two(hours)}.${two(minutes)}`, ending);

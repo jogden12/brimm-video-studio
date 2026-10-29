@@ -14,6 +14,7 @@ import { KEPT, isMain } from "./app.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
 import { downloadsFolder, episodeWork } from "./settings.js";
+import { isHdr } from "./workcopy.js";
 
 /** The endings of a video that is taken as an export. A WebM is read and mentioned, and never taken (8.1). */
 export const TAKEN_ENDINGS = ["mp4", "mov", "m4v"];
@@ -469,4 +470,39 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
     unreadable: seen.unreadable,
     input: { parts, downloads: { dir: downloads, files: seen.files }, released: { dir: releasedDir, files: videosIn(releasedDir, readdir).files }, finished: record.finished || null, zone }
   };
+}
+
+// --- The checks of an export (architecture 8.2), and the rule for what may be removed from Downloads (8.1) ---
+
+/** Whether a file's name is an export's name for the project: the name the app gives what it exports (exportNameOf), of that project,
+    compared composed. A file she named, or the app's record named, under another name is not. Only a file with such a name is removed from
+    Downloads once it is copied, since a record in a project can be written by the app's agent too (8.1, the originals). */
+export function isExportOf(name, project) {
+  const read = exportNameOf(name);
+  return read !== null && typeof project === "string" && project !== "" && read.project === project.normalize("NFC");
+}
+
+/** A picture's shape, in words. */
+const shapeOf = (w, h) => (h > w ? "upright" : w > h ? "wider than it is tall" : "square");
+
+/** What is wrong with a finished video's shape for its part, or "". A Reel is upright. The main video has the raw video's shape, so a short
+    upright video's main video is upright. `facts` are the video's (cuts.js factsOf) and `raw` the raw video's, as its cut plan keeps them. */
+export function shapeFault(part, name, facts, raw) {
+  const shape = shapeOf(facts.width, facts.height);
+  if (part.reel) return shape === "upright" ? "" : `${name} is ${shape}, and a Reel is upright.`;
+  if (!raw || !raw.width || !raw.height) return "";
+  const want = shapeOf(raw.width, raw.height);
+  return shape === want ? "" : `${name} is ${shape}, and the main video has the raw video's shape: ${want}.`;
+}
+
+/** What is wrong with an export's sound, or "": BRIMM Ops reads the words, so an export with no sound cannot be handed off. */
+export const soundFault = (facts, name) => (facts && facts.sound ? "" : `${name} has no sound. Export it again from HyperFrames with its sound.`);
+
+/** What to tell her of an export's colour, or "": nothing for the colour of an ordinary picture (BT.709 is what the app writes), a note that
+    there are no colour tags to read, and a note that it is HDR, which most players show washed out. Neither stops the finish. `colour` is
+    { primaries, transfer } (cuts.js colourOf), or null when the file has no colour tags. */
+export function colourNote(colour, name) {
+  if (!colour) return `${name} has no colour tags: check by eye that its colours look right.`;
+  if (isHdr(colour)) return `${name} is tagged as HDR colour, which most players show washed out: check it by eye, and export it again in standard colour if it looks wrong.`;
+  return "";
 }
