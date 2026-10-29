@@ -1,7 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
-- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 3 are merged, and PR 4 is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
+- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4 are merged, then the notes changes (#7) and the word-times fix (#8); main is 1d5f909. Nothing else in it is built on main, and nothing in it is installed or turned on.
 - **It rests on:**
   - the design accepted on 2026-10-27, `2026-10-27-brimm-video-with-the-hyperframes-app.md` (until it is merged, on the branch `claude/zealous-bell-esuqck` of brimm-video, or `claude/design-2026-10-27` of brimm-video-studio);
   - Jason's decisions in `docs/requirements.md`;
