@@ -8,7 +8,7 @@
 // with stand-ins for ffprobe, ffmpeg and the transcriber: nothing touches the real Downloads folder, Dropbox or BRIMM Video Work.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { finishFinished, finishNow } from "../finish.js";
@@ -138,6 +138,22 @@ describe("C1. the late check of a finish puts nothing back over a later write", 
     assert.equal(reread(found).finished.revision, 2);
     assert.equal(result.ok, false);
     assert.deepEqual(reasons(result), [`${MOVED} Say "hand it off" again.`]);
+  });
+  it("puts nothing back, and removes nothing it took, when a record written above its own is on its way and cannot be read yet", async () => {
+    const w = await W();
+    const reel = exportOf(w, "reel 2");
+    const found = await askedReels(w);
+    const copied = join(found.folder, "final", HANDOFF);
+    whileLate(w.t, async () => {
+      // A record Dropbox has not brought over whole, above this finish's own: what it came with is not known, and a copy went missing.
+      writeFileSync(recordFile(found.folder, reread(found).rev + 1), '{"version": 4, "rev": ');
+      rmSync(copied);
+    });
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, false);
+    assert.deepEqual(reasons(result), [`${MOVED} Say "hand off the Reels" again.`]);
+    assert.equal(existsSync(copied), false, "not put back over what that record may have come with");
+    assert.ok(readdirSync(w.downloads).includes(reel.name), "what it took from Downloads is kept: its copies were not checked");
   });
   it("still puts a copy back that went missing when a record written since still says its finish", async () => {
     const w = await W();
