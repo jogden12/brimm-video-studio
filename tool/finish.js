@@ -1074,7 +1074,7 @@ export async function finishNow(ctx, found, deps = {}) {
       const now = readEpisode(found.folder);
       // Not when a record above it was not known to say it: its copies were not checked, so nothing is removed that it took.
       holds = Boolean(now.record && now.record.finished && now.record.finished.revision === revision) && !movedOn;
-      if (!holds) failed.push(now.record ? `The episode's record no longer holds this finish: the other Mac changed it${movedOn ? " after the copies were made, so nothing in final/ was put back over what it wrote" : ""}. ${sayAgain}` :`The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. ${sayAgain}`);
+      if (!holds) failed.push(now.record ? `The episode's record no longer holds this finish: the other Mac changed it${movedOn ? " after the copies were made, so nothing in final/ was put back over what it wrote" : ""}. ${sayAgain}` : `The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. ${sayAgain}`);
     }
     if (problems.length) {
       failed.push(...problems);
