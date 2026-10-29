@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { isMain, plainName, projectOnAnotherMac } from "./app.js";
-import { VERSIONS_LIMIT, childEnv, historyArgs, plainTurns, plainVersions, readHistory, turnsOf } from "./hyperframes.js";
+import { VERSIONS_LIMIT, childEnv, clockIn, historyArgs, plainTurns, plainVersions, readHistory, turnsOf } from "./hyperframes.js";
 import { episodeWork } from "./settings.js";
 
 /** How many turns `what-happened` tells: the newest 10 that have something to say. */
@@ -126,6 +126,15 @@ export function daysOf(items, { tz, now }) {
     lines.push(`  ${line}`);
   }
   return lines;
+}
+
+/** The time of a turn, `ms`, as the guide tells it (plan PR 10): the day and the clock of what-happened's lines, "today at 3:41 pm",
+    "yesterday at 3:41 pm" or "on Tuesday 27 October at 3:41 pm". The day is daysOf's, and the clock plainTurns', both in the zone `tz`
+    (an IANA name; the Mac's own when none is given), and a zone that is not one throws. `now` is the clock, in milliseconds. */
+export function turnTime(ms, { tz, now }) {
+  const [heading] = daysOf([{ ms, line: "" }], { tz, now });
+  const day = heading.slice(0, -1);
+  return `${day === "Today" ? "today" : day === "Yesterday" ? "yesterday" : `on ${day}`} at ${clockIn(tz)(ms)}`;
 }
 
 /** The folder of the main project in use on this Mac, or null: the record has none (one kept for an earlier kind is none in use,

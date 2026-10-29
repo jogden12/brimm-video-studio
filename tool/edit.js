@@ -83,13 +83,13 @@ import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShow
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, plainName, projectOnAnotherMac } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
-import { versionsOf, whatHappened } from "./app-history.js";
+import { historyTail, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode } from "./free.js";
-import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
+import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
@@ -6090,6 +6090,49 @@ function guideReading(ctx, e, r, kind, running, rates) {
   return due === null ? { reading: "none" } : later();
 }
 
+/** The working copy's run, for the guide (plan PR 10; guide.js VideoFacts `copy`): { left, usual } while this Mac's run makes the video for
+    HyperFrames of the episode, that is while its lock (workcopy.js workCopyLockOf) is held by a live process, and null otherwise. `left`
+    is the seconds left as the panel's file for that very process says (panelRuns), as of when the panel last wrote it, with the time
+    since taken off; null when it says none, or the time has run out. `usual` is how long the step usually takes, by the speed this Mac
+    measured for it (`rates`, guide.js copyIn) and the recording's length, null while either is not known. A Reel's video is made under
+    the same lock, and is not told from the main video's. */
+function guideCopy(ctx, e, r, rates) {
+  const run = runningRun(ctx.home, e.name, ctx.alive, workCopyLockOf(ctx.home, e.name));
+  if (!run) return null;
+  const panel = panelRuns(ctx).find((p) => p.pid === run.pid);
+  const since = panel && Number.isFinite(panel.updated) ? Math.max(0, ctx.now() - panel.updated) / 1000 : 0;
+  const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
+  const left = panel ? readyIn({ left: fresh(panel.left), total: fresh(panel.total), n: panel.n, of: panel.of }) : null;
+  return { left, usual: copyIn(rates, r.video && r.video.seconds) };
+}
+
+/** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when
+    the record has none, or its folder is not on this Mac. `opened` is whether the record lists a time the app opened it; `last` the time
+    of the last turn in the project's `.hyperframes/app-history.jsonl` in words (app-history.js turnTime, in the zone a test gives as
+    `deps.app.tz`), "" when the app has kept none that can be read; `exported` whether it has an export that began after its last change,
+    as `finish` finds one (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in
+    the project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading,
+    is no export seen: the guide only reads, and `finish` tells her what it needs. */
+function guideProject(ctx, e, r) {
+  const main = (r.app?.projects ?? []).find(inUse);
+  if (!main || !plainName(main.name)) return null;
+  const dir = join(episodeWork(ctx.home, e.name), main.name);
+  try {
+    if (!statSync(dir).isDirectory()) return null;
+  } catch (err) {
+    return null;
+  }
+  const last = turnsOf(historyTail(dir)).reduce((latest, turn) => Math.max(latest, Date.parse(turn.at)), -Infinity);
+  let exported = false;
+  try {
+    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+    exported = !seen.unreadable && lookForExports(seen.input, {}, { rest: false }).parts.some((part) => part.key === "main" && part.video !== null);
+  } catch (err) {
+    exported = false;
+  }
+  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: Number.isFinite(last) ? turnTime(last, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported };
+}
+
 /** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
     read teachings now, how many of its items she has still to keep, drop or change, and whether its empty revision is still owed
     (revisionOwed). Its items are counted from its teachings file, read only when it is whole on this Mac: one that is not, or that
@@ -6114,6 +6157,11 @@ function guideFacts(ctx, e, links, rates) {
   const v2 = writesV2For(ctx.settings, e.folder, r);
   const running = runningCommand(ctx.home, e.name, ctx.alive);
   const pushed = r.main.pushed;
+  const handoff = guideHandoff(ctx, e, r, links, v2);
+  // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
+  // it: its Final Cut stages are for the Final Cut way alone. What the HyperFrames way reads of the disk (the video being made, the
+  // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written.
+  const way = kind === "raw" || kind === "short video" ? finishWay(ctx, r) : "";
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6135,8 +6183,11 @@ function guideFacts(ctx, e, links, rates) {
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    way,
+    copy: way ? guideCopy(ctx, e, r, rates) : null,
+    project: way && !handoff ? guideProject(ctx, e, r) : null,
     session: kind === "session" ? guideSession(ctx, e, r) : null,
-    handoff: guideHandoff(ctx, e, r, links, v2),
+    handoff,
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
     source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };
