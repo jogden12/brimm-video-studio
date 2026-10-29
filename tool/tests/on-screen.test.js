@@ -5,9 +5,11 @@
 // temporary folder. Nothing here touches the real BRIMM Video Work, Dropbox or Downloads, or the files A0 left.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { closeSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { projectWords, projectWordsIn, wordsOnScreen } from "../on-screen.js";
 
 const FIXTURES = new URL("./fixtures/hyperframes-0.8.208/on-screen/", import.meta.url);
@@ -499,6 +501,206 @@ describe("A6. from a folder", () => {
   it("reads a composition in a folder of compositions/", () => {
     const dir = folder({ "index.html": projectOf(`<div id="card" data-composition-id="card" data-composition-src="compositions/sub/card.html" data-start="3" data-duration="5"></div>`)["index.html"], "compositions/sub/card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Nested</div>') });
     assert.deepEqual(projectWords(dir).words, [{ text: "Nested", at: 3 }]);
+    done();
+  });
+});
+
+describe("A8. a file is read as the one thing it was looked at as, and no more than 2 MB of it (review I4)", () => {
+  // A project is written by the app's agent while `finish` reads it. The file looked at is opened without following a link and without
+  // waiting for a writer, the thing opened must be the thing looked at (the same device and inode, a regular file), and no more than 2 MB
+  // and a byte is read from it, whatever it has grown to. The tests swap a file from inside the look, as free.test.js's do from `ctx.stat`.
+  const MB = 1024 * 1024;
+  const made = [];
+  const folder = (files) => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-on-screen-"));
+    made.push(dir);
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(dir, rel, ".."), { recursive: true });
+      writeFileSync(join(dir, rel), text);
+    }
+    return dir;
+  };
+  const done = () => made.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  const SEEN = '<div class="clip" data-start="1" data-duration="2">Seen</div>';
+  const SWAPPED = '<div class="clip" data-start="1" data-duration="2">Swapped in</div>';
+  /** `io` for projectWords: the look at a file runs `swap(path)` once, after it has looked, before the file is opened. */
+  const afterLook = (swap) => {
+    let swapped = false;
+    return {
+      lstat: (path) => {
+        const found = lstatSync(path);
+        if (!swapped) {
+          swapped = true;
+          swap(path);
+        }
+        return found;
+      }
+    };
+  };
+  it("does not read a file swapped for another after the look: the file opened is not the file looked at", () => {
+    const dir = folder({ "index.html": SEEN });
+    // The other file exists beside the first when it takes its place, so that it has an inode of its own.
+    const found = projectWords(dir, afterLook((path) => {
+      writeFileSync(`${path}.other`, SWAPPED);
+      renameSync(`${path}.other`, path);
+    }));
+    assert.deepEqual(found, { here: true, words: [] });
+    assert.deepEqual(projectWords(dir).words, [{ text: "Swapped in", at: 1 }], "the swapped-in file is an ordinary one when it is there at the look");
+    done();
+  });
+  it("does not follow a link swapped in for a file after the look, though it leads to a file of the project that is the same file", () => {
+    const dir = folder({ "index.html": SEEN });
+    const found = projectWords(dir, afterLook((path) => {
+      linkSync(path, join(dir, "real.html"));
+      rmSync(path);
+      symlinkSync(join(dir, "real.html"), path);
+    }));
+    assert.deepEqual(found, { here: true, words: [] });
+    done();
+  });
+  it("does not wait for a writer on a file swapped for a pipe after the look", () => {
+    // A pipe opened to read waits for a writer for good: the child process has a time limit, and the swap is made after the look, since
+    // a pipe there at the look is refused before it is opened.
+    const dir = folder({ "index.html": SEEN });
+    const script = `
+      import { lstatSync, rmSync } from "node:fs";
+      import { execFileSync } from "node:child_process";
+      import { projectWords } from ${JSON.stringify(fileURLToPath(new URL("../on-screen.js", import.meta.url)))};
+      const dir = process.argv[1];
+      let swapped = false;
+      const lstat = (path) => {
+        const found = lstatSync(path);
+        if (!swapped) {
+          swapped = true;
+          rmSync(path);
+          execFileSync("mkfifo", [path]);
+        }
+        return found;
+      };
+      console.log(JSON.stringify(projectWords(dir, { lstat })));
+    `;
+    const ran = spawnSync(process.execPath, ["--input-type=module", "-e", script, dir], { encoding: "utf8", timeout: 20000, killSignal: "SIGKILL" });
+    assert.equal(ran.error, undefined, `it waited: ${ran.error?.message}`);
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.deepEqual(JSON.parse(ran.stdout), { here: true, words: [] });
+    done();
+  });
+  it("reads no more than 2 MB and a byte of a file that grows after the look, and refuses it", () => {
+    const dir = folder({ "index.html": SEEN });
+    const file = join(dir, "index.html");
+    let requested = 0;
+    let grown = false;
+    const io = {
+      fstat: (fd) => {
+        const found = fstatSync(fd);
+        if (!grown) {
+          grown = true;
+          truncateSync(file, 60 * MB);
+        }
+        return found;
+      },
+      read: (fd, buffer, offset, length, position) => {
+        requested += length;
+        return readSync(fd, buffer, offset, length, position);
+      }
+    };
+    assert.deepEqual(projectWords(dir, io), { here: true, words: [] });
+    assert.ok(requested > 0 && requested <= 2 * MB + 1, `${requested} bytes were asked for`);
+    done();
+  });
+  it("opens nothing that the look refuses: what is no file, or holds more than 2 MB", () => {
+    for (const refused of [(found) => ({ isFile: () => false, size: found.size }), (found) => ({ isFile: () => true, size: 3 * MB })]) {
+      const dir = folder({ "index.html": SEEN });
+      let opened = 0;
+      const io = {
+        lstat: (path) => {
+          const found = lstatSync(path);
+          return { dev: found.dev, ino: found.ino, ...refused(found) };
+        },
+        open: (path, flags) => {
+          opened += 1;
+          return openSync(path, flags);
+        }
+      };
+      assert.deepEqual(projectWords(dir, io), { here: true, words: [] });
+      assert.equal(opened, 0);
+    }
+    done();
+  });
+  it("reads a file of exactly 2 MB, and not one of a byte more", () => {
+    const exactly = (size) => {
+      const head = `${SEEN}<!--`;
+      return `${head}${"x".repeat(size - head.length - 3)}-->`;
+    };
+    assert.equal(Buffer.byteLength(exactly(2 * MB)), 2 * MB);
+    assert.deepEqual(projectWords(folder({ "index.html": exactly(2 * MB) })).words, [{ text: "Seen", at: 1 }]);
+    assert.deepEqual(projectWords(folder({ "index.html": exactly(2 * MB + 1) })).words, []);
+    done();
+  });
+  it("reads nothing of a file that has grown past 2 MB by the time it is opened", () => {
+    const dir = folder({ "index.html": SEEN });
+    let requested = 0;
+    const io = {
+      ...afterLook((path) => truncateSync(path, 60 * MB)),
+      read: (fd, buffer, offset, length, position) => {
+        requested += length;
+        return readSync(fd, buffer, offset, length, position);
+      }
+    };
+    assert.deepEqual(projectWords(dir, io), { here: true, words: [] });
+    assert.equal(requested, 0, "its size, as the descriptor gives it, is too much");
+    done();
+  });
+  it("does not take what the descriptor says is another device, or no file, for the file looked at", () => {
+    for (const change of [(found) => ({ dev: found.dev + 1 }), () => ({ isFile: () => false })]) {
+      const dir = folder({ "index.html": SEEN });
+      const io = { fstat: (fd) => { const found = fstatSync(fd); return { dev: found.dev, ino: found.ino, size: found.size, isFile: () => true, ...change(found) }; } };
+      assert.deepEqual(projectWords(dir, io), { here: true, words: [] });
+      assert.deepEqual(projectWords(dir, { fstat: (fd) => { const found = fstatSync(fd); return { dev: found.dev, ino: found.ino, size: found.size, isFile: () => true }; } }).words, [{ text: "Seen", at: 1 }], "and the same stand-in with nothing changed is the file");
+    }
+    done();
+  });
+  it("reads a file larger than one read, with a character across the boundary of two, whole", () => {
+    const lead = '<!---->' + '<div class="clip" data-start="1" data-duration="2">Price 5';
+    const padding = "x".repeat(65535 - Buffer.byteLength(lead));
+    const page = `<!--${padding}-->` + '<div class="clip" data-start="1" data-duration="2">Price 5€ now</div>';
+    const dir = folder({ "index.html": page });
+    assert.equal(Buffer.byteLength(page.slice(0, page.indexOf("€"))), 65535, "its three bytes are the last of the first 64 KB and the first two of the next");
+    assert.deepEqual(projectWords(dir).words, [{ text: "Price 5€ now", at: 1 }]);
+    const big = folder({ "index.html": `<!--${"x".repeat(1900 * 1024)}-->${SEEN}` });
+    assert.deepEqual(projectWords(big).words, [{ text: "Seen", at: 1 }]);
+    done();
+  });
+  it("reads the bytes of a file once for two names of it, and the words of both hosts", () => {
+    const a = composition("card", '<div class="clip" data-start="0" data-duration="2">Twice</div>');
+    const dir = folder({ "index.html": projectOf(`${hostOf("one", "compositions/a.html", 3, 5)}${hostOf("two", "compositions/b.html", 30, 5)}`)["index.html"], "compositions/a.html": a });
+    linkSync(join(dir, "compositions", "a.html"), join(dir, "compositions", "b.html"));
+    const names = new Map();
+    const reads = [];
+    const opened = [];
+    const closed = [];
+    const base = realpathSync(dir);
+    const io = {
+      open: (path, flags) => {
+        const fd = openSync(path, flags);
+        names.set(fd, path);
+        opened.push(fd);
+        return fd;
+      },
+      read: (fd, buffer, offset, length, position) => {
+        const got = readSync(fd, buffer, offset, length, position);
+        if (got > 0) reads.push(names.get(fd).slice(base.length + 1));
+        return got;
+      },
+      close: (fd) => {
+        closed.push(fd);
+        closeSync(fd);
+      }
+    };
+    assert.deepEqual(projectWords(dir, io), { here: true, words: [{ text: "Twice", at: 3 }, { text: "Twice", at: 30 }] });
+    assert.equal(reads.filter((rel) => rel.startsWith("compositions/")).length, 1, `read as ${reads.join(", ")}`);
+    assert.equal(opened.length, 3, "index.html and both names");
+    assert.deepEqual(closed, opened, "every file it opened, it closed, one at a time");
     done();
   });
 });

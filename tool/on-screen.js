@@ -12,12 +12,17 @@
 //
 // Below the reader are the words `finish` says and asks of what it found (`mainWordsSaid` for the main video's picture, `reelTitleAsk` for
 // a Reel's title): plain sentences, with no path, no flag and no command name, since they go into Sallie's chat.
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { join, posix, sep } from "node:path";
 import { clockText } from "./clock.js";
 
 /** The most a file may hold for it to be read: a composition is a few kilobytes, and an agent can write anything in the project. */
 const BYTES_MOST = 2 * 1024 * 1024;
+/** How much of a file is read at a time. */
+const READ_PIECE = 64 * 1024;
+/** The flags by which a project's file is opened: it follows no link, and does not wait on a file that is not one (a pipe). */
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 /** What the reading of a project may use, all together (review I3): hosts that name hosts multiply the work, so the whole project has
     one budget, and a project that uses it up is not read in full. The most lines (a project of more is not given cut short), the most
     elements parsed or walked, and the most files asked of `read`. And the most a line may have (a longer one is a paragraph, not a
@@ -301,9 +306,15 @@ export function wordsOnScreen(read) {
 /** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder.
     `incomplete: true` is there only for a project that was not read in full (its budget was used up, see wordsOnScreen), and its
     words are none. Only `index.html` and the compositions under `compositions/` that a host names are opened, and only a regular file
-    of at most 2 MB whose real path is inside the project (a link, or a file reached through one, is not read). A file is what its
-    device and inode say, so that two names of one file are one file. It writes nothing. */
-export function projectWords(dir) {
+    of at most 2 MB whose real path is inside the project (a link, or a file reached through one, is not read). The project's other
+    writer, the app's agent, can swap a file between the look and the read, so a file is looked at, opened without following a link and
+    without waiting for a writer (as `historyTail` opens the history), and read through the descriptor: it must be the file looked at (the
+    same device and inode), a regular file within 2 MB, and no more than 2 MB and a byte is read from it, whatever it grows to. A file is
+    what its device and inode say, so that two names of one file are one file, and its bytes are read once. It writes nothing.
+    `io` gives the file functions in place of node's, for a test to swap a file from inside the look: lstat, open, fstat, read, close
+    and realpath. */
+export function projectWords(dir, io = {}) {
+  const { lstat = lstatSync, open = openSync, fstat = fstatSync, read: readAt = readSync, close = closeSync, realpath = realpathSync } = io;
   let base;
   try {
     if (typeof dir !== "string" || dir === "" || !statSync(dir).isDirectory()) return { here: false, words: [] };
@@ -311,16 +322,40 @@ export function projectWords(dir) {
   } catch (e) {
     return { here: false, words: [] };
   }
+  const texts = new Map();
+  /** The whole of an open file as text, or null when it holds more than 2 MB: read in pieces, none past the 2 MB and a byte. */
+  const textOf = (fd) => {
+    const pieces = [];
+    let total = 0;
+    while (total <= BYTES_MOST) {
+      const piece = Buffer.alloc(Math.min(READ_PIECE, BYTES_MOST + 1 - total));
+      const got = readAt(fd, piece, 0, piece.length, total);
+      if (got === 0) return Buffer.concat(pieces).toString("utf8");
+      pieces.push(piece.subarray(0, got));
+      total += got;
+    }
+    return null;
+  };
   const read = (rel) => {
+    let fd;
     try {
       const file = join(base, rel);
-      const found = lstatSync(file);
-      if (!found.isFile() || found.size > BYTES_MOST) return null;
+      const looked = lstat(file);
+      if (!looked.isFile() || looked.size > BYTES_MOST) return null;
+      fd = open(file, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
+      const opened = fstat(fd);
+      if (!opened.isFile() || opened.size > BYTES_MOST || opened.ino !== looked.ino || opened.dev !== looked.dev) return null;
+      const id = `${opened.dev}:${opened.ino}`;
+      if (!texts.has(id)) texts.set(id, textOf(fd));
+      const text = texts.get(id);
+      if (text === null) return null;
       // The file is where its name says, under the project's own folder or its own compositions/: through no link on the way.
       const own = rel === "index.html" ? base : join(base, "compositions");
-      return realpathSync(file).startsWith(join(own, sep)) ? { text: readFileSync(file, "utf8"), id: `${found.dev}:${found.ino}` } : null;
+      return realpath(file).startsWith(join(own, sep)) ? { text, id } : null;
     } catch (e) {
       return null;
+    } finally {
+      if (fd !== undefined) close(fd);
     }
   };
   const words = wordsOnScreen(read);
@@ -329,8 +364,8 @@ export function projectWords(dir) {
 
 /** The words on the picture of the project called `name` in the work folder `work`: projectWords of its folder. A name that does not
     lead to a folder of the work folder (it is a path, or empty) is a project that is not here. */
-export function projectWordsIn(work, name) {
-  return typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name) ? projectWords(join(work, name)) : { here: false, words: [] };
+export function projectWordsIn(work, name, io) {
+  return typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name) ? projectWords(join(work, name), io) : { here: false, words: [] };
 }
 
 // --- What finish says and asks of them (plan PR 8; architecture 8.5). Every sentence is plain: no path, no flag, no command name. ---
