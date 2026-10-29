@@ -1,7 +1,16 @@
 // Opening an episode in the HyperFrames app (architecture 2026-10-27: sections 4.1, 4.8, 5.1, 5.2, 5.6, 5.7 and 7.1).
 //
-// edit.js finds the episode, asks the gate, refuses an episode whose main project in use was made on another Mac and is not on this
-// one (projectOnAnotherMac), claims it for this Mac, and then gives it to openInApp, which does the rest:
+// edit.js finds the episode, asks the gate, refuses an episode whose main project in use was made on another Mac, is not on this one
+// and has no snapshot listed in the record (projectOnAnotherMac, projectSnapshot), claims it for this Mac, and then gives it to
+// openInApp, which does the rest:
+//   - a project whose folder is not on this Mac, and that the record lists a snapshot of (snapshot.js; plan PR 11), is rebuilt from it,
+//     whichever Mac made it: a take-over on the other Mac, or a Mac whose own folder is gone (rebuildHere). The files come back with the
+//     times they had, the settings file is made again, the link leads into this Mac's own toolchain, and she is told the app's history
+//     stays behind. The project is then here without its video, as `free` leaves one, which is the next step;
+//   - a project here that is older than the newest snapshot (olderHere: its marker, snapshot.js MARKER, names another snapshot than the
+//     newest the record lists of it) is neither opened nor handed over (4.7): the other Mac worked on it since. edit.js decides that before
+//     it claims anything (olderWords), so the refusal leaves the record and its claim as they were; the same goes for a project whose folder
+//     is a session clip's on the volume, however the record spells its name (clipFolders, clipTrouble: PR 15's rule, as free.js has it);
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - unless its video has been taken away (`free`, free.js; plan PR 15). The project is still the one in use, so no second is made:
@@ -50,6 +59,7 @@ import { transcriptOf } from "./loosened.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
+import { makerOf, momentText, olderThan, rebuildProject, snapshotOf } from "./snapshot.js";
 import { studioFolder } from "./studio.js";
 import { requestWorkCopy, workCopyKey, workCopyPaths } from "./workcopy.js";
 
@@ -70,11 +80,28 @@ const beingMade = (name) => `The video for HyperFrames is being made. Say "open 
 const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 export const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
-const videoBack = (name) => `The video HyperFrames was given for ${name} had been taken away; it is back in the project.`;
-const videoGoneAndChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made, and the video that project was made from has been taken away, so it can't be opened. Ask Jason.`;
-const noRecording = (name) => `The recording of ${name} is not in its folder, so the video of its HyperFrames project could not be made again. Ask Jason.`;
-const notTheSame = (name) => `The video made again for ${name} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
-const notPutBack = (name) => `The video for ${name} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
+/** What is said of a project's video made again and put back, whether `free` took it away or the project was rebuilt from a snapshot (plan
+    PR 11) without one. The six that follow are said of a Reel's project in the same words (app-reel.js), with the Reel named in `name`. */
+export const videoBack = (name) => `The video for ${name} was made again, and it is in the project.`;
+export const videoGoneAndChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made, and the video that project was made from has been taken away, so it can't be opened. Ask Jason.`;
+export const noRecording = (name) => `The recording of ${name} is not in its folder, so the video of its HyperFrames project could not be made again. Ask Jason.`;
+export const notTheSame = (name) => `The video made again for ${name} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
+export const notPutBack = (name) => `The video for ${name} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
+/** What is said of a project rebuilt from the other Mac's snapshot (plan PR 11), `name` being "Pricing talk" or "Reel 2 of Pricing talk". */
+export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Ask Jason.`;
+export const couldNotRebuild = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac. Ask Jason.`;
+export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
+export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
+/** That a project is rebuilt, from what, and that the app's history stays behind. The snapshot was handed over by `by`, the Mac that made it
+    (snapshot.js makerOf: who first listed it in the record), when that is a Mac and not this one; it is "the snapshot taken at …" when this
+    Mac made it, as a Mac gets its own project back from its own, and when the record does not say (the review of PR 11, M5: the Mac that
+    released last may have made no snapshot of this project). */
+export function rebuiltWords(ctx, { snapshot, name, by = "" }) {
+  const when = momentText(snapshot.ms, ctx.deps?.zone);
+  return by !== "" && by !== ctx.machine
+    ? `The HyperFrames project for ${name} is rebuilt on this Mac from what ${by} handed over at ${when}. What HyperFrames kept of its history stays on ${by}.`
+    : `The HyperFrames project for ${name} is rebuilt on this Mac from the snapshot taken at ${when}. What HyperFrames kept of its history stays behind.`;
+}
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
 const STAYS = {
   held: "This chat has held a client or group session's words, so it stays here.",
@@ -95,12 +122,57 @@ export const isMain = (project) => project.key === "main" && project.state !== K
     deletes inside it). */
 export const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 
+// --- A session clip's folder (PR 15's rule, free.js; the review of PR 11, I4) ---
+// Nothing of a session goes to HyperFrames, nor into Dropbox in a snapshot, unless Sallie confirms. A record that lists a session clip's
+// folder again, as a Reel's or the main video's project, under another spelling of its name, must not make it one: the volume takes
+// "SESSION CLIP 1" for "Session clip 1", and an accent written as a letter and a mark for the composed one.
+
+/** A name as the volume may take it for another: composed, and in lower case. It is only for telling a name the record gives twice; what
+    a folder is, is told by the volume itself (identityOf). */
+export const folded = (name) => name.normalize("NFC").toLowerCase();
+
+/** What a folder is on its volume, { id }: its device and its number there, which no spelling of its name changes; {} when nothing is there;
+    { bad: true } when it cannot be looked at. A link is not followed: it has a number of its own. */
+export function identityOf(path) {
+  try {
+    const found = lstatSync(path, { bigint: true });
+    return { id: `${found.dev}:${found.ino}` };
+  } catch (e) {
+    return e.code === "ENOENT" || e.code === "ENOTDIR" ? {} : { bad: true };
+  }
+}
+
+/** The session clips of the record (a project whose key is `clip N`) as the volume knows their folders in the episode's work folder `work`:
+    { names, ids } the plain names the record gives them and the identity of each folder that is there, or { bad: true } when any cannot be
+    looked at. A clip is never handed over or opened, and nothing that is its folder is either. */
+export function clipFolders(work, record) {
+  const clips = (Array.isArray(record?.app?.projects) ? record.app.projects : []).filter((p) => typeof p?.key === "string" && /^clip [1-9]\d*$/.test(p.key) && plainName(p.name));
+  const ids = new Set();
+  for (const clip of clips) {
+    const there = identityOf(join(work, clip.name));
+    if (there.bad) return { bad: true };
+    if (there.id) ids.add(there.id);
+  }
+  return { names: new Set(clips.map((p) => p.name)), ids };
+}
+
+/** Whether the project called `name` is a session clip's folder: "clip" when its name is a clip's or its folder is a clip's on the volume,
+    whatever the record calls it; "bad" when that cannot be told (a folder cannot be looked at); "" otherwise. `clips` is clipFolders'. */
+export function clipTrouble(work, clips, name) {
+  if (clips.bad) return "bad";
+  if (clips.names.has(name)) return "clip";
+  const there = identityOf(join(work, name));
+  if (there.bad) return "bad";
+  return there.id && clips.ids.has(there.id) ? "clip" : "";
+}
+
 /** The Mac a project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
     otherwise. A project's folder is in the Mac's own work folder, never in Dropbox, so the project of another Mac is not here, and
     everything done in it (the app's history, what is in its folder) is there. Making a new project under its name would drop its
-    entry from the record and leave that Mac's work unreachable, so `app` refuses such an episode (edit.js), until a take-over can
-    rebuild the project from the snapshot (plan PR 11). The project of this Mac is not asked about: when its folder is gone it is made
-    again, under its own name (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads
+    entry from the record and leave that Mac's work unreachable, so `app` refuses such an episode (edit.js) unless the record lists a
+    snapshot of the project (projectSnapshot; plan PR 11), which a rebuild here is made from (rebuildHere). The project of this Mac
+    is not asked about: when its folder is gone it is rebuilt from its snapshot, or made again under its own name when there is none
+    (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads
     nowhere a folder is, is a folder that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's.
     `key` says which project: "main", the main video's in use (isMain), or a Reel's, "reel 2" (plan PR 5), the record's entry of
     that key, in whatever state it is in. */
@@ -212,10 +284,10 @@ export function copyOf(facts) {
 }
 
 /** The video of a project: where project.js moves the working copy to, last, and where `free` (free.js) takes it from. */
-const videoIn = (dir) => join(dir, "media", "recording.mp4");
+export const videoIn = (dir) => join(dir, "media", "recording.mp4");
 
 /** Whether there is nothing at a path, not even a link. Anything else that stops it being looked at is something there. */
-function nothingAt(path) {
+export function nothingAt(path) {
   try {
     lstatSync(path);
     return false;
@@ -334,6 +406,46 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
 }
 
+/** Whether facts (a copy's, or a project's brimm/facts.json) say how long a video is and how large its picture: what a video put back is
+    held to. */
+export const sizedFacts = (facts) => Boolean(facts) && Number.isFinite(facts.seconds) && facts.seconds > 0 && Number.isFinite(facts.width) && facts.width > 0 && Number.isFinite(facts.height) && facts.height > 0;
+
+/** The snapshot that the record lists of a project of the episode, { time, ms, dir, files } (snapshot.js snapshotOf), or null: the
+    project of the main video in use when `key` is "main", else the one the record keeps under that key ("reel 2"). It is what lets a
+    project made on another Mac be rebuilt here, so edit.js refuses such a project only when there is none. */
+export function projectSnapshot(record, key = "main") {
+  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? isMain(p) : p.key === key));
+  return project && plainName(project.name) ? snapshotOf(record.files, project.name) : null;
+}
+
+/** Rebuild a project whose folder is not on this Mac from the snapshot the record lists of it (snapshot.js rebuildProject), and say so:
+    {}, and then the project is here, without its video; or { code }, 1, when a line said why it could not be (the snapshot is not whole
+    here, or the folder could not be made). `name` is how the project is named in her words ("Pricing talk", "Reel 2 of Pricing talk"),
+    `dir` its folder and `cli` this Mac's own toolchain, which the project's link leads to. `deps.fs` is for a test to make a step fail. */
+export function rebuildHere(ctx, { found, record, snapshot, dir, name }, { cli, fs }) {
+  const by = makerOf(found.folder, snapshot);
+  const built = rebuildProject({ folder: found.folder, snapshot, dir, cli, by, now: ctx.now() }, { fs });
+  if (built.why === "not whole") {
+    ctx.say(snapshotNotWhole(name));
+    return { code: 1 };
+  }
+  if (built.why) {
+    ctx.say(couldNotRebuild(name));
+    return { code: 1 };
+  }
+  ctx.say(rebuiltWords(ctx, { snapshot, name, by }));
+  if (built.assetsLeft) ctx.say(ASSETS_NOT_IN);
+  return {};
+}
+
+/** Whether the project in `dir` on this Mac is older than the newest snapshot the record lists of it (snapshot.js olderThan): the other
+    Mac worked on it since, and a project that is opened or handed over from here would go on from an older state. The project's marker
+    says which snapshot it is; with no marker, the times of its files do. false when there is no snapshot, when (with no marker) it is not
+    whole here, or when the project cannot be read: nothing says it is. */
+export function olderHere(found, { record, project, dir }) {
+  return olderThan(snapshotOf(record.files, project.name), dir, { folder: found.folder });
+}
+
 /** Put the video back into a project whose video has been taken away (`free`, free.js): { workingCopy }, what the record keeps of the
     copy that was put in, when it was, or { code }, when nothing was put back and a line said why: the exit code to end with. The
     project is still the project in use, so nothing is made but the video, and the app is not asked until it is back.
@@ -368,15 +480,14 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
     ctx.say(beingMade(name));
     return { code: 0 };
   }
-  const sized = (facts) => Boolean(facts) && Number.isFinite(facts.seconds) && facts.seconds > 0 && Number.isFinite(facts.width) && facts.width > 0 && Number.isFinite(facts.height) && facts.height > 0;
   const was = factsIn(join(dir, "brimm", "facts.json"));
-  if (!sized(was)) {
+  if (!sizedFacts(was)) {
     ctx.say(notWhole(name));
     return { code: 1 };
   }
   const made = factsIn(copy.facts);
   const workingCopy = copyOf(made);
-  if (!sized(made) || !workingCopy) {
+  if (!sizedFacts(made) || !workingCopy) {
     ctx.say(notPutBack(name));
     return { code: 1 };
   }
@@ -416,7 +527,10 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
     folder is not here is replaced, when this Mac made it: by the folder at the name the project would get, when one is there
     that the record does not know (adoptProject), and otherwise by a new project (makeProject). One that another Mac made is not
     replaced: its work is on that Mac, and a new project under its name would drop its entry, so edit.js refuses it before the
-    claim (projectOnAnotherMac). A new project is not made while Claude's reading of the episode is at work (`read` holds its
+    claim (projectOnAnotherMac) unless the record lists a snapshot of it. With a snapshot listed, a project whose folder is not here, whichever
+    Mac made it, is rebuilt from it (rebuildHere; plan PR 11) before anything else: the folder is then here without its video, and what
+    follows is what follows for a project `free` took the video from. A project here that is older than the newest snapshot is not opened
+    (olderHere; it says so and ends with 1). A new project is not made while Claude's reading of the episode is at work (`read` holds its
     lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
     opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
@@ -434,6 +548,7 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
     - `guidance`: the path of the CLAUDE.md the pinned package ships, in the toolchain's folder;
     - `spawn` (spawnSync) runs the command line, and `env` (this process's) is where the chat's id and the LANG come from;
     - `rename` (renameSync) moves a working copy made again into a project whose video was taken away (putVideoBack);
+    - `fs` (node:fs) is what a project rebuilt from a snapshot is written with (project.js writeProject): a test replaces it to make a step fail;
     - `chat()` gives { sessionId, held } for the chat that asked (chatOf). It is asked only when this Mac's setting wants the
       handover, since that is all it decides. */
 export async function openInApp(ctx, { found, record }, deps = {}) {
@@ -448,7 +563,24 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
 
   let project = earlier && plainName(earlier.name) && existsSync(join(work, earlier.name)) ? earlier : null;
   let restored = null;
+  // A project whose folder is not on this Mac, and that the record lists a snapshot of, is rebuilt from it (plan PR 11), whichever Mac
+  // made it: a take-over, or a Mac whose own folder is gone. It is then here without its video, as a project `free` took the video from.
+  let rebuilt = false;
+  if (!project && earlier && plainName(earlier.name)) {
+    const snapshot = snapshotOf(record.files, earlier.name);
+    if (snapshot) {
+      const built = rebuildHere(ctx, { found, record, snapshot, dir: join(work, earlier.name), name: record.name.text }, { cli, fs: deps.fs });
+      if (built.code !== undefined) return built.code;
+      project = earlier;
+      rebuilt = true;
+    }
+  }
   if (project) {
+    // A project here that is older than the newest snapshot is not opened: the other Mac worked on it since (plan PR 11).
+    if (!rebuilt && olderHere(found, { record, project, dir: join(work, project.name) })) {
+      ctx.say(olderThanSnapshot(record.name.text));
+      return 1;
+    }
     if (nothingAt(videoIn(join(work, project.name)))) {
       // Its video has been taken away (free.js): it is put back before the app is asked, or the project is not opened.
       const back = putVideoBack(ctx, { found, record, project, dir: join(work, project.name) }, { rename });

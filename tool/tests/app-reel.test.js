@@ -555,3 +555,131 @@ describe("the words that name a Reel, and what is known of it before anything is
     });
   });
 });
+
+describe("openReelInApp: a Reel project without its video has the video put back (plan PR 11)", () => {
+  const OF = "Reel 2 of Pricing talk";
+  const BACK = `The video for ${OF} was made again, and it is in the project.`;
+  const NOT_THE_SAME = `The video made again for ${OF} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
+  const NOT_PUT_BACK = `The video for ${OF} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
+  /** The Reel made, and its video taken away (a hand, `free` in a later version, or a rebuild from a snapshot): the next ask has the record the
+      first one wrote, and no copy of the Reel's video until the test makes one. */
+  async function takenAway(c, over = {}) {
+    const e = episode(c, over);
+    assert.equal(await run(e), 0);
+    rmSync(join(e.project, "media", "recording.mp4"));
+    e.said.splice(0);
+    e.started.splice(0);
+    return e;
+  }
+  const copyOf = (e, over = {}, text = "the Reel's bytes") => {
+    writeFileSync(e.paths.video, text);
+    writeFileSync(e.paths.facts, JSON.stringify({ seconds: 1.45, fps: 30, width: 1920, height: 1080, bytes: Buffer.byteLength(text), stretch: STRETCH, ...over }));
+  };
+  it("asks for the Reel's video once, says it is being made, and writes no record; when it is made, moves it in, says so, and opens the app", async (c) => {
+    const e = await takenAway(c);
+    const saves = e.saved.length;
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual([e.said, e.started, e.saved.length], [[MAKING], [["workcopy", "--now", FOLDER, "--reel", "2"]], saves]);
+    e.said.splice(0);
+    copyOf(e);
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual(e.said, [BACK, "It's open in HyperFrames.", BUTTONS]);
+    assert.equal(readFileSync(join(e.project, "media", "recording.mp4"), "utf8"), "the Reel's bytes");
+    assert.ok(!existsSync(e.paths.video), "moved in, not copied");
+    assert.deepEqual(e.saved.at(-1).app.projects.find((p) => p.key === "reel 2").workingCopy, { bytes: 16, seconds: 1.45, fps: 30 });
+    plain(e.said);
+  });
+  it("is not asked for the video of a Reel project whose video is in it", async (c) => {
+    const e = episode(c);
+    assert.equal(await run(e), 0);
+    e.said.splice(0);
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual([e.said, e.started], [["It's open in HyperFrames.", BUTTONS], []]);
+  });
+  it("leaves a video that is not the project's where it is, in words: another size, another length by over a second, a Reel that starts elsewhere", async (c) => {
+    for (const over of [{ width: 1080, height: 1920 }, { seconds: 3.6 }, { stretch: { start: 3.5, end: 4.95 } }]) {
+      const e = await takenAway(c);
+      copyOf(e, over);
+      assert.equal(await run(e, e.saved[0]), 1, JSON.stringify(over));
+      assert.deepEqual(e.said, [NOT_THE_SAME], JSON.stringify(over));
+      assert.ok(existsSync(e.paths.video) && !existsSync(join(e.project, "media", "recording.mp4")));
+    }
+  });
+  it("puts a video in whose length is within a second and whose start is within half a second of the project's", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e, { seconds: 2.2, stretch: { start: 1.5, end: 3 } });
+    assert.equal(await run(e, e.saved[0]), 0, e.said.join(" "));
+    assert.ok(e.said.includes(BACK));
+  });
+  it("leaves a video that is not as large as its own facts say, in words", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e, { bytes: 99 });
+    assert.equal(await run(e, e.saved[0]), 1);
+    assert.deepEqual(e.said, [NOT_PUT_BACK]);
+    assert.ok(existsSync(e.paths.video) && !existsSync(join(e.project, "media", "recording.mp4")));
+  });
+  it("says a rename that fails, and a copy whose facts cannot be read, as it says them of the main video's", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e);
+    const code = await openReelInApp(e.ctx, { found: e.found, record: e.saved[0], n: 2 }, { ...e.deps, rename: () => { throw new Error("not on one disk"); } });
+    assert.equal(code, 1);
+    assert.deepEqual(e.said, [NOT_PUT_BACK]);
+    assert.ok(existsSync(e.paths.video));
+    const bad = await takenAway(c);
+    copyOf(bad);
+    writeFileSync(bad.paths.facts, "{ not json");
+    assert.equal(await run(bad, bad.saved[0]), 1);
+    assert.deepEqual(bad.said, [NOT_PUT_BACK]);
+  });
+  it("says the project's facts cannot be read when they cannot, and opens nothing", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e);
+    rmSync(join(e.project, "brimm", "facts.json"));
+    assert.equal(await run(e, e.saved[0]), 1);
+    assert.deepEqual(e.said, ["The HyperFrames project for Reel 2 of Pricing talk is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason."]);
+  });
+  it("waits while a video is being made, or its faces are looked for, and while Claude is reading; and asks for nothing then", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e);
+    assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual([e.said, e.started], [[BUSY], []]);
+    assert.ok(existsSync(e.paths.video), "the video is not moved from under the finder");
+    const none = await takenAway(c);
+    assert.equal(takeEpisodeLock(workCopyLockOf(none.home, FOLDER), "workcopy", () => true).taken, true);
+    assert.equal(await run(none, none.saved[0]), 0);
+    assert.deepEqual([none.said, none.started], [[BUSY], []], "a video of the episode is being made, and Reel 2's is not asked for");
+    const reading = await takenAway(c);
+    assert.equal(takeEpisodeLock(lockOf(reading.home, FOLDER), "read", () => true).taken, true);
+    assert.equal(await run(reading, reading.saved[0]), 0);
+    assert.deepEqual([reading.said, reading.started], [[STILL], []]);
+  });
+  it("says what the suggestion lacks: gone, or not to be read", async (c) => {
+    const gone = await takenAway(c);
+    writeFileSync(join(gone.folder, "reels.json"), JSON.stringify(reelsFile({ video: "Talk.mov", by: "read", made: "2026-10-28T09:00:00-04:00", candidates: [CANDIDATES[1]] })));
+    assert.equal(await run(gone, gone.saved[0]), 1);
+    assert.deepEqual(gone.said, ["There is no Reel 2. The Reels are 3."]);
+    const lost = await takenAway(c);
+    rmSync(join(lost.folder, "reels.json"));
+    assert.equal(await run(lost, lost.saved[0]), 1);
+    assert.deepEqual(lost.said, ["The Reel suggestions of Pricing talk cannot be read. Ask Jason."]);
+    const nothing = await takenAway(c);
+    writeFileSync(join(nothing.folder, "reels.json"), JSON.stringify(reelsFile({ video: "Talk.mov", by: "read", made: "2026-10-28T09:00:00-04:00", candidates: [candidate(2, 1.15, 1.15, { ranges: [], seconds: 0, failed: "it is shorter than one picture" })] })));
+    assert.equal(await run(nothing, nothing.saved[0]), 1);
+    assert.deepEqual(nothing.said, ["Reel 2 has nothing to show: it is shorter than one picture."]);
+  });
+  it("cannot put a video back for a recording that is not in the episode or that has changed, and says so in the words the main video's has", async (c) => {
+    const e = await takenAway(c);
+    copyOf(e);
+    writeFileSync(e.raw, "the raw video's bytes, changed");
+    const record = { ...e.saved[0], app: { ...e.saved[0].app, projects: e.saved[0].app.projects.map((p) => ({ ...p, from: { ...p.from, bytes: 1 } })) } };
+    assert.equal(await run(e, record), 1);
+    assert.deepEqual(e.said, ["The recording of Pricing talk has changed since its HyperFrames project was made, and the video that project was made from has been taken away, so it can't be opened. Ask Jason."]);
+    const gone = await takenAway(c);
+    copyOf(gone);
+    rmSync(gone.raw);
+    assert.equal(await run(gone, gone.saved[0]), 1);
+    assert.deepEqual(gone.said, ["The recording of Pricing talk is not in its folder, so the video of its HyperFrames project could not be made again. Ask Jason."]);
+    assert.ok(existsSync(e.paths.video) && existsSync(gone.paths.video));
+  });
+});

@@ -9,7 +9,7 @@
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { KEPT, isMain } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
@@ -369,7 +369,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let brimm-video look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
-/** Where `release` puts the exports it copies into the episode for the other Mac (plan PR 11 writes it; this reads it): the way
+/** Where `release` puts the exports it copies into the episode for the other Mac (hand-over.js writes it, plan PR 11, with exportsToCarry; this reads it): the way
     `edit/from-final-cut/` holds Final Cut's Shares. */
 export const RELEASED_FOLDER = join("edit", "from-hyperframes");
 
@@ -475,7 +475,7 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
     const dir = plainName(project.name) ? join(work, project.name) : "";
     const here = dir !== "" && isFolder(dir);
     return {
-      key, label, ...(reel ? { reel } : {}), project: project.name, fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
+      key, label, ...(reel ? { reel } : {}), project: project.name, ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
       changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone) : { recorded: [], renders: [] })
     };
   });
@@ -485,6 +485,37 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
     unreadable: seen.unreadable,
     input: { parts, downloads: { dir: downloads, files: seen.files }, released: { dir: releasedDir, files: videosIn(releasedDir, readdir).files }, finished: record.finished || null, zone }
   };
+}
+
+/** Whether the file at `path` is inside the folder `root` once links are followed: a link in a project that leads out of it is not. */
+function insideReal(path, root) {
+  try {
+    const real = realpathSync(path);
+    const base = realpathSync(root);
+    return real === base || real.startsWith(base.endsWith(sep) ? base : `${base}${sep}`);
+  } catch (e) {
+    return false;
+  }
+}
+
+/** The exports `release` carries to the other Mac (architecture 4.7 and 7.3; plan PR 11): of each part whose project is on this Mac, the
+    newest export of this Mac's own, in Downloads and wherever the project's records say it went, and not what the other Mac released: those
+    that began in the newest minute (an MP4 and a MOV of one minute are both carried, as `finish` asks which is final). A WebM is none, nor is
+    an empty file. Only an export in Downloads, inside the project (links followed), or named as an export of that project (isExportOf) is
+    carried: a record in the project's renders/ can be written by the app's agent, and must never make another video on this Mac go into
+    Dropbox (the review of PR 11, M3). `input` is what `exportsFound` gives. Each is { key, name, dir, bytes, mtimeMs }, the main video's first. */
+export function exportsToCarry(input) {
+  const zone = input.zone || LOCAL_ZONE;
+  const out = [];
+  for (const part of input.parts) {
+    if (!part.here) continue;
+    const carries = (file) => file.where === "Downloads" || isExportOf(file.name, part.project) || (typeof part.dir === "string" && insideReal(join(file.dir, file.name), part.dir));
+    const exports = once(candidatesOf(part, { ...input, released: { dir: "", files: [] } }, zone).filter(taking).filter(carries));
+    if (!exports.length) continue;
+    const newest = Math.max(...exports.map((file) => minuteOf(file.began.ms)));
+    for (const file of exports.filter((f) => minuteOf(f.began.ms) === newest)) out.push({ key: part.key, name: file.name, dir: file.dir, bytes: file.bytes, mtimeMs: file.mtimeMs });
+  }
+  return out;
 }
 
 // --- The checks of an export (architecture 8.2), and the rule for what may be removed from Downloads (8.1) ---

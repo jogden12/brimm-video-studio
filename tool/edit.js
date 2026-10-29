@@ -60,8 +60,10 @@ import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED, exportsFound, lookForExports } from "./exports.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports } from "./exports.js";
+import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
+import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -89,10 +91,10 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, plainName, projectOnAnotherMac } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
-import { freeEpisode } from "./free.js";
+import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -152,14 +154,17 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js app "<episode>" [--take-over]
                                         open the episode's main video in HyperFrames, making its project first. Its
                                         files are checked and brought over, and it is claimed for this Mac, as open
-                                        does; another Mac's claim refuses it, unless it is taken over. Only on a Mac
-                                        that Jason has set up for HyperFrames
+                                        does; another Mac's claim refuses it, unless it is taken over. A project the
+                                        other Mac made is rebuilt here from the snapshot it handed over, and its video
+                                        made again; what HyperFrames kept of its history stays on that Mac. One it has
+                                        not handed over is refused. Only on a Mac that Jason has set up for HyperFrames
   node edit.js app "<episode>" reel <n> [--take-over]
                                         make Reel <n>, one of Claude's suggestions, a project of its own in HyperFrames,
                                         open it, and pick it. Its video, the suggestion's stretch of the recording, is
                                         made first: it is asked for, and the Reel is opened when it is said again. Its
                                         files are checked and brought over, and it is claimed for this Mac, as above.
-                                        For a finished video too. Reels are made here, never by HyperFrames itself
+                                        A Reel project the other Mac made is rebuilt from its snapshot, as above. For a
+                                        finished video too. Reels are made here, never by HyperFrames itself
   node edit.js app "<episode>" what-happened
                                         what was done in HyperFrames on the episode's main video, newest first, under
                                         the day it happened: what she asked, what the app said, and the files it
@@ -246,7 +251,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         hand the episode over to the other Mac: copy this Mac's Shares and exports of it
                                         into its folder, and let it go. When this Mac pushed a part last, it asks first
                                         whether it was changed in Final Cut since: --no-hand-edits says it was not,
-                                        --hand-edits-stay that the changes stay in this Mac's library
+                                        --hand-edits-stay that the changes stay in this Mac's library. For its
+                                        HyperFrames projects it also copies a snapshot of each one's files, so that the
+                                        other Mac can rebuild it (not its video, renders or history), and the newest export
+                                        of each; HyperFrames must be quit, and a project too big for that is refused
   node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode's main
                                         project and what it rendered for every project, to give the room back. Their projects
                                         and everything done in them stay, and app makes the main video again; a Reel's video
@@ -1232,10 +1240,39 @@ const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Ja
     words, named as its other lines name the video. */
 const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
 
-/** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
-    projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record, and a take-over
-    cannot rebuild it until the snapshot comes (plan PR 11). Named as app's other lines name the video. */
-const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project for ${of}${name} is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+/** What `app` says of an episode whose main project in use was made on another Mac, is not on this one and has no snapshot listed in the
+    record (app.js projectOnAnotherMac, projectSnapshot): everything done in it is on that Mac, so a new project here would drop it from
+    the record, and nothing here can rebuild it until that Mac has handed it over (`release`; plan PR 11). Named as app's other lines
+    name the video. What she is told to do follows the claim as it stands (the review of PR 11, I3): when `on` holds it, or nobody does, `on`
+    can hand it over, and she is told to say so there; when another Mac holds it, which after a take-over is this one, `on`'s release would be
+    refused, so she is told to ask Jason. `holder` is who has the episode open: "" for nobody, "this Mac", or a Mac's name. */
+const projectIsElsewhere = (name, on, of = "", holder = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. ${holder && holder !== on
+  ? `${on} can't hand it over while ${holder} has ${name} open. Ask Jason.`
+  : `On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`}`;
+/** Who has the episode open, as projectIsElsewhere has it: "" when nobody does. */
+const holderOf = (ctx, record) => (record.editing ? (record.editing.by === ctx.machine ? "this Mac" : String(record.editing.by)) : "");
+
+/** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it (app.js olderHere), or "": decided
+    before anything is claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2).
+    `key` says which project ("main" or "reel 2"), and `of` how its words name it. With the project's marker (snapshot.js) that needs no
+    file of the snapshot; a project with no marker is judged by the times of its files when the snapshot is whole here, and otherwise
+    openInApp judges it again once the claim has brought the files. */
+function olderWords(ctx, { found, record }, key, of) {
+  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
+  if (!project || !plainName(project.name)) return "";
+  const dir = join(episodeWork(ctx.home, found.name), project.name);
+  return existsSync(dir) && olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
+}
+
+/** The refusal for a project of the record that is a session clip's folder on this Mac, however the record spells its name (PR 15's rule, as
+    free.js has it; the review of PR 11, I4), or that cannot be told from one, or "": decided before anything is claimed or opened. `key` says
+    which project ("main" or "reel 2"), and `of` how its words name it. Nothing of a session goes to HyperFrames by default. */
+function clipWords(ctx, { found, record }, key, of) {
+  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
+  if (!project || !plainName(project.name)) return "";
+  const work = episodeWork(ctx.home, found.name);
+  return clipTrouble(work, clipFolders(work, record), project.name) ? `The folder for ${of} on this Mac is not as it was made, so it wasn't opened. Ask Jason.` : "";
+}
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
@@ -1262,10 +1299,14 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
-    - an episode whose main project in use was made on another Mac, and is not on this one, is refused (projectIsElsewhere; app.js
-      projectOnAnotherMac), with or without `--take-over`: it ends with 1 before anything is claimed or brought, nothing is asked
-      for or made, and no record is written, since a new project here would drop the other Mac's from the record. A project of
-      this Mac's own whose folder is gone is made again, as before;
+    - an episode whose main project in use was made on another Mac, and is not on this one, is refused when the record lists no
+      snapshot of it (projectIsElsewhere; app.js projectOnAnotherMac, projectSnapshot), with or without `--take-over`: it ends with 1
+      before anything is claimed or brought, nothing is asked for or made, and no record is written, since a new project here would
+      drop the other Mac's from the record. With a snapshot listed (the other Mac released the episode; plan PR 11) it goes on to the
+      claim, and openInApp rebuilds the project from the snapshot. A project of this Mac's own whose folder is gone is rebuilt from its
+      snapshot when there is one, and made again, as before, when there is not;
+    - a project of this Mac's that is older than the newest snapshot the record lists of it (olderWords; the other Mac worked on it
+      since) is refused in words before anything is claimed, so that the refusal leaves the record and its claim as they were;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
@@ -1294,7 +1335,11 @@ export async function app(ctx, rest) {
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
-  if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
+  if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere, "", holderOf(ctx, got.record)));
+  const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
+  if (clip) return refuse(ctx, clip);
+  const older = olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
+  if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
@@ -1313,8 +1358,10 @@ export async function app(ctx, rest) {
     - a Reel neither the record's list nor its projects have, and a Reel finished already that has no project, are refused in words
       (app-reel.js reelWhy), before anything is claimed. While Claude's reading is at work the list is not asked, since the reading
       is making it;
-    - a Reel project made on another Mac and not on this one is refused (projectOnAnotherMac, with the Reel's key), with or without
-      `--take-over`, before anything is claimed, brought or made;
+    - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
+      and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
+      one, openReelInApp rebuilds it from the snapshot;
+    - a Reel project of this Mac's that is older than the newest snapshot of it (olderWords) is refused before anything is claimed;
     - the claim and the bring, as `open` and `app` make them (claimAndBring). What she is told to say again is "open Reel <n> of
       <name> in HyperFrames", and the bring it starts is told so (`bring … --asked-by "app reel <n>"`);
     - openReelInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record the
@@ -1336,7 +1383,11 @@ async function appReel(ctx, asked, flags) {
   const why = reelWhy(ctx, found, got.record, n);
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
-  if (elsewhere) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
+  if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `, holderOf(ctx, got.record)));
+  const clip = clipWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
+  if (clip) return refuse(ctx, clip);
+  const older = olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
+  if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
@@ -2513,7 +2564,7 @@ const projectOf = (name) => basename(name, extname(name)).normalize("NFC");
 /** Every file in a folder, at any depth, as paths from it, but for those Dropbox never syncs: a name starting with a dot, as
     Finder's .DS_Store, or Icon\r. Listed, the other Mac would wait for them for ever. */
 const filesUnder = (dir) => readdirSync(dir, { recursive: true })
-  .filter((rel) => !String(rel).split("/").some((part) => part.startsWith(".") || part === "Icon\r") && statSync(join(dir, rel)).isFile()).sort();
+  .filter((rel) => !String(rel).split("/").some(notSynced) && statSync(join(dir, rel)).isFile()).sort();
 
 /** Hand an episode this Mac has open over to the other Mac (spec section 1, "Picking an episode up"). In order:
     - only the Mac that has it open hands it over;
@@ -2527,6 +2578,14 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
     - the record is let go, with the files it lists now (its own and the copies) and the answers, each earlier answer
       carried on while its version is still the part's newest. A copy made here at an earlier hand-over that Dropbox has
       taken away, and that this release has not made again, is listed no more, and named.
+    The HyperFrames side (hand-over.js; plan PR 11) comes after those refusals and before the Final Cut copies: when the record has
+    projects whose folders are on this Mac, HyperFrames must be quit, and a snapshot of each project and the newest export of each go
+    into the episode by the rule (a failure removes what it put in, and hands nothing over). The record lists them, and lists no
+    snapshot but the two newest that are whole (and one newer than the newest of those, which the other Mac is still bringing over, is
+    never dropped): the others, and a copy of its own that Dropbox has taken away, are listed no more, and the older snapshots' files are
+    removed after the record is written, by the names the record gave them (removeSnapshots). A copy the other Mac made that is not here
+    yet is not excused: the release waits for it (who made a copy is who first listed it, snapshot.js listedBy). A folder that is a
+    session clip's on the volume, however the record spells its name, or cannot be told from one, is no project to hand over.
     Resolves 0 when it was handed over, and 1 when it refused, having said why. */
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
@@ -2536,8 +2595,13 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // The parts this Mac pushed last: a part whose newest version was rendered was never in Final Cut, and is neither asked about
   // nor copied (spec 3, "One version model").
   const mine = newest.filter((p) => p.last && p.last.on === ctx.machine && p.last.how !== "render");
-  // An episode nobody has open may be changed without opening it, so one this Mac pushed last is handed over as well.
-  if (record.editing ? record.editing.by !== ctx.machine : !mine.length) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
+  // The HyperFrames projects of the record that are on this Mac (hand-over.js): none for an episode that went the Final Cut way.
+  const hand = projectsToHand(ctx, { found, record });
+  const inHyperFrames = hand.projects;
+  // A folder that cannot be told from a session clip's (PR 15's rule; the review of PR 11, I4) hands nothing over.
+  if (hand.bad) return refuse(ctx, `The folder for ${name} on this Mac is not as it was made, so nothing was handed over. Ask Jason.`);
+  // An episode nobody has open may be changed without opening it, so one this Mac pushed last, or has a project of, is handed over as well.
+  if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
@@ -2577,7 +2641,14 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   /** The name in From Final Cut that a copy in edit/from-final-cut/ was made from: its Share's, or its export bundle's. */
   const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
   const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
-  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
+  // A snapshot's or an export's copy made here that Dropbox has taken away is no more waited for than a Final Cut one: it is listed no more.
+  // One the other Mac made, that is not here, is on its way: it is checked as any other file is, and the release waits (the review of PR 11,
+  // C1). Who made a copy is who first listed it in the record's own revisions (snapshot.js listedBy).
+  const carried = (rel) => rel.startsWith(`${SNAPSHOT_DIR}/`) || rel.startsWith(`${RELEASED_FOLDER}/`);
+  const missingCarried = Object.keys(record.files).filter((rel) => carried(rel) && !existsSync(at(rel)));
+  const madeBy = missingCarried.length ? listedBy(found.folder, missingCarried) : {};
+  const goneCarried = missingCarried.filter((rel) => madeBy[rel] === ctx.machine);
+  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel) && !goneCarried.includes(rel))) });
   if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
   if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
@@ -2606,6 +2677,17 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (exported && exported.mtimeMs < video.mtimeMs) return refuse(ctx, `${label}'s export is older than its Shared video. Once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut.${tail}`);
     if (!exported && answer !== "no changes") return refuse(ctx, `${label} was never exported. If you changed it by hand in Final Cut, then once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut. If you made no hand edits since it was shown, say so.${tail}`);
   }
+  // HyperFrames' side (hand-over.js): a snapshot of each project of this Mac and its newest export, put in by the rule, or nothing and why.
+  // A copy it deleted to replace and could not make again is listed no more.
+  const hf = inHyperFrames.length
+    ? await handOver(ctx, { found, record, own: inHyperFrames }, { running: ctx.deps.running ?? (() => hyperFramesRunning()), opts: ruleOpts(ctx), rm: ctx.deps.rm })
+    : { copies: {}, names: [], notYet: [], assetsLeft: [], time: "", undo() {} };
+  if (hf.refused) {
+    // The record lists what is there now: a copy replaced before the failure at its new size, and one lost no more (the review of PR 11, M9).
+    const relisted = Object.fromEntries(Object.entries({ ...record.files, ...hf.resized }).filter(([rel]) => !(hf.lost ?? []).includes(rel)));
+    if (JSON.stringify(relisted) !== JSON.stringify(record.files)) await save(ctx, found, { ...record, files: relisted }, "");
+    return refuse(ctx, hf.refused);
+  }
   // The copies, by the rule: each file of each Share and export (a bundle file by file), the Shares first. A copy already
   // there at the size the record lists, and no older than what it copies, is kept as it is: cp -c keeps a file's time, so
   // only a Share or an export made again is copied again. Its time may be put to the whole second, as Dropbox keeps it, so
@@ -2621,8 +2703,8 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   };
   const fresh = wanted.filter((c) => !existsSync(at(c.rel)));
   const again = wanted.filter((c) => existsSync(at(c.rel)) && !kept(c));
-  const copies = {};
-  const copied = [];
+  const copies = { ...hf.copies };
+  const copied = [...hf.names];
   for (const c of [...fresh, ...again]) {
     try {
       mkdirSync(dirname(at(c.rel)), { recursive: true });
@@ -2652,10 +2734,68 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   for (const part of mine) answers[part.key] = { v: part.last.v, said: answer === "no changes" ? "no changes" : `changes stay on ${ctx.machine}` };
   // The copies made here that are still gone, now that this release has made its own, are listed no more (see above).
   const unlisted = Object.keys(record.files).filter(goneCopy);
-  const files = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
-  const later = notYet.length ? ` Not copied yet, still being written: ${listed(notYet)}.` : "";
+  const listedNow = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
+  // Only the two newest snapshots that are whole are kept: the record lists no other, and their folders go once the record is written. A
+  // snapshot with a file gone is not whole, so it is judged before the copies Dropbox took away are left out of the list; a copy of an
+  // export that is gone is listed no more, and one this release made again is there.
+  const { drop } = keptSnapshots(listedNow, (rel, bytes) => ctx.stat(at(rel))?.size === bytes);
+  const files = Object.fromEntries(Object.entries(listedNow).filter(([rel]) => !(rel.startsWith(`${SNAPSHOT_DIR}/`) && drop.includes(rel.split("/")[1])) && !(goneCarried.includes(rel) && !existsSync(at(rel)))));
+  const stillWriting = [...notYet, ...hf.notYet];
+  const later = stillWriting.length ? ` Not copied yet, still being written: ${listed(stillWriting)}.` : "";
   const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
-  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  const code = await save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost}${assetsWords(hf.assetsLeft)} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  if (code !== 0) {
+    hf.undo();
+    return code;
+  }
+  removeSnapshots(ctx, found, drop, listedNow);
+  return 0;
+}
+
+/** Remove the snapshots the record lists no more (`drop`: their folder names; `listed` the record's files as they were listed before they went),
+    once the record is written, by the names the record gave their files and no other (the review of PR 11, M6; as free.js removes what it
+    names): each file is looked at where it stands, with the real path of its folder being the folder's own path (no link on the way, the
+    episode's folder itself aside) and the file being a file, and looked at again just before it goes; then each folder of the snapshot that is
+    empty then goes, deepest first, and one that holds anything else stays. A snapshot that stays is no longer listed, and a later release takes
+    no notice of it. Nothing is followed, and nothing outside the episode's `app-snapshot/` is named. `ctx.deps.rm` is how a file is removed. */
+function removeSnapshots(ctx, found, drop, listed) {
+  const rm = ctx.deps.rm ?? rmSync;
+  let base;
+  try {
+    base = realpathSync(found.folder);
+  } catch (e) {
+    return;
+  }
+  /** Whether `rel` (a path from the episode's folder) is where it was named, and a file, or a folder. */
+  const stands = (rel, type) => {
+    try {
+      if (realpathSync(dirname(join(found.folder, rel))) !== join(base, dirname(rel))) return false;
+      const there = lstatSync(join(found.folder, rel));
+      return type === "file" ? there.isFile() : there.isDirectory();
+    } catch (e) {
+      return false;
+    }
+  };
+  for (const time of drop) {
+    const root = `${SNAPSHOT_DIR}/${time}`;
+    const named = Object.keys(listed).filter((rel) => rel.startsWith(`${root}/`));
+    const folders = new Set([root]);
+    for (const rel of named) for (let at = dirname(rel); at.length > root.length; at = dirname(at)) folders.add(at);
+    for (const rel of named.filter((one) => stands(one, "file"))) {
+      try {
+        if (stands(rel, "file")) rm(join(found.folder, rel), { force: true });
+      } catch (e) {
+        // A file that stays is no longer listed.
+      }
+    }
+    for (const dir of [...folders].sort((a, b) => b.length - a.length)) {
+      try {
+        if (stands(dir, "folder")) rmdirSync(join(found.folder, dir));
+      } catch (e) {
+        // A folder that holds something else stays.
+      }
+    }
+  }
 }
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */
