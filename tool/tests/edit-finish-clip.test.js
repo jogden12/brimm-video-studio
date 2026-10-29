@@ -10,10 +10,9 @@ import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { finishFinished, finishNow, madeFromImport } from "../finish.js";
-import { episodeWork, writeSettings } from "../settings.js";
+import { episodeWork } from "../settings.js";
 import { FOLDER, ID, episodeFor, reread, setup, listAll } from "./episodes.js";
-import { rawProbe } from "./phase4.js";
-import { MAIN, entry, exportOf, world } from "./exports-world.js";
+import { AT, MAIN, READING, SPELLINGS, VIDEO, clipWorld as clip, entry, exportOf, world } from "./exports-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -22,18 +21,8 @@ async function on(deps, ...argv) {
   return { code, said, text: said.join("\n") };
 }
 
-const AT = "2026-10-20T15:00:00-05:00";
-const VIDEO = "Pricing talk.mp4";
 const NAME = "Pricing talk";
 const HANDOFF = "Pricing talk.brimm-ops.json";
-const IMPORT_SRT = "1\n00:00:06,070 --> 00:00:07,040\n Welcome to the show.\n\n2\n00:00:19,414 --> 00:00:21,097\n Thank you so much, Sallie Ogdin.\n\n3\n00:00:21,200 --> 00:00:23,000\n Pricing is the subject, and pricing needs costs.\n\n";
-const FILES = { [VIDEO]: "the clip", "Pricing talk.srt": IMPORT_SRT, "Pricing talk.transcript.txt": "the transcript" };
-const SPELLINGS = [
-  { heard: "Ogdin", spelled: "Ogden", why: "It is her surname." },
-  { heard: "pricing", spelled: "Pricing", why: "It is the subject." }
-];
-const ANSWER = { state: "answered", guess: "short video", seen: "upright, 0:23", came: "camera", match: null, by: "Mac Studio", on: "Mac Studio", at: AT, private: "no" };
-const READING = { kind: "short video", model: "m", at: AT, on: "Mac Studio", account: "", outcome: "read" };
 const OGDEN = '"Ogdin" as "Ogden"';
 const NEXT = 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.';
 const WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
@@ -45,21 +34,6 @@ const WORLD_HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/handoff-v2-${name}.json`, import.meta.url), "utf8"));
 const handoffIn = (found, file = HANDOFF) => JSON.parse(readFileSync(join(found.folder, "final", file), "utf8"));
-
-/** This Mac's settings say which version of the hand-off to write. */
-function handoffVersion(t, version) {
-  writeSettings(t.home, { handoffVersion: version });
-  t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
-}
-/** An iPhone clip she answered, read by Claude: its record holds the offers (`answered` too, when `answer` says how she answered them). */
-function clip({ version = 2, answer = null, over = {}, files = FILES } = {}) {
-  const t = setup({ programs: { FFPROBE: rawProbe } });
-  if (version) handoffVersion(t, version);
-  const offers = { spellings: SPELLINGS, ...(answer ? { answered: { reading: READING.at, at: AT, on: "Mac Studio", applied: answer, left: SPELLINGS.map((s) => s.heard).filter((h) => !answer.includes(h)) } } : {}) };
-  const spellings = answer ? answer.map((heard) => [heard, SPELLINGS.find((s) => s.heard === heard).spelled]) : [];
-  const found = episodeFor(t, { record: { version: 3, kind: "short video", answer: ANSWER, label: "Video of 14 Oct, 09:12 (Mac Studio)", editing: { by: "Mac Studio", since: AT }, offers, reading: READING, spellings, ...over }, files });
-  return { t, found };
-}
 
 describe("F1. the spellings card, for an iPhone clip", () => {
   it("records the answer and the spellings and writes no hand-off: nothing is run, and final/ is not made", async () => {

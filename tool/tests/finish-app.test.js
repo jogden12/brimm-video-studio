@@ -14,9 +14,9 @@ import { recordFile } from "../episode.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { PIN } from "../hyperframes.js";
 import { tidyTranscript } from "../shared/transcript.js";
-import { EDITED, ID, PROJECT, SRT, partOf, reread, toldOf } from "./episodes.js";
+import { EDITED, ID, PROJECT, SRT, partOf, reread } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
-import { MAIN, REEL1, REEL2, entry, exportOf, named, probeFor, world } from "./exports-world.js";
+import { MAIN, REEL1, REEL2, entry, exportOf, fw, named, probeFor, whisper } from "./exports-world.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const stem = (file) => file.replace(/\.[^.]+$/, "");
@@ -29,18 +29,6 @@ const FINAL = [HANDOFF, ...withTexts(MAIN_FILE), ...withTexts(REEL_FILE), `${ste
 const RAW_FIXTURE = JSON.parse(readFileSync(new URL("./fixtures/handoff-v2-raw.json", import.meta.url), "utf8"));
 const NOT_AN_APP_WORD = /Final Cut|Share|From Final Cut|Delete Generated/;
 
-/** The captions the transcriber stand-in writes of each part: Reel 2 starts with the words the suggestion it was made from starts with. */
-const CAPTIONS = { main: SRT.main, "reel 1": SRT["reel 1"], "reel 2": SRT["reel 1"] };
-const whisper = (over = {}) => (args) => {
-  const base = args[args.indexOf("-of") + 1];
-  const part = partOf(args[args.indexOf("-f") + 1]);
-  const srt = over[part] ?? CAPTIONS[part] ?? CAPTIONS.main;
-  writeFileSync(base + ".srt", srt);
-  if (args.includes("-ojf")) writeFileSync(base + ".json", JSON.stringify(toldOf(srt)));
-  return { code: 0, stderr: "" };
-};
-/** The made-up world with the transcriber stand-in above (or `captions` over its parts, or `programs`). */
-const fw = ({ captions = {}, programs = {}, ...rest } = {}) => world({ ...rest, programs: { WHISPER: whisper(captions), ...programs } });
 /** The same record with Reel 1 made too, from times she gave, and both Reels picked. */
 const THREE = () => ({
   app: { toolchain: PIN.version, projects: [entry("main"), entry("reel 1", { fromSuggestion: null }), entry("reel 2")] },
