@@ -438,6 +438,13 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
     assert.equal(none.stage, "handoff-owed");
     assert.equal(nextFor(waiting({ handoff: null, offersAnswered: false }), NONE, NOW).stage, "spellings");
   });
+  it("names only whole Reel numbers: what is no number in the fact is left out, and none left is no stage (review F7)", () => {
+    assert.deepEqual(shown(nextFor(waiting({ reelsExported: [2, "3", null, 1.5, NaN, undefined, {}] }), NONE, NOW)), { stage: "reels-exported", text: REEL_2 });
+    for (const none of [["x"], [null, undefined], [1.5, NaN], "2", { 0: 2, length: 1 }]) {
+      const n = nextFor(waiting({ reelsExported: none }), NONE, NOW);
+      assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(none));
+    }
+  });
   it("is a finished video's alone: a raw video, an iPhone clip and a session ignore it", () => {
     for (const over of [
       APP({ way: "hyperframes", project: PROJECT(), handoff: { ...OPS_HANDOFF, kind: "raw" } }),

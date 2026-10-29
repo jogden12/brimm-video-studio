@@ -12,6 +12,7 @@ import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { acceptRev, recordFile, recordText } from "../episode.js";
 import { finishEpisode } from "../edit.js";
+import { fixedZone } from "../exports.js";
 import { finishNow } from "../finish.js";
 import { NOTHING_UNDER_WAY } from "../guide.js";
 import { guideFile, writeGuideNotes } from "../guide-note.js";
@@ -175,6 +176,21 @@ describe("B2. what changes nothing: the page's step stands", () => {
       assert.equal(await line(w), says(TAKE));
     });
   }
+  it("is any trouble in reading the exports that nobody foresaw: the guide only reads, and no trouble stops it (review F7)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    // A zone that cannot place a moment makes the reading of the export's name throw inside exportsFound.
+    const said = await on(depsOf(w, { zone: {} }), "guide", "3fa9c1");
+    assert.deepEqual([said.code, said.said[0]], [0, says(TAKE)], said.text);
+  });
+  it("reads the day and the time on an export's name in the zone it is given and not in this Mac's own: east of the project's zone by 14 hours the export is older than the project's last change, and in the project's own it is not (review F7)", async () => {
+    // Two zones that give different answers, so that one of them differs from this Mac's own whichever Mac this is: the export is named 14.03, and the
+    // project last changed at 13:40 in UTC-5. Read in UTC+9 the export began at 05:03 UTC, before the change at 18:40 UTC.
+    const w = await W();
+    exportOf(w, "reel 2");
+    assert.equal(await line(w, { zone: fixedZone(-300) }), says(REEL_2));
+    assert.equal(await line(w, { zone: fixedZone(540) }), says(TAKE));
+  });
   it("is a Downloads folder this Mac will not let be read, and a Reel project with no export at all", async () => {
     const w = await W();
     exportOf(w, "reel 2");
