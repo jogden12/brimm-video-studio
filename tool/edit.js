@@ -193,9 +193,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         detached. An iPhone clip she answered that was not opened in HyperFrames is asked
                                         about once; --as-it-is writes its hand-off from the import's captions
   node edit.js show "<episode>" transcript|notes|plan
-                                        print its transcript (a raw video's she has answered: its rough cut's), Claude's
-                                        notes or its cut plan, whole. Of a video not yet answered, or a session, nothing
-                                        is printed: a read-only copy of it opens in TextEdit on this Mac
+                                        print its transcript (a raw video's she has answered: its rough cut's, or, with a
+                                        HyperFrames project in use, the recording's own), Claude's notes or its cut plan,
+                                        whole. Of a video not yet answered, or a session, nothing is printed: a read-only
+                                        copy of it opens in TextEdit on this Mac
   node edit.js behind                   whether Jason has a newer brimm-video than this Mac's; and the copies show
                                         opened are cleared. It refuses, and says to ask Jason, when her folder's lock is
                                         changed on this Mac: a settings.local.json in it, or hooks turned off
@@ -2437,7 +2438,9 @@ const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-no
 /** `show "<episode>" transcript|notes|plan`: print the episode's transcript, Claude's notes or the cut plan, whole. Her session
     reads an episode's files only through this (spec section 4), and it takes no path. A file not whole on this Mac yet is
     brought over by a detached run, as open does. The transcript of a raw video she has answered is its rough cut's, with its
-    times (spec 3, "Show me the transcript"); a finished video's, a clip's and one from before the switch is the video's own. Of a
+    times (spec 3, "Show me the transcript"), unless the record has a main HyperFrames project in use: then it is the recording's own,
+    with the times of the project's timeline (plan PR 7, item 5). A finished video's, a clip's and one from before the switch is the
+    video's own. Of a
     video not yet answered, or a session whose mark is not cleared, it prints nothing into her chat (printWhy): it opens a read-only
     copy of the file on this Mac, in TextEdit (showCopy). */
 async function show(ctx, rest) {
@@ -2455,7 +2458,10 @@ async function show(ctx, rest) {
   // What it prints goes into her chat: of a video not answered or a session, or one held as a session, nothing; a copy opens on this
   // Mac instead.
   if (printWhy(record) || found.held) return showCopy(ctx, found, record, `${stem}${ending}`, what);
-  const file = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
+  // The record picks a raw video's transcript (plan PR 7, item 5): with a main HyperFrames project in use, the recording's own, whose times
+  // are the project's timeline's; otherwise the rough cut's, which the reading still makes and an episode going the Final Cut way needs.
+  const roughCut = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" && !(record.app?.projects ?? []).some(inUse);
+  const file = roughCut ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
   const path = join(found.folder, file);
   if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
   if (!ctx.isWhole(path)) {

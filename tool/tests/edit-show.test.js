@@ -154,6 +154,65 @@ describe("show, for a video she has answered", () => {
       t.done();
     }
   });
+
+  // Plan PR 7, item 5 (group G): the record picks a raw video's transcript. With a main HyperFrames project in use it is the recording's own,
+  // whose times are the project's timeline's; any other raw video keeps the rough cut's, which the reading still makes until retirement
+  // wave 2 and an episode going the Final Cut way needs.
+  const PROJECT = (over = {}) => ({ key: "main", name: "Pricing talk main 3fa9c1", madeAt: AT, on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: AT }, workingCopy: { bytes: 16, seconds: 23.4, fps: 30 }, opened: [], handover: false, fromSuggestion: null, state: "made", ...over });
+  const rawWith = (projects, { files = ["own", "rough"] } = {}) => {
+    const t = setup();
+    const record = { version: projects ? 4 : 3, kind: "raw", answer: ANSWERED, name: { text: "Pricing talk", placeholder: false }, ...(projects ? { app: { toolchain: "0.8.208", projects } } : {}) };
+    const found = episodeFor(t, { record });
+    if (files.includes("own")) writeFileSync(join(found.folder, TEXTS.transcript[0]), TEXTS.transcript[1]);
+    if (files.includes("rough")) writeFileSync(join(found.folder, "Pricing talk.rough-cut.transcript.txt"), ROUGH);
+    return { t, found };
+  };
+  it("prints the recording's own transcript for a raw video with a main HyperFrames project in use, made or opened, though the rough cut's is beside it", async () => {
+    for (const project of [PROJECT(), PROJECT({ state: "opened", opened: [AT] }), PROJECT({ state: "finished", opened: [AT] })]) {
+      const { t } = rawWith([project]);
+      const r = await on(t.ctx.deps, "show", FOLDER, "transcript");
+      assert.deepEqual([r.code, r.text], [0, TEXTS.transcript[1].replace(/\n$/, "")], project.state);
+      t.done();
+    }
+  });
+  it("prints the recording's own when only the import's files are there, and says there is none when it has none", async () => {
+    const own = rawWith([PROJECT()], { files: ["own"] });
+    assert.deepEqual((await on(own.t.ctx.deps, "show", FOLDER, "transcript")).text, TEXTS.transcript[1].replace(/\n$/, ""));
+    own.t.done();
+    const none = rawWith([PROJECT()], { files: ["rough"] });
+    const r = await on(none.t.ctx.deps, "show", FOLDER, "transcript");
+    assert.deepEqual([r.code, r.text], [1, "Pricing talk has no transcript yet."]);
+    none.t.done();
+  });
+  it("still prints the rough cut's for a raw video with no project, whatever else is beside it", async () => {
+    for (const projects of [null, [], [PROJECT({ key: "reel 2", name: "Pricing talk reel 2 3fa9c1" })]]) {
+      const { t } = rawWith(projects);
+      const r = await on(t.ctx.deps, "show", FOLDER, "transcript");
+      assert.deepEqual([r.code, r.text], [0, ROUGH.replace(/\n$/, "")], JSON.stringify(projects));
+      t.done();
+    }
+  });
+  it("takes a project kept for an earlier kind for none in use: the rough cut's is printed", async () => {
+    const { t } = rawWith([PROJECT({ state: "kept for an earlier kind", opened: [AT] })]);
+    const r = await on(t.ctx.deps, "show", FOLDER, "transcript");
+    assert.deepEqual([r.code, r.text], [0, ROUGH.replace(/\n$/, "")]);
+    t.done();
+  });
+  it("leaves notes and the cut plan as they were for a raw video with a project, and a finished video's or a clip's transcript its own", async () => {
+    const { t, found } = rawWith([PROJECT({ state: "opened", opened: [AT] })]);
+    for (const kind of ["notes", "plan"]) writeFileSync(join(found.folder, TEXTS[kind][0]), TEXTS[kind][1]);
+    assert.equal((await on(t.ctx.deps, "show", FOLDER, "plan")).text, TEXTS.plan[1].replace(/\n$/, ""));
+    assert.match((await on(t.ctx.deps, "show", FOLDER, "notes")).text, /^Notes for the editor/);
+    t.done();
+    for (const kind of ["finished", "short video"]) {
+      const other = setup();
+      const f = episodeFor(other, { record: { version: 4, kind, answer: ANSWERED, name: { text: "Pricing talk", placeholder: false }, app: { toolchain: "0.8.208", projects: [PROJECT({ opened: [AT], state: "opened" })] } } });
+      writeFileSync(join(f.folder, TEXTS.transcript[0]), TEXTS.transcript[1]);
+      writeFileSync(join(f.folder, "Pricing talk.rough-cut.transcript.txt"), ROUGH);
+      assert.equal((await on(other.ctx.deps, "show", FOLDER, "transcript")).text, TEXTS.transcript[1].replace(/\n$/, ""), kind);
+      other.done();
+    }
+  });
 });
 
 describe("behind", () => {
