@@ -227,11 +227,16 @@ describe("the snapshots an episode's record lists (7.3)", () => {
     const all = () => true;
     assert.deepEqual(keptSnapshots(three, all), { keep: ["2026-10-22 08.00.00Z", T2], drop: [T1] });
     assert.deepEqual(keptSnapshots(listed, all), { keep: [T2, T1], drop: [] });
-    // The newest has a file that is not whole: it is not kept, and the two before it are.
-    const missing = (path) => !path.includes("2026-10-22 08.00.00Z");
-    assert.deepEqual(keptSnapshots(three, missing), { keep: [T2, T1], drop: ["2026-10-22 08.00.00Z"] });
+    // One that is not whole is dropped when a newer one is whole: nothing is arriving that it could become whole by.
     const short = (path, bytes) => !(path.includes(T2) && path.endsWith("brimm/facts.json")) || bytes !== 30;
     assert.deepEqual(keptSnapshots(three, short), { keep: ["2026-10-22 08.00.00Z", T1], drop: [T2] });
+    // But one newer than the newest whole one is never dropped: it is the other Mac's, still on its way (the review of PR 11, C1). It is kept
+    // beside the two newest that are whole, and is not counted among them.
+    const missing = (path) => !path.includes("2026-10-22 08.00.00Z");
+    assert.deepEqual(keptSnapshots(three, missing), { keep: ["2026-10-22 08.00.00Z", T2, T1], drop: [] });
+    const four = { [`app-snapshot/2026-10-19 08.00.00Z/${MAIN}/index.html`]: 3, ...three, [`app-snapshot/2026-10-23 08.00.00Z/${MAIN}/index.html`]: 9 };
+    const twoNew = (path) => !path.includes("2026-10-22 08.00.00Z") && !path.includes("2026-10-23 08.00.00Z");
+    assert.deepEqual(keptSnapshots(four, twoNew), { keep: ["2026-10-23 08.00.00Z", "2026-10-22 08.00.00Z", T2, T1], drop: ["2026-10-19 08.00.00Z"] });
     assert.deepEqual(keptSnapshots({}, all), { keep: [], drop: [] });
     assert.deepEqual(keptSnapshots({ [`app-snapshot/${T1}/${MAIN}/index.html`]: 1 }, all), { keep: [T1], drop: [] });
   });

@@ -176,15 +176,21 @@ export function snapshotOf(files, name) {
   return null;
 }
 
-/** Which snapshots an episode keeps, of the record's `files`: { keep, drop }, the names of the two newest whole snapshots (newest first),
-    and of every other (newest first), older or not whole. A snapshot is whole when `whole(path, bytes)` says each file the record lists for
-    it, as a path from the episode's folder and its size, is there at that size. */
+/** Which snapshots an episode keeps, of the record's `files`: { keep, drop }, the names (newest first) of the snapshots kept: the two newest
+    that are whole, and every one newer than the newest of those, which is not whole yet because the other Mac's files are still on their way
+    (it is never dropped, nor counted among the two), and of every other (newest first), older or not whole. A snapshot is whole when
+    `whole(path, bytes)` says each file the record lists for it, as a path from the episode's folder and its size, is there at that size. */
 export function keptSnapshots(files, whole) {
   const keep = [];
   const drop = [];
+  let wholeKept = 0;
+  let sawWhole = false;
   for (const snapshot of snapshotsOf(files)) {
     const all = Object.entries(snapshot.projects).every(([project, list]) => list.every(({ rel, bytes }) => whole(`${SNAPSHOT_DIR}/${snapshot.time}/${project}/${rel}`, bytes)));
-    (all && keep.length < SNAPSHOTS_KEPT ? keep : drop).push(snapshot.time);
+    if (all) sawWhole = true;
+    const kept = all ? wholeKept < SNAPSHOTS_KEPT : !sawWhole;
+    if (kept && all) wholeKept++;
+    (kept ? keep : drop).push(snapshot.time);
   }
   return { keep, drop };
 }
