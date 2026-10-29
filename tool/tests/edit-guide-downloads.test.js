@@ -36,8 +36,8 @@ const kept = (w) => (worlds.push(w), w);
 after(() => {
   for (const w of worlds) w.t.done();
 });
-/** The made-up episode of guide-world.js: a raw video with a main project here and no hand-off, with an export of it in Downloads unless `exported` is false
-    (or it has no project). */
+/** The made-up episode of guide-world.js: a raw video (or, given a `kind`, an iPhone clip) with a main project here and no hand-off, with an export of it in
+    Downloads unless `exported` is false (or it has no project). */
 function raw({ exported = true, ...opts } = {}) {
   const w = kept(guideWorld(opts));
   if (exported && opts.projects !== null) exportOf(w, "main");
@@ -84,30 +84,33 @@ const releasedOf = (w, ...folders) => [join(w.found.folder, "edit", "from-hyperf
 /** `readdirSync` refused for Downloads, as macOS refuses a program it has not been allowed to look in it. */
 const refusedDownloads = (w) => ({ deny: (name, path) => (path === w.downloads ? Object.assign(new Error(`EPERM: operation not permitted, scandir '${path}'`), { code: "EPERM" }) : null) });
 
-describe("a raw video she set aside is read for nothing of its project (plan PR 17, the rule of the review of PR 16, F6, for a raw video)", () => {
+describe("a raw video or an iPhone clip she set aside is read for nothing of its project (plan PR 17, the rule of the review of PR 16, F6, for a raw video and a clip)", () => {
   /** The functions of `fs` that look at a path, watched while `run` goes: the paths they were asked about. */
   const names = ["statSync", "lstatSync", "readdirSync", "readFileSync", "openSync", "existsSync", "realpathSync", "accessSync", "readlinkSync", "opendirSync"];
   const inside = (dir) => (path) => path === dir || path.startsWith(`${dir}${sep}`);
-  it("looks in its project, Downloads and what the other Mac released for none of the forms that read, once she said it was finished: the overview, the video, wait and tell", async () => {
-    const w = raw();
-    const places = [w.dirOf("main"), w.downloads, join(w.found.folder, "edit")].map(inside);
-    const reads = async () => {
-      const said = [];
-      const { calls } = await watched(async () => {
-        for (const argv of [["guide"], ["guide", "3fa9c1"], ["guide", "wait"], ["guide", "3fa9c1", "tell"]]) said.push((await on(depsOf(w), ...argv)).said);
-      }, { names });
-      return { said, paths: calls.map((call) => call.path).filter((path) => places.some((is) => is(path))) };
-    };
-    // The same video before she said it: its project and Downloads are looked in (the control, so that this test would see a read at all).
-    const before = await reads();
-    assert.ok(before.paths.some(inside(w.downloads)), "Downloads is read for a video not set aside");
-    assert.ok(before.paths.some(inside(w.dirOf("main"))), "its project is read for a video not set aside");
-    assert.ok(before.said.every((lines) => lines.some((said) => said.includes(EXPORTED))), JSON.stringify(before.said));
-    writeGuideNotes(w.t.home, { version: 1, handoffs: {}, finished: { [ID]: AT } });
-    const after = await reads();
-    assert.deepEqual(after.paths, [], "nothing of its project or Downloads is looked in");
-    assert.deepEqual(after.said, [[DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`], [DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`]]);
-  });
+  // The rule is the same for both kinds, and each is tried: a clip's project is read by the same fact as a raw video's, and a rule that left a clip out would leave a test of the raw video green.
+  for (const kind of ["raw", "short video"]) {
+    it(`looks in the project of ${kind === "raw" ? "a raw video" : "an iPhone clip"}, in Downloads and in what the other Mac released for none of the forms that read, once she said it was finished: the overview, the video, wait and tell`, async () => {
+      const w = raw({ kind });
+      const places = [w.dirOf("main"), w.downloads, join(w.found.folder, "edit")].map(inside);
+      const reads = async () => {
+        const said = [];
+        const { calls } = await watched(async () => {
+          for (const argv of [["guide"], ["guide", "3fa9c1"], ["guide", "wait"], ["guide", "3fa9c1", "tell"]]) said.push((await on(depsOf(w), ...argv)).said);
+        }, { names });
+        return { said, paths: calls.map((call) => call.path).filter((path) => places.some((is) => is(path))) };
+      };
+      // The same video before she said it: its project and Downloads are looked in (the control, so that this test would see a read at all).
+      const before = await reads();
+      assert.ok(before.paths.some(inside(w.downloads)), "Downloads is read for a video not set aside");
+      assert.ok(before.paths.some(inside(w.dirOf("main"))), "its project is read for a video not set aside");
+      assert.ok(before.said.every((lines) => lines.some((said) => said.includes(EXPORTED))), JSON.stringify(before.said));
+      writeGuideNotes(w.t.home, { version: 1, handoffs: {}, finished: { [ID]: AT } });
+      const after = await reads();
+      assert.deepEqual(after.paths, [], "nothing of its project or Downloads is looked in");
+      assert.deepEqual(after.said, [[DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`], [DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`]]);
+    });
+  }
 });
 
 describe("the guide lists Downloads once for a pass, however many videos look in it (plan PR 17; the review of PR 10, M5)", () => {
