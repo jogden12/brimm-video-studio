@@ -73,8 +73,9 @@ export function projectsToHand(ctx, { found, record }) {
   if (kindOf(record) === null || sessionNotCleared(record)) return { projects: [], bad: false };
   const listedProjects = Array.isArray(record?.app?.projects) ? record.app.projects : [];
   const work = episodeWork(ctx.home, found.name);
+  // The session clips' folders as the volume knows them. When one cannot be looked at, every project that is a candidate to hand over cannot
+  // be told from a clip's (clipTrouble says "bad"), and nothing is handed over; an episode with no such project is not stopped by it.
   const clips = clipFolders(work, record);
-  if (clips.bad) return { projects: [], bad: true };
   const mains = [];
   const reels = [];
   const seen = new Set();

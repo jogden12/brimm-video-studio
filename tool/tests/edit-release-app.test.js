@@ -264,6 +264,14 @@ describe("release: a session clip's folder is never handed over, however the rec
     await handed(w);
     w.t.done();
   });
+  it("is today's release when there is no project to tell from a clip's, whatever the record lists as a clip: nothing is looked at that nothing depends on", async () => {
+    const projects = [entry("clip 1", { name: "x".repeat(300) })];
+    const w = releaseWorld({ projects: null, over: { app: { toolchain: PIN.version, projects } } });
+    mkdirSync(w.work, { recursive: true }); // the folder a name too long for the volume would be looked for in
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`${NAME} is handed over. Copied for the other Mac: nothing. ${KEEP}`]]);
+    w.t.done();
+  });
   it("hands over nothing at all when a folder it has to tell from a session clip's cannot be looked at: it cannot be told what that folder is", async () => {
     // A name too long for the volume is a name no folder can have, so looking at it fails without anything being wrong with the disk.
     for (const key of ["clip 2", "main", "reel 3"]) {
