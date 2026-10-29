@@ -116,6 +116,55 @@ describe("A2. what is not words", () => {
       assert.deepEqual(wordsOf(projectOf(`<div class="clip" ${attributes}>Words</div>`)), [], attributes);
     }
   });
+  it("gives none for a unit that starts at or after the end of its host, or after the end of the video (review M6)", () => {
+    const card = (...starts) => composition("card", starts.map((start) => `<div class="clip" data-start="${start}" data-duration="2">At ${start}</div>`).join(""));
+    // A host that runs 10 to 15: a card at 4 is on the screen at 14, one at 5 starts as the host ends, one at 6 is at 16.
+    const files = projectOf(host("card", 10, 5), { "compositions/card.html": card(0, 4, 4.9, 5, 6, 40) });
+    assert.deepEqual(wordsOf(files), [{ text: "At 0", at: 10 }, { text: "At 4", at: 14 }, { text: "At 4.9", at: 14.9 }]);
+    // A video of 60 seconds: a unit at 500 is not in it, nor is one at 60, and a host that starts at 70 is not read.
+    const asked = [];
+    const long = wordsOnScreen((rel) => {
+      asked.push(rel);
+      const index = projectOf(`<div class="clip" data-start="59.9" data-duration="2">Last</div><div class="clip" data-start="60" data-duration="2">At the end</div><div class="clip" data-start="500" data-duration="2">Far away</div>${host("late", 70, 5)}`);
+      return rel === "index.html" ? index["index.html"] : null;
+    });
+    assert.deepEqual(long, [{ text: "Last", at: 59.9 }]);
+    assert.deepEqual(asked, ["index.html"], "a host that starts after the video is not read");
+    // A host inside a host is cut by the host it is in: B runs 12 to 32 on the clock, and A, which holds it, ends at 15.
+    const nested = projectOf(host("a", 10, 5), {
+      "compositions/a.html": composition("a", host("b", 2, 20)),
+      "compositions/b.html": composition("b", '<div class="clip" data-start="0" data-duration="2">B at 12</div><div class="clip" data-start="2" data-duration="2">B at 14</div><div class="clip" data-start="3" data-duration="2">B at 15</div><div class="clip" data-start="4" data-duration="2">B at 16</div>')
+    });
+    assert.deepEqual(wordsOf(nested), [{ text: "B at 12", at: 12 }, { text: "B at 14", at: 14 }]);
+  });
+  it("gives none for the words of a host that starts after the video, though no unit of their own holds them", () => {
+    const title = composition("title", "<h1>Title words</h1>");
+    assert.deepEqual(wordsOf(projectOf(host("title", 59, 5), { "compositions/title.html": title })), [{ text: "Title words", at: 59 }]);
+    assert.deepEqual(wordsOf(projectOf(host("title", 60, 5), { "compositions/title.html": title })), []);
+  });
+  it("keeps the words inside a unit that is past the end, if a unit inside it starts before the end", () => {
+    // The timing of the elements is flat: a unit inside another is on the clock of the composition, not of the unit that holds it.
+    const files = projectOf('<div class="clip" data-start="500" data-duration="2">Away<div class="clip" data-start="5" data-duration="2">Inside</div></div>');
+    assert.deepEqual(wordsOf(files), [{ text: "Inside", at: 5 }]);
+  });
+  it("takes the first root of the main page for the video, and not a root inside it", () => {
+    const files = { "index.html": '<div id="root" data-composition-id="main" data-duration="60"><div id="inner" data-composition-id="inner" data-duration="5"><div class="clip" data-start="3" data-duration="1">Inside</div></div><div class="clip" data-start="30" data-duration="2">Later</div></div>' };
+    assert.deepEqual(wordsOf(files), [{ text: "Inside", at: 3 }, { text: "Later", at: 30 }]);
+    // Before the first root there is no video yet: a root that follows another element still sizes it.
+    const after = { "index.html": '<div class="clip" data-start="20" data-duration="1">Before the root</div><div id="root" data-composition-id="main" data-duration="10"><div class="clip" data-start="30" data-duration="1">After the end</div></div>' };
+    assert.deepEqual(wordsOf(after), [{ text: "Before the root", at: 20 }]);
+    // A composition's own root gives no end: the host it is named by does.
+    const card = `<template><div id="root" data-composition-id="card" data-duration="3"><div class="clip" data-start="5" data-duration="1">Past its own root</div></div></template>`;
+    assert.deepEqual(wordsOf(projectOf(host("card", 10, 10), { "compositions/card.html": card })), [{ text: "Past its own root", at: 15 }]);
+  });
+  it("takes a project whose root says no length, or a nonsense one, to have no end", () => {
+    const bare = (root) => ({ "index.html": `<div ${root}><div class="clip" data-start="500" data-duration="2">Far</div></div>` });
+    for (const root of ['id="root" data-composition-id="main"', 'id="root" data-composition-id="main" data-duration="long"', 'id="root" data-composition-id="main" data-duration="0"', 'id="root" data-composition-id="main" data-duration="-5"']) {
+      assert.deepEqual(wordsOf(bare(root)), [{ text: "Far", at: 500 }], root);
+    }
+    assert.deepEqual(wordsOf(bare('id="root" data-composition-id="main" data-duration="600"')), [{ text: "Far", at: 500 }]);
+    assert.deepEqual(wordsOf(bare('id="root" data-composition-id="main" data-duration="500"')), []);
+  });
   it("gives none for text outside every unit, in index.html and in the root of the main composition", () => {
     assert.deepEqual(wordsOf(projectOf("Plain text<div>More</div>")), []);
     assert.deepEqual(wordsOnScreen(() => '<html><body>Bare<div id="root" data-composition-id="main" data-start="0" data-duration="9">In the root</div></body></html>'), []);
@@ -389,7 +438,7 @@ describe("A7. a project too big to read in full, and a file that is two names (r
     }
   });
   it("gives the words of a project of a reasonable size, though many hosts name one composition", () => {
-    const hosts = Array.from({ length: 10 }, (_, i) => hostOf(`h${i}`, "compositions/card.html", i * 5, 4)).join("");
+    const hosts = Array.from({ length: 10 }, (_, i) => hostOf(`h${i}`, "compositions/card.html", i * 5, 10)).join("");
     const { read } = asking(projectOf(hosts, { "compositions/card.html": composition("card", timed(40)) }));
     const found = wordsOnScreen(read);
     assert.equal(found.length, 10 * 40);

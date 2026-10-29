@@ -261,21 +261,26 @@ export function wordsOnScreen(read) {
       doc.unit.lines.push(line);
     }
   };
-  /** A file read on a clock, with the ids of the files it is inside: a file that is one of them is already being read. */
-  const walkFile = (rel, { offset, host, vars, ids }) => {
+  /** A file read on a clock, with the ids of the files it is inside: a file that is one of them is already being read. `end` is the
+      second of the project's timeline at which the file stops being on the screen (the host's end, or the video's), and nothing that
+      starts at or after it is (review M6). */
+  const walkFile = (rel, { offset, host, vars, ids, end }) => {
     const file = get(rel);
     if (file === null || ids.includes(file.id)) return;
-    const doc = { offset, vars, unit: host ? unit(offset) : null, buffer: [], ids: [...ids, file.id] };
+    const doc = { offset, vars, end, host, sized: false, unit: host ? unit(offset) : null, buffer: [], ids: [...ids, file.id] };
     walk(treeOf(file), doc);
     flush(doc);
   };
-  /** A host: the composition it names, on its clock, when it is on the screen at a time and is a file to be read. */
+  /** A host: the composition it names, on its clock, when it is on the screen at a time and is a file to be read. One that starts
+      at or after the end of what it is in is not on the screen, and is not read. */
   const walkHost = (attrs, doc) => {
     const timing = timingOf(attrs);
     const rel = compositionPath(attrs["data-composition-src"]);
     if (!timing || !rel || doc.ids.length > NESTING_MOST) return;
     if (CAPTIONS_NAME.test(attrs["data-composition-id"] ?? "") || CAPTIONS_NAME.test(stemOf(rel))) return;
-    walkFile(rel, { offset: doc.offset + timing.start, host: true, vars: variablesOf(attrs), ids: doc.ids });
+    const start = doc.offset + timing.start;
+    if (start >= doc.end) return;
+    walkFile(rel, { offset: start, host: true, vars: variablesOf(attrs), ids: doc.ids, end: Math.min(doc.end, start + timing.duration) });
   };
   const walk = (node, doc) => {
     if (node.text !== undefined) {
@@ -292,6 +297,12 @@ export function wordsOnScreen(read) {
     }
     const root = attrs["data-composition-id"] !== undefined;
     if (root && CAPTIONS_NAME.test(attrs["data-composition-id"])) return;
+    // The first root of the main page is the video: its duration is the length of the video, and nothing starts after that.
+    if (root && !doc.host && !doc.sized) {
+      doc.sized = true;
+      const length = (attrs["data-duration"] ?? "").trim();
+      if (NUMBER.test(length) && Number(length) > 0) doc.end = Math.min(doc.end, Number(length));
+    }
     if (tag === "br") {
       flush(doc);
       return;
@@ -300,7 +311,8 @@ export function wordsOnScreen(read) {
     const timing = root ? null : timingOf(attrs);
     if (block || timing) flush(doc);
     const outer = doc.unit;
-    if (timing) doc.unit = unit(doc.offset + timing.start);
+    // A unit that starts at or after the end is not on the screen, and its own words are none; a unit inside it has a start of its own.
+    if (timing) doc.unit = doc.offset + timing.start < doc.end ? unit(doc.offset + timing.start) : null;
     const bound = attrs["data-var-text"];
     if (bound !== undefined && Object.hasOwn(doc.vars, bound) && typeof doc.vars[bound] === "string") {
       if (doc.unit) doc.buffer.push(doc.vars[bound]);
@@ -311,7 +323,7 @@ export function wordsOnScreen(read) {
     doc.unit = outer;
   };
   try {
-    walkFile("index.html", { offset: 0, host: false, vars: {}, ids: [] });
+    walkFile("index.html", { offset: 0, host: false, vars: {}, ids: [], end: Infinity });
   } catch (e) {
     // The budget is used up, or something went wrong that this was not written for: the project was not read in full.
     return null;
