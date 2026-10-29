@@ -5,8 +5,11 @@
 // writes nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { HELP } from "../edit.js";
@@ -15,7 +18,8 @@ import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
 import { workCopyLockOf } from "../workcopy.js";
 import { FOLDER, ID, listAll, reread } from "./episodes.js";
-import { AT, entry, exportOf, world } from "./exports-world.js";
+import { entry, exportOf } from "./exports-world.js";
+import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
 
 const NAMED = "Pricing: what to charge? (3fa9c1)";
@@ -32,22 +36,15 @@ const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 
-const READ = (kind) => ({ kind, model: "m", at: AT, on: "Mac Studio", account: "a", outcome: "read" });
-const OFFERS = { spellings: [], answered: { reading: AT, at: AT, on: "Mac Studio", applied: [], left: [] } };
 const MAIN_PUSHED = (pushed) => ({ preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed });
 const push = (v, at) => ({ v, at, on: "Mac Studio", file: `edit/x.v${v}.mac-studio.fcpxml`, project: `Pricing- what to charge- main v${v} 3fa9c1` });
 const FINISHED = { revision: 1, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} };
 
-/** The made-up episode of exports-world.js, read by Claude and its spellings answered, with the projects given on disk: just the main
-    one, opened and last changed at 13:40, by default. `projects: null` is a record with no project at all. */
-const guideWorld = ({ kind = "raw", projects = ["main"], over = {}, ...rest } = {}) => world({ kind, projects, over: { reading: READ(kind), offers: OFFERS, ...over }, ...rest });
-/** Its hand-off, written in final/ as a finish writes one. */
+/** The made-up episode's hand-off, written in final/ as a finish writes one. */
 function handOff(w, kind = "raw") {
   mkdirSync(join(w.found.folder, "final"), { recursive: true });
   writeFileSync(join(w.found.folder, "final", "Pricing talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: ID, kind, name: "Pricing talk" }, main: { file: "Pricing talk.mov" } }));
 }
-/** The deps of a guide run: this Mac on the light import, with the zone the made-up records are in (UTC-5, Chicago's in October). */
-const depsOf = (w, over = {}) => ({ ...w.t.ctx.deps, settings: { ...w.t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 }, app: { tz: "America/Chicago" }, ...over });
 /** The line `guide` says of the made-up episode. Nothing she reads holds a path, a flag or the name of a command. */
 async function line(w, over) {
   const r = await on(depsOf(w, over), "guide", "3fa9c1");
@@ -401,6 +398,71 @@ describe("what says the guide's new states: the help and the README (the skills'
     assert.ok(row("| `guide drop [zoom]").includes("being imported, being read or having its video for HyperFrames made"));
     assert.ok(row('| `guide "<video>" done').includes("Its video for HyperFrames being made is waited for too, and ends with its next step; no notice is posted for it"));
     assert.ok(row("| `tool/guide.js`, `tool/guide-note.js`").includes("where a raw video and an iPhone clip are in HyperFrames"));
+  });
+});
+
+/** Run a scenario of pipe-scenario.mjs in a child process with a time limit for the command it runs, which starts once the child says READY
+    (the episode is made then, and the pipe), so that a loaded Mac's slow start costs nothing. Gives { hung, code, said } of its answer, or
+    { hung: true, stage } when the command did not answer in `limit` milliseconds, or { hung: false, exited, err } when the child ended with
+    none. The child is killed whatever happens, and its temporary folder taken away. */
+function inChild(what, command, { limit = 20000, start = 240000 } = {}) {
+  return new Promise((resolve) => {
+    const tmp = mkdtempSync(join(tmpdir(), "brimm-pipes-"));
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./pipe-scenario.mjs", import.meta.url)), what, command], { env: { ...process.env, TMPDIR: tmp }, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    let ready = false;
+    let over = false;
+    let timer = null;
+    const end = (result) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      rmSync(tmp, { recursive: true, force: true });
+      resolve(result);
+    };
+    timer = setTimeout(() => end({ hung: true, stage: "before the command" }), start);
+    child.stdout.on("data", (chunk) => {
+      out += chunk;
+      if (!ready && out.includes("READY\n")) {
+        ready = true;
+        clearTimeout(timer);
+        timer = setTimeout(() => end({ hung: true, stage: "in the command" }), limit);
+      }
+      const got = /^RESULT (.*)$/m.exec(out);
+      if (got) end({ hung: false, ...JSON.parse(got[1]) });
+    });
+    child.stderr.on("data", (chunk) => (err += chunk));
+    child.on("close", (exited) => end({ hung: false, exited, err }));
+  });
+}
+
+describe("a file the app keeps that is a named pipe, where a reader that waits for a writer would wait for good (plan PR 10, review I1)", () => {
+  const MAIN_EXPORT = /^The main video: Pricing- what to charge- main 3fa9c1 2026-10-20 13\.56\.mp4, from Downloads, exported 2026-10-20 13:56\.$/;
+  it("answers `guide` when the app's history is a pipe: no time of a last request, and the export still found", async () => {
+    const got = await inChild("history", "guide");
+    assert.equal(got.hung, false, `${got.stage}`);
+    assert.deepEqual([got.code, got.said], [0, [says(EXPORTED)]], JSON.stringify(got));
+  });
+  it("answers `guide` when an export's record in renders/ is a pipe: passed over, and the export found by its name", async () => {
+    const got = await inChild("record", "guide");
+    assert.equal(got.hung, false, `${got.stage}`);
+    assert.deepEqual([got.code, got.said], [0, [says(EXPORTED)]], JSON.stringify(got));
+  });
+  it("answers `finish` when the app's history is a pipe, as it answers without one", async () => {
+    const got = await inChild("history", "finish");
+    assert.equal(got.hung, false, `${got.stage}`);
+    assert.equal(got.code, 0, JSON.stringify(got));
+    assert.match(got.said[0], MAIN_EXPORT);
+    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+  });
+  it("answers `finish` when an export's record in renders/ is a pipe", async () => {
+    const got = await inChild("record", "finish");
+    assert.equal(got.hung, false, `${got.stage}`);
+    assert.equal(got.code, 0, JSON.stringify(got));
+    assert.match(got.said[0], MAIN_EXPORT);
+    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
   });
 });
 

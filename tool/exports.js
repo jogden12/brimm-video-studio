@@ -8,9 +8,10 @@
 // in the project, which says where the file went. The app updates itself, so everything here reads what it writes tolerantly.
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { KEPT, isMain } from "./app.js";
+import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
 import { downloadsFolder, episodeWork } from "./settings.js";
@@ -121,30 +122,28 @@ export function lastChangeOf({ files = [], turns = [] } = {}) {
   return latest;
 }
 
-/** How much of the end of app-history.jsonl is read: a megabyte, as the command line's catch-up reads it. */
-const HISTORY_BYTES = 1000000;
+/** The flags by which a file the app keeps is opened to be read: no link is followed, and no wait is made on a file that is not a regular
+    one. A pipe where the file should be has no writer, and opening it as a plain read waits for one for good (plan PR 10, review I1). */
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 
-/** The end of a text file, at most `bytes` of it, or "" when it cannot be read. The first line may be cut: a reader of turns passes over a
-    line that is not JSON. */
-function tailOf(path, bytes) {
+/** A file the app keeps, `path`, read as text when it is a regular file; null for anything else (a link, a folder, a pipe, a file that is
+    not there or cannot be read). It is looked at once it is open, so that what is read is the very file that was looked at. */
+function readRegular(path) {
   let fd;
   try {
-    fd = openSync(path, "r");
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - bytes);
-    const buffer = Buffer.alloc(size - start);
-    readSync(fd, buffer, 0, buffer.length, start);
-    return buffer.toString("utf8");
+    fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : null;
   } catch (e) {
-    return "";
+    return null;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
 
 /** When the project in the folder `dir` last changed (lastChangeOf), read from the disk: every file in it but those in the folders it
-    skips, a link counting for its own time and never followed, and the app's history. null when the folder is not here, or holds nothing
-    that counts. */
+    skips, a link counting for its own time and never followed, and the app's history (app-history.js historyTail, which reads a regular
+    file alone: a pipe in its place is no history, and is not waited on). null when the folder is not here, or holds nothing that counts. */
 export function projectChange(dir) {
   const files = [];
   const walk = (folder, rel) => {
@@ -169,7 +168,7 @@ export function projectChange(dir) {
     }
   };
   walk(dir, "");
-  return lastChangeOf({ files, turns: turnsOf(tailOf(join(dir, ".hyperframes", "app-history.jsonl"), HISTORY_BYTES)) });
+  return lastChangeOf({ files, turns: turnsOf(historyTail(dir)) });
 }
 
 // --- Which export a part takes ---
@@ -429,12 +428,9 @@ function recordsIn(dir, downloads, zone) {
   const named = new Set();
   for (const name of names.filter((n) => n.endsWith(".meta.json"))) {
     const when = metaNameOf(name);
-    let told = null;
-    try {
-      told = metaOf(readFileSync(join(folder, name), "utf8"));
-    } catch (e) {
-      // A record that cannot be read is none.
-    }
+    // A record that cannot be read, or is not a regular file (a pipe, a link, a folder), is none.
+    const text = readRegular(join(folder, name));
+    const told = text === null ? null : metaOf(text);
     if (!told || !told.complete || !told.exportedTo) continue;
     named.add(resolve(told.exportedTo));
     if (!when || !ENDINGS.includes(endingOf(told.exportedTo)) || !isFile(told.exportedTo)) continue;
