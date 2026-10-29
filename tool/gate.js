@@ -98,7 +98,7 @@ function agreedTo(record, n) {
     - `render "<label>" reel <n>` of a Reel recorded as agreed.
     Any other words are not: the label is one word, as a quoted name is, so that these are all the words there are. And the
     first word counts as the label only when it is the very word the episode was asked for (`said`, what findEpisode was given):
-    otherwise it is a verb of today's reel, as in `reel pick 14 --client-agreed`, which asks for the episode "14". Without `said`
+    otherwise it is a verb of today's reel, as in `reel drop 14 --client-agreed`, which asks for the episode "14". Without `said`
     no words count. */
 function reelWords(command, record, words, said) {
   const [label, second, third, ...rest] = wordsOf(words);

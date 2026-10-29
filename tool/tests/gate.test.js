@@ -175,10 +175,9 @@ describe("gateFor, a Reel cut from a session", () => {
     assert.equal(gateFor("render", session(), TAUGHT, [LABEL, "reel", "3"]), REEL_NOT_AGREED);
   });
   it("counts the words only when the first is the very word the episode was asked for, never a verb of today's reel", () => {
-    // `reel pick 14 --client-agreed` is today's reel, naming the episode "14": its first word, "pick", is not the label.
-    assert.equal(gateFor("reel", session(), { teachingsOn: true, said: "14" }, ["pick", "14", "--client-agreed"]), REEL_NOT_AGREED);
+    // `reel drop 14 --client-agreed` is today's reel, naming the episode "14": its first word, "drop", is not the label.
     assert.equal(gateFor("reel", session(), { teachingsOn: true, said: "14" }, ["drop", "14", "--client-agreed"]), REEL_NOT_AGREED);
-    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "14" }, ["pick", "make", "2"]), REEL_NOT_AGREED);
+    assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "14" }, ["drop", "make", "2"]), REEL_NOT_AGREED);
     assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: "other" }, [LABEL, "make", "2"]), REEL_NOT_AGREED);
     assert.equal(gateFor("render", agreed(2), { teachingsOn: true, said: "other" }, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
   });
@@ -188,8 +187,8 @@ describe("gateFor, a Reel cut from a session", () => {
     assert.equal(gateFor("render", agreed(2), ON, [LABEL, "reel", "2"]), REEL_NOT_AGREED);
     assert.equal(gateFor("reel", agreed(2), { teachingsOn: true, said: undefined }, [LABEL, "make", "2"]), REEL_NOT_AGREED);
   });
-  it("refuses any other words: today's pick and drop, no words, extra words, a number that is not a whole one", () => {
-    const words = [[], [LABEL], ["pick", LABEL, "2"], ["drop", LABEL, "2"], [LABEL, "pick", "2"], [LABEL, "make"], [LABEL, "make", "2", "3"], [LABEL, "make", "2", "--no-play"],
+  it("refuses any other words: today's drop, no words, extra words, a number that is not a whole one", () => {
+    const words = [[], [LABEL], ["drop", LABEL, "2"], [LABEL, "drop", "2"], [LABEL, "make"], [LABEL, "make", "2", "3"], [LABEL, "make", "2", "--no-play"],
       [LABEL, "make", "0"], [LABEL, "make", "-1"], [LABEL, "make", "1.5"], [LABEL, "make", "two"], [LABEL, "2"], [LABEL, "--client-agreed", "2"], [LABEL, "2", "--client-agreed", "extra"],
       [LABEL, "2", "--client-agreed", "make", "1"], ["x", LABEL, "make", "2"], [LABEL, "make", "02"], [LABEL, "make", "2 "]];
     for (const these of words) assert.equal(gateFor("reel", agreed(2, 0, -1, 1), TAUGHT, these), REEL_NOT_AGREED, JSON.stringify(these));

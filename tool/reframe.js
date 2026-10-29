@@ -11,6 +11,9 @@ import { QUALITY, encodeArgs, framesASecond } from "./cuts.js";
 
 /** How far apart the stills are, in seconds, when nothing else is asked for. */
 const EVERY = 2;
+/** The same, for whoever keeps what the face finder found in them (workcopy.js, for a Reel's copy), so that a still's number is read
+    as the time it was taken at. */
+export const STILL_EVERY = EVERY;
 
 /** Write a still every `every` seconds, 640 pixels wide, as 0001.jpg, 0002.jpg and so on: what faces.swift looks for faces in.
     A still's time is its number times `every`. Tried on ffmpeg 9: with round=down, still 3 of a still every 2 seconds is the

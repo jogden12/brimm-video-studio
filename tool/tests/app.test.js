@@ -631,6 +631,23 @@ describe("app: opening an episode in HyperFrames", () => {
       const { e, record } = await madeHere(c);
       for (const name of ["", ".", "..", "../Pricing talk main 3fa9c1", "a/b"]) assert.equal(asked(e, changed(record, { on: "Sallie's laptop", name })), "Sallie's laptop", JSON.stringify(name));
     });
+    it("is asked about a Reel's project by its key (plan PR 5): the Reel's, whatever state it is in, and not the main project's", async (c) => {
+      const { e, record } = await madeHere(c);
+      const reel = { ...record.app.projects[0], key: "reel 2", name: "Pricing talk reel 2 3fa9c1", fromSuggestion: 2, on: "Sallie's laptop" };
+      const both = { ...record, app: { ...record.app, projects: [record.app.projects[0], reel] } };
+      // Its folder is not here: another Mac made it, and everything done in it is there.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 2"), "Sallie's laptop");
+      // The main project is this Mac's, and the Reel's other Mac does not make it another's.
+      assert.equal(asked(e, both), null);
+      // This Mac's own Reel, whose folder is gone, is made again; one whose folder is here is opened, whichever Mac made it.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: { ...both, app: { ...both.app, projects: [record.app.projects[0], { ...reel, on: "Mac Studio" }] } } }, "reel 2"), null);
+      mkdirSync(join(episodeWork(e.home, FOLDER), reel.name));
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 2"), null);
+      // A Reel with no project in the record, and one the record keeps in another state, are asked the same way.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 3"), null);
+      rmSync(join(episodeWork(e.home, FOLDER), reel.name), { recursive: true });
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: { ...both, app: { ...both.app, projects: [record.app.projects[0], { ...reel, state: "exported" }] } } }, "reel 2"), "Sallie's laptop");
+    });
   });
   describe("her chat, found by chatOf (plan PR 4, \"The chat\": no readable transcript, no handover, never guessed)", () => {
     // No test here gives openInApp a chat(): it finds the chat itself, from the environment it is given, her folder for Claude and

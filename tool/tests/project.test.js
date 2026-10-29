@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
-import { assertSafe, cutSuggestions, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, saidWords, transcriptJson, writeProject } from "../project.js";
+import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, reelWords, saidWords, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -51,7 +51,9 @@ const main = (over = {}) => ({
   kind: "main", name: "Pricing talk", part: "main", id: ID, facts: FACTS, words: WORDS, spellings: [["Hormozy", "Hormozi"]], plan: PLAN, reels: REELS,
   guidance: GOLDEN.claude, video: "/Users/sallie/BRIMM Video Work/E/working copy/k.mp4", cli: CLI, logos: LOGOS, createdAt: "2026-10-28T15:00:00.000Z", ...over
 });
-const reel = (over = {}) => main({ kind: "reel", part: { reel: 2 }, ...over });
+/** Reel 2's stretch of the recording, as the candidate of REELS has it: from its first moment to its last. */
+const STRETCH = { start: 1.15, end: 4.05 };
+const reel = (over = {}) => main({ kind: "reel", part: { reel: 2 }, stretch: STRETCH, ...over });
 /** A session's clip, given everything an episode's part is given: its kind alone decides what goes in. */
 const clip = (over = {}) => main({ kind: "clip", clip: 3, name: undefined, part: undefined, file: "GMT20261013-142933_Recording_Jane Doe.mp4", ...over });
 const json = (files, path) => JSON.parse(files.get(path));
@@ -190,7 +192,8 @@ describe("the words as they are said (F5)", () => {
     assert.deepEqual([cut.from, cut.to, cut.start, cut.end], ["w2", "w3", 2, 2.9]);
   });
   it("are moved inside their time only in a Reel's project and a clip's, whose words no cut plan of the main video speaks for", () => {
-    assert.deepEqual(starts(projectFiles(reel({ words: given, plan }))), [0.2, 0.65, 1.65, 2.65]);
+    // (The Reel's stretch here is the first three seconds of the recording, so its clock is the recording's own.)
+    assert.deepEqual(starts(projectFiles(reel({ words: given, plan, stretch: { start: 0, end: 3 } }))), [0.2, 0.65, 1.65, 2.65]);
     assert.deepEqual(starts(projectFiles(clip({ words: given }))), [0.2, 0.65, 1.65, 2.65]);
   });
   it("start a word after a long pause on the pause's end: \"Instagram\" of the A0 recording, which the app's transcript has at 121.82 s", () => {
@@ -208,6 +211,112 @@ describe("the words as they are said (F5)", () => {
     const made = json(projectFiles(main({ words, plan: { by: "rules", phrases: phrasesOf(words, pausesOf(printed)) }, spellings: [] })), "transcript.json");
     // The app's transcript has "section," at 120.58 and "captions" at 122.34.
     assert.deepEqual(made.map(({ text, start, end }) => [text, start, end]), [["newsletter", 119.855, 120.38], ["section,", 120.64, 120.9], ["Instagram", 121.8, 122.08], ["captions", 122.34, 122.6]]);
+  });
+});
+
+describe("a Reel's words and clock (architecture 4.3 and 5.2; plan PR 5)", () => {
+  it("are the words that end inside its stretch, on the stretch's own clock: its start taken off the times", () => {
+    // "Pricing," ends at 1.1, before the stretch starts at 1.15, and "Later" ends after it ends at 4.05.
+    const said = reelWords([...WORDS, { w: "Later", start: 4.05, end: 4.4 }], STRETCH);
+    assert.deepEqual(said.map(({ w, start, end }) => [w, start, end]), [["says", 0.05, 0.45], ["Hormozy,", 0.55, 1.35], ["is", 1.55, 1.75], ["a", 1.85, 1.95], ["skill.", 2.05, 2.85]]);
+  });
+  it("start a word that began before the stretch at its first moment, and give no word for words that are not given", () => {
+    assert.deepEqual(reelWords([{ w: "Okay,", start: 1, end: 1.3 }], STRETCH), [{ w: "Okay,", start: 0, end: 0.15 }]);
+    for (const words of [null, undefined, {}, "words"]) assert.deepEqual(reelWords(words, STRETCH), []);
+  });
+  it("are what transcript.json of a Reel's project holds: ids from w0, the spellings applied, each start moved halfway into its time", () => {
+    const made = json(projectFiles(reel()), "transcript.json");
+    assert.deepEqual(made.map(({ id, text, start, end }) => [id, text, start, end]), [
+      ["w0", "says", 0.25, 0.45], ["w1", "Hormozi,", 0.95, 1.35], ["w2", "is", 1.65, 1.75], ["w3", "a", 1.9, 1.95], ["w4", "skill.", 2.45, 2.85]
+    ]);
+  });
+  it("say in brimm/facts.json where the Reel starts in the recording, and a main project or a clip says nothing of one", () => {
+    assert.deepEqual(json(projectFiles(reel()), "brimm/facts.json").reel, { n: 2, offset: 1.15 });
+    for (const files of [projectFiles(main()), projectFiles(clip())]) assert.equal("reel" in json(files, "brimm/facts.json"), false);
+  });
+  it("tell the agent in the notes where the Reel's clock starts, what its video is, and that it is exported upright", () => {
+    const notes = projectFiles(reel({ stretch: { start: 312.4, end: 340 } })).get("CLAUDE.md");
+    assert.ok(notes.includes("- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/recording.mp4`, which starts at 5:12 (312.4 seconds) into the episode's recording: this Reel is that stretch of it, and nothing was cut from the stretch."), notes);
+    assert.ok(notes.includes("`media/recording.mp4`: the Reel's stretch of the recording, made ready for HyperFrames and not cut inside it."), notes);
+    assert.match(notes, /exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker/);
+    // A main project's and a clip's lines are as they were.
+    for (const files of [projectFiles(main()), projectFiles(clip())]) {
+      const own = files.get("CLAUDE.md");
+      assert.ok(own.includes("is on the clock of `media/recording.mp4`, which is the recording's own: nothing was cut from it."), own);
+      assert.ok(own.includes("`media/recording.mp4`: the video: the recording, made ready for HyperFrames and not cut."), own);
+      assert.doesNotMatch(own, /exported upright|which starts at/);
+    }
+  });
+  it("name an offset an hour in as an hour, as the lists of Reels do", () => {
+    assert.match(projectFiles(reel({ stretch: { start: 3725.5, end: 3800 } })).get("CLAUDE.md"), /which starts at 1:02:06 \(3725\.5 seconds\) into the episode's recording/);
+  });
+  it("are refused, with the Reel's project, when its stretch is not one: missing, empty, backwards or not times", () => {
+    for (const stretch of [undefined, null, {}, { start: 5, end: 5 }, { start: 6, end: 5 }, { start: -1, end: 4 }, { start: 1, end: "x" }, { start: NaN, end: 4 }]) {
+      assert.throws(() => projectFiles(reel({ stretch })), /stretch/, JSON.stringify(stretch));
+    }
+    // A main project and a clip have no stretch, and are not asked for one.
+    assert.doesNotThrow(() => projectFiles(main()));
+    assert.doesNotThrow(() => projectFiles(clip()));
+  });
+});
+
+describe("the face track (architecture 4.3; plan PR 5)", () => {
+  const BOX = { x: 0.41, y: 0.22, w: 0.18, h: 0.3 };
+  /** What the face finder printed of three stills, one every two seconds of the Reel: none, one face, and two. */
+  const FACES = { every: 2, stills: [{ file: "0001.jpg", faces: [] }, { file: "0002.jpg", faces: [BOX] }, { file: "0003.jpg", faces: [BOX, { x: 0.7, y: 0.3, w: 0.1, h: 0.15 }] }] };
+  it("is the faces found in each still, at the still's time on the Reel's own clock: its number times how far apart they are", () => {
+    const made = json(projectFiles(reel({ faces: FACES })), "brimm/face-track.json");
+    assert.deepEqual(made.stills, [{ at: 2, faces: [] }, { at: 4, faces: [BOX] }, { at: 6, faces: [BOX, { x: 0.7, y: 0.3, w: 0.1, h: 0.15 }] }]);
+    assert.deepEqual([made.version, made.clock, made.every], [1, "reel", 2]);
+    // It says how to read a box.
+    assert.match(made.about, /fractions of the picture, from its top left corner/);
+    assert.deepEqual(faceTrack(FACES), made);
+  });
+  it("is written only when some still holds a face: none looked for, none found, or a finder that printed nothing it can be read by", () => {
+    for (const faces of [undefined, null, { every: 2, stills: [] }, { every: 2, stills: [{ file: "0001.jpg", faces: [] }] }, { every: 2 }, { stills: [{ file: "0001.jpg", faces: [BOX] }] }, "faces"]) {
+      assert.equal(faceTrack(faces), null, JSON.stringify(faces));
+      assert.ok(!projectFiles(reel({ faces })).has("brimm/face-track.json"), JSON.stringify(faces));
+    }
+  });
+  it("leaves out a still whose name has no number, and keeps the others at their own times", () => {
+    const made = faceTrack({ every: 2, stills: [{ file: "cover.jpg", faces: [BOX] }, { file: "0004.jpg", faces: [BOX] }] });
+    assert.deepEqual(made.stills, [{ at: 8, faces: [BOX] }]);
+  });
+  it("is a Reel's alone: a main project and a clip given faces have none", () => {
+    assert.ok(!projectFiles(main({ faces: FACES })).has("brimm/face-track.json"));
+    assert.ok(!projectFiles(clip({ faces: FACES })).has("brimm/face-track.json"));
+  });
+  it("is in the notes' list of the project's files, with what it is for, when it is there and not otherwise", () => {
+    assert.ok(projectFiles(reel({ faces: FACES })).get("CLAUDE.md").includes("`brimm/face-track.json`: where the faces are in this Reel, for the upright crop."));
+    assert.ok(!projectFiles(reel()).get("CLAUDE.md").includes("face-track.json: where"));
+    assert.ok(json(projectFiles(reel({ faces: FACES })), "brimm/facts.json").files["brimm/face-track.json"]);
+    assert.ok(!("brimm/face-track.json" in json(projectFiles(reel()), "brimm/facts.json").files));
+  });
+});
+
+describe("the ruling: a Reel is made by Studio only (Jason, 2026-10-28; plan PR 5)", () => {
+  const rulesOf = (files) => {
+    const notes = files.get("CLAUDE.md");
+    return notes.slice(notes.indexOf("# The BRIMM: rules for this project"), notes.indexOf("\n# ", notes.indexOf("# The BRIMM: rules for this project") + 1));
+  };
+  it("is in the BRIMM rules of a main project and of a Reel's: never make a Reel as a new project, and say \"Open Reel 2 in HyperFrames\" in her Claude chat", () => {
+    for (const files of [projectFiles(main()), projectFiles(reel())]) {
+      const rules = rulesOf(files);
+      assert.match(rules, /Never make a Reel as a new project yourself/);
+      assert.match(rules, /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat, with the number of the Reel she wants/);
+      assert.match(rules, /outside BRIMM Video Work with a second copy of the whole recording/);
+      assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+    }
+    // The main project's line about the Reels Studio suggests stays, with the rule after it.
+    assert.match(rulesOf(projectFiles(main())), /\*\*Reels\.\*\* The Reels Studio suggests are in `brimm\/reel-suggestions\.json`, by their word ids\. Never make a Reel as a new project yourself/);
+  });
+  it("is in a session clip's own rules, above the BRIMM rules: no new projects, a Reel or any other, from a clip of a private client session", () => {
+    const own = projectFiles(clip()).get("CLAUDE.md");
+    const first = own.slice(0, own.indexOf("# The BRIMM: rules for this project"));
+    assert.match(first, /\*\*No new projects\.\*\* Never make a Reel or any other new project from this clip/);
+    assert.match(first, /second copy of the clip outside Studio's care/);
+    // The clip has no Reels to ask for, so it is not told to say a phrase about one.
+    assert.doesNotMatch(own, /Open Reel \d in HyperFrames/);
   });
 });
 
@@ -263,6 +372,12 @@ describe("the file set of each kind of project (5.2)", () => {
   });
   it("is the same for a Reel's project, without the cut and Reel suggestions", () => {
     assert.deepEqual(sorted(projectFiles(reel()).keys()), sorted([...common, ...logos, "brimm/spellings.json"]));
+  });
+  it("has the face track too for a Reel whose video has faces in it, and for no other project", () => {
+    const faces = { every: 2, stills: [{ file: "0001.jpg", faces: [{ x: 0.4, y: 0.2, w: 0.2, h: 0.3 }] }] };
+    assert.deepEqual(sorted(projectFiles(reel({ faces })).keys()), sorted([...common, ...logos, "brimm/spellings.json", "brimm/face-track.json"]));
+    assert.deepEqual(sorted(projectFiles(main({ faces })).keys()), sorted(projectFiles(main()).keys()));
+    assert.deepEqual(sorted(projectFiles(clip({ faces })).keys()), sorted(common));
   });
   it("has no spellings, suggestions or logos for a session clip", () => {
     assert.deepEqual(sorted(projectFiles(clip()).keys()), sorted(common));

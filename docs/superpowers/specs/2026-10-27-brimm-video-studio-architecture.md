@@ -1,7 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
-- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 3 are merged, and PR 4 is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
+- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4 are merged, and PR 5 (Reel projects, 4.3) is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
 - **It rests on:**
   - the design accepted on 2026-10-27, `2026-10-27-brimm-video-with-the-hyperframes-app.md` (until it is merged, on the branch `claude/zealous-bell-esuqck` of brimm-video, or `claude/design-2026-10-27` of brimm-video-studio);
   - Jason's decisions in `docs/requirements.md`;
@@ -9,7 +9,7 @@
   - the code of `main` at c666508;
   - the HyperFrames command line, version 0.8.208, read and run in a scratch folder on a Linux machine: no Mac, no app, install scripts off, telemetry off. "Sources" at the end says exactly what was read.
 - **It does not reopen** a decision of the accepted design. Where a fact in the code or in the command line makes a sentence of that design unworkable as worded, "Findings" says so and proposes a rule that keeps its intent.
-- **Not covered, because only A0 can answer it:** what the app's Script panel does with `transcript.json`; where the app puts its exports and what it names them; where "make Reel 2" puts the new project; whether the app's assistant keeps a project's rules. Where this document needs one of those, it says so and gives the rule it will use until A0 answers. Section 15 lists what to add to A0 so that one sitting answers all of them.
+- **Not covered, because only A0 can answer it:** what the app's Script panel does with `transcript.json`; where the app puts its exports and what it names them; where "make Reel 2" puts the new project (A0 of 2026-10-28 answered it: in a folder of the app's own, outside `~/BRIMM Video Work`, with a copy of the whole recording, which is why Studio makes every Reel, 4.3); whether the app's assistant keeps a project's rules. Where this document needs one of those, it says so and gives the rule it will use until A0 answers. Section 15 lists what to add to A0 so that one sitting answers all of them.
 - **Companion:** the build plan, `docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md`: the pull requests in order, the failing tests of the first ones, the roll-out, and the baseline of the test suite.
 
 **Words used here.** Two ideas have near names, so they are kept apart:
@@ -309,7 +309,7 @@ sequenceDiagram
 | 7 | Studio | Claims the episode for this Mac, brings its files over if they are online-only, asks for the working copy if it is not made, writes the project, opens the app, and says in plain words that it is open. The bring and the copy are detached runs, so `app` does not wait for them: it says what is being made, and tells her to say "open `<name>` in HyperFrames" again when it is done ("how far is it?" shows how far it has got), since a command has two minutes in the Code tab | `app.js`: today's claim and bring from `open`, then `project.js` and `hyperframes.js` |
 | 8 | Sallie and Framey, in the app | Cuts (the Script panel's suggestions, and Studio's in `brimm/cut-suggestions.json`), a name, a title card, music, captions, graphics. Each request is an entry in the project's history | Not Studio's |
 | 9 | Sallie, in her chat | "What did I do in HyperFrames?" | `app "<episode>" what-happened` reads `.hyperframes/app-history.jsonl` and says it in plain words |
-| 10 | Sallie | A Reel: asks the app ("Make Reel 2 from … to …"), or says "make Reel 2" in her chat | `app "<episode>" reel 2` makes a Reel project from suggestion 2 and opens it |
+| 10 | Sallie | A Reel: says "Open Reel 2 in HyperFrames" (or "make Reel 2") in her chat. If she asks the app for one, its assistant tells her to say that in her chat: the app never makes a Reel as a project of its own (4.3) | `app "<episode>" reel 2` makes a Reel project from suggestion 2 and opens it |
 | 11 | Sallie, in the app | Exports on This Mac: the main video (1080p), each Reel 9:16 | Not Studio's |
 | 12 | Sallie, in her chat | "Hand it off" | `finish "<episode>"` (section 8) |
 | 13 | Sallie | Drops the hand-off on the BRIMM Ops page; the guide gives her each step | Unchanged |
@@ -330,7 +330,9 @@ The same, with these differences:
 ### 4.3 A finished video from her editor, and Reels from it
 
 - **No app for the hand-off.** As today: drop, card "Finished by your editor", Claude's Reel suggestions and spelling offers, and the hand-off is written when the spelling card is answered, from the import's captions (`finishFinished`). No working copy, no project: `app "<episode>"` for a finished video says "`<name>` was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames." and stops.
-- **A Reel she wants** goes to the app as a project of its own: `app "<episode>" reel 2`. Studio cuts that suggestion's stretch out of the original into the Reel project's working file (a short job for a Reel's length), writes the project, and opens it. The upright crop is the app's job; Studio offers the face positions it already finds (`brimm/face-track.json`, optional). `app … reel N` also marks the candidate as picked, which is what `reel pick` did, and `reel drop N` stays as the way to drop one (6.1).
+- **A Reel she wants** goes to the app as a project of its own: `app "<episode>" reel 2`. **Studio makes every Reel** (Jason's ruling, 2026-10-28). A0 found that the app, asked for a Reel, makes it as a project of its own in `~/.hyperframes-studio/<name>/`, outside `~/BRIMM Video Work`, with a copy of the whole recording in its `assets/`: Studio could not find such a project's export for the hand-off, and a second copy of a recording is one nothing keeps track of. So every project's notes (5.4) tell the app's agent never to make a Reel as a new project itself, and, when she asks it for one, to tell her to say "Open Reel 2 in HyperFrames" in her Claude chat. If it is wrong, the cost is a line in the notes, and a way to adopt the app's own Reels later.
+  - Studio cuts that suggestion's stretch out of the original as filed, from the suggestion's first moment to its last, into the Reel project's working file, by a detached run (`workcopy --reel 2`) with the working copy's lock, chain and checks (5.7), and writes the project, and opens it. Nothing is cut inside the stretch: the pauses and retakes the cut plan cuts stay, and cutting them is the app's. The Reel's words are its own, on its own clock from 0. The upright crop is the app's job; Studio offers the face positions it already finds in the Reel's video (`brimm/face-track.json`, only when the finder found a face).
+  - `app … reel N` also marks the candidate picked, in the same write that records the project, which is what `reel pick` did, and `reel pick` is gone: `reel drop N` stays as the way to drop one (6.1).
 - **After the export,** `finish "<episode>" reels` writes the next revision of the hand-off under the same id, with the new Reels added and `main` as it was (section 8.7).
 - **OpusClip** is unchanged: it takes the episode's YouTube link, and Studio uploads nothing.
 
@@ -431,15 +433,16 @@ The project's folder name, its `meta.json` name and its title in the app are one
 | File | Made from | Notes |
 |---|---|---|
 | `index.html` | Studio's template | One `<video>` for the working copy; `data-width`, `data-height`, `data-duration` from the working copy's facts; GSAP from `vendor/` |
-| `media/recording.mp4` | The raw video | 5.7 |
-| `transcript.json` | The episode's words, with its spellings | F5. For a session clip: the clip's own words, names muted |
+| `media/recording.mp4` | The raw video | 5.7. For a Reel: its stretch of the recording, cut by `workcopy --reel` (5.7) |
+| `transcript.json` | The episode's words, with its spellings | F5. For a session clip: the clip's own words, names muted. For a Reel: the recording's words that end inside its stretch, on the stretch's own clock from 0 (`reelWords`), ids from `w0` |
 | `meta.json`, `hyperframes.json`, `package.json` | Studio's template | `package.json` has the scripts `dev`, `check` and `render` (each runs `hyperframes <command>`), and no `publish` |
 | `node_modules/.bin/hyperframes` | A link to the toolchain's `bin/hyperframes.mjs` | 5.3. Makes `npx hyperframes …` and `npm run …` run the pinned version with no network |
 | `CLAUDE.md`, `AGENTS.md` | 5.4 | The same text in both |
 | `.claude/settings.json` | 5.5 | Denied commands, and the environment |
-| `brimm/facts.json` | The record | The kind, the name, the length, what the files are |
-| `brimm/cut-suggestions.json` | The cut plan, as Claude changed it | 5.8 |
-| `brimm/reel-suggestions.json` | `reels.json` | 5.8. Not in a session clip |
+| `brimm/facts.json` | The record | The kind, the name, the length, what the files are. For a Reel: `reel: { n, offset }`, where its stretch starts in the recording, in seconds |
+| `brimm/cut-suggestions.json` | The cut plan, as Claude changed it | 5.8. The main video's only |
+| `brimm/reel-suggestions.json` | `reels.json` | 5.8. The main video's only: not in a Reel, and not in a session clip |
+| `brimm/face-track.json` | The face finder's stills of the Reel's video | A Reel's only, and only when the finder found a face: `{ version: 1, clock: "reel", every, about, stills: [{ at, faces }] }`, each `at` in seconds on the Reel's clock and each face a box as the finder gave it. The upright crop is the app's; this says where the speaker is |
 | `brimm/spellings.json` | The house's spellings, then the episode's | So titles and captions are spelled as she says, and the company's name always as BRIMM. The house's are "brim", "Brim" and "BRIM" as BRIMM, since the app makes a transcript of its own that says "Brim". They come first, as `transcript.json` applies them: the name is Jason's rule, and it wins |
 | `brimm/brand.md`, `assets/fonts/`, `assets/logos/` | The brand pack (`tool/brand/`) and the Assets folder in Dropbox | D4. Colours, type, rules; Josefin Sans in Light, Regular, Regular Italic and Medium, and Allison for an accent (open licences; Jason's of 2026-10-26 and 2026-10-28); the logos she chose, never a "with Sallie Holder" mark |
 | `vendor/gsap.min.js` | `tool/vendor/` | The version `init` uses (3.14.2), with its checksum in the pin file |
@@ -464,11 +467,12 @@ Everything in a project is a file Studio chose to put there. The tests assert th
    - a wide main video has no captions drawn on it; Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear;
    - the words and their times are in `transcript.json`: use it, never transcribe again;
    - cut whole phrases at pauses, never inside a word;
+   - never make a Reel as a new project: Studio makes every Reel (4.3). When she asks the agent for one, it tells her to say "Open Reel 2 in HyperFrames" in her Claude chat, with the number she wants. (The main video's and a Reel's notes say it; a session clip's rules, below, forbid any new project from the clip);
    - when she asks what has changed, or to go back, `npx hyperframes history`. The notes do not have the agent wrap each request in `history begin` and `history end`: the app records every change on its own, and in A0 its assistant said so and skipped the line;
    - when she is done: export on This Mac, then say "hand it off" in her Claude chat.
-2. **This project:** the kind, the name, what each file is; times are on the working copy's clock, which is the raw video's clock, so every time in `brimm/` is true here.
+2. **This project:** the kind, the name, what each file is; times are on the working copy's clock, which is the raw video's clock, so every time in `brimm/` is true here. A Reel's clock starts where its stretch does: the notes say how far into the episode's recording that is ("which starts at 5:12 (312.4 seconds) into the episode's recording"), and that the Reel is exported upright, 1080 by 1920, so a wide picture is made upright and cropped on the speaker, with `brimm/face-track.json` saying where the faces are when it is there.
 3. **HyperFrames' own guidance,** the text the pinned package ships (`dist/templates/_shared/CLAUDE.md`), kept as a fixture, with these lines taken out: `skills update`, `publish`, `npm run publish`, and the links that send the agent to its documentation host; and, since PR 2, any that names a command the agent may not run (5.5), such as `catch-up`, `upgrade` or `init`, and the registry. A paragraph that says one goes whole; in a list or a block of code, its line goes.
-4. **For a session clip, first of all:** it is a clip of a private client session; nothing goes anywhere; no Share, no cloud render, no Script panel transcription; no web.
+4. **For a session clip, first of all:** it is a clip of a private client session; nothing goes anywhere; no Share, no cloud render, no Script panel transcription; no web; no new project made from it (a Reel or any other: a new project would hold a second copy of the clip outside Studio's care).
 
 ### 5.5 The command line's 43 commands, classified
 
@@ -530,6 +534,7 @@ Whenever the app opened, a last line names the buttons Studio cannot control (3.
 - **HDR** is recognised from the picture's colour as `colourOf` reads it (BT.2020 primaries with an HLG or PQ transfer) and tone-mapped to standard colour. A clip that cannot be converted is refused in words, never used as it is. None of this exists today: `colourOf` only reads the two names, `fcpxml.js`'s `colorSpaceOf` maps HLG alone, and nothing converts. A0's recording is not HDR, so the converter is checked by eye on a real iPhone clip (risk 3).
 - **Under the watchdog.** ffmpeg runs under `runGuarded` (`guard.js`), the guard that exists because an ffmpeg once grew its memory without end: killed past 4 GB of memory (8 GB for a 4K copy) or past five minutes and twenty seconds for each second of video, limits set from measurements in plan PR 3. A Reel preview's 2 GB would be too tight for a 4K HDR copy. The rough cut itself runs unguarded today: only Reel previews have the guard.
 - **Not cut.** Its clock is the raw video's clock, so every time Studio and Claude have given stays true in the project.
+- **A Reel's video** (plan PR 5, 4.3). The same chain and checks, on a stretch of the recording as filed, from the suggestion's first moment to its last: ffmpeg is given the stretch's start before the input and its length before the output, so that picture and sound start together at 0 and the copy is as long as the stretch, whatever the source's frame rate. A run of its own makes it, `workcopy --now <folder> --reel <n>`, which holds the working copy's lock (so a second `app` while it runs starts none), runs under the same limits for the stretch's seconds, refuses an HDR video on a Mac without the filters in the working copy's own words, holds the end to the video's length, and keeps the copy as `working copy/reel-<n>-<key>.mp4`, with its facts, and the faces the finder found in it, beside it. The key is the raw file's size and time and the stretch's two ends, so a suggestion that moved is another video. It is cut from the recording and not from the working copy, because the working copy is moved into the main project, which the app may hold open, and a finished video has none. Nothing is cut inside the stretch: the Reel's clock starts at its first moment and runs on, and the pauses and retakes the cut plan cuts stay for the app to cut.
 - **Idempotent:** keyed by the raw file's size and time, with a key of its own for a 4K copy. A new version of a video is a new revision with its own copy and project (4.8). A project that exists is never changed under the app: a recording that changed under it is said, and the project is opened as it was.
 - **Disk:** refused in words when less than twice the raw video's size is free.
 - **Said.** `status` ("how far is it?") looks for the copy's run under the copy's own lock. While the copy is made it says "`<name>`: the video for HyperFrames is being made."; a result of it reads "`<name>`: making the video for HyperFrames ended … ago".
@@ -564,13 +569,13 @@ The app's buttons: Share, Render in the cloud, the Script panel's transcription,
 | `episodes`, `guide`, `kind`, `leave`, `which`, `read`, `status`, `retry`, `name`, `ask`, `release`, `behind`, `resolve`, `spell`, `bring` | Kept. `kind` also starts the working copy, on a Mac set up for the app and for an episode with no main project in use; and when `--again` changes the kind, it marks the main project "kept for an earlier kind" (4.8). `release` writes the snapshot, and stops using Final Cut's `unkeptParts` and `mediaIn`. `guide` gains states and stops using `newestIsRender`. `episodes` stops using `newestOf`. `spell` stops using `presetOf`. `behind`, on a Mac set up for the app, also says when the toolchain is not the pin: "HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits.", with a line for Jason in brackets that names the pin and what the Mac has (the plan has the words) |
 | `open` | Claim and bring. The lines it prints about showing the timeline in Final Cut go. `app` does the same claim and bring first. A bring that `app` started ends by telling her to say "open `<name>` in HyperFrames"; `open`'s own words are unchanged |
 | `finish` | From the app's exports (section 8). Accepts an iPhone clip (4.2) |
-| `title` | Kept and changed. Today `title <episode> reel N` refuses a Reel nobody made in Final Cut (`notMade`, `notMadeWords`), so it must accept a Reel that `app … reel N` made |
-| `reels` | The candidates as text, with no previews. It stops using `clockFor`, and stops ending with "cut it in OpusClip" (`notMadeWords`) for a candidate `app` can make |
+| `title` | Kept and changed. Today `title <episode> reel N` refuses a Reel nobody made in Final Cut (`notMade`, `notMadeWords`), so it accepts a Reel that `app … reel N` made (plan PR 5). A Reel nobody made is still refused, with how to make it: on a Mac set up for the app, "Reel 3 isn't made yet. Say "open Reel 3 of `<name>` in HyperFrames" to make it."; on any other, `notMadeWords` |
+| `reels` | The candidates as text, with no previews. It stops using `clockFor`, and stops ending with "cut it in OpusClip" (`notMadeWords`) for a candidate `app` can make: on a Mac set up for the app (plan PR 5) it ends with "To make it, say "open Reel 3 of `<name>` in HyperFrames"." (or "To make one, say "open Reel 1 of `<name>` in HyperFrames", with the number of the one you want."), and with nothing once she has dropped every suggestion; on a Mac not set up it ends as before |
 | `show` | Kept. `show transcript` of a raw video prints `<stem>.rough-cut.transcript.txt`, which a reading with no rough cut does not make: it prints the transcript the reading kept |
 | `teachings`, `principles`, `ideas` | `teachings` runs at the drop for a session (S1); the others are kept |
-| `reel` | Reduced to `reel drop N`. `reel pick` becomes `app … reel N`, which also marks the candidate picked (`parts.js` and the hand-off read "picked" and "dropped"). The client's agreement moves to `clips … send` |
+| `reel` | Reduced to `reel drop N`. `reel pick` becomes `app … reel N`, which also marks the candidate picked (`parts.js` and the hand-off read "picked" and "dropped"); `reel pick` is gone as of plan PR 5: it is the help and 2. The client's agreement moves to `clips … send` (until then it is `reel "<label>" <n> --client-agreed`, as before) |
 | `free` | Today a stub: it says deleting a library "comes in a later version", and `freeLibrary` and `unkeptParts` are unreachable. Studio builds it (plan, PR 15) to take a project's working copy and `renders/` away |
-| `push`, `logo`, `captions`, `text`, `graphic`, `preset`, `cut` | Retire, after the app path works (section 10). `push` and the Final Cut files it uses wait for Jason's call on Final Cut |
+| `push`, `logo`, `captions`, `text`, `graphic`, `preset`, `cut` | Retire, after the app path works (section 10). `push` and the Final Cut files it uses wait for Jason's call on Final Cut. Until then, for a Reel `app … reel N` made (a project in HyperFrames, with no timeline in Final Cut) `push` and the changes say so and send her back to HyperFrames, and for a Reel not picked they say how it is picked now: by opening it (plan PR 5) |
 | **`app`** | New. `app "<episode>"` opens; `… reel N`; `… what-happened`; `… versions`; `--take-over` |
 | **`clips`** | New. `clips "<label>"` lists; `… make`; `… show N`; `… send N`; `… done N` |
 | **`workcopy`** | New, and a detached run's alone, like `read` (`startDetached` runs `edit.js <command> --now <folder>`), in no help |
@@ -596,7 +601,8 @@ What a new command does need, or the suite fails:
 | She says | Run |
 |---|---|
 | "Open it in HyperFrames" / "Let's edit it" | `app "<episode>"` |
-| "Make Reel 2" / "Open Reel 2 in HyperFrames" | `app "<episode>" reel 2` |
+| "Make Reel 2" / "Open Reel 2 in HyperFrames" | `app "<episode>" reel 2` (the phrase the project's notes tell the app's agent to give her, 4.3) |
+| "Drop 2" | `reel drop "<episode>" 2` |
 | "What did I do in HyperFrames?" | `app "<episode>" what-happened` |
 | "What versions are there?" | `app "<episode>" versions` |
 | "Hand it off" / "Finish it" | `finish "<episode>"`, and its questions |
@@ -642,7 +648,7 @@ A record gains `app` once a project is made (F13). It holds numbers, names, stat
 - `from` is what the working copy was made from: the raw file's name, size and modified time (5.7). If the file is different now, `app` says so and opens the project as it was (4.8).
 - `workingCopy.fps` is a number, as `workcopy.js` writes it in its facts, or a fraction written n/d, as the example has it.
 - `state`: `made`, `opened`, `exported`, `finished`, or `kept for an earlier kind`.
-- A Reel project's `fromSuggestion` is the suggestion's number, or `null` for a Reel made from times she gave: the rule `fromSuggestionOf` already follows.
+- A Reel project's `fromSuggestion` is the suggestion's number, or `null` for a Reel made from times she gave: the rule `fromSuggestionOf` already follows. `app … reel N` writes the project (`key` "reel N", `fromSuggestion` N, `workingCopy` the Reel's own video) and the candidate marked picked in one record write; a Reel from times she gave is not built (no command gives times).
 - A session's clips: `clips: [{ n, state, consent: { basis: "alone" | "client", day } }]`. The consent is a basis and a day, never who. A clip's title and point stay in its file beside the teachings, under the gate.
 
 ### 7.2 The claim
@@ -813,6 +819,7 @@ The build plan has the detail. The rules:
 | 11 | The contract has no place for a clip without a client (F10) | D5 | No hand-off for such clips |
 | 12 | Text read out of the app's HTML is wrong (8.5) | A0's project fixtures | She types the words, as for a Reel title now |
 | 13 | The cloud box cannot run the suite cleanly | The plan's baseline: as a normal user four tests about signals and process groups fail on it, and twenty-six more fail as root | Run on the Mac or in CI, which pass |
+| 14 | The app's agent makes a Reel as a project of its own anyway (A0: it did, in `~/.hyperframes-studio/`, with a copy of the whole recording; and it suggested Reels unasked) | The project's notes forbid it and say what to tell her (5.4); Jason's by-hand check of PR 5 asks the app for a Reel | Studio does not see that project or its export for the hand-off; adopting the app's own Reels is a later step |
 
 ---
 
@@ -850,7 +857,7 @@ A0 (`docs/phase-a0/checklist.md`, on the design branch) is one sitting by hand. 
 | 1 | **Must.** Open the project from a plain Terminal, not from Claude Code (`node …/hyperframes.mjs open <folder>`, no `CLAUDE_CODE_SESSION_ID`). Does the app open it and start a fresh chat? Is `.hyperframes/app-history.jsonl` written as you use it? | D3, 4.1 step 9 |
 | 2 | Open it again from a Claude Code session (A0 step 4). What does the app show of the earlier conversation? Does the assistant follow the project's `CLAUDE.md`, or the old chat's folder rules? | D3, F3 |
 | 3 | **Must.** Export a main video and a Reel. Write down the folder, the exact file names (with the date and time), whether the folder can be chosen per project, and whether `~/Downloads` is a plain local folder on this Mac (`~/Movies` there is a link into Dropbox) | 8.1, Q3 |
-| 4 | **Must.** Ask for "Make Reel 2 from … to …". Where does the new project go: inside this folder, beside it, or as a part of this project? | 4.1 step 10, 8.1 |
+| 4 | **Must.** Ask for "Make Reel 2 from … to …". Where does the new project go: inside this folder, beside it, or as a part of this project? *Answered by A0 (2026-10-28): as a project of its own in `~/.hyperframes-studio/<name>/`, outside `~/BRIMM Video Work`, with a copy of the whole recording in its `assets/`, and its Reel export an H.264 1080 by 1920 file at 30 pictures a second in `~/Downloads`. Hence Jason's ruling that Studio makes every Reel (4.3)* | 4.1 step 10, 8.1 |
 | 5 | Ask the assistant to run `tts`, `capture`, `add` and `skills update`. Are they blocked? Does it honour `.claude/settings.json` `sandbox` settings if they are added? | F6, risk 1 |
 | 6 | Put `brimm/cut-suggestions.json` and `brimm/brand.md` in the project, without picking the brand kit. Ask: "cut the retakes", then "a title in the brand". Does it use them? | 5.8, D4 |
 | 7 | With `HYPERFRAMES_SKIP_SKILLS=1`, are the graphics and captions good, or does the assistant need the skills? | D6 |

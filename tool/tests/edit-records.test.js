@@ -67,7 +67,7 @@ describe("what every record command does first", () => {
     writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, version: RECORD_VERSION + 1, rev: 2 }));
     assert.equal(await editMain(["name", FOLDER, "Pricing"], t.ctx.deps), 1);
     assert.equal(await editMain(["title", FOLDER, "--words", "Hello"], t.ctx.deps), 1);
-    assert.equal(await editMain(["reel", "pick", FOLDER, "1"], t.ctx.deps), 1);
+    assert.equal(await editMain(["reel", "drop", FOLDER, "1"], t.ctx.deps), 1);
     assert.equal(await editMain(["finish", FOLDER], t.ctx.deps), 1);
     assert.equal(await editMain(["free", FOLDER, "library"], t.ctx.deps), 1);
     assert.match(t.said(), /Ask him to update this Mac\./);
@@ -159,7 +159,10 @@ describe("title", () => {
   });
 });
 
-describe("reel pick and reel drop", () => {
+// No command picks a Reel by this any more (plan PR 5): `app … reel <n>` marks the Reel it opens picked (tests/edit-app-reel.test.js).
+// `pickReels` stays, with `markReels` it shares with `reel drop`, for the Final Cut Reel path and these tests until the retirement's
+// wave 5 takes that path away.
+describe("pickReels and reel drop", () => {
   it("picks and drops Reels by number, and says how to show a picked one in Final Cut", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { reels: EDITED.reels.map((r) => ({ ...r, status: "candidate" })) } });
@@ -202,7 +205,8 @@ describe("the help", () => {
     const lines = [];
     assert.equal(await editMain(["--help"], { say: (line) => lines.push(line) }), 0);
     const help = lines.join("\n");
-    for (const words of ["edit.js name", "edit.js title", "reel pick|drop", "reel <n>", "edit.js finish"]) assert.ok(help.includes(words), words);
+    for (const words of ["edit.js name", "edit.js title", 'reel drop "<episode>"', "reel <n>", "edit.js finish"]) assert.ok(help.includes(words), words);
+    assert.ok(!help.includes("reel pick"), "a Reel is picked by making it: there is no reel pick");
     assert.ok(!help.includes("edit.js free"), "free library is held back from this version");
   });
 });

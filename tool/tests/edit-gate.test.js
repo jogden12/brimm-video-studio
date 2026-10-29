@@ -47,7 +47,7 @@ const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTe
 /** What each command is given to name the made-up episode, as Claude runs it. `free` names none: it says it is held back. */
 const ASKED = {
   kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER], read: ["--now", FOLDER, "--kind", "finished", "--rev", "1"],
-  workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["pick", FOLDER, "1"], reels: [FOLDER, "--no-play"],
+  workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
   teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER]
@@ -127,13 +127,35 @@ describe("the gate walks every command that names an episode", () => {
     assert.ok(!GATE_REFUSALS.some((why) => finish.text.includes(why)), finish.text);
     t.done();
   });
-  it("refuses a session's reel pick and drop, today's reel, with teachings on, as a Reel she has not agreed to", async () => {
+  it("refuses a session's reel drop, today's reel, with teachings on, as a Reel she has not agreed to", async () => {
     const t = setup();
     episodeFor(t, { record: SESSION_RECORD });
-    for (const words of [["pick", FOLDER, "1"], ["drop", FOLDER, "1"]]) {
-      assert.deepEqual((await on(taught(t), "reel", ...words)).said, [REEL_NOT_AGREED], words.join(" "));
-    }
+    assert.deepEqual((await on(taught(t), "reel", "drop", FOLDER, "1")).said, [REEL_NOT_AGREED]);
     t.done();
+  });
+  it("refuses a session's app … reel as it refuses app: a session is not opened in HyperFrames, with teachings on or off", async () => {
+    // `app` is in no list of the gate (spec 6.2: nothing of a session goes to HyperFrames by default), so a Reel of a session is
+    // refused as a session is for every command that is in none: the Reel's words add nothing.
+    for (const deps of [(t) => t.ctx.deps, taught]) {
+      const t = setup();
+      const found = episodeFor(t, { record: SESSION_RECORD });
+      const before = filesIn(found);
+      const r = await on(deps(t), "app", FOLDER, "reel", "1");
+      assert.deepEqual([r.code, r.said], [1, [NOT_FOR_SESSION]]);
+      assert.deepEqual([t.started, t.calls, reread(found).rev, filesIn(found)], [[], [], 1, before]);
+      t.done();
+    }
+  });
+  it("refuses app … reel on a video not yet answered, and on one left alone, in the words of the gate, and starts nothing", async () => {
+    for (const [record, why] of [[UNANSWERED_RECORD, WAITING], [LEFT_RECORD, LEFT_ALONE]]) {
+      const t = setup();
+      const found = episodeFor(t, { record });
+      const before = filesIn(found);
+      const r = await on(t.ctx.deps, "app", FOLDER, "reel", "1");
+      assert.deepEqual([r.code, r.said], [1, [why]]);
+      assert.deepEqual([t.started, t.calls, reread(found).rev, filesIn(found)], [[], [], 1, before]);
+      t.done();
+    }
   });
   it("lets a session through the commands of its list, with teachings on or off", async () => {
     for (const name of ["kind", "leave", "which", "show", "release", "resolve", "name"]) {
@@ -221,10 +243,10 @@ describe("the gate refuses before the command reads anything", () => {
 });
 
 describe("the gate, wherever a command names its episode", () => {
-  it("refuses 'reel pick <episode> 1' on a video not yet answered, which names it second", async () => {
+  it("refuses 'reel drop <episode> 1' on a video not yet answered, which names it second", async () => {
     const t = setup();
     const found = episodeFor(t, { record: UNANSWERED_RECORD });
-    const r = await on(t.ctx.deps, "reel", "pick", FOLDER, "1");
+    const r = await on(t.ctx.deps, "reel", "drop", FOLDER, "1");
     assert.deepEqual([r.code, r.said, reread(found).rev], [1, [WAITING], 1]);
     t.done();
   });
@@ -361,7 +383,7 @@ describe("the gate, an episode with a conflicted copy", () => {
   it("refuses a session's copy for the commands a session is refused", async () => {
     const { t } = conflict({}, SESSION_RECORD);
     assert.deepEqual((await on(t.ctx.deps, "ask", FOLDER)).said, [NOT_FOR_SESSION]);
-    assert.deepEqual((await on(t.ctx.deps, "reel", "pick", FOLDER, "1")).said, [TEACHINGS_OFF]);
+    assert.deepEqual((await on(t.ctx.deps, "reel", "drop", FOLDER, "1")).said, [TEACHINGS_OFF]);
     t.done();
   });
   it("asks a copy that is shaped as a record though it says no kind, and refuses it: it fails closed", async () => {
@@ -516,17 +538,28 @@ describe("show, which prints a file of an episode into the chat", () => {
 });
 
 describe("reel, which a session passes only with the words of a Reel she has agreed to", () => {
-  it("refuses 'reel pick <digits> --client-agreed' and 'reel drop <episode> 1 --client-agreed' for a session with the training gate on", async () => {
+  it("refuses 'reel drop <digits> --client-agreed' and 'reel drop <episode> 1 --client-agreed' for a session with the training gate on", async () => {
     const t = setup();
     episodeFor(t, { record: SESSION_RECORD });
-    for (const words of [["pick", "3fa9c1", "--client-agreed"], ["drop", "3fa9c1", "--client-agreed"], ["drop", FOLDER, "1", "--client-agreed"], ["pick", FOLDER, "1", "--client-agreed"]]) {
+    for (const words of [["drop", "3fa9c1", "--client-agreed"], ["drop", FOLDER, "1", "--client-agreed"]]) {
       const r = await on(taught(t), "reel", ...words);
       assert.deepEqual([r.code, r.said], [1, [REEL_NOT_AGREED]], words.join(" "));
     }
     // Digits that are words of its folder, which are its file's, do not find a session at all (F2).
-    for (const words of [["pick", "14", "--client-agreed"], ["pick", "2026", "--client-agreed"], ["drop", "14", "--client-agreed"]]) {
+    for (const words of [["drop", "14", "--client-agreed"], ["drop", "2026", "--client-agreed"]]) {
       const r = await on(taught(t), "reel", ...words);
       assert.deepEqual([r.code, r.said], [1, [`No episode fits "${words[1]}". The episodes are: ${SESSION_RECORD.label} (3fa9c1).`]], words.join(" "));
+    }
+    assert.deepEqual(t.started, []);
+    t.done();
+  });
+  it("does not know 'reel pick' any more: it is the help and 2 for a session too, before the gate is asked anything", async () => {
+    // Plan PR 5: a Reel is picked by opening it (`app … reel <n>`), so `pick` is a verb the command does not know, as any is.
+    const t = setup();
+    episodeFor(t, { record: SESSION_RECORD });
+    for (const words of [["pick", "3fa9c1", "--client-agreed"], ["pick", FOLDER, "1", "--client-agreed"], ["pick", FOLDER, "1"], ["pick", "14", "--client-agreed"]]) {
+      const r = await on(taught(t), "reel", ...words);
+      assert.deepEqual([r.code, r.said.length, r.said[0].startsWith("The command line for episodes")], [2, 1, true], words.join(" "));
     }
     assert.deepEqual(t.started, []);
     t.done();
@@ -543,7 +576,7 @@ describe("reel, which a session passes only with the words of a Reel she has agr
     assert.equal(asked("reel", ["--now", FOLDER, "make", "2"], FOLDER).name, FOLDER);
     // The episode was asked for by another word than the first: the first is a verb of today's reel, not the label. (By its
     // short id: words of its folder do not find a session, F2.)
-    assert.equal(asked("reel", ["pick", "3fa9c1", "--client-agreed"], "3fa9c1").why, REEL_NOT_AGREED);
+    assert.equal(asked("reel", ["drop", "3fa9c1", "--client-agreed"], "3fa9c1").why, REEL_NOT_AGREED);
     assert.equal(asked("reel", [FOLDER, "make", "2"], "3fa9c1").why, REEL_NOT_AGREED);
     t.done();
   });

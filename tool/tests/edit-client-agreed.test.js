@@ -613,23 +613,26 @@ describe("reel --client-agreed: when it cannot be written", () => {
 });
 
 describe("reel --client-agreed: the form, and today's reel", () => {
-  it("takes exactly three words, a label, digits and --client-agreed, before today's pick and drop", async () => {
+  it("takes exactly three words, a label, digits and --client-agreed, before today's drop", async () => {
     const { t, found } = agreeMac({ over: { kind: "finished", session: undefined, reading: undefined, answer: { ...ANSWERED, private: "no" }, name: { text: "Talk with a friend", placeholder: false } } });
     const d = dialogs(t, found, agreed());
     // Three words in this form are this command's: here it says the video is no session.
     const r = await d.ask("reel", "Talk with a friend", "2", "--client-agreed");
     assert.deepEqual([r.code, r.said], [1, [NOT_A_SESSION("Talk with a friend")]]);
-    // Every other form is today's: the help, or a pick or a drop.
+    // Every other form is today's: the help, or a drop.
     for (const words of [["Talk with a friend", "--client-agreed"], ["Talk with a friend", "two", "--client-agreed"], ["Talk with a friend", "2", "--client-agree"], ["Talk with a friend", "2"], ["Talk with a friend", "2", "--client-agreed", "3"], ["--client-agreed", "Talk with a friend", "2"], ["Talk with a friend", "make", "2"]]) {
       const other = await d.ask("reel", ...words);
       assert.deepEqual([other.code, other.said.length, other.said[0].startsWith("The command line for episodes")], [2, 1, true], words.join(" "));
     }
-    // `reel pick 14 --client-agreed` is today's pick of an episode called "14", not this: it says what `reel pick 14` says.
-    for (const what of ["pick", "drop"]) {
-      const flagged = await d.ask("reel", what, "14", "--client-agreed");
-      const plain = await d.ask("reel", what, "14");
-      assert.deepEqual([flagged.code, flagged.said], [plain.code, plain.said], what);
-      assert.deepEqual(flagged.said, ["Say which Reels, by their numbers."], what);
+    // `reel drop 14 --client-agreed` is today's drop in an episode called "14", not this: it says what `reel drop 14` says.
+    const flagged = await d.ask("reel", "drop", "14", "--client-agreed");
+    const plain = await d.ask("reel", "drop", "14");
+    assert.deepEqual([flagged.code, flagged.said], [plain.code, plain.said]);
+    assert.deepEqual(flagged.said, ["Say which Reels, by their numbers."]);
+    // `reel pick` is gone (plan PR 5): flagged or not it is the help, never a client's agreement for a session called "pick".
+    for (const words of [["pick", "14", "--client-agreed"], ["pick", "14"]]) {
+      const gone = await d.ask("reel", ...words);
+      assert.deepEqual([gone.code, gone.said.length, gone.said[0].startsWith("The command line for episodes")], [2, 1, true], words.join(" "));
     }
     assert.equal(d.asked.length, 0);
     t.done();
@@ -652,7 +655,7 @@ describe("reel --client-agreed: the form, and today's reel", () => {
     assert.equal(await editMain(["--help"], { ...t.ctx.deps, say: (line) => said.push(line) }), 0);
     const help = said.join("\n");
     const at = help.indexOf('node edit.js reel "<label>" <n> --client-agreed');
-    assert.ok(at > help.indexOf("node edit.js reel pick|drop") && at < help.indexOf("node edit.js reels "), help);
+    assert.ok(at > help.indexOf('node edit.js reel drop "<episode>"') && at < help.indexOf("node edit.js reels "), help);
     const entry = help.slice(at, help.indexOf("node edit.js reels "));
     assert.match(entry, /client or group session/);
     assert.match(entry, /dialog on this Mac/);

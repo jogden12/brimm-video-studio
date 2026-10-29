@@ -399,7 +399,7 @@ const isStills = (told) => Array.isArray(told) && told.every((still) => still &&
 
 /** Where the faces are in a video: {stills}, what the face finder printed for stills of it, or {why} they could not be looked
     for. The stills go into the run's own folder `work`, which is taken away when the run ends. */
-async function facesIn(file, work, { run, tools }) {
+export async function facesIn(file, work, { run, tools }) {
   if (!tools.swift) return { why: "swift, which finds the faces, is not installed" };
   const folder = join(work, "stills");
   mkdirSync(folder, { recursive: true });

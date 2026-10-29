@@ -10,6 +10,12 @@
 //   - the notes for the agent, CLAUDE.md and AGENTS.md: BRIMM's rules first, then what the project is, then HyperFrames' own
 //     guidance without what the rules forbid (5.4);
 //   - the brand pack (tool/brand/): the brand's rules, Josefin Sans and Allison; and the logos chosen, from the Assets folder.
+// A Reel's project (plan PR 5, architecture 4.3) is a stretch of the recording as a project of its own: its video is that stretch,
+// cut by workcopy.js; its transcript.json holds the recording's words in the stretch on the stretch's own clock (reelWords), and
+// brimm/facts.json says where the stretch starts in the recording; it has no cut or Reel suggestions, and brimm/face-track.json
+// only when the face finder found a face in its video. The notes of a main and a Reel project carry the ruling of 2026-10-28: a Reel
+// is made by Studio only, so the agent never makes one as a new project, and tells her to say "Open Reel 2 in HyperFrames" in her
+// Claude chat when she asks it for one; a session clip's own rules, first of all, forbid any new project from it.
 // A project holds only the files chosen here: projectFiles gives the whole set, and the tests hold each kind's list whole.
 //
 // writeProject puts a file set on disk whole or not at all. It is made in the run's own folder, the working copy is renamed into
@@ -19,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { heardWords, insideTheirTime } from "./clock.js";
+import { clockText, heardWords, insideTheirTime, keptWords } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
@@ -165,6 +171,43 @@ export const HOUSE_SPELLINGS = Object.freeze([["brim", "BRIMM"], ["Brim", "BRIMM
     heardWords). Only the main video has a cut plan: a Reel's words and a clip's are moved inside their time and no more. */
 export const saidWords = (words, phrases = []) => heardWords(insideTheirTime(Array.isArray(words) ? words : []), Array.isArray(phrases) ? phrases : []);
 
+/** A time to the thousandth of a second: a sum such as 1.2 - 1.15 comes to 0.04999999999999982. */
+const thousandth = (seconds) => Math.round(seconds * 1000) / 1000;
+
+/** Whether `stretch` is a stretch of the recording: { start, end } in seconds, from 0 at the earliest, ending after it starts. */
+const isStretch = (stretch) => stretch !== null && typeof stretch === "object" && Number.isFinite(stretch.start) && Number.isFinite(stretch.end) && stretch.start >= 0 && stretch.end > stretch.start;
+
+/** The words of the recording that a Reel's stretch holds, on the Reel's own clock (architecture 4.3, 5.2): the words that end
+    inside the stretch (clock.js keptWords, as the hand-off places a suggestion's words), each with the stretch's start taken
+    off its times, since the Reel's video is that stretch and its first moment is 0. A word the transcriber started before the
+    stretch, in the pause that came before it, starts at 0. `words` are {w, start, end} in seconds of the recording; none for words
+    that are not a list or a stretch that is not one. */
+export function reelWords(words, stretch) {
+  if (!Array.isArray(words) || !isStretch(stretch)) return [];
+  const length = thousandth(stretch.end - stretch.start);
+  return keptWords(words, [stretch]).map((word) => ({ ...word, start: Math.max(0, thousandth(word.start - stretch.start)), end: Math.min(length, thousandth(word.end - stretch.start)) }));
+}
+
+/** brimm/face-track.json (architecture 4.3): where the faces are in a Reel's video, from what the face finder (faces.swift)
+    printed of a still every `every` seconds of it, { every, stills: [{ file, faces: [{x, y, w, h}] }] }: for each still, its time
+    on the Reel's clock (its number times `every`, as unedited.js cropsFor reads it) and its boxes as the finder gave them, in
+    fractions of the picture from its top left corner. The upright crop is the app's job; this is what Studio offers for it. null
+    when no still holds a face, or the finder printed nothing that can be read: then there is no file. A still whose file has no
+    number is left out. */
+export function faceTrack(found) {
+  const every = Number(found?.every);
+  if (!(every > 0) || !Array.isArray(found?.stills)) return null;
+  const stills = found.stills
+    .map((still) => ({ at: parseInt(still?.file, 10) * every, faces: Array.isArray(still?.faces) ? still.faces : [] }))
+    .filter((still) => Number.isFinite(still.at));
+  if (!stills.some((still) => still.faces.length > 0)) return null;
+  return {
+    version: 1, clock: "reel", every,
+    about: `Faces found in a picture taken every ${every} seconds of this Reel. A box is in fractions of the picture, from its top left corner. A still shows the last picture before its time.`,
+    stills
+  };
+}
+
 /** transcript.json (F5): the list the pinned `transcribe` writes, {text, start, end, id} for each word in order, its ids "w0",
     "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names, the house's spellings and the
     episode's (final-transcript.js spelled). A word keeps its punctuation, its times and its id: a spelling changes its text alone. */
@@ -290,7 +333,14 @@ This is a clip of a private client session. These rules come before everything e
 
 - **Nothing of it goes anywhere.** No Share, no render in the cloud, and no transcription in the Script panel.
 - **No web.** Never search the web or fetch anything from it while working on this clip.
-- **Its own files only.** Use this project's files, and nothing from another project.`;
+- **Its own files only.** Use this project's files, and nothing from another project.
+- **No new projects.** Never make a Reel or any other new project from this clip: a new project holds a second copy of the clip outside Studio's care. Say it is not done for a client session's clip.`;
+
+/** The ruling of 2026-10-28 (plan PR 5): a Reel is made by Studio only. The app, asked for a Reel, makes it as a project of its
+    own in ~/.hyperframes-studio/, outside BRIMM Video Work, with a copy of the whole recording in its assets (A0), and Studio
+    could not find its export for the hand-off. So the agent is told never to make one, and what to tell her instead: the
+    phrase of architecture 6.3 that runs `app "<episode>" reel 2`. */
+const REELS_ARE_STUDIOS = `Never make a Reel as a new project yourself: the app would put it outside BRIMM Video Work with a second copy of the whole recording, and Studio could not find its export. Studio makes every Reel. When she asks you for one, tell her to say "Open Reel 2 in HyperFrames" in her Claude chat, with the number of the Reel she wants.`;
 
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. */
 function brimmRules(kind) {
@@ -307,7 +357,8 @@ function brimmRules(kind) {
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
-    ...(kind === "main" ? ["- **Reels.** The Reels Studio suggests are in `brimm/reel-suggestions.json`, by their word ids."] : []),
+    ...(kind === "main" ? [`- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
+    ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, "- **This Reel.** It is exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker. `brimm/face-track.json`, when it is there, says where the faces are."] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
     "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.",
@@ -328,6 +379,7 @@ const ABOUT = {
   "brimm/facts.json": "what this project is, for Studio",
   "brimm/cut-suggestions.json": "the cuts Studio suggests, by word ids",
   "brimm/reel-suggestions.json": "the Reels Studio suggests, by word ids",
+  "brimm/face-track.json": "where the faces are in this Reel, for the upright crop",
   "brimm/spellings.json": "names spelled as she spells them",
   "brimm/brand.md": "The BRIMM's brand: colours, typefaces, logos and how to use them",
   "assets/fonts/": "Josefin Sans and Allison",
@@ -339,26 +391,38 @@ const ABOUT = {
 /** The project's files as its notes and facts list them: a folder of assets once, every other file by its path. */
 const listed = (paths) => [...new Set(paths.filter((path) => path !== "AGENTS.md").map((path) => (path.startsWith("assets/") ? `${path.slice(0, path.indexOf("/", 7) + 1)}` : path)))];
 
+/** What a file is, as a project of this kind says it: a Reel's video is a stretch of the recording, and any other project's is the
+    recording itself. */
+const aboutOf = (kind, path) => (kind === "reel" && path === "media/recording.mp4" ? "the Reel's stretch of the recording, made ready for HyperFrames and not cut inside it" : ABOUT[path]);
+
+/** The line that says what a project's times are on (5.4, item 2). The main video's and a clip's video is the recording itself, so
+    its clock is the recording's own. A Reel's video is a stretch of the recording (architecture 4.3), so its clock starts where
+    the stretch does, at `offset` seconds into the recording, and the words of its transcript.json are on it. */
+function clockLine(kind, offset) {
+  if (kind !== "reel") return "- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/recording.mp4`, which is the recording's own: nothing was cut from it.";
+  return `- **Its clock.** Every time in \`transcript.json\` and in \`brimm/\` is on the clock of \`media/recording.mp4\`, which starts at ${clockText(offset)} (${thousandth(offset)} seconds) into the episode's recording: this Reel is that stretch of it, and nothing was cut from the stretch.`;
+}
+
 /** What the project is (5.4, item 2): its kind, its name, its clock and its files. */
-function thisProject({ what, name, files }) {
+function thisProject({ kind, what, name, offset, files }) {
   return [
     "# This project",
     "",
     `- **What it is:** ${what}.`,
     `- **Its name:** ${name}. HyperFrames names an export after it.`,
-    "- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/recording.mp4`, which is the recording's own: nothing was cut from it.",
+    clockLine(kind, offset),
     "- **Its files:**",
-    ...files.map((path) => `  - \`${path}\`: ${ABOUT[path] ?? "a file of this project"}.`)
+    ...files.map((path) => `  - \`${path}\`: ${aboutOf(kind, path) ?? "a file of this project"}.`)
   ].join("\n");
 }
 
 /** The notes for the agent (5.4), the text of both CLAUDE.md and AGENTS.md: a session clip's own rules first, then BRIMM's rules,
     then what the project is, then HyperFrames' own guidance without what conflicts. */
-function notesText({ kind, what, name, files, guidance }) {
+function notesText({ kind, what, name, offset, files, guidance }) {
   return [
     ...(kind === "clip" ? [CLIP_RULES] : []),
     brimmRules(kind),
-    thisProject({ what, name, files }),
+    thisProject({ kind, what, name, offset, files }),
     "# HyperFrames' own guidance\n\nWhat follows is the guidance the pinned HyperFrames ships, without what the rules above forbid.",
     hyperframesGuidance(guidance).trim()
   ].join("\n\n") + "\n";
@@ -384,6 +448,9 @@ const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
       (the paths of the logos chosen, in the Assets folder);
     - for the main video, the cut `plan` and the Reel candidates, `reels`, and `number`, which main project this is (projectName),
       the first when it is not given;
+    - for a Reel, its `stretch` of the recording, { start, end } in seconds (a Reel's video is that stretch, cut by workcopy.js, and
+      its words are the recording's words in it, on its own clock: reelWords), and the `faces` the face finder printed of its video,
+      { every, stills }, if any were looked for (faceTrack: a file only when one holds a face). No cut or Reel suggestions;
     - for a session's clip, `clip`, its number. A clip has no spellings, suggestions or logos, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
@@ -394,10 +461,13 @@ export function projectFiles(input) {
   if (!KINDS.includes(kind)) throw new Error(`projectFiles: a project's kind is "main", "reel" or "clip", not ${JSON.stringify(kind)}`);
   for (const key of ["video", "cli"]) if (!isAbsolute(String(input[key] ?? ""))) throw new Error(`projectFiles: ${key} must be an absolute path`);
   if (kind === "reel" && !Number.isInteger(input.part?.reel)) throw new Error("projectFiles: a Reel's project needs its part, {reel: n}");
+  if (kind === "reel" && !isStretch(input.stretch)) throw new Error("projectFiles: a Reel's project needs its stretch of the recording, { start, end } in seconds, from 0 at the earliest and ending after it starts");
   const episode = kind !== "clip";
   const name = episode ? projectName({ name: input.name, part: kind === "main" ? "main" : input.part, number: kind === "main" ? input.number : undefined, id: input.id }) : projectName({ clip: input.clip, id: input.id });
   const what = kind === "main" ? `the main video of the episode “${fileSafe(input.name)}”` : kind === "reel" ? `Reel ${input.part.reel} of the episode “${fileSafe(input.name)}”` : `clip ${input.clip} of a session`;
-  const transcript = transcriptJson(saidWords(input.words, kind === "main" ? input.plan?.phrases : []), episode ? input.spellings : []);
+  const said = kind === "reel" ? reelWords(input.words, input.stretch) : input.words;
+  const transcript = transcriptJson(saidWords(said, kind === "main" ? input.plan?.phrases : []), episode ? input.spellings : []);
+  const track = kind === "reel" ? faceTrack(input.faces) : null;
 
   const files = new Map();
   files.set("index.html", indexHtml(input.facts));
@@ -410,6 +480,7 @@ export function projectFiles(input) {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
   }
+  if (track) files.set("brimm/face-track.json", jsonText(track));
   if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: [...HOUSE_SPELLINGS, ...(input.spellings ?? [])].map(([wrong, right]) => ({ wrong, right })) }));
   files.set("brimm/brand.md", BRAND);
   files.set("vendor/gsap.min.js", { copy: GSAP });
@@ -420,8 +491,13 @@ export function projectFiles(input) {
 
   const paths = listed([...files.keys(), "brimm/facts.json", "CLAUDE.md"]);
   const facts = input.facts;
-  files.set("brimm/facts.json", jsonText({ version: 1, kind, name, seconds: facts.seconds, width: facts.width, height: facts.height, fps: facts.fps, files: Object.fromEntries(paths.map((path) => [path, ABOUT[path] ?? ""])) }));
-  const notes = notesText({ kind, what, name, files: paths, guidance: input.guidance });
+  files.set("brimm/facts.json", jsonText({
+    version: 1, kind, name, seconds: facts.seconds, width: facts.width, height: facts.height, fps: facts.fps,
+    // Where a Reel's video starts in the recording (4.3): Studio reads it back, and the notes say it.
+    ...(kind === "reel" ? { reel: { n: input.part.reel, offset: input.stretch.start } } : {}),
+    files: Object.fromEntries(paths.map((path) => [path, aboutOf(kind, path) ?? ""]))
+  }));
+  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance });
   files.set("CLAUDE.md", notes);
   files.set("AGENTS.md", notes);
   return files;
