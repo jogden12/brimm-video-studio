@@ -582,6 +582,19 @@ describe("what `history --json` printed", () => {
     const read = readHistory(printing(entry({ label: "kept" }), entry({ endedAt: "soon" }), entry({ endedAt: null }), entry({ endedAt: undefined }), 5, null, entry({ label: "also kept" })), 0);
     assert.deepEqual(read.entries.map((e) => e.label), ["kept", "also kept"]);
   });
+  it("passes over an entry whose time no date can hold and keeps the others: a Date goes no further than 8.64e15 milliseconds either way", () => {
+    const far = [1e20, -1e20, 8.64e15 + 1, -8.64e15 - 1, 1e300, -1e300, Number.MAX_VALUE];
+    const read = readHistory(printing(entry({ label: "kept" }), ...far.map((endedAt) => entry({ label: `far ${endedAt}`, endedAt })), entry({ label: "also kept" })), 0);
+    assert.deepEqual(read.entries.map((e) => e.label), ["kept", "also kept"]);
+    // The edges are times: they are kept.
+    const edges = readHistory(printing(entry({ label: "late", endedAt: 8.64e15 }), entry({ label: "early", endedAt: -8.64e15 })), 0);
+    assert.deepEqual(edges.entries.map((e) => [e.label, e.endedAt]), [["late", 8.64e15], ["early", -8.64e15]]);
+  });
+  it("cannot read a list whose every entry has such a time, as it cannot read one whose entries have no time", () => {
+    const far = [1e20, -1e20, 8.64e15 + 1, 1e300];
+    for (const endedAt of far) assert.deepEqual(readHistory(printing(entry({ endedAt })), 0), { ok: false }, String(endedAt));
+    assert.deepEqual(readHistory(printing(...far.map((endedAt) => entry({ endedAt }))), 0), { ok: false });
+  });
   it("takes a part that is not what it should be as none, and keeps the rest", () => {
     const [bare] = readHistory(printing({ endedAt: 1793130091906 }), 0).entries;
     assert.deepEqual(bare, { kind: "", label: "", endedAt: 1793130091906, files: [], undone: false, pinned: false });
@@ -745,6 +758,13 @@ describe("the versions, in her words", () => {
   it("passes over an entry it cannot date, and takes nothing for nothing", () => {
     assert.deepEqual(plainVersions([one({ endedAt: "soon" }), one({ endedAt: undefined }), null, 5, "text", one()], { tz: NEW_YORK }), ["3:41 pm: make it blue (HyperFrames)"]);
     for (const nothing of [[], null, undefined, "text", 5, {}]) assert.deepEqual(plainVersions(nothing, { tz: NEW_YORK }), [], String(nothing));
+  });
+  it("passes over an entry whose time no date can hold, which would otherwise stop the whole list, and tells those at the edges", () => {
+    const far = [1e20, -1e20, 8.64e15 + 1, -8.64e15 - 1, 1e300, -1e300, Number.MAX_VALUE, Infinity, -Infinity, NaN];
+    assert.deepEqual(plainVersions([...far.map((endedAt) => one({ endedAt })), one()], { tz: NEW_YORK }), ["3:41 pm: make it blue (HyperFrames)"]);
+    assert.deepEqual(plainVersions(far.map((endedAt) => one({ endedAt })), { tz: NEW_YORK }), []);
+    // The edges are times a Date holds, and are told.
+    assert.deepEqual(plainVersions([one({ endedAt: 8.64e15 }), one({ endedAt: -8.64e15 })], { tz: "UTC" }), ["12:00 am: make it blue (HyperFrames)", "12:00 am: make it blue (HyperFrames)"]);
   });
   it("never says a path, a flag or a command, whatever the entries hold", () => {
     for (const line of plainVersions(entries, { tz: NEW_YORK })) assert.doesNotMatch(line, PLAIN, line);

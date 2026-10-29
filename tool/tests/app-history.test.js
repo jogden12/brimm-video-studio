@@ -355,6 +355,16 @@ describe("the versions HyperFrames has kept (versions)", () => {
     }
     assert.equal(CANNOT_LIST, "I can't list the versions right now; HyperFrames shows its history.");
   });
+  it("tells the entries it can date and passes over those whose time no date can hold; with none left it cannot list the versions, and ends with 0", (c) => {
+    // A Date goes no further than 8.64e15 milliseconds either way; a time beyond it is a number and not a moment.
+    const ending = (...ends) => JSON.stringify({ entries: ends.map((endedAt, n) => ({ id: `id-${n}`, who: { kind: "agent", name: "Framey" }, label: `change ${n}`, startedAt: 1, endedAt, files: [], undone: false, pinned: false })), _meta: { version: PIN.version, updateAvailable: false } });
+    const some = world(c);
+    assert.equal(run(some, { spawn: printing(ending(1e20, Date.parse("2026-10-27T19:41:08.000Z"), -1e20, 8.64e15 + 1, 1e300)) }), 0);
+    assert.deepEqual(some.said, [HEAD, "Yesterday:", "  3:41 pm: change 1 (HyperFrames)"]);
+    const none = world(c);
+    assert.equal(run(none, { spawn: printing(ending(1e20, -1e20, 8.64e15 + 1, 1e300)) }), 0);
+    assert.deepEqual(none.said, [CANNOT_LIST]);
+  });
   it("writes nothing and makes no record, and says no path, no flag and no command", (c) => {
     const w = world(c);
     const before = [treeOf(w.work), w.record];

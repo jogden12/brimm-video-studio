@@ -26,7 +26,8 @@ const BUTTONS = "In HyperFrames, share only with people you invite, export on Th
 
 /** A home folder for the stand-in, which reads how to answer `open` and `history` from a file there (`hyperframes-stand-in.json`) and
     writes each run it makes to another (`hyperframes-stand-in.log`): it is run in PR 1's environment, which carries no variable of a
-    test's. `history` is "empty" (an untouched project's, the default), "entries" (the fixture's), "fails" or "garbled". */
+    test's. `history` is "empty" (an untouched project's, the default), "entries" (the fixture's), "far" (the fixture's, with times no
+    date can hold), "fails" or "garbled". */
 function standIn(c, { open = "opened", history = "empty" } = {}) {
   const home = mkdtempSync(join(tmpdir(), "brimm-stand-in-"));
   c.after(() => rmSync(home, { recursive: true, force: true }));
@@ -80,6 +81,17 @@ describe("the HyperFrames stand-in", () => {
     assert.deepEqual(Object.keys(JSON.parse(all.stdout)), ["entries", "_meta"]);
     const two = s.run(["history", "--json", "--limit", "2", "--dir", s.project]);
     assert.deepEqual(readHistory(two.stdout, two.status).entries.map((e) => e.kind), ["agent", "person"]);
+  });
+  it("answers history with times no date can hold when the test says so: the fixture's entries, each ended 1e20, -1e20, one past the edge of a Date and so on", (c) => {
+    const s = standIn(c, { history: "far" });
+    const far = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
+    assert.equal(far.status, 0);
+    const said = JSON.parse(far.stdout);
+    assert.deepEqual(Object.keys(said), ["entries", "_meta"]);
+    assert.equal(said.entries.length, 6);
+    for (const entry of said.entries) assert.ok(typeof entry.endedAt === "number" && Number.isFinite(entry.endedAt) && Math.abs(entry.endedAt) > 8.64e15, String(entry.endedAt));
+    assert.deepEqual(said.entries.slice(0, 4).map((e) => e.endedAt), [1e20, -1e20, 8.64e15 + 1, 1e300]);
+    assert.deepEqual(said.entries.map((e) => e.label), JSON.parse(readFileSync(new URL("./fixtures/hyperframes-0.8.208/history-entries.json", import.meta.url), "utf8")).entries.map((e) => e.label));
   });
   it("fails history as the pinned version does when a project cannot be listed: {ok: false} on stdout and exit 2", (c) => {
     const s = standIn(c, { history: "fails" });

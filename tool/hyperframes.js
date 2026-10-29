@@ -372,13 +372,19 @@ export function turnsOf(text) {
   return text.split("\n").flatMap((line) => turnOf(line) ?? []);
 }
 
+/** The furthest a moment can be from the epoch, in milliseconds either way, for a Date to hold it (ECMAScript's time value limit).
+    A number beyond it is a number and not a moment, and the clock that tells the time (clockIn) throws a RangeError for it. */
+const DATE_MOST = 8.64e15;
+/** Whether a value is a moment a Date can hold: a number no further from the epoch than DATE_MOST. NaN and the infinities are not. */
+const isMoment = (value) => typeof value === "number" && Math.abs(value) <= DATE_MOST;
+
 /** One entry of what `history --json` printed (publicEntry, in the pinned command line) as { kind, label, endedAt, files, undone,
-    pinned }, or null when it has no time that is a number: when it happened is what is told first, and an entry that cannot be
-    dated is passed over. `kind` is who made it (`who.kind`: "agent", "person" or "outside"); the name is not kept, since it is
-    the app's assistant's own. A part that is not what it should be is none (the texts are cut at 2,000 characters as a turn's
-    are), and `undone` and `pinned` are so only when they are `true`: whether it was undone is not guessed at. */
+    pinned }, or null when it has no time that is a moment (isMoment): when it happened is what is told first, and an entry that
+    cannot be dated is passed over. `kind` is who made it (`who.kind`: "agent", "person" or "outside"); the name is not kept, since
+    it is the app's assistant's own. A part that is not what it should be is none (the texts are cut at 2,000 characters as a
+    turn's are), and `undone` and `pinned` are so only when they are `true`: whether it was undone is not guessed at. */
 function entryOf(raw) {
-  if (!isObject(raw) || typeof raw.endedAt !== "number" || !Number.isFinite(raw.endedAt)) return null;
+  if (!isObject(raw) || !isMoment(raw.endedAt)) return null;
   return {
     kind: cut(isObject(raw.who) ? raw.who.kind : ""),
     label: cut(raw.label),
@@ -413,12 +419,15 @@ export const QUOTE_MOST = 200;
 /** How many files a line names before it says how many there were instead (plainTurns, plainVersions). */
 export const FILES_MOST = 5;
 
-/** What a line of hers never holds, besides a path and a flag: the program that runs the command line or this one. */
+/** The five names of programs that a text, or a file's name, is left out whole for, since a line of hers holds none of them: npx,
+    npm and node (the programs that run the command line), and edit.js and hyperframes.mjs (this one, and the command line's). No
+    other program's name is looked for. */
 const COMMAND_WORDS = /\b(?:npx|npm|node)\b|edit\.js|hyperframes\.mjs/i;
 
-/** A word of a text, made plain: a flag is left out; a path is its file's name (or its folder's, when it ends in a slash); and any
-    other word with a slash in it is the words it joins, as "and/or" and "9/16" are. A path is a word with a slash that starts with
-    one, with a tilde or with a dot, that ends in one, that has three parts or more, or whose last part has an extension. */
+/** A word of a text, made plain: a `--word` token (a double hyphen and a letter at its start, as `--now` and `--dir=x`) is left out
+    whole; a path is its file's name (or its folder's, when it ends in a slash); and any other word with a slash in it is the words
+    it joins, as "and/or" and "9/16" are. A path is a word with a slash that starts with one, with a tilde or with a dot, that ends in
+    one, that has three parts or more, or whose last part has an extension. */
 function plainWord(word) {
   if (/^--[A-Za-z]/.test(word)) return [];
   if (!word.includes("/")) return [word];
@@ -430,11 +439,12 @@ function plainWord(word) {
 }
 
 /** A text she or the app wrote, as a line of hers has it (4.6): on one line, with its markdown marks off (bold, slant and code), a
-    link as its words and an address left out, every path as its file's name, any other slash as a space, a flag left out and any
-    other double hyphen one, and cut at `most` characters (QUOTE_MOST) at a word, with an ellipsis, when it is longer. "" for what
-    is not a text, what has no letter or number in it, and a text that holds the name of a program (npx, npm, node, edit.js,
-    hyperframes.mjs): nothing can be made plain of that, so it is left out whole rather than changed into something it was not.
-    Whatever it is given, what it gives holds no slash, no double hyphen and no program's name. */
+    link as its words and an address left out, every path as its file's name, any other slash as a space, every `--word` token left
+    out whole and any other run of hyphens made one, and cut at `most` characters (QUOTE_MOST) at a word, with an ellipsis, when it
+    is longer. "" for what is not a text, what has no letter or number in it, and a text that holds one of the five program names
+    (COMMAND_WORDS): nothing can be made plain of that, so it is left out whole rather than changed into something it was not.
+    Whatever it is given, what it gives holds no slash, no double hyphen and none of those five names. It takes nothing else out of
+    what was said: a single-dash option, or the name of another program, stays. */
 export function plainText(text, most = QUOTE_MOST) {
   if (typeof text !== "string") return "";
   const words = text
@@ -511,7 +521,7 @@ const WHO = { agent: "HyperFrames", person: "you", outside: "outside HyperFrames
 export function plainVersions(entries, options) {
   const timeOf = clockIn(options?.tz);
   return (Array.isArray(entries) ? entries : [])
-    .map((entry, index) => ({ entry, index, ms: isObject(entry) && Number.isFinite(entry.endedAt) ? entry.endedAt : NaN }))
+    .map((entry, index) => ({ entry, index, ms: isObject(entry) && isMoment(entry.endedAt) ? entry.endedAt : NaN }))
     .filter(({ ms }) => !Number.isNaN(ms))
     .sort((a, b) => b.ms - a.ms || a.index - b.index)
     .map(({ entry, ms }) => {

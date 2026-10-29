@@ -6,11 +6,13 @@
 //
 // It is run in PR 1's environment (hyperframes.js childEnv), which carries no variable of a test's, so it reads how to answer
 // `open` and `history` from `hyperframes-stand-in.json` in its HOME ({ "open": "opened", "not-installed" or "open-failed", and
-// "history": "empty", "entries", "fails" or "garbled" }, "opened" and "empty" when there is none), and writes each run, its
+// "history": "empty", "entries", "far", "fails" or "garbled" }, "opened" and "empty" when there is none), and writes each run, its
 // arguments and the names of its environment, as a line of `hyperframes-stand-in.log` there. It hands the chat over, as the real
 // one does, only when the environment carries CLAUDE_CODE_SESSION_ID.
 //   - `history` "empty" is an untouched project's, history-empty.json (the default);
 //   - "entries" is history-entries.json: its entries, the newest <n> of them, with the `_meta` the command line adds;
+//   - "far" is those entries with a time (`endedAt`) that is a number and no date can hold, as a Date goes no further than
+//     8.64e15 milliseconds either way: 1e20, -1e20, one past the edge, 1e300 and so on;
 //   - "fails" is a refusal as the command line prints one: `{ok: false, error, _meta}` on stdout, and exit 2;
 //   - "garbled" is an output that is not JSON, with exit 0.
 import { appendFileSync, readFileSync } from "node:fs";
@@ -66,6 +68,11 @@ function answer() {
       case "entries":
         print({ ...fixture("history-entries.json"), entries: fixture("history-entries.json").entries.slice(0, Number(args[3])) });
         return 0;
+      case "far": {
+        const far = [1e20, -1e20, 8.64e15 + 1, 1e300, -1e300, Number.MAX_VALUE];
+        print({ ...fixture("history-entries.json"), entries: fixture("history-entries.json").entries.map((entry, n) => ({ ...entry, endedAt: far[n % far.length] })) });
+        return 0;
+      }
       case "fails":
         print({ ok: false, error: "This project is open in another app (pid 4242), which keeps its history: undo, restore or pin there.", _meta: empty._meta });
         return 2;

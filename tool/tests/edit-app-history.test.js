@@ -387,6 +387,17 @@ describe("app … versions: the versions HyperFrames has kept", () => {
     assert.deepEqual([r.code, r.said, runsOf(bare.t).length, listAll(made.dir)], [0, [NO_VERSIONS], runs, before]);
     bare.t.done();
   });
+  it("says it cannot list the versions right now, with 0, and does not stop the work, when the command line gives times no date can hold", async () => {
+    // The stand-in's "far" entries end at 1e20, -1e20, one past the edge of a Date, 1e300 and so on: numbers, but not moments. The work
+    // used to stop there (a RangeError from the clock), which on a Mac that does the light import was "The work stopped (an error)."
+    const w = world({ history: "far" });
+    const { dir } = await opened(w);
+    recordedIn(dir);
+    const r = await app(later(w.t), FOLDER, "versions");
+    assert.deepEqual([r.code, r.said], [0, [CANNOT]]);
+    assert.equal(runsOf(w.t).at(-1).args[0], "history", "the command line was asked, and its answer is what could not be read");
+    w.t.done();
+  });
   it("says it cannot list the versions right now, with 0, when the command line refuses or prints what is not JSON", async () => {
     for (const history of ["fails", "garbled"]) {
       const w = world({ history });
@@ -408,11 +419,15 @@ describe("app … what-happened and app … versions: the README", () => {
     assert.ok(happened && versions, "the README has a row for each");
     assert.deepEqual([more, moreToo], [[], []]);
     for (const [row, words] of [
-      [happened, ["Nothing has been done in HyperFrames on <name> yet.", "claims the episode for no Mac, brings no file, asks for no working copy and writes no record", "`--take-over` is not read", "the last megabyte", "the newest 10 turns", "cut at 200 characters at a word", "Ask Jason."]],
-      [versions, ["<name> has no versions in HyperFrames yet.", "I can't list the versions right now; HyperFrames shows its history.", "These are the newest 20; HyperFrames shows any older ones.", "`history --json --limit 20 --dir <project>`", "with no chat's id whatever this Mac's setting", "`.hyperframes/history-id`", "Studio changes no history"]]
+      [happened, ["Nothing has been done in HyperFrames on <name> yet.", "claims the episode for no Mac, brings no file, asks for no working copy and writes no record", "`--take-over` is not read", "the last megabyte", "the newest 10 turns", "cut at 200 characters at a word",
+        "every `--word` token left out whole", "is left out whole", "a single-dash option, or another program's name, stays", "no slash, no `--word` and none of those five names", "Ask Jason."]],
+      [versions, ["<name> has no versions in HyperFrames yet.", "I can't list the versions right now; HyperFrames shows its history.", "These are the newest 20; HyperFrames shows any older ones.", "`history --json --limit 20 --dir <project>`", "with no chat's id whatever this Mac's setting", "`.hyperframes/history-id`", "Studio changes no history",
+        "every `--word` token left out whole", "told as \"a change\"", "A listing is not read-only, by the command line's own doing and not Studio's", "`.hyperframes/video-state.json` and its lock", "`project.json` and `.last-prune`", "rewrite `history-id` for a folder that is a copy", "gone for more than 14 days", "None of it touches the project's own files"]]
     ]) {
       for (const given of words) assert.ok(row.includes(given), given);
     }
+    // The scrub drops whole `--word` tokens and the five program names: the rows do not claim more (no "no flag", no "no command name").
+    for (const row of [happened, versions]) assert.doesNotMatch(row, /no path, flag or command name|no flag|no command name/);
     // They come right after the row of `app`, which opens the episode.
     const rows = readme.split("\n");
     const opens = rows.findIndex((line) => line.startsWith('| `app "<episode>" [--take-over]` |'));

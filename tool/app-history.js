@@ -10,16 +10,21 @@
 //     (A0, item 1): what she asked, what the app answered, and which files changed, newest first, under the day they happened.
 //   - versionsOf runs the pinned command line's `history --json --limit 20 --dir <project>` and tells the entries it prints: when, who,
 //     and the label the app gave each, with whether it was undone or is kept, and the files it changed.
-// Studio only reads what the app keeps. It reads the history file as the pinned command line's own reader does (the last megabyte,
-// and nothing that is a link), and the command line is run in PR 1's short list of variables with no chat's id. A listing is the
-// command line's own work: when the app is closed it may file what changed outside the app as an entry of its own in the app's
-// store (hyperframes.js and the plan have the detail), and on a project that has no `.hyperframes/history-id` it would make one, so
-// `versions` lists only a project the app (or the command line) has recorded. Studio changes no history: "go back to before the
-// music" is said to the app's assistant.
+// Studio's own code only reads what the app keeps. It reads the history file as the pinned command line's own reader does (the last
+// megabyte, and nothing that is a link), and the command line is run in PR 1's short list of variables with no chat's id. A listing
+// is the command line's own work, and it writes: when the app is closed it may file what changed outside the app as an entry of its
+// own in the app's store; it may recreate `.hyperframes/video-state.json` and its lock when they are missing, write its store's
+// `project.json` and `.last-prune`, rewrite `history-id` for a folder that is a copy, and once a day prune the history stores of
+// other projects whose folders have been gone for more than 14 days; and on a project that has no `.hyperframes/history-id` it would
+// make one, so `versions` lists only a project the app (or the command line) has recorded. None of it touches the project's own
+// files (spec 4.6 has the detail). Studio changes no history: "go back to before the music" is said to the app's assistant.
 //
-// What it says goes into her chat, so it holds no path, no flag and no name of a command (hyperframes.js plainText and its
-// neighbours see to the words of the app and hers that it quotes). What it touches beyond the project's own files is given to it
-// (`deps`), so that no test runs the command line or the app; the defaults are the Mac's.
+// What it says goes into her chat, so it holds no slash (no path), no `--word` and none of the five program names that
+// hyperframes.js COMMAND_WORDS lists. What Studio writes holds none, and the words of hers and the app's that it quotes are made
+// plain first by hyperframes.js plainText, which drops whole every `--word` token and the whole of a text that has one of the five
+// names in it, and takes nothing else out of what was said (a single-dash option or another program's name stays). What it touches
+// beyond the project's own files is given to it (`deps`), so that no test runs the command line or the app; the defaults are the
+// Mac's.
 import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
