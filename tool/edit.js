@@ -108,8 +108,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
-                                        and once it is exported, to hand it off. A raw video that goes the Final Cut way
-                                        keeps its Final Cut steps. Only on a Mac that does the light import: on any other,
+                                        and once it is exported, to hand it off. A finished video whose hand-off is
+                                        written is told to hand off the Reels once a Reel is exported from HyperFrames
+                                        that the hand-off does not hold. A raw video that goes the Final Cut way keeps
+                                        its Final Cut steps. Only on a Mac that does the light import: on any other,
                                         every form says to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
