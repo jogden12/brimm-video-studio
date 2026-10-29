@@ -40,6 +40,28 @@ export function respelledPart({ srt, words }, spellings) {
   return { srt: captions, txt: stampedText(captions), words: timed ? JSON.stringify({ ...timed, words: timed.words.map((w) => ({ ...w, w: spelledPairs(w.w, spellings) })) }, null, 2) + "\n" : null };
 }
 
+/** Whether `text` holds `word` as a whole word, or run of words, as spelledPairs matches one. */
+const holdsWord = (text, word) => new RegExp(`(?<![\\p{L}\\p{N}])${String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(text);
+
+/** A Reel of a finished video that its hand-off holds, spelled again with the episode's spellings as they are now (plan PR 9, the review's
+    I1), from what is kept of it: its captions (`srt`) and its word times (`words`), each given as text. The Reel holds the pairs that changed
+    it (`held`); only the pairs of `now` it does not hold are applied, so none is applied twice, and a pair is held from now on only once it
+    has changed the Reel. Gives { srt, txt, words, held, keeps, changed }: the captions, their transcript and the words spelled; `held`, the
+    pairs the Reel holds now; `changed`, whether the captions ({ srt }) and the word times ({ words }) are another text than they were; and
+    `keeps`, true when a pair the Reel holds was taken back or changed since and its captions still hold the spelling it gave, which cannot
+    be taken out of words that hold it. Throws for word times that are not a words file. Nothing is read or written. */
+export function respelledHeldReel({ srt, words }, { held, now }) {
+  const meant = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
+  const timed = JSON.parse(words);
+  const sameWords = (made) => JSON.stringify(JSON.parse(made.words).words) === JSON.stringify(timed.words);
+  const changing = now.filter(([heard]) => meant(held, heard) === undefined).filter((pair) => {
+    const made = respelledPart({ srt, words }, [pair]);
+    return made.srt !== srt || !sameWords(made);
+  });
+  const made = respelledPart({ srt, words }, changing);
+  return { ...made, held: [...held, ...changing], keeps: held.some(([heard, spelt]) => meant(now, heard) !== spelt && holdsWord(srt, spelt)), changed: { srt: made.srt !== srt, words: !sameWords(made) } };
+}
+
 /** A version 1 hand-off made again, as version 1, with each part's captions as they are spelled now, as the next revision, made
     now on this Mac by this brimm-video (`commit`), as a finish makes one (handoff.js buildHandoff): the episode's name and
     approved title as the `record` has them now, and each part's file and length as the hand-off has them. Only a version 1

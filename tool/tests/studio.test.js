@@ -184,6 +184,36 @@ describe("her folder's settings", () => {
     assert.doesNotMatch(skill, /reel pick|Finish Reels|`reel pick/);
     assert.ok(commandsIn(skill).every((span) => !/^reel pick/.test(span)));
   });
+  it("have the skill hand off the Reels of a video her editor finished with finish … reels, after the exports, and say what to tell her of its answers (plan PR 9)", () => {
+    // The Reels she made in HyperFrames from a finished video are added to the hand-off the video has, as its next revision, by
+    // `finish "<episode>" reels`; the skill's only other words for finishing are the plain row and the section on HyperFrames.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const rowOf = (start) => skill.split("\n").filter((line) => line.startsWith(start));
+    const START = '| "Hand off the Reels" / "Add the Reels to the hand-off" |';
+    const [row, ...more] = rowOf(START);
+    assert.ok(row, "the skill has a row for the Reels of a finished video");
+    assert.deepEqual(more, []);
+    assert.deepEqual([...new Set([...row.matchAll(/`(finish[^`]*)`/g)].map((m) => m[1]))], ['finish "<episode>" reels', 'finish "<episode>" reels --yes']);
+    for (const words of [
+      "for a video finished by your editor whose Reels she made in HyperFrames and exported there",
+      "it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it",
+      'Its questions go back to `finish "<episode>" reels --yes` with one flag each, as in "In HyperFrames, to hand it off" (a part is reel 2).',
+      "When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page again.",
+      'If it says the hand-off is not written yet, tell her to answer the spellings first ("Show me the spellings"); if it says there is nothing new, tell her to export a Reel from HyperFrames first'
+    ]) assert.ok(row.includes(words), words);
+    // It follows the plain row for handing an episode off, and says nothing a command name or a path would.
+    const at = (text) => skill.indexOf(text);
+    assert.ok(at('| "Hand it off" / "Finish the episode" |') < at(row) && at(row) < at('| "How far is it?" |'));
+    assert.doesNotMatch(row.slice(START.length), /\/|--(?!yes)|edit\.js|workcopy/);
+    // Both ways of finishing a video are in the skill, and neither runs the other's command.
+    assert.equal(rowOf('| "Hand it off" / "Finish the episode" |').length, 1);
+    assert.doesNotMatch(rowOf('| "Hand it off" / "Finish the episode" |')[0], /reels/);
+    // A spelling reaches the Reels of such a video too; when a Reel's captions keep the old spelling, the way back is a fresh export from
+    // HyperFrames, not Final Cut (the review's I1).
+    const [spell, ...others] = rowOf('| "It\'s Hormozi, not Hormozy" |');
+    assert.deepEqual(others, []);
+    assert.ok(spell.includes('if it says a Reel\'s captions keep the old spelling, tell her to export that Reel again from HyperFrames and say "Hand off the Reels"'), spell);
+  });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const given = commandsIn(skill);
@@ -502,6 +532,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       'app "<episode>" --take-over [--take-over]', // this Mac is not set up for HyperFrames, which app says before it looks at a claim (and no other Mac has the episode)
       'app "<episode>" reel 2 --take-over [--take-over]', // the same, for a Reel
       'finish "<episode>" --yes [--yes]', // the main video was never shown in Final Cut, which it says first
+      'finish "<episode>" reels --yes [--yes]', // the made-up video is a raw one, whose Reels are handed off with its main video, which it says first
       'resolve "<episode>" --keep A [--keep]', // there is no conflict, whatever is kept
       'principles "<label>" edit 3 --name "<words>" [--name]' // teachings are not turned on in this world
     ];
