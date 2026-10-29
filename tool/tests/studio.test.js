@@ -622,6 +622,21 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(!guide.includes("the first time in a session"), guide);
     assert.ok(sectionOf(skill, "## The card").includes("offer to tell her here when Claude has read it"));
   });
+  it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and keeps the Final Cut offer for a raw video edited there (plan PR 10)", () => {
+    const guide = sectionOf(skill, "## Guide her");
+    assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+    const next = guide.split("\n").find((line) => line.startsWith("- Any other next step:"));
+    assert.ok(next, guide);
+    for (const words of [
+      '"Shall I open it in HyperFrames?" when it says to open it there', '"Shall I hand it off?" once she has exported it', '"Shall I show it in Final Cut?" for a raw video edited there',
+      "and run it only on her yes, as the table below says",
+      "While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide \"<video>\" tell`, as above)",
+      'say only "I\'ll tell you here": no notice is posted for it',
+      "When it gives the time of her last request in HyperFrames, say it"
+    ]) assert.ok(next.includes(words), words);
+    // The tell row's own words are for the import and the reading, which post a notice, and stay as they were.
+    assert.ok(guide.includes("I'll tell you here; the Mac doing the work shows a notice too"));
+  });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);
     const asked = row.indexOf('on one `AskUserQuestion`: "Is it a private session with a client or a group?": "Yes", "No"');

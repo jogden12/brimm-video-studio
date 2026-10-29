@@ -21,7 +21,9 @@ async function on(deps, ...argv) {
   const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
   return { code, said };
 }
-/** This Mac on the light import, its drop folder switched to Drop, handing off version 2; `over` lays other deps on it. */
+/** This Mac on the light import, its drop folder switched to Drop, handing off version 2; `over` lays other deps on it. Its settings have the
+    app off, so a raw video goes the Final Cut way here, and the guide's Final Cut lines stand (plan PR 10): the HyperFrames way's are
+    edit-guide-app.test.js's. */
 const light = (t, over = {}) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 }, ...over });
 const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Mac Studio", on: "Mac Studio", at: "2026-10-20T08:00:00-05:00", private: "no" };
 const READ = (kind) => ({ kind, model: "m", at: "2026-10-20T08:05:00-05:00", on: "Mac Studio", account: "a", outcome: "read" });
