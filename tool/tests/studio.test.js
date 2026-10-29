@@ -235,7 +235,7 @@ describe("her folder's settings", () => {
     // video is made again, so she is told to ask again), and one here that is older than the snapshot.
     const alone = app.slice(app.indexOf(twin) + twin.length, app.lastIndexOf(" |"));
     for (const words of [
-      'If it says the project is on another Mac and that Mac has not handed it over, tell her so, and to say "I\'m done with it for now" there and then ask again here, or to ask Jason; nothing was claimed.',
+      'If it says the project is on another Mac and that Mac has not handed it over, tell her so in its words, which are either to say "I\'m done with it for now" there and then ask again here, or, when that Mac cannot hand it over while this one has the episode open, to ask Jason; nothing was claimed.',
       "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; its video is then made again in the background, so tell her so, and when \"how far is it?\" says it is done, run it again.",
       "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
     ]) assert.ok(alone.includes(words), words);

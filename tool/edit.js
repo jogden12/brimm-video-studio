@@ -1219,8 +1219,14 @@ const finishedHasNoProject = (name) => `${name} was finished by your editor, so 
 /** What `app` says of an episode whose main project in use was made on another Mac, is not on this one and has no snapshot listed in the
     record (app.js projectOnAnotherMac, projectSnapshot): everything done in it is on that Mac, so a new project here would drop it from
     the record, and nothing here can rebuild it until that Mac has handed it over (`release`; plan PR 11). Named as app's other lines
-    name the video. */
-const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
+    name the video. What she is told to do follows the claim as it stands (the review of PR 11, I3): when `on` holds it, or nobody does, `on`
+    can hand it over, and she is told to say so there; when another Mac holds it, which after a take-over is this one, `on`'s release would be
+    refused, so she is told to ask Jason. `holder` is who has the episode open: "" for nobody, "this Mac", or a Mac's name. */
+const projectIsElsewhere = (name, on, of = "", holder = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. ${holder && holder !== on
+  ? `${on} can't hand it over while ${holder} has ${name} open. Ask Jason.`
+  : `On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`}`;
+/** Who has the episode open, as projectIsElsewhere has it: "" when nobody does. */
+const holderOf = (ctx, record) => (record.editing ? (record.editing.by === ctx.machine ? "this Mac" : String(record.editing.by)) : "");
 
 /** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it (app.js olderHere), or "": decided
     before anything is claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2).
@@ -1295,7 +1301,7 @@ export async function app(ctx, rest) {
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
-  if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
+  if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere, "", holderOf(ctx, got.record)));
   const older = olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
@@ -1341,7 +1347,7 @@ async function appReel(ctx, asked, flags) {
   const why = reelWhy(ctx, found, got.record, n);
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
-  if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
+  if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `, holderOf(ctx, got.record)));
   const older = olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });

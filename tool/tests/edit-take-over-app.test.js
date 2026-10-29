@@ -88,6 +88,31 @@ describe("app: a project of the other Mac that has not been handed over (group I
     assert.deepEqual(stateOf(w), before);
     w.t.done();
   });
+  it("follows the claim as it stands: when this Mac holds it, the other Mac cannot hand the project over, and she is told to ask Jason, not to say what would be refused (the review of PR 11, I3)", async () => {
+    const HELD_HERE = (on, of = "") => `The HyperFrames project for ${of}${NAME} is on ${on}, and ${on} has not handed it over yet. ${on} can't hand it over while this Mac has ${NAME} open. Ask Jason.`;
+    for (const [words, of] of [[[], ""], [["reel", "2"], "Reel 2 of "]]) {
+      const w = takeOverWorld();
+      // Sallie's laptop takes the episode over from Mac Studio, which has not handed anything over.
+      const took = await on(w.b.deps, "open", FOLDER, "--take-over");
+      assert.equal(took.code, 0, took.text);
+      assert.equal(reread(w.found).editing.by, "Sallie's laptop");
+      const before = stateOf(w);
+      const r = await app(w.b.deps, FOLDER, ...words);
+      assert.deepEqual([r.code, r.said], [1, [HELD_HERE("Mac Studio", of)]], of);
+      assert.deepEqual(stateOf(w), before, "nothing was claimed");
+      // And that is so: the words she was given before would have led nowhere.
+      const stuck = await release(w.t.ctx.deps);
+      assert.equal(stuck.code, 1);
+      assert.match(stuck.text, /Sallie's laptop has .* open/);
+      w.t.done();
+    }
+  });
+  it("tells her to say it there when that Mac holds the claim itself, or nobody does, as it did", async () => {
+    const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
+    const r = await app(w.b.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [THERE("Mac Studio")]]);
+    w.t.done();
+  });
   it("comes after the settings: a Mac not set up for HyperFrames says so, and the other Mac's project is not asked about", async () => {
     const w = takeOverWorld({ projects: ["main"] });
     w.b.deps.settings = { ...w.b.deps.settings, app: undefined };
