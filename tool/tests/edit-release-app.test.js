@@ -417,6 +417,34 @@ describe("release: the newest exports go with it (group D)", () => {
     assert.deepEqual(carried(w), [elsewhere.name]);
     w.t.done();
   });
+  it("never copies another video of this Mac into Dropbox because a record in a project names it: only an export in Downloads, in the project, or named as an export of that project (the review of PR 11, M3)", async () => {
+    const w = releaseWorld({ projects: ["main"] });
+    // A record the app's agent wrote (or anything else) names videos all over this Mac.
+    exportOf(w, "main", { start: [13, 10, 0], name: "Private holiday.mov", folder: join(w.t.dir, "Movies") });
+    const out = join(w.dirOf("main"), "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(w.t.dir, "secret.mp4"), "a video of nobody's business");
+    symlinkSync(join(w.t.dir, "secret.mp4"), join(out, "pretty.mp4"));
+    exportOf(w, "main", { start: [13, 11, 0], name: "pretty.mp4", folder: out, text: "" });
+    // (exportOf wrote the file over the link's place; put the link back, since it is the case that matters.)
+    rmSync(join(out, "pretty.mp4"));
+    symlinkSync(join(w.t.dir, "secret.mp4"), join(out, "pretty.mp4"));
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SAID("its HyperFrames project (the main video)")]]);
+    assert.deepEqual(carried(w), []);
+    w.t.done();
+  });
+  it("copies an export that the record names in Downloads or in the project, under any name", async () => {
+    for (const where of ["downloads", "project"]) {
+      const w = releaseWorld({ projects: ["main"] });
+      const folder = where === "downloads" ? w.downloads : join(w.dirOf("main"), "out");
+      const made = exportOf(w, "main", { start: [13, 10, 0], name: "my final cut.mp4", folder });
+      const r = await release(w.t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [0, [SAID(`its HyperFrames project (the main video) and ${made.name}`)]], where);
+      assert.deepEqual(carried(w), [made.name], where);
+      w.t.done();
+    }
+  });
   it("keeps a copy that is there already at the size the record lists, and replaces one of another size", async () => {
     const w = releaseWorld({ projects: ["main"] });
     const main = exportOf(w, "main");

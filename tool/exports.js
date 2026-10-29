@@ -9,7 +9,7 @@
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
 import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { KEPT, isMain } from "./app.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
@@ -471,7 +471,7 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
     const dir = plainName(project.name) ? join(work, project.name) : "";
     const here = dir !== "" && isFolder(dir);
     return {
-      key, label, ...(reel ? { reel } : {}), project: project.name, fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
+      key, label, ...(reel ? { reel } : {}), project: project.name, ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
       changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone) : { recorded: [], renders: [] })
     };
   });
@@ -483,16 +483,30 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
   };
 }
 
+/** Whether the file at `path` is inside the folder `root` once links are followed: a link in a project that leads out of it is not. */
+function insideReal(path, root) {
+  try {
+    const real = realpathSync(path);
+    const base = realpathSync(root);
+    return real === base || real.startsWith(base.endsWith(sep) ? base : `${base}${sep}`);
+  } catch (e) {
+    return false;
+  }
+}
+
 /** The exports `release` carries to the other Mac (architecture 4.7 and 7.3; plan PR 11): of each part whose project is on this Mac, the
     newest export of this Mac's own, in Downloads and wherever the project's records say it went, and not what the other Mac released: those
     that began in the newest minute (an MP4 and a MOV of one minute are both carried, as `finish` asks which is final). A WebM is none, nor is
-    an empty file. `input` is what `exportsFound` gives. Each is { key, name, dir, bytes, mtimeMs }, the main video's first. */
+    an empty file. Only an export in Downloads, inside the project (links followed), or named as an export of that project (isExportOf) is
+    carried: a record in the project's renders/ can be written by the app's agent, and must never make another video on this Mac go into
+    Dropbox (the review of PR 11, M3). `input` is what `exportsFound` gives. Each is { key, name, dir, bytes, mtimeMs }, the main video's first. */
 export function exportsToCarry(input) {
   const zone = input.zone || LOCAL_ZONE;
   const out = [];
   for (const part of input.parts) {
     if (!part.here) continue;
-    const exports = once(candidatesOf(part, { ...input, released: { dir: "", files: [] } }, zone).filter(taking));
+    const carries = (file) => file.where === "Downloads" || isExportOf(file.name, part.project) || (typeof part.dir === "string" && insideReal(join(file.dir, file.name), part.dir));
+    const exports = once(candidatesOf(part, { ...input, released: { dir: "", files: [] } }, zone).filter(taking).filter(carries));
     if (!exports.length) continue;
     const newest = Math.max(...exports.map((file) => minuteOf(file.began.ms)));
     for (const file of exports.filter((f) => minuteOf(f.began.ms) === newest)) out.push({ key: part.key, name: file.name, dir: file.dir, bytes: file.bytes, mtimeMs: file.mtimeMs });
