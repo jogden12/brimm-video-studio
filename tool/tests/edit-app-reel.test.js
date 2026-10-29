@@ -643,6 +643,53 @@ describe("reels: how to make one", () => {
     assert.doesNotMatch(r.text, /To make/);
     t.done();
   });
+  // A Reel `app` has made has a project in the record and is picked: it is not one to make, so it is not offered.
+  const madeProject = (n) => ({
+    key: `reel ${n}`, name: `Pricing- what to charge- reel ${n} 3fa9c1`, madeAt: "2026-10-19T10:00:00-05:00", on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: "2026-10-14T09:00:00-05:00" },
+    workingCopy: { bytes: REEL_COPY.length, seconds: 7, fps: 30 }, opened: ["2026-10-19T10:05:00-05:00"], handover: false, fromSuggestion: n, state: "opened"
+  });
+  /** The made-up episode's record with a project made for each Reel of `made`, those Reels picked, as `app … reel` leaves them. */
+  const withMade = (found, made, over = (r) => r) => {
+    const base = reread(found);
+    writeFileSync(recordFile(found.folder, base.rev + 1), recordText({
+      ...base, rev: base.rev + 1, version: 4, app: { toolchain: PIN.version, projects: made.map(madeProject) },
+      reels: base.reels.map((r) => over(made.includes(r.n) ? { ...r, status: "picked" } : r))
+    }));
+  };
+  it("offers only the Reels not yet made: once Reel 2 is opened it ends with Reel 1 alone, in the singular", async () => {
+    const { t } = suggested();
+    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
+    const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
+    assert.equal(r.said.at(-1), `To make it, say "${openReelWords(1, NAME)}".`);
+    assert.doesNotMatch(r.text, /Reel 2"/);
+    t.done();
+  });
+  it("says nothing of making one once every suggestion is made or dropped, and does not offer one she dropped after it was made", async () => {
+    const both = suggested();
+    withMade(both.found, [1, 2]);
+    const all = await on(both.t.ctx.deps, "reels", FOLDER, "--no-play");
+    assert.doesNotMatch(all.text, /To make|OpusClip/);
+    // One made and the other dropped.
+    const mixed = suggested();
+    withMade(mixed.found, [2], (r) => (r.n === 1 ? { ...r, status: "dropped" } : r));
+    assert.doesNotMatch((await on(mixed.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    // Made, and dropped since: still not one to make.
+    const dropped = suggested();
+    withMade(dropped.found, [1, 2], (r) => ({ ...r, status: "dropped" }));
+    assert.doesNotMatch((await on(dropped.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    both.t.done();
+    mixed.t.done();
+    dropped.t.done();
+  });
+  it("does not send her to OpusClip for a Reel another Mac made, on a Mac that is not set up for HyperFrames, and still does for one that is not made", async () => {
+    const { t, found } = suggested({ set: false });
+    withMade(found, [2]);
+    assert.equal((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).said.at(-1), notMadeWords());
+    const base = reread(found);
+    writeFileSync(recordFile(found.folder, base.rev + 1), recordText({ ...base, rev: base.rev + 1, reels: base.reels.map((r) => (r.n === 1 ? { ...r, status: "dropped" } : r)) }));
+    assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    t.done();
+  });
   it("says nothing of making one for a video whose Reels are not suggestions, which brimm-video still makes in Final Cut", async () => {
     const { t } = world({ set: true });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
@@ -673,13 +720,19 @@ describe("push and the changes on a Reel: one HyperFrames opened is a project th
     assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).said, [IN_HYPERFRAMES]);
     t.done();
   });
-  it("still sends her where it did for a Reel nobody has opened, on a Mac set up for HyperFrames or not", async () => {
-    for (const set of [true, false]) {
-      const { t } = suggested({ set });
+  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and sends her where it did on one that is not", async () => {
+    // On a Mac set up for the app the way to make it is to open it; the line to OpusClip is for a Mac that cannot.
+    const NOT_MADE_YET = `Reel 2 isn't made yet. Say "${AGAIN}" to make it.`;
+    for (const [set, said] of [[true, NOT_MADE_YET], [false, notMadeWords(2)]]) {
+      const { t, found } = suggested({ set });
+      const before = [reread(found).rev, listAll(found.folder)];
       for (const words of FINAL_CUT_WORDS) {
         const r = await on(t.ctx.deps, ...words);
-        assert.deepEqual([r.code, r.said], [1, [notMadeWords(2)]], `${set} ${words.join(" ")}`);
+        assert.deepEqual([r.code, r.said], [1, [said]], `${set} ${words.join(" ")}`);
+        assert.doesNotMatch(r.text, set ? /OpusClip|cannot make Reels/ : /isn't made yet/, `${set} ${words.join(" ")}`);
+        assert.doesNotMatch(r.text, PLAIN);
       }
+      assert.deepEqual([reread(found).rev, listAll(found.folder)], before, "nothing is written");
       t.done();
     }
   });

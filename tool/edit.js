@@ -1934,8 +1934,8 @@ async function reelTitle(ctx, found, n, words) {
   const reels = (found.record.reels || []).map((r) => ({ ...r }));
   const reel = reels.find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
-  // A Reel a reading suggested is not made, and no Reel brimm-video makes would show its title: she is told where she makes it.
-  if (!madeInApp(found.record, n) && notMade(found, n)) return refuse(ctx, appOf(ctx.settings) ? notMadeYet(n, found.record.name.text) : notMadeWords(n));
+  // A Reel a reading suggested is not made, and no Reel brimm-video makes would show its title: she is told how to make it.
+  if (!madeInApp(found.record, n) && notMade(found, n)) return refuse(ctx, notMadeSaid(ctx, found.record, n));
   if (words == null) {
     ctx.say(reel.title ? `Reel ${n}'s title on screen is "${reel.title}".` : `Reel ${n} has no title on screen. Say what it says.`);
     return 0;
@@ -2043,6 +2043,11 @@ function notMade(found, n) {
   return Boolean(candidate && uncropped(candidate));
 }
 
+/** What is said of a Reel a reading suggested that nobody has made, by every command that needs it made: on a Mac set up for
+    HyperFrames how to make it, "Reel 3 isn't made yet. Say "open Reel 3 of <name> in HyperFrames" to make it." (app-reel.js
+    notMadeYet), as `title` and `reels` say it; on any other Mac, which cannot make one, where she makes it for now (notMadeWords). */
+const notMadeSaid = (ctx, record, n) => (appOf(ctx.settings) ? notMadeYet(n, shownName(record)) : notMadeWords(n));
+
 /** What is said of a Reel `app … reel <n>` made, by the commands that work on a timeline in Final Cut (push, and the layers): it is
     a project in HyperFrames, and nothing writes a timeline for it in Final Cut, so she is not sent where a Reel nobody made is sent
     (OpusClip, which would be wrong of a Reel just made) and is not told it is not picked: she is sent back to HyperFrames. A Reel the
@@ -2059,14 +2064,14 @@ const notPickedWords = (ctx, record, n) => `Reel ${n} is not picked. ${appOf(ctx
 
 /** Show a picked Reel in Final Cut Pro: its timeline (reelTimeline: the project written at its pick, its own project, or for an
     episode imported before phase 3 the clip the import cut), through the push every part shares, with its guard. A Reel a
-    reading suggested and nobody has made yet (notMade) is refused first, with where she makes it for now (notMadeWords). */
+    reading suggested and nobody has made yet (notMade) is refused first, with how to make it (notMadeSaid). */
 export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits = false, withoutOther = false } = {}) {
   const { record } = found;
   if (record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const reel = (record.reels || []).find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
   if (inHyperFramesWords(record, n)) return refuse(ctx, inHyperFramesWords(record, n));
-  if (notMade(found, n)) return refuse(ctx, notMadeWords(n));
+  if (notMade(found, n)) return refuse(ctx, notMadeSaid(ctx, record, n));
   if (reel.status !== "picked" && reel.status !== "finished") return refuse(ctx, notPickedWords(ctx, record, n));
   const made = await timelineFor(found, { reel: n }, ctx);
   if (made.coming) {
@@ -3243,9 +3248,10 @@ async function reels(ctx, rest) {
     // She is told last how to make one: on a Mac set up for HyperFrames, `app … reel <n>` makes it (plan PR 5), and on any other
     // nothing makes a Reel from a suggestion, so she is told where she makes them for now, so that no command sends her round in a
     // circle (Sallie's walkthrough, 25 Oct). Not once she has dropped every one. The gate refuses a session before this, and it is
-    // never said of one.
+    // never said of one. Only of a suggestion still to make: not one she dropped, and not one `app … reel <n>` has made, which has a
+    // project in the record (on this Mac or the other's) and is picked.
     const dropped = new Set((record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n));
-    const open = read.reels.candidates.filter((c) => uncropped(c) && !dropped.has(c.n)).map((c) => c.n);
+    const open = read.reels.candidates.filter((c) => uncropped(c) && !dropped.has(c.n) && !madeInApp(record, c.n)).map((c) => c.n);
     if (!gated(record) && open.length) ctx.say(appOf(ctx.settings) ? makeOneWords(open, shownName(record)) : notMadeWords());
     return 0;
   }
@@ -3557,9 +3563,10 @@ function layerStart(ctx, words, { writes = true } = {}) {
   const target = part === "main" ? got.record.main : (got.record.reels || []).find((r) => r.n === part.reel);
   if (!target) return { code: refuse(ctx, `There is no Reel ${part.reel}.`) };
   // A Reel `app … reel <n>` made is a project in HyperFrames, which these commands do not touch: she is sent back there. A Reel a
-  // reading suggested that nobody has made cannot be picked in Final Cut, so she is not sent to pick it: she is told where she makes it.
+  // reading suggested that nobody has made cannot be picked in Final Cut, so she is not sent to pick it: she is told how to make it
+  // (on a Mac set up for HyperFrames), or where she makes it for now.
   if (part !== "main" && inHyperFramesWords(got.record, part.reel)) return { code: refuse(ctx, inHyperFramesWords(got.record, part.reel)) };
-  if (part !== "main" && notMade(found, part.reel)) return { code: refuse(ctx, notMadeWords(part.reel)) };
+  if (part !== "main" && notMade(found, part.reel)) return { code: refuse(ctx, notMadeSaid(ctx, got.record, part.reel)) };
   if (part !== "main" && target.status !== "picked" && target.status !== "finished") return { code: refuse(ctx, notPickedWords(ctx, got.record, part.reel)) };
   if (!writes) return { found, part, target, words: left };
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
