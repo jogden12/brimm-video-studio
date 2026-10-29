@@ -349,7 +349,7 @@ describe("6 again. numbers, in the detached part as well", () => {
 });
 
 describe("10. a spelling after the Reels", () => {
-  it("makes the hand-off again as the next revision with main spelled and the Reels as they were, and keeps the Reels' parts in the record, so that the next finish keeps Reel 2", async () => {
+  it("makes the hand-off again as the next revision with main and the Reels spelled, and keeps the Reels' parts in the record, so that the next finish keeps Reel 2", async () => {
     const w = await W({ projects: ["reel 1", "reel 2"] });
     exportOf(w, "reel 2");
     const two = handoffIn((await finished(w, { without: ["reel 1"] })).found);
@@ -359,15 +359,124 @@ describe("10. a spelling after the Reels", () => {
     const three = handoffIn(w.found);
     assert.equal(three.revision, 3);
     assert.match(three.main.srt, /Thank you so much, Sally\./);
-    assert.deepEqual(three.reels, two.reels);
-    assert.match(three.reels[0].srt, /Sallie\./, "a Reel's own captions keep the spelling they were made with until its export is taken again");
-    assert.deepEqual(reread(w.found).finished.parts["reel 2"], parts["reel 2"]);
+    // The Reel is as it was but for its captions, which the spelling reaches too (the review's I1): they were "Sallie." and are "Sally." now.
+    assert.deepEqual(three.reels.map(({ srt, ...rest }) => rest), two.reels.map(({ srt, ...rest }) => rest));
+    assert.match(three.reels[0].srt, /Thank you so much, Sally\./);
+    assert.doesNotMatch(three.reels[0].srt, /Sallie/);
+    assert.deepEqual(reread(w.found).finished.parts["reel 2"], { ...parts["reel 2"], spellings: [["Sallie", "Sally"]] });
     assert.deepEqual(Object.keys(reread(w.found).finished.parts), ["main", "reel 2"]);
     exportOf(w, "reel 1");
     assert.deepEqual((await lines(w)).slice(1, 2), ["Reel 2: kept as the last finish made it."]);
     const four = handoffIn((await finished(w)).found);
     assert.deepEqual([four.revision, four.reels.map((r) => r.n)], [4, [1, 2]]);
-    assert.deepEqual(four.reels[1], two.reels[0]);
+    assert.deepEqual(four.reels[1], three.reels[0], "the next finish keeps Reel 2 as the spelling left it");
+  });
+});
+
+describe("I1. a spelling after the Reels reaches the Reels the hand-off holds (the review)", () => {
+  /** What the transcriber hears of Reel 2: the sentence of the made-up Reel, with a name of its own, which the video's captions do not hold. */
+  const CYNTHIA = "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n2\n00:00:02,600 --> 00:00:07,700\n costs. It is very, very important. Thank you so much, Cynthia.\n\n";
+  const text = (found, rel) => readFileSync(join(found.folder, rel), "utf8");
+  /** The Reel's files in final/, by what they are: the captions, the transcript and the word times. */
+  const reelRel = (found, ending) => `final/${stem(handoffIn(found).reels[0].file)}.${ending}`;
+  const KEPT = `Reel 2's captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".`;
+  /** The finish of Reel 2 done, and `damage` done to the file of its word times: what a spelling then says, and what it left. */
+  async function spelledAfter(damage, { pair = ["Sallie", "Sally"], opts = {} } = {}) {
+    const w = await W(opts);
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const two = handoffIn(found);
+    if (damage) damage(join(found.folder, reelRel(found, "words.json")));
+    const srt = text(found, reelRel(found, "srt"));
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", ...pair);
+    return { w, found, two, three: handoffIn(found), r, srt };
+  }
+  it("spells a Reel's captions, its transcript and its word times, in final/ and in the hand-off, and leaves main as it was when the word is the Reel's alone", async () => {
+    const w = await W({ captions: { "reel 2": CYNTHIA } });
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const two = handoffIn(found);
+    const mainSrt = text(found, "final/Pricing talk.srt");
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Cynthia", "Allison");
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.deepEqual(r.said, ['"Cynthia" is spelled "Allison" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again.']);
+    const three = handoffIn(found);
+    assert.equal(three.revision, 3);
+    assert.deepEqual(three.main, two.main, "main is as it was, byte for byte");
+    assert.equal(text(found, "final/Pricing talk.srt"), mainSrt);
+    assert.match(three.reels[0].srt, /Thank you so much, Allison\./);
+    assert.equal(text(found, reelRel(found, "srt")), three.reels[0].srt, "the captions in final/ are the hand-off's");
+    assert.match(text(found, reelRel(found, "transcript.txt")), /Thank you so much, Allison\./);
+    assert.deepEqual(JSON.parse(text(found, reelRel(found, "words.json"))).words.map((word) => word.w).filter((word) => /Allison|Cynthia/.test(word)), ["Allison."]);
+    assert.equal(handoffFaultV2(three), "");
+    const record = reread(found);
+    assert.deepEqual(record.finished.parts["reel 2"].spellings, [["Cynthia", "Allison"]]);
+    for (const ending of ["srt", "transcript.txt", "words.json"]) assert.equal(record.files[reelRel(found, ending)], Buffer.byteLength(text(found, reelRel(found, ending))), `${ending} is listed at its size`);
+    assert.deepEqual(three.reels.map(({ srt, ...rest }) => rest), two.reels.map(({ srt, ...rest }) => rest), "the Reel is as it was but for its captions");
+  });
+  it("says a Reel's captions keep the old spelling when its word times cannot be read, and leaves its captions as they were", async () => {
+    for (const damage of [(path) => rmSync(path), (path) => writeFileSync(path, "x".repeat(statSync(path).size))]) {
+      const { found, two, three, r, srt } = await spelledAfter(damage);
+      assert.equal(r.code, 0, r.said.join("\n"));
+      assert.equal(r.said.at(-1), KEPT);
+      assert.match(three.main.srt, /Thank you so much, Sally\./, "main is spelled all the same");
+      assert.deepEqual(three.reels, two.reels, "the Reel is as it was");
+      assert.equal(text(found, reelRel(found, "srt")), srt);
+      assert.match(text(found, reelRel(found, "srt")), /Sallie\./);
+      assert.deepEqual(reread(found).finished.parts["reel 2"].spellings, [], "the spelling is not held by it, so a later one tries it again");
+    }
+  });
+  it("says it too when the hand-off comes out as it was, because the spelling is the Reel's alone and its word times cannot be read", async () => {
+    const { three, two, r } = await spelledAfter((path) => rmSync(path), { pair: ["Cynthia", "Allison"], opts: { captions: { "reel 2": CYNTHIA } } });
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.deepEqual(r.said, ['"Cynthia" is spelled "Allison" now, in every caption. The final transcripts and the hand-off are as they were.', KEPT]);
+    assert.equal(three.revision, two.revision);
+  });
+  it("keeps a Reel's captions and says so when a spelling it holds is taken back: it cannot be taken out of words that hold it", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    assert.equal((await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally")).code, 0);
+    const dropped = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
+    assert.equal(dropped.code, 0, dropped.said.join("\n"));
+    assert.equal(dropped.said.at(-1), KEPT);
+    const four = handoffIn(found);
+    assert.deepEqual([four.revision, /Sallie\./.test(four.main.srt), /Sally\./.test(four.reels[0].srt)], [4, true, true]);
+    assert.deepEqual(reread(found).finished.parts["reel 2"].spellings, [["Sallie", "Sally"]]);
+  });
+  it("asks Dropbox to bring a Reel's word times over when they are a placeholder, and writes nothing", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const before = filesOf(found);
+    const rev = reread(found).rev;
+    const started = w.t.started.length;
+    w.t.ctx.deps.isWhole = (path) => !(path.includes("/final/") && path.endsWith(".words.json"));
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
+    assert.deepEqual([r.code, r.said], [1, ["Dropbox is still bringing the final captions over: say it again in a minute."]]);
+    assert.deepEqual([filesOf(found), reread(found).rev, w.t.started.length], [before, rev, started + 1]);
+    assert.deepEqual(w.t.started.at(-1)[1].slice(-4), ["bring", "--now", FOLDER, reelRel(found, "words.json")]);
+  });
+  it("puts a Reel's files back as they were when the record could not be written", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const files = ["srt", "transcript.txt", "words.json"].map((ending) => reelRel(found, ending));
+    const before = files.map((rel) => text(found, rel));
+    const handoff = text(found, HANDOFF_REL);
+    // The other Mac writes the next record while this one copies the hand-off in.
+    const clone = w.t.ctx.deps.clone;
+    w.t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith(".brimm-ops.json")) {
+        const now = reread(found);
+        writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, name: { text: "Changed meanwhile", placeholder: false } }));
+      }
+    };
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
+    assert.equal(r.code, 1, r.said.join("\n"));
+    assert.deepEqual(files.map((rel) => text(found, rel)), before, "the Reel's three files are as they were");
+    assert.equal(text(found, HANDOFF_REL), handoff);
   });
 });
 
@@ -378,8 +487,6 @@ describe("I2. a hand-off that is gone is not made again without its Reels (the r
     exportOf(w, "reel 2");
     const { found } = await finished(w);
     damage(join(found.folder, HANDOFF_REL));
-    // As the Mac's own check has it, a file that is not there is not whole.
-    w.t.ctx.isWhole = (path) => existsSync(path);
     const before = filesOf(found);
     const rev = reread(found).rev;
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
@@ -404,7 +511,6 @@ describe("I2. a hand-off that is gone is not made again without its Reels (the r
   it("still makes a hand-off again that is gone when the record holds no part of a Reel: only a first hand-off was written", async () => {
     const w = await W();
     rmSync(join(w.found.folder, HANDOFF_REL));
-    w.t.ctx.isWhole = (path) => existsSync(path);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.said.join("\n"));
     assert.deepEqual([handoffIn(w.found).reels, handoffIn(w.found).suggestions.length], [[], 2]);

@@ -59,7 +59,7 @@ import { heldBy, commitOf, episodeHolding, holdingEpisode, readSeen, seenKey, re
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
-import { BRINGING, REEL_KEY, START as REELS_START, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked } from "./finish-reels.js";
+import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked } from "./finish-reels.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, exportsFound, lookForExports } from "./exports.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
@@ -3991,6 +3991,8 @@ async function importHandoff(ctx, found, record, done) {
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
   else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.`);
   else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}`);
+  // A Reel whose captions keep the spelling they were made with (a spelling cannot be put into them, or taken out) says so, and the way back.
+  if (Array.isArray(wrote.kept) && wrote.kept.length) ctx.say(keepOldWords(wrote.kept));
   // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
   if (wrote.shown === false) ctx.say(cantOpen(shownName(record)));
   return 0;

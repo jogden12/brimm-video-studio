@@ -22,6 +22,7 @@ import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
 import { REEL_KEY, SAY_AGAIN, heldReelParts, lostReelsWords, missingWords, nextHandoff, noHandoffWords, otherKindWords, unusableWords } from "./finish-reels.js";
+import { respelledHeldReel } from "./spelling.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
@@ -1177,6 +1178,62 @@ export function suggestionsFrom({ candidates, dropped = [], seconds, spellings =
   return { list, left };
 }
 
+/** The Reels a finished video's hand-off holds, spelled again with the spellings `now` (plan PR 9, the review's I1), from what is kept of each in
+    final/: its captions and its word times, which hold the spellings it was made with. A Reel holds the pairs that changed it (its part's
+    `spellings`, in `prior.parts`, or, for one no spelling has reached since a finish made it, `before`, the record's before this change); only
+    those it does not hold are applied (respelledHeldReel). `standing` says how a file stands, as finishFinished has it. Gives
+    - `done`: for each Reel with something to apply, by its number, { held, srt, writes }: the pairs it holds now (as they were when its files
+      cannot be read), its new captions or null, and the files to write, [path from the folder, text], its captions and transcript before its
+      word times;
+    - `kept`: the numbers of the Reels whose captions keep the old spelling: those whose files cannot be read (no part, no word times, a file
+      gone, not a words file), and those that hold a spelling since taken back or changed, which cannot be taken out of words that hold it;
+    - `coming`: files that are there but not whole, for Dropbox to bring over first; nothing is then to be written.
+    This only reads. */
+function respellHeldReels({ folder, prior, onFile, before, now, standing }) {
+  const meant = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
+  const done = new Map();
+  const kept = [];
+  const coming = [];
+  for (const reel of prior && onFile && Array.isArray(onFile.reels) ? onFile.reels : []) {
+    const part = prior.parts && prior.parts[`reel ${reel.n}`];
+    const held = part && Array.isArray(part.spellings) ? part.spellings : before;
+    if (!now.some(([heard]) => meant(held, heard) === undefined) && !held.some(([heard, spelt]) => meant(now, heard) !== spelt)) continue;
+    const result = { held, srt: null, writes: [] };
+    done.set(reel.n, result);
+    const at = part && typeof part.file === "string" ? `final/${basename(part.file, extname(part.file))}` : "";
+    const rels = { srt: `${at}.srt`, txt: `${at}.transcript.txt`, words: part && typeof part.words === "string" ? part.words : "" };
+    if (!at || !rels.words) {
+      kept.push(reel.n);
+      continue;
+    }
+    const files = [rels.srt, rels.txt, rels.words];
+    const states = files.map((rel) => standing(rel));
+    if (states.includes("wrong")) {
+      coming.push(...files.filter((rel, i) => states[i] === "wrong"));
+      continue;
+    }
+    if (states[0] === "gone" || states[2] === "gone") {
+      kept.push(reel.n);
+      continue;
+    }
+    let made;
+    try {
+      made = respelledHeldReel({ srt: readFileSync(join(folder, rels.srt), "utf8"), words: readFileSync(join(folder, rels.words), "utf8") }, { held, now });
+    } catch (e) {
+      kept.push(reel.n);
+      continue;
+    }
+    result.held = made.held;
+    if (made.changed.srt) {
+      result.srt = made.srt;
+      result.writes.push([rels.srt, made.srt], [rels.txt, made.txt]);
+    }
+    if (made.changed.words) result.writes.push([rels.words, made.words]);
+    if (made.keeps) kept.push(reel.n);
+  }
+  return { done, kept, coming };
+}
+
 /** Write the hand-off of a finished video or an iPhone clip, from the import's own captions, once its spellings are answered
     (edit.js spell … offers), in the shape finishNow writes: the captions and their plain text in final/, the hand-off last, and
     the record with `finished` (revision, handoff, and a `main` part marked `import`, with the kind it was made as), the claim this
@@ -1199,8 +1256,13 @@ export function suggestionsFrom({ candidates, dropped = [], seconds, spellings =
     - { why }: why it was not written, in plain words, with "Nothing was written." or "Nothing was changed.". When files it had
       put in could not be put back as they were, it says which and to tell Jason.
     - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first (whatIs says what each is).
-    - { ok: true, revision, handoff, left, same }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
-      says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written. */
+    - { ok: true, revision, handoff, left, same, shown, kept }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
+      says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written; `kept`
+      names the Reels whose captions keep the old spelling (respellHeldReels).
+    The Reels the hand-off holds (finish "<episode>" reels) are spelled with the record's spellings too, from what is kept of each in final/,
+    their files put in by the same rule before the hand-off, and put back as they were with the others (respellHeldReels, plan PR 9, the
+    review's I1); `main` is made from the import's captions as before. A hand-off that holds Reels and is gone or cannot be read is not made
+    again (they would be left out of the new one): `why`, ending "Ask Jason.". */
 export async function finishFinished(ctx, found, { record = found.record } = {}) {
   const who = shownName(record);
   const refused = cannotFinish(record);
@@ -1263,6 +1325,10 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   if (prior && !onFile && Object.keys(prior.parts || {}).some((key) => REEL_KEY.test(key))) return { why: lostReelsWords(who) };
 
   const spellings = Array.isArray(record.spellings) ? record.spellings : [];
+  // The Reels the hand-off holds are spelled with them too (the review's I1), or left as they are and said: a Reel's files that are there and
+  // not whole are brought over first.
+  const reelsNow = respellHeldReels({ folder, prior, onFile, before: Array.isArray(found.record.spellings) ? found.record.spellings : [], now: spellings, standing });
+  if (reelsNow.coming.length) return { coming: [...new Set(reelsNow.coming)] };
   const shows = spelledCaptions(imported, []);
   const srt = spelledCaptions(imported, spellings);
   const txt = stampedText(srt);
@@ -1273,7 +1339,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   const { list, left } = reels ? suggestionsFrom({ candidates: reels.reels.candidates, dropped, seconds, spellings }) : { list: [], left: [] };
   const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
   const at = localStamp(new Date(ctx.now()));
-  const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, main: { file: record.video.file, seconds, srt }, onPicture: onPictureOf(record), suggestions: list, reels: onFile && Array.isArray(onFile.reels) ? onFile.reels : [] });
+  const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, main: { file: record.video.file, seconds, srt }, onPicture: onPictureOf(record), suggestions: list, reels: onFile && Array.isArray(onFile.reels) ? onFile.reels.map((r) => (reelsNow.done.has(r.n) && reelsNow.done.get(r.n).srt !== null ? { ...r, srt: reelsNow.done.get(r.n).srt } : r)) : [] });
   const fault = handoffFaultV2(handoff);
   if (fault) return { why: `The hand-off could not be written: ${fault.replace(/\.$/, "")}. Nothing was written.` };
   // A number another version of the video gave already, under the same id, is never given again (spec section 8).
@@ -1289,6 +1355,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   // The Reels the hand-off holds stay in it as they were (above), and the parts of the last finish that took them stay in the record, so
   // that a spelling after `finish "<episode>" reels` does not make the next one forget what it took (plan PR 9).
   const reelParts = prior ? heldReelParts(prior.parts, handoff.reels) : {};
+  // A Reel a spelling was tried on holds the pairs that changed it from now on (also when none did, or its files could not be read: it is tried again).
+  for (const [n, done] of reelsNow.done) if (reelParts[`reel ${n}`]) reelParts[`reel ${n}`] = { ...reelParts[`reel ${n}`], spellings: done.held };
+  const reelWrites = [...reelsNow.done.values()].flatMap((done) => done.writes);
   const finishedNow = (revision, when) => ({ revision, at: when, on: ctx.machine, handoff: handoffRel, parts: { main: { v: 0, file: `final/${record.video.file}`, bytes: record.video.bytes, seconds, spellings: held, noHandEdits: true, import: true, kind }, ...reelParts } });
   const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
   const work = join(runsFolder(ctx.home), `first-hand-off-${process.pid}-${ctx.now()}`);
@@ -1326,9 +1395,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   const files = {};
   try {
     mkdirSync(finalDir, { recursive: true });
-    if (!same) {
-      // The hand-off last, as finish copies it.
-      const ordered = [[`final/${stem}.srt`, srt], [`final/${stem}.transcript.txt`, txt], [handoffRel, handoffText(handoff)]];
+    if (!same || reelWrites.length) {
+      // The main video's captions, then the Reels' that a spelling reached, and the hand-off last, as finish copies it.
+      const ordered = [...(same ? [] : [[`final/${stem}.srt`, srt], [`final/${stem}.transcript.txt`, txt]]), ...reelWrites, ...(same ? [] : [[handoffRel, handoffText(handoff)]])];
       for (const [rel, ours] of ordered) {
         const to = join(folder, rel);
         const there = existsSync(to);
@@ -1362,7 +1431,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
       // The hand-off is in final/ all the same.
     }
   }
-  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same, shown };
+  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same, shown, kept: reelsNow.kept };
 }
 
 // --- A client or group session's own hand-off (spec 2026-10-22, sections 3 and 8) ---

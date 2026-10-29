@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, unusableWords } from "../finish-reels.js";
+import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, unusableWords } from "../finish-reels.js";
 import { reelsBase } from "../finish.js";
 
 const NAME = "Pricing: what to charge?";
@@ -106,6 +106,9 @@ describe("the words she reads", () => {
       [lostReelsWords(NAME), `${NAME}'s hand-off is not there or cannot be read, so a new one would leave out the Reels it holds. Nothing was written. Ask Jason.`],
       [noReelWords(NAME), `${NAME} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`],
       [nothingNewWords(NAME, 3), `${NAME} has no Reel exported since its hand-off was made, as revision 3, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`],
+      [keepOldWords([2]), `Reel 2's captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".`],
+      [keepOldWords([2, 3]), `Reel 2's and Reel 3's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
+      [keepOldWords([1, 2, 5]), `Reel 1's, Reel 2's and Reel 5's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
       [START, 'Say "yes, hand off the Reels" to start.'],
       [SAY_AGAIN, 'Say "hand off the Reels" again.'],
       [BRINGING, "Dropbox is still bringing the hand-off over: say it again in a minute."]

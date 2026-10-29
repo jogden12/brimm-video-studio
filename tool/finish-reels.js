@@ -39,6 +39,13 @@ export const lostReelsWords = (name) => `${name}'s hand-off is not there or cann
 export const noReelWords = (name) => `${name} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`;
 /** No Reel is taken from an export: every one is kept as the hand-off has it, or there is none. */
 export const nothingNewWords = (name, revision) => `${name} has no Reel exported since its hand-off was made, as revision ${revision}, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`;
+/** What she is told of the Reels (`ns`, their numbers) whose captions keep the spelling they were made with after a spelling is made: it
+    cannot be put into them, or taken out, from what is kept of them. The way back is a fresh export. */
+export function keepOldWords(ns) {
+  const reels = ns.map((n) => `Reel ${n}'s`);
+  const said = reels.length < 2 ? reels.join("") : `${reels.slice(0, -1).join(", ")} and ${reels[reels.length - 1]}`;
+  return `${said} captions keep the old spelling until you export ${ns.length === 1 ? "it" : "each"} again from HyperFrames and say "hand off the Reels".`;
+}
 /** What she is asked to say when everything is found and nothing is left to ask. */
 export const START = 'Say "yes, hand off the Reels" to start.';
 /** What she is told to say again when the detached part could not go on. */

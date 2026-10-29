@@ -2510,7 +2510,10 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
       const handoff = JSON.parse(readFileSync(join(found.folder, REL), "utf8"));
       assert.deepEqual(handoff.reels, [REEL2]);
       assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"]);
-      assert.deepEqual(reread(found).finished.parts["reel 2"], part(2));
+      // (This Reel's part has no word times, so a spelling cannot be put into its captions: they keep the old spelling, which is said, and
+      // the part notes that it holds none of the pairs yet, so that a later spelling tries it again: the review's I1.)
+      assert.deepEqual(reread(found).finished.parts["reel 2"], { ...part(2), spellings: [] });
+      assert.deepEqual(done.kept, [2]);
       assert.match(handoff.main.srt, /Thank you so much, Sally\./);
       t.done();
     });
