@@ -458,6 +458,20 @@ describe("app: the older project's video (plan PR 18, group F)", () => {
     assert.equal(existsSync(join(w.dir, "media")), false);
     w.t.done();
   });
+  it("is left where it is when it is a link whose own size is the size the copy's facts give: only a plain file is a video, whatever size a link has", async () => {
+    const w = await comeBack();
+    rmSync(join(w.dir, "media", "recording.mp4"));
+    // A link's size is the length of the path it holds; this one holds as many characters as the video has bytes.
+    symlinkSync("x".repeat(OLD_VIDEO.length), join(w.dir, "media", "recording.mp4"));
+    assert.equal(lstatSync(join(w.dir, "media", "recording.mp4")).size, OLD_VIDEO.length);
+    const before = treeOf(w.dir);
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, MADE_AGAIN(w)]);
+    const [aside] = asidesOf(w);
+    assert.deepEqual(treeOf(aside), before);
+    assert.equal(existsSync(join(w.dir, "media")), false);
+    w.t.done();
+  });
   it("is asked for when the older folder has none", async () => {
     const w = await comeBack();
     rmSync(join(w.dir, "media", "recording.mp4"));
