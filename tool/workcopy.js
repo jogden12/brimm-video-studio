@@ -2,7 +2,8 @@
 // recording as it was filed may be 4K, HDR, of a frame rate that wanders, or stored on its side. The app wants an ordinary video it
 // can seek in at once, so the tool makes one: the longer side at most 1920, H.264 High at 8 bits, tagged BT.709, a constant frame
 // rate, and AAC at 48 kHz. It has the raw video's own length and clock and is cut nowhere, so every time the tool and Claude have
-// given for the recording is a time in the working copy.
+// given for the recording is a time in the working copy. An HDR video (an iPhone records HDR by default) is made standard colour
+// by the Mac's own hardware, VideoToolbox, because the ffmpeg on the Mac Studio has no zscale to tone-map it with in software.
 //
 // Two layers. The first is pure: from what ffprobe printed (and a switch for 4K) it decides the ffmpeg arguments, the words said
 // when a video cannot be used, the key of the copy and where it goes. The second is the job, which has ffmpeg make the copy under
@@ -127,25 +128,84 @@ const HDR_TRANSFERS = new Set(["arib-std-b67", "smpte2084"]);
     ordinary transfer is not. */
 export const isHdr = (colour) => Boolean(colour) && colour.primaries === "bt2020" && HDR_TRANSFERS.has(colour.transfer);
 
-/** The curves the tonemap filter has that a picture can be made with: not "none", which changes nothing. */
-const CURVES = ["clip", "gamma", "hable", "linear", "mobius", "reinhard"];
-/** The curve an HDR picture is tone-mapped with: Hable's, which rolls the highlights off and does not cut them, and is the one most
-    guides to tone-mapping in software give. How it looks on a real iPhone clip is looked at by eye (plan, PR 3, step 5), and this
-    is the one word to change if another is better: workCopyArgs takes the curve as `toneMap`. */
+/** Not used any more. It was the curve an HDR picture was tone-mapped with by software (Hable's, in the tonemap filter). The ffmpeg
+    on the Mac Studio has no zscale, which that chain needed, so the working copy now makes an HDR picture standard with
+    VideoToolbox, whose conversion (scale_vt) has no curve to choose. The name stays only so that a module that still imports it
+    loads; nothing reads it, and it goes when nothing imports it. */
 export const TONE_MAP = "hable";
 
-/** The filters that make an HDR picture standard, as the rough cut's chain for size goes before them (so that they work on the
-    smaller picture, which is four times quicker at 4K): to linear light as a float, from the colour ffprobe said it has, with
-    the input given in full so that the work never depends on what the frames themselves say; to BT.709 primaries; tone-mapped;
-    and to BT.709's own transfer, matrix and limited range, dithered, since the picture is written at 8 bits and a smooth
-    wall or sky would band. The caller ends the chain with format=yuv420p. */
-const toneMapChain = (transfer, curve) => [
-  `zscale=pin=bt2020:tin=${transfer}:min=bt2020nc:rin=tv:t=linear:npl=100`,
-  "format=gbrpf32le",
-  "zscale=p=bt709",
-  `tonemap=tonemap=${curve}:desat=0`,
-  "zscale=t=bt709:m=bt709:r=tv:dither=error_diffusion"
-];
+/** How the picture of a video is stored, from what ffprobe printed of it: { turn, bits }. Of the picture, never of a cover picture
+    or a sound. An HDR picture is decoded and converted on the Mac's hardware, where ffmpeg's own turning of a picture that is
+    stored on its side does not happen, so it is turned by hand after, and these two say how.
+    - `turn` is the degrees clockwise the picture is turned to be shown upright, 0 up to 360, as ffmpeg's own turning counts
+      them. ffprobe's `rotation` in the display matrix counts the other way (anticlockwise), so the sign is changed: an iPhone's
+      upright clip, which ffprobe says -90 of, is turned 90 clockwise, and Jason's, stored turned round, says -180 and is
+      turned 180. The old `rotate` tag, which older ffprobe printed, counted clockwise already. The note in the side data wins
+      over the tag, and 0 is none, as factsOf reads them for the sides.
+    - `bits` is how many bits each sample of the picture's colour has, read from its pixel format: 10 for an iPhone's HDR, 8 for
+      a plain 4:2:0. When ffprobe gave no pixel format it is 10, which is what an HDR picture is. */
+export function storedOf(printed) {
+  let picture;
+  try {
+    picture = list(JSON.parse(printed).streams).find((s) => s.codec_type === "video" && !(s.disposition && s.disposition.attached_pic));
+  } catch (e) {
+    picture = undefined;
+  }
+  if (!picture) return { turn: 0, bits: 10 };
+  const noted = list(picture.side_data_list).map((d) => d.rotation).find((r) => r != null);
+  const clockwise = noted != null ? -Number(noted) : Number(picture.tags && picture.tags.rotate);
+  const depth = /(\d+)(?:le|be)$/.exec(String(picture.pix_fmt || ""));
+  return {
+    turn: Number.isFinite(clockwise) ? (((clockwise % 360) + 360) % 360) : 0,
+    bits: depth ? Number(depth[1]) : picture.pix_fmt ? 8 : 10
+  };
+}
+
+/** The arguments that go before the input for an HDR video, so that its picture is decoded by VideoToolbox and stays on the
+    hardware until it is made standard: ffmpeg's own turning is off, because hardware frames skip it and it would otherwise pass
+    the stored note to turn the picture on to the file, and the note is set to nothing for the same reason, so that no
+    rotation is left in the copy and the picture is never turned twice. */
+const HDR_INPUT = ["-noautorotate", "-display_rotation", "0", "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"];
+
+/** The filters that turn a picture upright by hand, for `turn` degrees clockwise (storedOf): a quarter turn is a transpose, a half
+    turn is two flips, and any other angle is what ffmpeg's own turning would do with it, a rotate by that angle. */
+function turnFilters(turn) {
+  if (turn === 0) return [];
+  if (turn === 90) return ["transpose=clock"];
+  if (turn === 180) return ["hflip", "vflip"];
+  if (turn === 270) return ["transpose=cclock"];
+  return [`rotate=${turn}*PI/180`];
+}
+
+/** The filters that make an HDR picture standard, from the rate and the size it is made at (workCopySize, as it is shown) and
+    how it is stored (storedOf), in this order:
+    - fps, first, as for every copy, so that each picture has its place on an even grid from 0;
+    - scale_vt, on the hardware: it makes the picture the size it is stored at (the size shown, with its sides swapped for a
+      quarter turn, since the turn comes after) and converts its colour to BT.709, with BT.709's primaries, transfer and matrix.
+      It reads the colour it starts from off the picture's own tags, which is why the same chain makes HLG and PQ standard;
+    - hwdownload, and the pixel format the frames are downloaded in: p010le for the 10 bits an iPhone records, nv12 for 8. It
+      must be the format the hardware holds them in, and ffmpeg does not convert there;
+    - the turn, by hand, in software (turnFilters);
+    - format=yuv420p, last: the drop to 8 bits is ffmpeg's own scaler's, which adds an ordered dither whenever it drops from
+      more than 8 bits to 8, so a smooth wall or sky does not band, as it did not when zscale dithered by error diffusion. The
+      colour is made standard in the 10 bits VideoToolbox gives (its words hold more than 10 bits, which is what the dither
+      works from) and nothing is done to it after. That holds because the file is tagged BT.709, as the frames are
+      (workCopyArgs): with no tags to say so, ffmpeg's scaler converts the colour between the frames' tags and the file's as well,
+      which does not dither, and a gradient comes out in bands (tried: a ramp of 16 steps went from a few hundred changes along a
+      row to three). workcopy-real.test.js looks at a gradient.
+    There is no comma in any of them but the ones between filters. */
+const hdrChain = ({ rate, width, height, stored }) => {
+  const quarter = stored.turn === 90 || stored.turn === 270;
+  const [w, h] = quarter ? [height, width] : [width, height];
+  return [
+    `fps=${rate}:start_time=0`,
+    `scale_vt=w=${w}:h=${h}:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709`,
+    "hwdownload",
+    `format=${stored.bits > 8 ? "p010le" : "nv12"}`,
+    ...turnFilters(stored.turn),
+    "format=yuv420p"
+  ];
+};
 
 // --- Whether a video can be made into a working copy ---
 
@@ -160,30 +220,42 @@ function unusable({ facts, streams }) {
   return "";
 }
 
-/** The filters of a Mac's ffmpeg that tone-map an HDR picture. */
-const HDR_FILTERS = ["zscale", "tonemap"];
+/** What a Mac's ffmpeg needs to make an HDR picture standard: the filter that sizes it and converts its colour on the hardware,
+    and the hardware decoder that holds its frames there. */
+const HDR_FILTERS = ["scale_vt"];
+const HDR_HWACCEL = "videotoolbox";
 
 /** Does what ffmpeg printed for -filters list each of these filters? Each is known by its whole name, in the column of names that
-    follows the column of flags (three letters or dots today, and a few more are allowed for): a name that only begins as another
-    does (tonemap_opencl for tonemap) is not it, and neither is a word of a description or a line of the legend. */
+    follows the column of flags (two letters or dots, as ffmpeg 9.0.2 prints them, and the three of the ffmpeg before it, and a
+    few more are allowed for): a name that only begins as another does (scale_vaapi for scale_vt) is not it, and neither is a
+    word of a description or a line of the legend. */
 export function hasFilters(listing, names) {
-  const have = new Set([...String(listing || "").matchAll(/^\s*[A-Za-z.]{3,5}\s+(\S+)\s+\S+->\S+/gm)].map((m) => m[1]));
+  const have = new Set([...String(listing || "").matchAll(/^\s*[A-Za-z.]{2,5}\s+(\S+)\s+\S+->\S+/gm)].map((m) => m[1]));
   return names.every((name) => have.has(name));
+}
+
+/** Does what ffmpeg printed for -hwaccels list this method? Each method is a line of its own, below the line that says what the
+    list is, and is known by the whole line: a name that only begins as another does is not it, and neither is a word of a
+    sentence or the line that says what the list is. */
+export function hasHwaccel(listing, name) {
+  const methods = String(listing || "").split("\n").map((line) => line.trim()).filter((line) => /^\w+$/.test(line));
+  return methods.includes(name);
 }
 
 /** Why a video cannot be made into a working copy on this Mac, in plain words (canNotBeUsed makes the sentence), or null when it
     can. In this order, so that the first thing wrong is the one said: what cannot be read, the picture, the sound, the colour
     and then the room.
-    - `filters` is what ffmpeg prints for -filters on this Mac. Only an HDR video needs the filters that tone-map it, and one on
-      a Mac without them is refused, never used as it is: its colours would be wrong in the app and in the export. A video in
-      standard colour is not touched by this.
+    - `filters` is what ffmpeg prints for -filters on this Mac, and `hwaccels` what it prints for -hwaccels. Only an HDR video
+      needs the filter and the hardware decoder that make it standard (VideoToolbox's), and one on a Mac without them is refused,
+      never used as it is: its colours would be wrong in the app and in the export. A video in standard colour is not touched
+      by this.
     - `freeBytes` is the room on the disk the copy is made on, and `rawBytes` the raw video's size: less than twice its size is not
       enough. When the room cannot be measured (it is not a number) nothing is said: a full disk is found out when the copy is
       written, and the job leaves nothing behind then either. */
-export function workCopyFault({ facts, streams, colour, filters, freeBytes, rawBytes }) {
+export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes, rawBytes }) {
   const cannot = unusable({ facts, streams });
   if (cannot) return cannot;
-  if (isHdr(colour) && !hasFilters(filters, HDR_FILTERS)) return "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason";
+  if (isHdr(colour) && !(hasFilters(filters, HDR_FILTERS) && hasHwaccel(hwaccels, HDR_HWACCEL))) return "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason";
   if (Number.isFinite(rawBytes) && rawBytes > 0 && Number.isFinite(freeBytes) && freeBytes < 2 * rawBytes) {
     return `there is not enough room on this Mac to make it: ${sizeText(2 * rawBytes)} must be free, and ${sizeText(Math.max(0, freeBytes))} is`;
   }
@@ -194,7 +266,9 @@ export function workCopyFault({ facts, streams, colour, filters, freeBytes, rawB
 
 /** Have ffmpeg make the working copy of the video at `input` as the file `output`, or null when the video cannot be made into one
     (see unusable). `facts`, `streams` and `colour` are what factsOf, streamsOf and colourOf read from what ffprobe printed, and
-    `rate` is rateOf's. `fourK` lets the longer side be 3840, and `toneMap` is the curve an HDR picture is mapped with.
+    `rate` is rateOf's. `fourK` lets the longer side be 3840. `stored` is storedOf's, how the picture is stored: it is needed for
+    an HDR video, which is turned by hand (see below), and a call for one without it throws rather than make a picture that is
+    on its side; a video in standard colour has no use for it.
     - The picture and the sound to take are mapped by their numbers, as the rough cut's are: ffmpeg on its own takes the sound
       with the most channels, which on an iPhone's clip is its APAC, and this Mac cannot read that. A video with no sound is made
       with none.
@@ -202,23 +276,30 @@ export function workCopyFault({ facts, streams, colour, filters, freeBytes, rawB
       the sound on the file's clock first, with silence where it has none, so that a time in the cut plan is a time in the working
       copy. Nothing is cut: there is no select, no trim and no start.
     - The picture is made smaller by workCopySize, never larger, as an iPhone's upright clip is shown: ffmpeg turns it upright
-      before any filter sees it, and the copy has no note to turn it.
+      before any filter sees it, and the copy has no note to turn it. That is for a video in standard colour.
+    - An HDR picture is made standard with the Mac's hardware instead (hdrChain, HDR_INPUT): VideoToolbox decodes it, sizes it and
+      converts its colour, and ffmpeg's own turning of a stored-on-its-side picture, which hardware frames skip, is off. The
+      picture is turned by hand in software after it is downloaded, by the note it is stored with (`stored.turn`), and the file
+      is left with no note, so that it is never turned twice.
     - The picture is H.264 High at 8 bits and 4:2:0 (encodeArgs' own settings, at WORK_COPY_CRF and WORK_COPY_PRESET), with a
       keyframe every second, so that a place in the video is reached by decoding a second of it at most when it is scrubbed.
-    - It is tagged BT.709 in limited range: what a video in standard colour is, and what an HDR one is once its filters have run.
-      A video in standard colour is taken to be BT.709, as the iPhone's, the OBSBOT's and Zoom's are, and its pixels are not
-      converted. One that is not (BT.601, wide colour with no HDR, full range) would be tagged as what it is not, and its colours
-      shifted a little: the plan asks only for HDR to be converted, and none of the cameras here makes such a video.
+    - It is tagged BT.709 in limited range: what a video in standard colour is, and what an HDR one is once VideoToolbox has
+      converted it. A video in standard colour is taken to be BT.709, as the iPhone's, the OBSBOT's and Zoom's are, and its pixels
+      are not converted. One that is not (BT.601, wide colour with no HDR, full range) would be tagged as what it is not, and its
+      colours shifted a little: the plan asks only for HDR to be converted, and none of the cameras here makes such a video.
     - The file is told it is an mp4, so it can be written under another name and given its own when it is whole. */
-export function workCopyArgs(input, output, { facts, streams = null, colour = null, rate = FALLBACK_RATE, fourK = false, toneMap = TONE_MAP } = {}) {
+export function workCopyArgs(input, output, { facts, streams = null, colour = null, rate = FALLBACK_RATE, fourK = false, stored } = {}) {
   if (unusable({ facts, streams })) return null;
-  if (!CURVES.includes(toneMap)) throw new Error(`The tonemap filter has no curve called "${toneMap}".`);
   const at = rate || FALLBACK_RATE;
   const { width, height } = workCopySize(facts, fourK);
-  const chain = [`fps=${at}:start_time=0`, `scale=${width}:${height}`, ...(isHdr(colour) ? toneMapChain(colour.transfer, toneMap) : []), "format=yuv420p"];
+  const hdr = isHdr(colour);
+  if (hdr && !(stored && Number.isFinite(stored.turn) && Number.isFinite(stored.bits))) {
+    throw new Error("An HDR picture is turned by hand, so how it is stored (`stored`, from storedOf) must be given to workCopyArgs.");
+  }
+  const chain = hdr ? hdrChain({ rate: at, width, height, stored }) : [`fps=${at}:start_time=0`, `scale=${width}:${height}`, "format=yuv420p"];
   const sound = streams.audio !== null;
   return [
-    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input,
+    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...(hdr ? HDR_INPUT : []), "-i", input,
     "-map", `0:${streams.video}`, ...(sound ? ["-map", `0:${streams.audio}`] : []),
     "-vf", chain.join(","), ...(sound ? ["-af", "aresample=async=1:first_pts=0"] : ["-an"]),
     "-sn", "-dn", ...encodeArgs(WORK_COPY_CRF, WORK_COPY_PRESET),
@@ -266,14 +347,17 @@ export function workCopyFacts(printed, bytes) {
     were set from measurements on a box of four cores, with 3 seconds of 4K made into a copy, and they are generous: a limit that
     stops work that is going well stops it every time it is tried, while a runaway is stopped by any limit.
     - Memory. The most ffmpeg held, and the most it was allowed:
-        1080 SDR 0.5 GB, 1080 HDR 0.8 GB      allowed 4 GB
+        1080 SDR 0.5 GB, 1080 HDR 0.6 GB      allowed 4 GB
         4K SDR 1.2 GB, 4K HDR 1.8 GB          allowed 8 GB (`fourK`)
-      A picture tone-mapped as floating point holds frames of a hundred megabytes at 4K, and the Mac Studio has many more cores,
-      so many more frames in flight, than the box this was measured on. So each is about five times what four cores held, and
-      a Reel preview's 2 GB would not do. A runaway grows by gigabytes a second, so any of these stops it in a moment.
-    - Time. Five minutes, and twenty seconds more for every second of video. The same four cores took 1.1, 2.4, 1.7 and 6.8
-      seconds for each second of video, in the order above, so the slowest has three times as long as it needed, and the Mac
-      Studio is far quicker. */
+      The SDR figures are the four cores'. The HDR ones are of the VideoToolbox chain (workCopyArgs), measured on 2026-10-28 on the
+      Mac Studio (an M1 Max): 0.6 GB for 4 seconds of a real 1080 clip, and 1.8 GB for 2 seconds of a made-up 4K clip made into a
+      copy of 4K. Its frames stay on the hardware until they are standard, so none is held as floating point, as the software
+      chain's were. The limits are left as they were: the Mac Studio has many more cores, so many more frames in flight, than the
+      box the SDR ones were measured on, so each is several times what was held, and a Reel preview's 2 GB would not do. A runaway
+      grows by gigabytes a second, so any of these stops it in a moment.
+    - Time. Five minutes, and twenty seconds more for every second of video. The four cores took 1.1 and 2.4 seconds for each
+      second of SDR video at 1080 and 4K, so the slowest has many times as long as it needed. The VideoToolbox chain took 0.2 to
+      0.3 for HDR at 1080 and 0.5 at 4K, on the Mac Studio. */
 export const workCopyLimits = (seconds, fourK = false) => ({ most: (fourK ? 8 : 4) * GB, limit: Math.round((300 + 20 * (Number.isFinite(seconds) && seconds > 0 ? seconds : 0)) * 1000) });
 
 // --- Asking for the copy ---
@@ -326,7 +410,7 @@ const freeOn = (path) => {
 /** Make the working copy of the raw video at `video`, of the episode in `folder`, on this Mac: resolves { ok, made, failed, next,
     words, key, paths }, which is the shape a detached run's work gives runDetached, with `words` the one line to say of it, and
     never throws. `name` is how the video is called in the progress panel and the log, its file's name when it is not given.
-    `fourK` and `toneMap` are as workCopyArgs takes them.
+    `fourK` is as workCopyArgs takes it.
     What it does, and why in this order:
     - It looks at nothing but the video's size and time first, for the key, and when the copy for that key is there already, whole
       (its video and its facts), it says Done and makes none. The copy is not looked for in any project: whether a project has
@@ -344,11 +428,11 @@ const freeOn = (path) => {
       better than none is kept until its replacement is whole. One that cannot be taken away is said in the log and left.
     - It says nothing to a person that holds a path, a flag or the name of a program: Done, or "It can't be used" and why. What
       ffmpeg said is in the log.
-    The `deps` are all what it touches: `run` (runProgram) for ffprobe and for ffmpeg's list of filters, `runGuarded`, `tools` ({
-    ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed of it, or "": read through `run` when none is
-    given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`, `progress`, `log`, `now`, and `pid`, which names the
-    run's own folder. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false, toneMap = TONE_MAP }, deps = {}) {
+    The `deps` are all what it touches: `run` (runProgram) for ffprobe and for ffmpeg's lists of filters and of hardware decoders
+    (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
+    of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
+    `progress`, `log`, `now`, and `pid`, which names the run's own folder. */
+export async function makeWorkCopy({ home, folder, video, name, fourK = false }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid
@@ -403,13 +487,19 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, t
     const streams = streamsOf(printed);
     const colour = colourOf(printed);
     const { rate, steady } = rateOf(printed);
+    const stored = storedOf(printed);
     const hdr = isHdr(colour);
-    // Only an HDR video needs the filters that tone-map it, so ffmpeg is asked which it has for one alone, once.
+    // Only an HDR video needs the filter and the hardware decoder that make it standard, so ffmpeg is asked which it has for one
+    // alone, once each.
     let filters = "";
+    let hwaccels = "";
     if (hdr) {
       const listed = await run(tools.ffmpeg, ["-nostdin", "-hide_banner", "-filters"], { out: 1000000 });
       if (listed.code === 0) filters = String(listed.stdout || "");
       else log(`${shown}: ffmpeg could not say which filters it has (${lastLine(listed.stderr)}).`);
+      const methods = await run(tools.ffmpeg, ["-nostdin", "-hide_banner", "-hwaccels"], { out: 100000 });
+      if (methods.code === 0) hwaccels = String(methods.stdout || "");
+      else log(`${shown}: ffmpeg could not say which hardware decoders it has (${lastLine(methods.stderr)}).`);
     }
     let free = Number.NaN;
     try {
@@ -417,11 +507,11 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, t
     } catch (e) {
       log(`${shown}: the room left on the disk could not be read (${e.code || e.message}).`);
     }
-    const fault = workCopyFault({ facts, streams, colour, filters, freeBytes: free, rawBytes: raw.size });
+    const fault = workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes: free, rawBytes: raw.size });
     if (fault) return refuse(fault);
 
     const writing = join(work, `${key}.mp4`);
-    const args = workCopyArgs(video, writing, { facts, streams, colour, rate, fourK, toneMap });
+    const args = workCopyArgs(video, writing, { facts, streams, colour, rate, fourK, stored });
     if (!args) return refuse("it could not be read as a video");
     // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
     const watch = progress.encoding(facts.duration);
