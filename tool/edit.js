@@ -210,7 +210,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         detached. An iPhone clip she answered that was not opened in HyperFrames is asked
                                         about once; --as-it-is writes its hand-off from the import's captions. For a main
                                         video taken from an export it reads the words on its picture out of the HyperFrames
-                                        project and asks if they are right, and a raw video's hand-off also holds the Reel
+                                        project and asks if they are right (a --yes takes them only after a call has shown
+                                        them), and a raw video's hand-off also holds the Reel
                                         suggestions that fall in it. --on-screen gives those words, once for each line in
                                         the order they appear, when she changes or drops one, and --no-on-screen says there
                                         are none. A Reel's title, when it has none, is asked with the Reel's first line
@@ -2160,11 +2161,35 @@ function suggestionOpening(folder, n) {
   }
 }
 
+/** The lines `finish` last showed her as the words on the main video's picture, kept on this Mac's own disk beside finish.asked.json
+    (plan PR 8, review I1): a yes takes the words found only when they are these, so that no yes comes before she has seen them. It
+    holds { version, at, lines }; `shownWords` gives the lines, or null when the file is not there or holds no list of lines. */
+const SHOWN_WORDS = "finish.shown.json";
+function shownWords(work) {
+  try {
+    const kept = JSON.parse(readFileSync(join(work, SHOWN_WORDS), "utf8"));
+    return Array.isArray(kept?.lines) ? kept.lines : null;
+  } catch (e) {
+    return null;
+  }
+}
+/** Keep the lines just shown, in place of any kept before. A file that cannot be written keeps nothing, which asks her again. */
+function keepShownWords(work, lines, at) {
+  try {
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, SHOWN_WORDS), JSON.stringify({ version: 1, at, lines }, null, 2) + "\n");
+  } catch (e) {
+    // Nothing is kept: her next yes shows them again, and nothing starts without it.
+  }
+}
+const sameLines = (kept, lines) => Array.isArray(kept) && kept.length === lines.length && kept.every((line, i) => line === lines[i]);
+
 /** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
     exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
     it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once.
     For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
-    (plan PR 8, on-screen.js): `answers.onScreen` are the lines she gave instead, and `answers.noOnScreen` that there are none. */
+    (plan PR 8, on-screen.js): `answers.onScreen` are the lines she gave instead, and `answers.noOnScreen` that there are none. A yes
+    takes the words found only if they are the lines the last call showed (finish.shown.json); otherwise it shows them, and starts nothing. */
 export async function finishEpisode(ctx, found, answers = {}) {
   const { record } = found;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
@@ -2256,14 +2281,20 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // The words on the main video's picture (plan PR 8; architecture 8.5): those the project holds, read for her to confirm with her yes, or the
   // ones she gives; with none found, she is asked. A main video kept as the last finish made it is not asked, and Final Cut's has its own.
   let onPicture = null;
+  // Whether this call showed her the words found for her to say they are right: her yes is to the words she was shown, so this call starts nothing.
+  let showing = false;
   const work = episodeWork(ctx.home, found.name);
   const main = app ? looked.parts.find((p) => p.key === "main") : undefined;
   if (main && v2) {
     const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
-    const said = mainWordsSaid({ found: read.words, here: read.here, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video) });
+    const said = mainWordsSaid({ found: read.words, here: read.here, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
     if (said.refusal) return refuse(ctx, said.refusal);
     if (said.line) lines.push(said.line);
     if (said.ask) looked.asks.push(said.ask);
+    if (said.shows) {
+      showing = true;
+      keepShownWords(work, said.shows, localStamp(new Date(ctx.now())));
+    }
     onPicture = said.words;
   }
   for (const part of looked.parts.filter((p) => p.reel)) {
@@ -2285,7 +2316,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     ctx.say(looked.looked);
     return 1;
   }
-  if (looked.asks.length || !answers.yes) {
+  if (looked.asks.length || !answers.yes || showing) {
     if (!looked.asks.length) ctx.say(app ? 'Say "yes, hand it off" to start.' : 'Say "yes, finish it" to start.');
     return 0;
   }
@@ -2313,6 +2344,12 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const asked = { version: 1, ...(app ? { source: "hyperframes" } : {}), at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map(askedPart) };
   mkdirSync(work, { recursive: true });
   writeFileSync(join(work, "finish.asked.json"), JSON.stringify(asked, null, 2) + "\n");
+  // A finish that has started has used what it was shown: the next finish shows its words again.
+  try {
+    rmSync(join(work, SHOWN_WORDS), { force: true });
+  } catch (e) {
+    // Whatever stands in its place is not a file it kept: it is read as nothing shown.
+  }
   startDetached(ctx, { command: "finish", folder: found.name });
   ctx.say("Started. The panel shows how far it is.");
   return 0;

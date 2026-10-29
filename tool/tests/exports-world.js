@@ -84,7 +84,7 @@ export function screen(w, key, files, { only = false } = {}) {
     Mac set up for the app (`set`), its hand-off in version 2 (`handoffVersion`), and the app's index.html of each project last changed
     at 13:40. `projects: null` gives a record with no `app` at all. `over` changes the record, `programs` the stand-ins. `name` is another
     name for the episode, whose projects are named for it (namesFor), as one with an accent and a quote in it. */
-export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null, candidates = null } = {}) {
+export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null, candidates = null, shown = true } = {}) {
   const names = name ? namesFor(name) : PROJECT_OF;
   const record = { version: projects ? 4 : 3, kind, answer: ANSWERED, ...(name ? { name: { text: name, placeholder: false } } : {}), ...(projects ? { app: { toolchain: PIN.version, projects: projects.map((key) => entry(key, {}, names)) } } : {}), ...over };
   // `candidates` are the Reel suggestions of the episode's reels.json in place of the made-up two: a reading's, with an opening and a closing, a reason and a point.
@@ -103,6 +103,12 @@ export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, 
     mkdirSync(join(dirOf(key), "renders"), { recursive: true });
     // The main video's picture holds a lower third (plan PR 8); a Reel's holds nothing unless a test says so.
     screen(w, key, key === "main" ? LOWER_THIRD : { "index.html": "<html></html>" });
+  }
+  // Unless `shown` is false, finish has already shown her the lower third and asked if it is right, as the tests that go on to a yes
+  // need (review I1): a yes is to the words she was shown. The tests of what is shown, and of the yes that follows it, leave it out.
+  if (shown && (projects || []).includes("main")) {
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, "finish.shown.json"), JSON.stringify({ version: 1, at: AT, lines: MAIN_WORDS }));
   }
   return w;
 }

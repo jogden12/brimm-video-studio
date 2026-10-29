@@ -4,7 +4,7 @@
 // "Head of Pricing", from 0:03, with a Downloads folder in the test's own home. No program is run, and nothing is written in a project.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { PIN } from "../hyperframes.js";
@@ -56,14 +56,18 @@ describe("B1. the main video's words, found", () => {
     plain(w.t.said().split("\n"));
     w.t.done();
   });
-  it("with a yes says them again as taken, starts the finish once, and writes the lines in the order shown", async () => {
-    const w = ready();
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
-    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, TAKEN, STARTED]);
+  it("with a yes after the call that showed them says them again as taken, starts the finish once, and writes the lines in the order shown", async () => {
+    // Her yes is to the words that call showed (review I1): so it is the second call that starts.
+    const w = ready({ shown: false });
+    const first = await on(w.t.ctx.deps, "finish", FOLDER);
+    assert.deepEqual([first.code, first.said], [0, [MAIN_LINE, REEL_LINE, FOUND, START]]);
+    assert.deepEqual(w.t.started, []);
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said], [0, [MAIN_LINE, REEL_LINE, TAKEN, STARTED]]);
     assert.equal(w.t.started.length, 1);
     const asked = w.asked();
     assert.deepEqual(asked.parts.map((p) => [p.key, p.onPicture]), [["main", MAIN_WORDS], ["reel 2", undefined]]);
-    plain(w.t.said().split("\n"));
+    plain([...first.said, ...r.said]);
     w.t.done();
   });
   it("says three or more as a, b and c, each with its time, in the order they appear", async () => {
@@ -251,6 +255,120 @@ describe("B5. when it is not asked", () => {
     exportOf(w, "reel 2");
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
     assert.doesNotMatch(w.t.said(), /On screen|picture/);
+    w.t.done();
+  });
+});
+
+describe("B7. a yes is to the words she was shown (review I1)", () => {
+  // A bare yes takes the words found only when they are the lines the last call that asked "Right?" showed, kept on this Mac's own
+  // disk beside what finish was asked (finish.shown.json): the chat cannot hand off words she never saw by adding a yes to its first call.
+  const SHOWN = "finish.shown.json";
+  const keptOf = (w) => JSON.parse(readFileSync(join(w.work, SHOWN), "utf8"));
+  const LAST_WORD = { "index.html": '<div class="clip" data-start="3725" data-duration="4">Last word</div>' };
+  const LAST = 'On screen in the main video I found "Last word" at 1:02:05. Right?';
+  it("shows the words, and starts nothing, when the first call has a yes and nothing was shown before", async () => {
+    const w = ready({ shown: false });
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said], [0, [MAIN_LINE, REEL_LINE, FOUND, START]]);
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json")), reread(w.found).rev, Boolean(reread(w.found).editing)], [[], false, 1, false]);
+    assert.deepEqual(keptOf(w).lines, MAIN_WORDS, "what it showed is kept");
+    plain(r.said);
+    w.t.done();
+  });
+  it("starts with the next yes, and lets go of what it kept, so that a later finish shows them again", async () => {
+    const w = ready({ shown: false });
+    await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual(w.t.started, [], "the call that shows them starts nothing");
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said], [0, [MAIN_LINE, REEL_LINE, TAKEN, STARTED]]);
+    assert.equal(w.t.started.length, 1);
+    assert.deepEqual(w.asked().parts[0].onPicture, MAIN_WORDS);
+    assert.equal(existsSync(join(w.work, SHOWN)), false, "a finish that has started does not leave what it was shown");
+    w.t.done();
+  });
+  it("shows them again, and starts nothing, when the project's words changed between the two calls, and then takes the new ones on a yes", async () => {
+    const w = ready({ shown: false });
+    await on(w.t.ctx.deps, "finish", FOLDER);
+    assert.deepEqual(keptOf(w).lines, MAIN_WORDS);
+    screen(w, "main", LAST_WORD, { only: true });
+    const again = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([again.code, again.said], [0, [MAIN_LINE, REEL_LINE, LAST, START]]);
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json"))], [[], false]);
+    assert.deepEqual(keptOf(w).lines, ["Last word"], "each call that asks replaces what was kept");
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said], [0, [MAIN_LINE, REEL_LINE, 'On screen in the main video: "Last word" at 1:02:05.', STARTED]]);
+    assert.deepEqual(w.asked().parts[0].onPicture, ["Last word"]);
+    w.t.done();
+  });
+  it("shows them again when they are the same lines in another order, or the same lines and one more", async () => {
+    const w = ready({ shown: false });
+    for (const lines of [[...MAIN_WORDS].reverse(), [...MAIN_WORDS, "One more"], [MAIN_WORDS[0]], []]) {
+      writeFileSync(join(w.work, SHOWN), JSON.stringify({ version: 1, lines }));
+      const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+      assert.deepEqual([r.code, r.said.at(-2), w.t.started], [0, FOUND, []], JSON.stringify(lines));
+    }
+    w.t.done();
+  });
+  it("takes nothing in the file for shown when it is not a list of lines", async () => {
+    const w = ready({ shown: false });
+    for (const text of ["", "not json", "null", "[]", "{}", '{"lines":"Alex Rivera"}', JSON.stringify({ lines: [1, 2] }), JSON.stringify({ lines: [["Alex Rivera"], "Head of Pricing"] }), JSON.stringify({ lines: { 0: "Alex Rivera", 1: "Head of Pricing", length: 2 } })]) {
+      writeFileSync(join(w.work, SHOWN), text);
+      const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+      assert.deepEqual([r.code, r.said.at(-2), w.t.started], [0, FOUND, []], text);
+    }
+    // A folder where the file goes does not stop it from asking either.
+    rmSync(join(w.work, SHOWN), { recursive: true, force: true });
+    mkdirSync(join(w.work, SHOWN));
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said.at(-2), w.t.started], [0, FOUND, []]);
+    w.t.done();
+  });
+  it("needs nothing shown for the lines she gives, or for nothing on screen, and lets go of what it kept when it starts", async () => {
+    const w = ready({ shown: false });
+    await on(w.t.ctx.deps, "finish", FOLDER);
+    const gave = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Her words", "--yes");
+    assert.deepEqual([gave.code, gave.said], [0, [MAIN_LINE, REEL_LINE, 'On screen in the main video, as you said: "Her words".', STARTED]]);
+    assert.equal(existsSync(join(w.work, SHOWN)), false);
+    w.t.done();
+    const none = ready({ shown: false });
+    const r = await on(none.t.ctx.deps, "finish", FOLDER, "--no-on-screen", "--yes");
+    assert.deepEqual([r.code, r.said], [0, [MAIN_LINE, REEL_LINE, "Nothing is on the main video's picture, as you said.", STARTED]]);
+    assert.deepEqual(none.asked().parts[0].onPicture, []);
+    none.t.done();
+  });
+  it("keeps nothing when what it says is the lines she gave, a main video kept as the last finish made it, or no words found", async () => {
+    const w = ready({ shown: false });
+    await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Her words");
+    await on(w.t.ctx.deps, "finish", FOLDER, "--no-on-screen");
+    assert.equal(existsSync(join(w.work, SHOWN)), false, "the lines she gave are not kept as shown");
+    screen(w, "main", { "index.html": "<html></html>" }, { only: true });
+    await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.equal(existsSync(join(w.work, SHOWN)), false, "nothing found is shown as nothing");
+    w.t.done();
+  });
+  it("starts a kept main video's finish with a yes alone, as it did, there being no words to show", async () => {
+    const KEPT = { revision: 1, at: "2026-10-20T14:10:00-05:00", on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: { main: { file: "final/m.mp4", bytes: 5, seconds: 11.878, source: { bytes: 5, mtimeMs: 1 }, project: MAIN } } };
+    const w = world({ shown: false, over: { finished: KEPT } });
+    exportOf(w, "reel 2");
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([r.code, r.said], [0, ["The main video: kept as the last finish made it.", REEL_LINE, STARTED]]);
+    w.t.done();
+  });
+  it("keeps the words it showed also when a Reel's title is asked in the same call", async () => {
+    const w = ready({ shown: false, over: { reels: reelsWith("") } });
+    const first = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.equal(first.code, 0);
+    assert.ok(first.said.includes(FOUND), first.text);
+    assert.ok(first.said.some((line) => line.startsWith("Reel 2 has no title on screen")), first.text);
+    assert.deepEqual(w.t.started, []);
+    assert.deepEqual(keptOf(w).lines, MAIN_WORDS);
+    w.t.done();
+  });
+  it("says what it shows with no path, flag or command name", async () => {
+    const w = ready({ shown: false });
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    plain(r.said);
+    assert.doesNotMatch(r.text, /shown|\.json/);
     w.t.done();
   });
 });

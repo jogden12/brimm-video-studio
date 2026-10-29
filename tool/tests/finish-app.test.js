@@ -695,7 +695,12 @@ describe("E7. again, and the run", () => {
     w.t.calls.length = 0;
     const newer = exportOf(w, "main", { start: [14, 30, 0] });
     const again = { ...found, record: reread(found) };
+    // The first finish used up what it was shown: the main video's words are shown again for the new export, and her yes is to them.
+    const started = w.t.started.length;
     assert.equal(await finishEpisode(w.t.ctx, again, { yes: true }), 0, w.t.said());
+    assert.equal(w.t.started.length, started, "that yes started nothing");
+    assert.equal(await finishEpisode(w.t.ctx, again, { yes: true }), 0, w.t.said());
+    assert.equal(w.t.started.length, started + 1, "and the next yes started the finish");
     const result = await finishNow(w.t.ctx, { ...found, record: reread(found) });
     assert.equal(result.ok, true, result.failed.join(" "));
     assert.deepEqual([...new Set(w.t.calls.filter((c) => c.cmd === "WHISPER").map((c) => partOf(c.args[c.args.indexOf("-f") + 1])))], ["main"]);

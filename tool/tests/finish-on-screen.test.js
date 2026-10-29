@@ -56,6 +56,8 @@ describe("D1. the hand-off holds the words she confirmed", () => {
   it("has the words of a title card whose host sets them, a note in index.html, and none of the captions", async () => {
     const w = ready();
     screen(w, "main", FIXTURE_MAIN);
+    // These words are new to her: the first call shows them, and her yes is to those.
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0, w.t.said());
     const { found } = await finished(w);
     assert.deepEqual(handoffOf(found).main.onPicture, ["Alex Rivera", "Head of Pricing", "Three pricing", "mistakes", "Know your costs"]);
     w.t.done();

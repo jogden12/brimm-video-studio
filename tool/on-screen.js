@@ -312,10 +312,13 @@ const NOTHING_SAID = "Nothing is on the main video's picture, as you said.";
       gave (a list, empty when she gave none), `none` whether she said there are none, `yes` whether she has said yes, and `taking`
       whether the main video is taken from an export in this finish (a main video kept as the last finish made it is not asked).
     - What she says is what goes on: her lines, in her order, or an empty list. Both at once, or a line with no words, is refused.
-    - Otherwise, for a main video that is taken, the words found are said with their times and "Right?", and with her yes said again
-      as taken: her yes is her yes to them. Nothing found, or a project that is not here, is an ask: nothing starts until she has said.
-    `words` are the lines that go on, or null when none is decided; `line` is what is said, and `ask` what is asked, or "". */
-export function mainWordsSaid({ found = [], here = true, given = [], none = false, yes = false, taking = true } = {}) {
+    - Otherwise, for a main video that is taken, the words found are said with their times and "Right?". Her yes is to the words she was
+      shown: `shown` is whether the words found are the lines a call before this one showed (`finish` keeps them), and only then does a
+      yes take them, and say them again as taken. A yes with words she was not shown shows them, and `shows` are the lines for `finish`
+      to keep, so that her next yes is to them. Nothing found, or a project that is not here, is an ask: nothing starts until she has said.
+    `words` are the lines that go on, or null when none is decided; `line` is what is said, and `ask` what is asked, or ""; `shows` is
+    there only when the line asks "Right?", and holds the lines it shows. */
+export function mainWordsSaid({ found = [], here = true, given = [], none = false, yes = false, taking = true, shown = false } = {}) {
   const lines = (Array.isArray(given) ? given : []).map(oneLine);
   if (none && lines.length) return { refusal: BOTH_SAID };
   if (lines.some((line) => line === "")) return { refusal: EMPTY_LINE };
@@ -325,7 +328,9 @@ export function mainWordsSaid({ found = [], here = true, given = [], none = fals
   if (!here) return { words: null, line: "", ask: NOT_HERE };
   if (!found.length) return { words: null, line: "", ask: NONE_FOUND };
   const told = listed(found.map(timed));
-  return { words: found.map((word) => word.text), line: yes ? `On screen in the main video: ${told}.` : `On screen in the main video I found ${told}. Right?`, ask: "" };
+  const texts = found.map((word) => word.text);
+  if (yes && shown) return { words: texts, line: `On screen in the main video: ${told}.`, ask: "" };
+  return { words: null, line: `On screen in the main video I found ${told}. Right?`, ask: "", shows: texts };
 }
 
 /** What `finish` asks of a Reel that has no title on screen: today's ask, which names the suggestion's opening when it has one, and,
