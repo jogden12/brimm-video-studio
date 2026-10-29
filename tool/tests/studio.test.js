@@ -208,6 +208,11 @@ describe("her folder's settings", () => {
     // Both ways of finishing a video are in the skill, and neither runs the other's command.
     assert.equal(rowOf('| "Hand it off" / "Finish the episode" |').length, 1);
     assert.doesNotMatch(rowOf('| "Hand it off" / "Finish the episode" |')[0], /reels/);
+    // A spelling reaches the Reels of such a video too; when a Reel's captions keep the old spelling, the way back is a fresh export from
+    // HyperFrames, not Final Cut (the review's I1).
+    const [spell, ...others] = rowOf('| "It\'s Hormozi, not Hormozy" |');
+    assert.deepEqual(others, []);
+    assert.ok(spell.includes('if it says a Reel\'s captions keep the old spelling, tell her to export that Reel again from HyperFrames and say "Hand off the Reels"'), spell);
   });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
