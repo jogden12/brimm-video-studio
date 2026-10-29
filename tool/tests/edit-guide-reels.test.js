@@ -470,7 +470,9 @@ describe("B7. where the guide reads", () => {
     ["a Reel she dropped", {}, (w) => rewrite(w, (now) => ({ reels: now.reels.map((r) => (r.n === 2 ? { ...r, status: "dropped" } : r)) }))],
     ["a project kept for an earlier kind", {}, (w) => rewrite(w, (now) => ({ app: { ...now.app, projects: now.app.projects.map((p) => ({ ...p, state: KEPT })) } }))],
     // ".." is a folder that is there: only its name keeps it from being the project.
-    ["a project whose name is not one folder's", {}, (w) => rewrite(w, (now) => ({ app: { ...now.app, projects: now.app.projects.map((p) => ({ ...p, name: ".." })) } }))]
+    ["a project whose name is not one folder's", {}, (w) => rewrite(w, (now) => ({ app: { ...now.app, projects: now.app.projects.map((p) => ({ ...p, name: ".." })) } }))],
+    // A project that is not a Reel's is no Reel project: a finished video with a main project in use here has none to look for.
+    ["a main project and no Reel project", { projects: ["main"] }, () => {}]
   ]) {
     it(`does not list them for ${what}`, async () => {
       const w = await W(opts);
@@ -516,11 +518,33 @@ describe("B7b. a video she set aside is read for nothing of its Reels (review F6
     return [...paths];
   }
   const inside = (dir) => (path) => path === dir || path.startsWith(`${dir}${sep}`);
+  /** The places the Reels are looked for: the Reel projects, Downloads and what the other Mac released. (The episode's lock, in the work folder, is
+      looked at for every video: whether a run is at work is the guide's own business.) */
+  const placesOf = (w) => [w.dirOf("reel 1"), w.dirOf("reel 2"), w.downloads, join(w.found.folder, "edit")].map(inside);
+  it("looks in no Reel project and no Downloads when a first look says the stage would not be said: no hand-off written, a run at work, a gap in the chain of versions, Dropbox's undo, the other Mac having the episode open, the gate holding the video (reads nothing more once a look says no)", async () => {
+    const lockedBy = (command) => (w) => {
+      assert.equal(takeEpisodeLock(lockOf(w.t.home, FOLDER), command, () => true).taken, true);
+      w.t.ctx.deps.alive = (pid) => pid === process.pid;
+    };
+    for (const [what, opts, make] of [
+      ["no hand-off is written", { handoff: false }, () => {}],
+      ["a bring is at work", {}, lockedBy("bring")],
+      ["the chain of versions has a gap", {}, (w) => rewrite(w, { versionOf: "e-20261001-aaaaaa" })],
+      ["Dropbox undid this Mac's last change", {}, (w) => acceptRev(w.t.home, ID, reread(w.found).rev + 5)],
+      ["the other Mac has the episode open", {}, (w) => rewrite(w, { editing: { by: "Sallie's laptop", since: AT } })],
+      ["the gate holds the video", {}, (w) => rewrite(w, { session: MARKED })]
+    ]) {
+      const w = await W(opts);
+      exportOf(w, "reel 2");
+      make(w);
+      const paths = await touched(() => on(depsOf(w), "guide", "3fa9c1"));
+      assert.deepEqual(paths.filter((path) => placesOf(w).some((is) => is(path))), [], what);
+    }
+  });
   it("looks in no Reel project and no Downloads, nor in what the other Mac released, for a video she said was finished, in every form that reads: the overview, the video, wait and tell", async () => {
     const w = await W({ projects: ["reel 1", "reel 2"] });
     exportOf(w, "reel 2");
-    // (The episode's lock, in the work folder, is looked at for every video: whether a run is at work is the guide's own business.)
-    const places = [w.dirOf("reel 1"), w.dirOf("reel 2"), w.downloads, join(w.found.folder, "edit")].map(inside);
+    const places = placesOf(w);
     const reads = async () => {
       const said = [];
       const paths = await touched(async () => {
