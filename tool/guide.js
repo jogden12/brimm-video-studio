@@ -156,6 +156,10 @@ export function opsText(handoff, step, again) {
       when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported }, whether the record says
       the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none), and
       whether it has an export that began after its last change.
+    - For a finished video whose hand-off is written (plan PR 16): `reelsExported`, the numbers of its Reels, in order, that were exported from
+      HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
+      command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
+      BRIMM Ops page's steps, and below her note that the video is finished.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
@@ -183,6 +187,7 @@ export const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see 
 const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.';
 const SESSION_MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
+const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
 /** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
@@ -302,6 +307,16 @@ function appStep(facts) {
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
 }
 
+/** The Reels of a finished video that were exported from HyperFrames and are not in its hand-off yet (plan PR 16): their numbers, from the fact
+    `reelsExported`, or none. Only a finished video has them, and not one the gate holds as a session (nothing of its projects is read for it:
+    plan PR 10, review I2) or one the other Mac has open, which `finish … reels` refuses. */
+const reelsWaiting = (facts) => (facts.kind === "finished" && !facts.gated && !facts.elsewhere && Array.isArray(facts.reelsExported) ? facts.reelsExported.filter(Number.isInteger) : []);
+
+/** The step for the Reels exported and not in the hand-off (plan PR 16): which they are, and what she says to add them to it. */
+function reelsStep(reels) {
+  return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels" to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
+}
+
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep), unless a raw video
     goes the Final Cut way, which keeps its stages. */
@@ -309,9 +324,13 @@ function videoNext(facts, notes, now) {
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
-  if ((raw || clip) && facts.finishRunning) return toDo("finish-running", "Its finish is running. The panel shows how far it is.");
+  if ((raw || clip) && facts.finishRunning) return toDo("finish-running", FINISH_RUNNING);
   if (facts.handoff) {
     if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
+    // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
+    // finished (nextFor) is above them: her word stands. While a finish runs, `finish … reels` refuses another, so the stage is that finish's.
+    const reels = reelsWaiting(facts);
+    if (reels.length) return facts.finishRunning ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels);
     return opsStep(facts, notes, now) || { done: true };
   }
   // The gate holds it as a session whose mark is not cleared, though its kind is another (a Dropbox conflict or a hand edit leaves one): `app`

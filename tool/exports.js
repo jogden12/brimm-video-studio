@@ -128,8 +128,9 @@ const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 
 /** A file the app keeps, `path`, read as text when it is a regular file; null for anything else (a link, a folder, a pipe, a file that is
-    not there or cannot be read). It is looked at once it is open, so that what is read is the very file that was looked at. */
-function readRegular(path) {
+    not there or cannot be read). It is looked at once it is open, so that what is read is the very file that was looked at. The guide reads a
+    finished video's hand-off through it too (edit.js regularJson; plan PR 16). */
+export function readRegular(path) {
   let fd;
   try {
     fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);

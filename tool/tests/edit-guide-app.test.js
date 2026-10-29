@@ -35,6 +35,7 @@ const AGAIN = 'It was shown in Final Cut again since its finish. Share it and Ex
 const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
+const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';
 
 const MAIN_PUSHED = (pushed) => ({ preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed });
 const push = (v, at) => ({ v, at, on: "Mac Studio", file: `edit/x.v${v}.mac-studio.fcpxml`, project: `Pricing- what to charge- main v${v} 3fa9c1` });
@@ -601,6 +602,22 @@ describe("a file the app keeps that is a named pipe, where a reader that waits f
     assert.equal(got.code, 0, JSON.stringify(got));
     assert.match(got.said[0], MAIN_EXPORT);
     assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+  });
+  // A finished video's Reels (plan PR 16): the Reel project's history and record, and the hand-off in final/, which the guide read with a plain read.
+  it("answers `guide` for a finished video when a Reel project's history, or its export's record, is a pipe: the Reel is still said", async () => {
+    for (const what of ["reels-history", "reels-record"]) {
+      const got = await inChild(what, "guide");
+      assert.equal(got.hung, false, `${what}: ${got.stage}`);
+      assert.deepEqual([got.code, got.said], [0, [says(REEL_2)]], `${what}: ${JSON.stringify(got)}`);
+    }
+  });
+  it("answers `guide` for a finished video when its hand-off is a pipe, or a link to one: it cannot be read, so the page's step stands from the record", async () => {
+    for (const what of ["reels-handoff", "reels-link"]) {
+      const got = await inChild(what, "guide");
+      assert.equal(got.hung, false, `${what}: ${got.stage}`);
+      // The page's step says what comes after it, and its word: `guide "<video>"` gives three lines for it.
+      assert.deepEqual([got.code, got.said[0], got.said.at(-1)], [0, says(TAKE), "Step: taken"], `${what}: ${JSON.stringify(got)}`);
+    }
   });
 });
 
