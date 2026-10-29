@@ -173,8 +173,9 @@ describe("F2. finish on a clip that was not opened in HyperFrames: it asks once,
 
 describe("F3. a clip edited in HyperFrames, and a clip handed off already", () => {
   /** The made-up world of exports-world.js, for an answered iPhone clip whose spellings are answered: a main project, opened or not. */
-  const edited = ({ opened = true, over = {} } = {}) => world({
+  const edited = ({ opened = true, over = {}, handoffVersion = 2 } = {}) => world({
     kind: "short video",
+    handoffVersion,
     projects: ["main"],
     over: { version: 4, reels: [], offers: { spellings: SPELLINGS, answered: { reading: READING.at, at: AT, on: "Mac Studio", applied: ["Ogdin"], left: ["pricing"] } }, reading: READING, spellings: [["Ogdin", "Ogden"]], app: { toolchain: "0.8.208", projects: [entry("main", opened ? {} : { opened: [], state: "made" })] }, ...over }
   });
@@ -195,6 +196,18 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
     assert.deepEqual([Object.keys(handoff), Object.keys(handoff.video)], [Object.keys(contract), Object.keys(contract.video)]);
     assert.equal(reread(found).finished.parts.main.project, MAIN);
     assert.equal(reread(found).finished.parts.main.import, undefined);
+    w.t.done();
+  });
+  it("writes a version 1 short-video hand-off from the export on a Mac that hands off version 1, as a Final Cut finish of a short video did", async () => {
+    const w = edited({ handoffVersion: 1 });
+    const main = exportOf(w, "main");
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.equal(r.code, 0, r.text);
+    const found = { ...w.found, record: reread(w.found) };
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const handoff = handoffIn(found, WORLD_HANDOFF);
+    assert.deepEqual([handoff.version, handoff.episode.kind, handoff.main.file, "reels" in handoff && handoff.reels.length], [1, "short video", main.name, 0]);
     w.t.done();
   });
   it("asks the question for a clip whose project was made and never opened, and for one with no project at all", async () => {
