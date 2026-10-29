@@ -27,7 +27,7 @@ import { hyperFramesRunning } from "./free.js";
 import { sessionNotCleared } from "./gate.js";
 import { sizeText } from "./kinds.js";
 import { episodeWork } from "./settings.js";
-import { SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, snapshotFiles, snapshotOf, snapshotStats, timeName } from "./snapshot.js";
+import { SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, listedBy, snapshotFiles, snapshotOf, snapshotStats, timeName } from "./snapshot.js";
 
 /** The program the app runs as, which is asked of `running`. */
 const APP_PROGRAM = "HyperFrames";
@@ -41,6 +41,9 @@ const projectOf = (name, project) => `The HyperFrames project for ${project.of}$
 const cantRead = (name, project) => `${projectOf(name, project)} on this Mac can't be read, so nothing was handed over. Ask Jason.`;
 const tooBig = (name, project, bytes) => `${projectOf(name, project)} is too big to hand over: ${sizeText(bytes)} of files, and the most is ${sizeText(SNAPSHOT_MOST)}. Nothing was handed over. Ask Jason.`;
 const older = (name, project) => `${projectOf(name, project)} on this Mac is older than the one the other Mac handed over, so it isn't handed over again. Nothing was handed over. Ask Jason.`;
+/** What is said while the newest snapshot of a project, which another Mac made, is not all here yet: `by` is that Mac, or "" when the
+    record does not say. */
+const arriving = (name, project, by) => `Dropbox is still bringing what ${by || "the other Mac"} handed over of ${project.of}${name}. Say it again when it is done. Nothing was handed over.`;
 /** Some things as they are said in a row: "a", "a and b", "a, b and c". */
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
 
@@ -116,6 +119,14 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
     if (got.bytes > SNAPSHOT_MOST) return { refused: tooBig(name, project, got.bytes) };
     const newest = snapshotOf(record.files, project.name);
     const there = newest ? snapshotStats(found.folder, newest) : null;
+    if (newest && there === null) {
+      // The newest snapshot of this project is not all here. If another Mac made it, what is missing is on its way, and this Mac's older
+      // project must not take its place as the newest (the review of PR 11, C1). A snapshot this Mac made itself that lost a file is none
+      // to wait for: a new one takes its place.
+      const first = `${newest.dir}/${newest.files[0]?.rel ?? ""}`;
+      const by = listedBy(found.folder, [first])[first];
+      if (by !== ctx.machine) return { refused: arriving(name, project, by) };
+    }
     if (there && behindSnapshot(got.files, there)) return { refused: older(name, project) };
     planned.push({ ...project, ...got });
   }

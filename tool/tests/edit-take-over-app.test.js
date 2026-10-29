@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { NOT_SET_UP } from "../app.js";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { localStamp, shown } from "../episode.js";
+import { handOver } from "../hand-over.js";
 import { PIN, cliPath } from "../hyperframes.js";
 import { settingsText } from "../project.js";
 import { NAME } from "./episodes.js";
@@ -566,6 +567,50 @@ describe("what the take-over leaves as it was (group Q)", () => {
     await run(w.b.deps, FOLDER, "reel", "2");
     assert.ok(lines.some((line) => line.includes(name)), "the name is said");
     for (const line of lines) assert.doesNotMatch(line, PLAIN, line);
+    w.t.done();
+  });
+});
+
+describe("release: the other Mac's newer snapshot is never dropped, and an older state never handed over after it (C1)", () => {
+  /** Mac Studio releases at T1; Sallie's laptop takes over, rebuilds, makes the video, changes a composition and releases a minute later.
+      The record Mac Studio then has lists the laptop's snapshot after its own. Gives the world, the laptop's snapshot's folder name and
+      the folders of the episode's snapshots. */
+  async function handedBack(options = { projects: ["main"] }) {
+    const w = takeOverWorld(options);
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER);
+    madeCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER)).code, 0);
+    const changed = join(w.b.work, MAIN, "compositions", "title-card.html");
+    writeFileSync(changed, "<div>Pricing, in a new way</div>");
+    utimesSync(changed, new Date(ms(16, 0)), new Date(ms(16, 0)));
+    await w.t.ctx.deps.wait(60000);
+    const handed = await release(w.b.deps);
+    assert.equal(handed.code, 0, handed.text);
+    const folders = readdirSync(join(w.found.folder, "app-snapshot")).sort();
+    return { w, T2: folders.at(-1), folders };
+  }
+  const listedUnder = (w, time) => Object.keys(reread(w.found).files).filter((rel) => rel.startsWith(`app-snapshot/${time}/`));
+  it("does not hand over its older project, nor drop or delete the laptop's newer snapshot, while that snapshot is not all here", async () => {
+    const { w, T2, folders } = await handedBack();
+    assert.equal(folders.length, 2);
+    rmSync(join(w.found.folder, "app-snapshot", T2, MAIN, "index.html"));
+    const listed = listedUnder(w, T2);
+    const before = stateOf(w);
+    const r = await release(w.t.ctx.deps);
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /Nothing was handed over\./);
+    assert.deepEqual(stateOf(w), before, "no record is written and nothing is put in or taken out of the episode");
+    assert.deepEqual(readdirSync(join(w.found.folder, "app-snapshot")).sort(), folders);
+    assert.deepEqual(listedUnder(w, T2), listed, "the record still lists every file of the laptop's snapshot");
+    w.t.done();
+  });
+  it("is refused by handOver itself while the newest snapshot of a project is not whole here, in words that name the Mac that handed it over", async () => {
+    const { w, T2 } = await handedBack();
+    rmSync(join(w.found.folder, "app-snapshot", T2, MAIN, "index.html"));
+    const record = reread(w.found);
+    const got = await handOver(w.t.ctx, { found: { ...w.found, record }, record }, { running: async () => false });
+    assert.deepEqual(got, { refused: `Dropbox is still bringing what Sallie's laptop handed over of ${NAME}. Say it again when it is done. Nothing was handed over.` });
     w.t.done();
   });
 });

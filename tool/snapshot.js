@@ -19,8 +19,9 @@
 // an episode after the other Mac worked on it would otherwise go on from an older state.
 //
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { recordFile, recordNumbers } from "./episode.js";
 import { settingsText, writeProject } from "./project.js";
 
 /** The folder of an episode that holds its snapshots. */
@@ -127,6 +128,42 @@ export function snapshotsOf(files) {
   }
   for (const snapshot of found.values()) for (const list of Object.values(snapshot.projects)) list.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   return [...found.values()].sort((a, b) => b.ms - a.ms);
+}
+
+/** The Mac that first listed each of `paths` (paths from the episode's folder) in the episode's record, from the record's own revisions, which
+    are kept (`record/0001.json` and on) and each written by the Mac that made it (`writer.on`): { <path>: "Mac Studio" }, "" for a path
+    that no revision lists, or whose first listing cannot be told because a revision between is missing or cannot be read. A Mac lists a
+    snapshot's files, and the copies of its exports, in the one write that puts them in, so the Mac that first listed a file is the one that
+    made the copy. Revisions are read from the newest back, no further than the oldest that is needed. Nothing is written. */
+export function listedBy(folder, paths) {
+  const out = {};
+  const open = new Set(paths);
+  const last = new Map();
+  let above = null;
+  let whole = true;
+  for (const n of recordNumbers(folder)) {
+    let rev = null;
+    try {
+      rev = JSON.parse(readFileSync(recordFile(folder, n), "utf8"));
+    } catch (e) {
+      rev = null;
+    }
+    if ((above !== null && n !== above - 1) || rev === null || typeof rev !== "object" || rev.rev !== n || rev.files === null || typeof rev.files !== "object") {
+      whole = false;
+      break;
+    }
+    above = n;
+    for (const path of [...open]) {
+      if (Object.hasOwn(rev.files, path)) last.set(path, typeof rev.writer?.on === "string" ? rev.writer.on : "");
+      else {
+        out[path] = last.get(path) ?? "";
+        open.delete(path);
+      }
+    }
+    if (open.size === 0) break;
+  }
+  for (const path of open) out[path] = whole ? (last.get(path) ?? "") : "";
+  return out;
 }
 
 /** The newest snapshot that holds files of the project called `name`: { time, ms, dir, files }, `dir` being its folder from the episode's
