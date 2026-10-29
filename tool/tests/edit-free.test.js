@@ -362,7 +362,7 @@ describe("free, then app: the video is made again, and the same project is opene
     await madeAgain(w.t, 0);
 
     const back = await plain(w.t.ctx.deps, "app", FOLDER);
-    assert.deepEqual([back.code, back.said], [0, [`The video HyperFrames was given for ${NAME} had been taken away; it is back in the project.`, OPEN, BUTTONS]]);
+    assert.deepEqual([back.code, back.said], [0, [`The video for ${NAME} was made again, and it is in the project.`, OPEN, BUTTONS]]);
     assert.equal(readFileSync(join(w.at, "media", "recording.mp4"), "utf8"), "a part of a Story");
     const copies = readdirSync(w.paths.dir);
     assert.deepEqual(copies, [`${w.raw.size}-${Math.floor(w.raw.mtimeMs)}.json`], "the copy was moved into the project, and its facts stay beside it");

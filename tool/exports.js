@@ -362,7 +362,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let brimm-video look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
-/** Where `release` puts the exports it copies into the episode for the other Mac (plan PR 11 writes it; this reads it): the way
+/** Where `release` puts the exports it copies into the episode for the other Mac (hand-over.js writes it, plan PR 11, with exportsToCarry; this reads it): the way
     `edit/from-final-cut/` holds Final Cut's Shares. */
 export const RELEASED_FOLDER = join("edit", "from-hyperframes");
 

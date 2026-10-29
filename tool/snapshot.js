@@ -18,9 +18,10 @@
 // A project here that is older than the newest snapshot (behindSnapshot) is neither opened nor handed over again: a Mac that came back to
 // an episode after the other Mac worked on it would otherwise go on from an older state.
 //
-// Nothing here writes into Dropbox. rebuild writes one project folder in the Mac's own work folder, whole or not at all (project.js).
+// Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { settingsText, writeProject } from "./project.js";
 
 /** The folder of an episode that holds its snapshots. */
 export const SNAPSHOT_DIR = "app-snapshot";
@@ -165,6 +166,35 @@ export function snapshotStats(folder, snapshot) {
     }
   }
   return out;
+}
+
+/** A moment as she is told it, to the minute, in the zone `zone` gives ({ text(ms) }, exports.js fixedZone for a test) or this Mac's own:
+    "2026-10-20 15:00". */
+export function momentText(ms, zone) {
+  if (zone && typeof zone.text === "function") return zone.text(ms);
+  const at = new Date(ms);
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/** Rebuild the project that `snapshot` (snapshotOf) holds, in the folder `dir` on this Mac, whole or not at all (project.js writeProject):
+    every file of the snapshot that a snapshot holds (holds), with the time it had, `.claude/settings.json` made again from the pin's table,
+    and `node_modules/.bin/hyperframes` a link to `cli`, this Mac's own toolchain. The video is not in a snapshot and is not made here: it is
+    made again from the raw video, as `free` leaves a project without it (app.js putVideoBack). `folder` is the episode's folder in Dropbox.
+    `deps.fs` is node:fs, which a test replaces to make a step fail. Gives { assetsLeft }, true when no file of `assets/` was in the snapshot
+    (they weighed too much to be handed over), or { why }: "not whole" when a file the record lists for it is not here at its size, or it
+    holds nothing, and "could not" when the folder could not be made (then none is left). Nothing in `folder` is written. */
+export function rebuildProject({ folder, snapshot, dir, cli }, deps = {}) {
+  const stats = snapshotStats(folder, { ...snapshot, files: snapshot.files.filter(({ rel }) => holds(rel)) });
+  if (stats === null || stats.length === 0) return { why: "not whole" };
+  const files = new Map(stats.map(({ rel, mtimeMs }) => [rel, { copy: join(folder, snapshot.dir, rel), mtimeMs }]));
+  files.set(".claude/settings.json", settingsText("main"));
+  files.set("node_modules/.bin/hyperframes", { link: cli });
+  try {
+    writeProject(dir, files, deps.fs ? { fs: deps.fs } : {});
+  } catch (e) {
+    return { why: "could not" };
+  }
+  return { assetsLeft: !stats.some(({ rel }) => rel.startsWith("assets/")) };
 }
 
 /** Whether a project's files `local` are older than a snapshot's `there`: the newest of them is more than BEHIND_MS older than the snapshot's.

@@ -6,7 +6,7 @@
 // (tests/stand-ins/hyperframes.mjs), so no test runs HyperFrames, the app, HeyGen or `claude`.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, COMMAND_NAMES, HELP, editMain } from "../edit.js";
@@ -525,8 +525,8 @@ describe("app … reel: the project, the record and the app", () => {
   });
 });
 
-describe("app … reel: a Reel project that is on another Mac is not made again here (plan PR 11 brings the snapshot)", () => {
-  const THERE = (on) => `The HyperFrames project for Reel 2 of ${NAME} is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+describe("app … reel: a Reel project that is on another Mac, and that Mac has not handed over, is not made again here (plan PR 11: a snapshot makes it possible, edit-take-over-app.test.js)", () => {
+  const THERE = (on) => `The HyperFrames project for Reel 2 of ${NAME} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,
     app: { toolchain: PIN.version, projects: [{
@@ -546,7 +546,12 @@ describe("app … reel: a Reel project that is on another Mac is not made again 
   it("is opened when its folder is on this Mac, and made again, under its own name, when this Mac made it and the folder is gone; another Reel is not asked about it", async () => {
     const here = world({ record: madeOn("Sallie's laptop") });
     mkdirSync(join(here.work, PROJECT, "brimm"), { recursive: true });
+    mkdirSync(join(here.work, PROJECT, "media"), { recursive: true });
     writeFileSync(join(here.work, PROJECT, "index.html"), "<html></html>");
+    // The project is whole, its video in it: one without its video is put right by `app … reel` (plan PR 11), as `app` puts the main video's right.
+    writeFileSync(join(here.work, PROJECT, "media", "recording.mp4"), REEL_COPY);
+    const made = Date.parse("2026-10-14T09:00:00-05:00") / 1000;
+    utimesSync(join(here.found.folder, "Pricing talk.mp4"), made, made);
     assert.equal((await app(here.t.ctx.deps, FOLDER, "reel", "2")).code, 0);
     here.t.done();
     const mine = world({ record: madeOn("Mac Studio") });

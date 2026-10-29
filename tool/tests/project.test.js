@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
-import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, reelWords, saidWords, transcriptJson, writeProject } from "../project.js";
+import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -622,5 +622,35 @@ describe("writeProject (5.7)", () => {
     assert.throws(() => writeProject(dir, new Map([...files, ["../escaped.txt", "x"]])));
     assert.ok(!fs.existsSync(episode) && fs.existsSync(video));
     fs.rmSync(root, { recursive: true, force: true });
+  });
+  it("gives a file it copies the time it is given (a project rebuilt from a snapshot keeps the times its files had), and a copy with none the time of the copy (plan PR 11)", () => {
+    const root = fs.mkdtempSync(join(tmpdir(), "brimm-project-"));
+    fs.writeFileSync(join(root, "a.html"), "<a/>");
+    fs.writeFileSync(join(root, "b.html"), "<b/>");
+    const dir = join(root, "Episode", "Project");
+    const at = Date.parse("2020-05-04T13:40:00.500Z");
+    writeProject(dir, new Map([["a.html", { copy: join(root, "a.html"), mtimeMs: at }], ["b.html", { copy: join(root, "b.html") }], ["c.html", "<c/>"]]));
+    assert.equal(fs.statSync(join(dir, "a.html")).mtimeMs, at);
+    assert.ok(fs.statSync(join(dir, "b.html")).mtimeMs > at + 1000 * 60 * 60 * 24, "a copy with no time is as new as the copy");
+    assert.equal(fs.readFileSync(join(dir, "a.html"), "utf8"), "<a/>");
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  it("leaves no folder when a time cannot be given to a copy", () => {
+    const root = fs.mkdtempSync(join(tmpdir(), "brimm-project-"));
+    fs.writeFileSync(join(root, "a.html"), "<a/>");
+    const dir = join(root, "Episode", "Project");
+    const failing = { ...fs, utimesSync: () => { throw new Error("no time for it"); } };
+    assert.throws(() => writeProject(dir, new Map([["a.html", { copy: join(root, "a.html"), mtimeMs: 1000 }]]), { fs: failing }), /no time for it/);
+    assert.deepEqual(fs.readdirSync(join(root, "Episode")), []);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("settingsText (5.5; plan PR 11)", () => {
+  it("is the text that .claude/settings.json holds in a project of that kind, so that a rebuilt project's is the same", () => {
+    assert.equal(settingsText("main"), projectFiles(main()).get(".claude/settings.json"));
+    assert.equal(settingsText("main"), projectFiles(reel()).get(".claude/settings.json"));
+    assert.equal(settingsText("clip"), projectFiles(clip()).get(".claude/settings.json"));
+    assert.notEqual(settingsText("main"), settingsText("clip"));
   });
 });

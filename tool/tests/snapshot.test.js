@@ -3,13 +3,14 @@
 // record's list of files; it runs no program and writes nothing here but the project it rebuilds. Every folder is a temporary one.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import * as fsModule from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
-import { projectFiles, writeProject } from "../project.js";
+import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf, timeName, timeOf
+  ASSETS_MOST, BEHIND_MS, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf, timeName, timeOf
 } from "../snapshot.js";
 
 const GUIDANCE = readFileSync(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url), "utf8");
@@ -274,6 +275,94 @@ describe("a snapshot as it is in the episode's folder", () => {
       spoil(join(folder, snapshot.dir));
       assert.equal(snapshotStats(folder, snapshot), null);
     }
+  });
+});
+
+describe("a project rebuilt from a snapshot (4.7, F12)", () => {
+  const T = "2026-10-20 20.00.00Z";
+  const MAIN = "Pricing talk main 3fa9c1";
+  const CLI = "/Users/sallie/BRIMM Video Work/.toolchain/hyperframes-0.8.208/node_modules/hyperframes/bin/hyperframes.mjs";
+  const FILES = { "index.html": "<html>", "brimm/facts.json": '{"seconds":6}', "compositions/title.html": "<div>", "assets/fonts/a.woff2": "font" };
+  /** The episode's folder with a snapshot in it, the record's list, and the folder the project is to be made in. */
+  function episodeWith(c, files = FILES) {
+    const base = scratch(c);
+    const folder = join(base, "episode");
+    const listed = {};
+    for (const [rel, text] of Object.entries(files)) {
+      put(folder, `app-snapshot/${T}/${MAIN}/${rel}`, text);
+      utimesSync(join(folder, "app-snapshot", T, MAIN, rel), new Date("2026-10-20T13:40:00Z"), new Date("2026-10-20T13:40:00Z"));
+      listed[`app-snapshot/${T}/${MAIN}/${rel}`] = Buffer.byteLength(text);
+    }
+    return { base, folder, listed, snapshot: snapshotOf(listed, MAIN), dir: join(base, "work", MAIN) };
+  }
+  it("is made of the snapshot's files with the times they had, a settings file made again and a link to the Mac's own toolchain, and nothing else", (c) => {
+    const e = episodeWith(c);
+    const got = rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
+    assert.deepEqual(got, { assetsLeft: false });
+    assert.deepEqual(readdirSync(e.dir, { recursive: true }).filter((rel) => !lstatSync(join(e.dir, rel)).isDirectory()).sort(), [...Object.keys(FILES), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    for (const [rel, text] of Object.entries(FILES)) {
+      assert.equal(readFileSync(join(e.dir, rel), "utf8"), text);
+      assert.equal(lstatSync(join(e.dir, rel)).mtimeMs, Date.parse("2026-10-20T13:40:00Z"), rel);
+    }
+    assert.equal(readFileSync(join(e.dir, ".claude", "settings.json"), "utf8"), settingsText("main"));
+    assert.equal(readlinkSync(join(e.dir, "node_modules", ".bin", "hyperframes")), CLI);
+    assert.deepEqual(readdirSync(join(e.base, "work")), [MAIN], "no half-built folder is left beside it");
+  });
+  it("writes nothing in the episode's folder", (c) => {
+    const e = episodeWith(c);
+    const before = readdirSync(e.folder, { recursive: true }).sort();
+    rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
+    assert.deepEqual(readdirSync(e.folder, { recursive: true }).sort(), before);
+  });
+  it("says the assets were left out when the snapshot holds none of them", (c) => {
+    const e = episodeWith(c, { "index.html": "<html>" });
+    assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { assetsLeft: true });
+  });
+  it("takes none of what a snapshot does not hold, however the record lists it, and makes its own settings file whatever the snapshot's says", (c) => {
+    const foreign = { ".env": "SECRET=1", ".claude/settings.json": '{"permissions":{"allow":["Bash(*)"]}}', "media/recording.mp4": "v", "node_modules/x/index.js": "x", ".hyperframes/history-id": "i", "renders/r.mp4": "r", "snapshots/s.png": "s" };
+    const e = episodeWith(c, { ...FILES, ...foreign });
+    const got = rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
+    assert.deepEqual(got, { assetsLeft: false });
+    const made = readdirSync(e.dir, { recursive: true }).filter((rel) => !lstatSync(join(e.dir, rel)).isDirectory()).sort();
+    assert.deepEqual(made, [...Object.keys(FILES), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.equal(readFileSync(join(e.dir, ".claude", "settings.json"), "utf8"), settingsText("main"));
+  });
+  it("is { why: \"not whole\" } when a file the record lists is not here, is short, is not a file, or when the snapshot holds nothing a snapshot holds, and makes nothing", (c) => {
+    for (const spoil of [
+      (e) => rmSync(join(e.folder, "app-snapshot", T, MAIN, "index.html")),
+      (e) => writeFileSync(join(e.folder, "app-snapshot", T, MAIN, "index.html"), "<h"),
+      (e) => {
+        rmSync(join(e.folder, "app-snapshot", T, MAIN, "index.html"));
+        mkdirSync(join(e.folder, "app-snapshot", T, MAIN, "index.html"));
+      }
+    ]) {
+      const e = episodeWith(c);
+      spoil(e);
+      assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { why: "not whole" });
+      assert.equal(existsSync(e.dir), false);
+    }
+    const nothing = episodeWith(c, { ".env": "x", "media/recording.mp4": "v" });
+    assert.deepEqual(rebuildProject({ folder: nothing.folder, snapshot: nothing.snapshot, dir: nothing.dir, cli: CLI }), { why: "not whole" });
+  });
+  it("is { why: \"could not\" } when the folder cannot be made or is there already, and leaves no folder of its own, and a folder that is there is left alone", (c) => {
+    const e = episodeWith(c);
+    const failing = { ...fsModule, copyFileSync: () => { throw new Error("the disk is full"); } };
+    assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }, { fs: failing }), { why: "could not" });
+    assert.equal(existsSync(e.dir), false);
+    assert.deepEqual(existsSync(join(e.base, "work")) ? readdirSync(join(e.base, "work")) : [], []);
+    put(e.base, `work/${MAIN}/theirs.txt`, "kept");
+    assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { why: "could not" });
+    assert.deepEqual(readdirSync(e.dir), ["theirs.txt"]);
+  });
+});
+
+describe("a moment as she is told it", () => {
+  it("is the zone's text when it is given one, and this Mac's own clock to the minute otherwise", () => {
+    assert.equal(momentText(Date.parse("2026-10-20T20:00:00Z"), { text: (ms) => `at ${ms}` }), `at ${Date.parse("2026-10-20T20:00:00Z")}`);
+    const ms = new Date(2026, 9, 20, 15, 5).getTime();
+    assert.equal(momentText(ms), "2026-10-20 15:05");
+    assert.equal(momentText(ms, undefined), "2026-10-20 15:05");
+    assert.equal(momentText(ms, {}), "2026-10-20 15:05");
   });
 });
 

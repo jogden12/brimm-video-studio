@@ -229,7 +229,16 @@ describe("her folder's settings", () => {
     assert.ok(open, "the skill has no row for opening an episode");
     const takeOver = open.slice(open.indexOf("If it says another Mac has it"), open.lastIndexOf(" |"));
     assert.ok(takeOver.includes("Never take an episode over unasked otherwise."), takeOver);
-    assert.ok(app.endsWith(`${takeOver.replaceAll('`open "<episode>"', '`app "<episode>"')} |`), app);
+    const twin = takeOver.replaceAll('`open "<episode>"', '`app "<episode>"');
+    assert.ok(app.slice(app.indexOf("If it says another Mac has it")).startsWith(twin), app);
+    // After the twin, what `app` alone can say (plan PR 11): a project the other Mac has not handed over, one rebuilt from its snapshot (its
+    // video is made again, so she is told to ask again), and one here that is older than the snapshot.
+    const alone = app.slice(app.indexOf(twin) + twin.length, app.lastIndexOf(" |"));
+    for (const words of [
+      'If it says the project is on another Mac and that Mac has not handed it over, tell her so, and to say "I\'m done with it for now" there and then ask again here, or to ask Jason; nothing was claimed.',
+      "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; its video is then made again in the background, so tell her so, and when \"how far is it?\" says it is done, run it again.",
+      "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
+    ]) assert.ok(alone.includes(words), words);
     // The two rows are twins and neither runs the other's command: this one runs app, in the two forms the help gives it, and never open.
     assert.doesNotMatch(app, /`open /);
     assert.doesNotMatch(open, /`app /);
@@ -939,6 +948,15 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
       assert.deepEqual(rowsOf(openSkill(), start), rowsOf(strictSkill, start), start);
     }
     assert.ok(openSkill().split("\n")[2].includes("what was done in HyperFrames and its versions"), "the description names them too");
+  });
+  it("has the skill say what to do when release of an episode edited in HyperFrames asks her to quit it or refuses a project, in the very words the strict skill has (plan PR 11)", () => {
+    const sentence = 'An episode she edited in HyperFrames asks no such question: `release` hands over a copy of what she made there and her newest exports. If it says to quit HyperFrames first, tell her so, and run `release "<episode>"` again when she has. If it says a HyperFrames project is too big to hand over, can\'t be read, or is older than the one the other Mac handed over, tell her so in plain words and that nothing was handed over, and to ask Jason. If it says some assets are too big, tell her those stay on this Mac.';
+    for (const skill of [strictSkill, openSkill()]) {
+      const lines = skill.split("\n").filter((line) => line.startsWith('When `release "<episode>"` asks, ask her:'));
+      assert.equal(lines.length, 1, "one paragraph of the release question");
+      assert.ok(lines[0].endsWith(sentence), lines[0]);
+      assert.ok(lines[0].includes("Afterwards tell her to keep the laptop open and online until Dropbox shows the folder is up to date."));
+    }
   });
   it("has the skill make and drop a Reel in the very rows the strict skill has (plan PR 5)", () => {
     const rowsOf = (skill) => skill.split("\n").filter((line) => line.startsWith('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |') || line.startsWith('| "Drop 2" |') || line.startsWith('| "Show me the Reels" |'));

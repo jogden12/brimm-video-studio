@@ -87,7 +87,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac, projectSnapshot } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
@@ -145,14 +145,17 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js app "<episode>" [--take-over]
                                         open the episode's main video in HyperFrames, making its project first. Its
                                         files are checked and brought over, and it is claimed for this Mac, as open
-                                        does; another Mac's claim refuses it, unless it is taken over. Only on a Mac
-                                        that Jason has set up for HyperFrames
+                                        does; another Mac's claim refuses it, unless it is taken over. A project the
+                                        other Mac made is rebuilt here from the snapshot it handed over, and its video
+                                        made again; what HyperFrames kept of its history stays on that Mac. One it has
+                                        not handed over is refused. Only on a Mac that Jason has set up for HyperFrames
   node edit.js app "<episode>" reel <n> [--take-over]
                                         make Reel <n>, one of Claude's suggestions, a project of its own in HyperFrames,
                                         open it, and pick it. Its video, the suggestion's stretch of the recording, is
                                         made first: it is asked for, and the Reel is opened when it is said again. Its
                                         files are checked and brought over, and it is claimed for this Mac, as above.
-                                        For a finished video too. Reels are made here, never by HyperFrames itself
+                                        A Reel project the other Mac made is rebuilt from its snapshot, as above. For a
+                                        finished video too. Reels are made here, never by HyperFrames itself
   node edit.js app "<episode>" what-happened
                                         what was done in HyperFrames on the episode's main video, newest first, under
                                         the day it happened: what she asked, what the app said, and the files it
@@ -1213,10 +1216,11 @@ const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Ja
     words, named as its other lines name the video. */
 const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
 
-/** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
-    projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record, and a take-over
-    cannot rebuild it until the snapshot comes (plan PR 11). Named as app's other lines name the video. */
-const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project for ${of}${name} is on ${on}, with everything done in it, so it can't be opened on this Mac yet. Ask Jason.`;
+/** What `app` says of an episode whose main project in use was made on another Mac, is not on this one and has no snapshot listed in the
+    record (app.js projectOnAnotherMac, projectSnapshot): everything done in it is on that Mac, so a new project here would drop it from
+    the record, and nothing here can rebuild it until that Mac has handed it over (`release`; plan PR 11). Named as app's other lines
+    name the video. */
+const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
@@ -1243,10 +1247,12 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
-    - an episode whose main project in use was made on another Mac, and is not on this one, is refused (projectIsElsewhere; app.js
-      projectOnAnotherMac), with or without `--take-over`: it ends with 1 before anything is claimed or brought, nothing is asked
-      for or made, and no record is written, since a new project here would drop the other Mac's from the record. A project of
-      this Mac's own whose folder is gone is made again, as before;
+    - an episode whose main project in use was made on another Mac, and is not on this one, is refused when the record lists no
+      snapshot of it (projectIsElsewhere; app.js projectOnAnotherMac, projectSnapshot), with or without `--take-over`: it ends with 1
+      before anything is claimed or brought, nothing is asked for or made, and no record is written, since a new project here would
+      drop the other Mac's from the record. With a snapshot listed (the other Mac released the episode; plan PR 11) it goes on to the
+      claim, and openInApp rebuilds the project from the snapshot. A project of this Mac's own whose folder is gone is rebuilt from its
+      snapshot when there is one, and made again, as before, when there is not;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
@@ -1275,7 +1281,7 @@ export async function app(ctx, rest) {
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
-  if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
+  if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
@@ -1294,8 +1300,9 @@ export async function app(ctx, rest) {
     - a Reel neither the record's list nor its projects have, and a Reel finished already that has no project, are refused in words
       (app-reel.js reelWhy), before anything is claimed. While Claude's reading is at work the list is not asked, since the reading
       is making it;
-    - a Reel project made on another Mac and not on this one is refused (projectOnAnotherMac, with the Reel's key), with or without
-      `--take-over`, before anything is claimed, brought or made;
+    - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
+      and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
+      one, openReelInApp rebuilds it from the snapshot;
     - the claim and the bring, as `open` and `app` make them (claimAndBring). What she is told to say again is "open Reel <n> of
       <name> in HyperFrames", and the bring it starts is told so (`bring … --asked-by "app reel <n>"`);
     - openReelInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record the
@@ -1317,7 +1324,7 @@ async function appReel(ctx, asked, flags) {
   const why = reelWhy(ctx, found, got.record, n);
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
-  if (elsewhere) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
+  if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
