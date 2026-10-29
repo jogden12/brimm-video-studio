@@ -110,7 +110,8 @@ export const reasonOf = (e) => {
 
 /** Hand over the projects `own` (projectsToHand) of the episode `found` with `record`, this Mac holding it. Resolves one of:
     - { refused }, words to say, ending the release with 1: nothing was written, or, with `lost`, the paths of copies in the episode that
-      this run deleted to replace and could not (the record must stop listing them);
+      this run deleted to replace and could not (the record must stop listing them), and `resized`, { <path>: size } for the copies it replaced
+      before the failure, which the record must list at the size they have now;
     - { copies, names, notYet, assetsLeft, time, undo }: `copies` the paths from the episode's folder of what was put in, with their sizes
       (the record lists them), `names` what to say was copied (the projects, then each export), `notYet` the exports that were not whole,
       `assetsLeft` the labels of the parts whose assets were left out for weighing too much, `time` the snapshot's folder name (nothing
@@ -207,8 +208,11 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
     }
   } catch (e) {
     undo();
+    // A copy that was replaced before the failure is the new one now: the record must list it at the size it has (the review of PR 11, M9),
+    // and one whose old copy was deleted and whose new one could not be made is gone.
     const lost = replaced.filter((rel) => !existsSync(at(rel)));
-    return { refused: `${name} could not be handed over: ${reasonOf(e)}. Nothing was handed over: say hand it over again.`, ...(lost.length ? { lost } : {}) };
+    const resized = Object.fromEntries(replaced.filter((rel) => existsSync(at(rel))).map((rel) => [rel, statSync(at(rel)).size]));
+    return { refused: `${name} could not be handed over: ${reasonOf(e)}. Nothing was handed over: say hand it over again.`, ...(lost.length ? { lost } : {}), ...(Object.keys(resized).length ? { resized } : {}) };
   }
   return { copies, names, notYet, assetsLeft: planned.filter((p) => p.assets.left).map((p) => p.label), time, undo };
 }

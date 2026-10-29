@@ -2560,7 +2560,9 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     ? await handOver(ctx, { found, record, own: inHyperFrames }, { running: ctx.deps.running ?? (() => hyperFramesRunning()), opts: ruleOpts(ctx), rm: ctx.deps.rm })
     : { copies: {}, names: [], notYet: [], assetsLeft: [], time: "", undo() {} };
   if (hf.refused) {
-    if (hf.lost) await save(ctx, found, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !hf.lost.includes(rel))) }, "");
+    // The record lists what is there now: a copy replaced before the failure at its new size, and one lost no more (the review of PR 11, M9).
+    const relisted = Object.fromEntries(Object.entries({ ...record.files, ...hf.resized }).filter(([rel]) => !(hf.lost ?? []).includes(rel)));
+    if (JSON.stringify(relisted) !== JSON.stringify(record.files)) await save(ctx, found, { ...record, files: relisted }, "");
     return refuse(ctx, hf.refused);
   }
   // The copies, by the rule: each file of each Share and export (a bundle file by file), the Shares first. A copy already

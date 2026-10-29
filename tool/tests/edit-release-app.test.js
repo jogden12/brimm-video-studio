@@ -746,6 +746,25 @@ describe("release: a failure leaves nothing half there (group H)", () => {
     assert.equal(markerAsItIs(w.dirOf("main")), null);
     w.t.done();
   });
+  it("lists each export it replaced at the size it has now when a later one cannot be put in, and lists the one it lost no more (the review of PR 11, M9)", async () => {
+    const w = releaseWorld();
+    const main = exportOf(w, "main");
+    const reel = exportOf(w, "reel 2");
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    writeFileSync(main.path, "the export of main, longer now");
+    writeFileSync(reel.path, "the export of reel 2, longer now, too");
+    const mend = failing(w, "from-hyperframes", 2);
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`${NAME} could not be handed over: no room left on the disk. Nothing was handed over: say hand it over again.`]]);
+    const files = reread(w.found).files;
+    assert.equal(files[`edit/from-hyperframes/${main.name}`], Buffer.byteLength("the export of main, longer now"), "the copy that was replaced is listed at its real size");
+    assert.equal(`edit/from-hyperframes/${reel.name}` in files, false, "the copy that was lost is listed no more");
+    assert.equal(statSync(join(w.found.folder, "edit", "from-hyperframes", main.name)).size, files[`edit/from-hyperframes/${main.name}`]);
+    mend();
+    const again = await release(w.t.ctx.deps, FOLDER);
+    assert.equal(again.code, 0, again.text);
+    w.t.done();
+  });
   it("removes what it put in when the record cannot be written because the other Mac wrote meanwhile", async () => {
     const w = releaseWorld({ projects: ["main"] });
     const main = exportOf(w, "main");
