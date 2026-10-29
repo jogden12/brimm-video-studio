@@ -76,6 +76,18 @@ describe("A1. the shapes of A0 and A0b", () => {
     const files = projectOf('<div class="clip" data-start="1" data-duration="3">  Fish &amp;\n   chips &#8212; it&#39;s &quot;fresh&quot;&nbsp;&#x2713; </div>');
     assert.deepEqual(texts(wordsOf(files)), ["Fish & chips — it's \"fresh\" ✓"]);
   });
+  it("reads the named entities of Latin-1 and the common typographic ones, and leaves one it does not know as it was written (review M5)", () => {
+    const pairs = [["iexcl", "¡"], ["cent", "¢"], ["pound", "£"], ["yen", "¥"], ["sect", "§"], ["copy", "©"], ["laquo", "«"], ["reg", "®"], ["deg", "°"], ["plusmn", "±"], ["sup2", "²"], ["micro", "µ"], ["para", "¶"], ["raquo", "»"], ["frac14", "¼"], ["frac12", "½"], ["frac34", "¾"], ["iquest", "¿"],
+      ["Agrave", "À"], ["Aring", "Å"], ["AElig", "Æ"], ["Ccedil", "Ç"], ["Eacute", "É"], ["ETH", "Ð"], ["Ntilde", "Ñ"], ["times", "×"], ["Oslash", "Ø"], ["THORN", "Þ"], ["szlig", "ß"], ["agrave", "à"], ["aelig", "æ"], ["ccedil", "ç"], ["eacute", "é"], ["eth", "ð"], ["ntilde", "ñ"], ["divide", "÷"], ["oslash", "ø"], ["uuml", "ü"], ["thorn", "þ"], ["yuml", "ÿ"],
+      ["sbquo", "‚"], ["bdquo", "„"], ["dagger", "†"], ["permil", "‰"], ["prime", "′"], ["lsaquo", "‹"], ["rsaquo", "›"], ["euro", "€"], ["trade", "™"], ["larr", "←"], ["uarr", "↑"], ["rarr", "→"], ["darr", "↓"], ["harr", "↔"], ["minus", "−"], ["mdash", "—"], ["ndash", "–"], ["hellip", "…"], ["lsquo", "‘"], ["rsquo", "’"], ["ldquo", "“"], ["rdquo", "”"]];
+    for (const [name, character] of pairs) {
+      const found = wordsOf(projectOf(`<div class="clip" data-start="1" data-duration="3">a&${name};b</div>`));
+      assert.deepEqual(texts(found), [`a${character}b`], name);
+    }
+    // One it does not know, one with no semicolon, and one of another case stay as written.
+    assert.deepEqual(texts(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3">&bogus; &Eacute &EACUTE; &frac99;</div>'))), ["&bogus; &Eacute &EACUTE; &frac99;"]);
+    assert.deepEqual(texts(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3">Caf&eacute; &amp; Cr&egrave;me &mdash; 5&euro;</div>'))), ["Café & Crème — 5€"]);
+  });
 });
 
 describe("A2. what is not words", () => {
