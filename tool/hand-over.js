@@ -19,7 +19,7 @@
 // What it says goes into her chat, so it holds no path, no flag and no name of a command.
 import { existsSync, lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { KEPT, isMain, plainName } from "./app.js";
+import { KEPT, clipFolders, clipTrouble, folded, isMain, plainName } from "./app.js";
 import { cloneIn, replaceIn } from "./dropbox.js";
 import { kindOf, shownName } from "./episode.js";
 import { RELEASED_FOLDER, exportsFound, exportsToCarry } from "./exports.js";
@@ -59,29 +59,36 @@ function isFolder(path) {
 }
 
 /** The projects of the record that this Mac hands over, in the order they are handed over (the main video's, then each Reel by its number):
-    each { key, name, dir, label, of }, where `label` is how the words call the part ("the main video", "Reel 2") and `of` what goes before
-    the episode's name in "The HyperFrames project for … ". They are the main project in use and each Reel project whose folder is a folder
-    in this Mac's work folder for the episode: a Reel she dropped included, since opening it again picks it again, but not a session
-    clip's, not one kept for an earlier kind, not one whose name is not one plain folder name and not a duplicate of another. A video that
-    waits for its answer, and a session that is not cleared, have none. */
+    { projects, bad }, `projects` each { key, name, dir, label, of }, where `label` is how the words call the part ("the main video", "Reel 2")
+    and `of` what goes before the episode's name in "The HyperFrames project for … ". They are the main project in use and each Reel project
+    whose folder is a folder in this Mac's work folder for the episode: a Reel she dropped included, since opening it again picks it again,
+    but not a session clip's, not one kept for an earlier kind, not one whose name is not one plain folder name and not a duplicate of another
+    however its name is spelled. A project whose folder is a session clip's on the volume, whatever the record calls it, is none (PR 15's
+    rule, as free.js has it: the name is a clip's, or the folder is the same folder); and when a folder it has to tell from a clip's cannot
+    be looked at, `bad` is true and nothing is handed over. A video that waits for its answer, and a session that is not cleared, have none. */
 export function projectsToHand(ctx, { found, record }) {
-  if (kindOf(record) === null || sessionNotCleared(record)) return [];
+  if (kindOf(record) === null || sessionNotCleared(record)) return { projects: [], bad: false };
   const listedProjects = Array.isArray(record?.app?.projects) ? record.app.projects : [];
   const work = episodeWork(ctx.home, found.name);
+  const clips = clipFolders(work, record);
+  if (clips.bad) return { projects: [], bad: true };
   const mains = [];
   const reels = [];
   const seen = new Set();
   for (const project of listedProjects) {
     const reel = /^reel ([1-9]\d*)$/.exec(typeof project?.key === "string" ? project.key : "");
     const main = project?.key === "main" && isMain(project);
-    if ((!main && !(reel && project.state !== KEPT)) || (main && mains.length > 0) || !plainName(project.name) || seen.has(project.name)) continue;
+    if ((!main && !(reel && project.state !== KEPT)) || (main && mains.length > 0) || !plainName(project.name) || seen.has(folded(project.name))) continue;
+    const trouble = clipTrouble(work, clips, project.name);
+    if (trouble === "bad") return { projects: [], bad: true };
+    if (trouble === "clip") continue;
     const dir = join(work, project.name);
     if (!isFolder(dir)) continue;
-    seen.add(project.name);
+    seen.add(folded(project.name));
     if (main) mains.push({ key: "main", name: project.name, dir, label: "the main video", of: "" });
     else reels.push({ key: project.key, n: Number(reel[1]), name: project.name, dir, label: `Reel ${reel[1]}`, of: `Reel ${reel[1]} of ` });
   }
-  return [...mains, ...reels.sort((a, b) => a.n - b.n)];
+  return { projects: [...mains, ...reels.sort((a, b) => a.n - b.n)], bad: false };
 }
 
 /** The first moment from `ms` that no snapshot of the episode in `folder` is named for, a second at a time. */
@@ -101,7 +108,7 @@ const reasonOf = (e) => basename(String(e && e.message ? e.message : e).replace(
       when no snapshot was made), and `undo()`, which removes what this run put in (for a record that cannot be written).
     `deps`: `running(name)`, whether the program is running (true or false, as a promise or not; a throw, or anything else, is that it
     cannot be told), `opts` the rule's (clone and sameDisk, cloneIn's), and `rm`. */
-export async function handOver(ctx, { found, record, own = projectsToHand(ctx, { found, record }) }, { running = () => hyperFramesRunning(), opts = {}, rm = rmSync } = {}) {
+export async function handOver(ctx, { found, record, own = projectsToHand(ctx, { found, record }).projects }, { running = () => hyperFramesRunning(), opts = {}, rm = rmSync } = {}) {
   const name = shownName(record);
   let open;
   try {

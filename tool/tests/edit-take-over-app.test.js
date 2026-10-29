@@ -6,7 +6,8 @@
 // HeyGen or `claude`: the pinned command line is the stand-in of tests/stand-ins/hyperframes.mjs.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NOT_SET_UP } from "../app.js";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
@@ -19,7 +20,7 @@ import { MARKER, readMarker } from "../snapshot.js";
 import { NAME } from "./episodes.js";
 import { ZONE } from "./exports-world.js";
 import {
-  COPY_TEXT, FOLDER, GUIDANCE as GUIDANCE_PATH, HELD, MAIN, REEL2, REEL_COPY_TEXT, T1, entry, exportOf, filesBelow, listAll, madeCopy, madeReelCopy, ms, reread, takeOverWorld, textOf
+  COPY_TEXT, FOLDER, GUIDANCE as GUIDANCE_PATH, HELD, MAIN, REEL2, REEL_COPY_TEXT, T1, entry, exportOf, fillProject, filesBelow, listAll, madeCopy, madeReelCopy, ms, reread, takeOverWorld, textOf
 } from "./snapshot-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -655,6 +656,61 @@ describe("app and release: which project is older goes by the marker, not by the
     for (const rel of Object.keys(HELD)) utimesSync(join(w.dirOf("main"), rel), stamp, stamp);
     const r = await app(w.t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [1, [OLDER]]);
+    w.t.done();
+  });
+});
+
+/** Whether this Mac's temporary folder takes two spellings of a name for one folder, as the Mac's own volume does with case: a test about a
+    folder named two ways runs only where that is so (free.test.js has the same probe). */
+const caseBlind = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-take-over-volume-"));
+  try {
+    writeFileSync(join(dir, "aBc"), "");
+    return existsSync(join(dir, "ABC"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
+describe("app: a session clip's folder is never opened, however the record spells it (the review of PR 11, I4; PR 15's rule)", () => {
+  const CLIP = "Session clip 1 3fa9c1";
+  const ALIAS = "SESSION CLIP 1 3FA9C1";
+  const NOT_AS_MADE = (of = "") => `The folder for ${of}${NAME} on this Mac is not as it was made, so it wasn't opened. Ask Jason.`;
+  /** The laptop with a session clip's folder in its work folder, which the record lists again as the project of `key` under `name`. */
+  function clipped(key, name) {
+    const projects = key === "main"
+      ? [entry("main", { name, on: "Sallie's laptop" }), entry("clip 1", { name: CLIP, on: "Sallie's laptop" })]
+      : [entry("main", { on: "Sallie's laptop" }), entry("clip 1", { name: CLIP, on: "Sallie's laptop" }), entry(key, { name, on: "Sallie's laptop" })];
+    const w = takeOverWorld({ projects: ["main"], over: { editing: null, app: { toolchain: PIN.version, projects } } });
+    fillProject(join(w.b.work, CLIP));
+    rmSync(join(w.b.work, CLIP, "node_modules"), { recursive: true, force: true }); // its link leads nowhere here, and listAll follows links
+    return w;
+  }
+  for (const [key, words, of] of [["main", [], ""], ["reel 2", ["reel", "2"], "Reel 2 of "]]) {
+    it(`refuses a ${key === "main" ? "main project" : "Reel project"} the record names in other case than the clip's folder, before anything is claimed or opened`, { skip: caseBlind ? false : "this volume tells names apart by case, so there is no second spelling of one folder" }, async () => {
+      const w = clipped(key, ALIAS);
+      assert.equal(existsSync(join(w.b.work, ALIAS)), true, "this volume takes the other spelling for the clip's folder");
+      const before = stateOf(w);
+      const r = await app(w.b.deps, FOLDER, ...words);
+      assert.deepEqual([r.code, r.said], [1, [NOT_AS_MADE(of)]]);
+      assert.deepEqual(stateOf(w), before);
+      w.t.done();
+    });
+  }
+  it("refuses a project the record gives the clip's own name, though no folder is there to tell it by", async () => {
+    const w = clipped("reel 2", CLIP);
+    const before = stateOf(w);
+    const r = await app(w.b.deps, FOLDER, "reel", "2");
+    assert.deepEqual([r.code, r.said], [1, [NOT_AS_MADE("Reel 2 of ")]]);
+    assert.deepEqual(stateOf(w), before);
+    w.t.done();
+  });
+  it("refuses when a folder it has to tell from a clip's cannot be looked at: a name too long for the volume", async () => {
+    const w = clipped("main", "x".repeat(300));
+    const before = stateOf(w);
+    const r = await app(w.b.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [NOT_AS_MADE()]]);
+    assert.deepEqual(stateOf(w), before);
     w.t.done();
   });
 });

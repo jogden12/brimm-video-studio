@@ -5,7 +5,8 @@
 // projects are in a temporary home, and no program: HyperFrames is a stand-in that is running or not.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { PIN } from "../hyperframes.js";
@@ -201,6 +202,68 @@ describe("release: the projects of an episode edited in HyperFrames (group C)", 
     const r = await release(w.t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [1, [`This Mac does not have ${NAME} open, so there is nothing to hand over.`]]);
     w.t.done();
+  });
+});
+
+/** What this Mac's temporary folder does with names: whether it takes two spellings of a name for one folder, as the Mac's own volume does
+    with case, and with an accent written composed or as a letter and a mark. A test about a folder named two ways runs only where that is
+    so (free.test.js has the same probe). */
+const volume = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-release-volume-"));
+  try {
+    writeFileSync(join(dir, "aBc"), "");
+    writeFileSync(join(dir, "café"), "");
+    return { case: existsSync(join(dir, "ABC")), composition: existsSync(join(dir, "café")) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
+describe("release: a session clip's folder is never handed over, however the record spells it (the review of PR 11, I4; PR 15's rule)", () => {
+  const CLIP = "Session clip 1 3fa9c1";
+  const ONE = "its HyperFrames project (the main video)";
+  /** A world whose record lists the clip's folder as the clip's, and again as Reel 2's, under the spelling `alias`. */
+  function aliased(alias, clip = CLIP) {
+    const projects = [entry("main"), entry("clip 1", { name: clip }), entry("reel 2", { name: alias })];
+    const w = releaseWorld({ projects: ["main"], over: { app: { toolchain: PIN.version, projects } } });
+    fillProject(join(w.work, clip));
+    return w;
+  }
+  const handed = async (w) => {
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SAID(ONE)]], r.text);
+    assert.deepEqual(readdirSync(join(w.found.folder, "app-snapshot", T1)), [MAIN], "the clip's project is not in Dropbox");
+    assert.equal(Object.keys(reread(w.found).files).some((rel) => rel.toLowerCase().includes("session clip")), false);
+  };
+  it("hands over nothing of a Reel whose project the record names as the clip's folder is named", async () => {
+    const w = aliased(CLIP);
+    await handed(w);
+    w.t.done();
+  });
+  it("hands over nothing of a Reel whose project the record names in other case", { skip: volume.case ? false : "this volume tells names apart by case, so there is no second spelling of one folder" }, async () => {
+    const alias = "SESSION CLIP 1 3FA9C1";
+    const w = aliased(alias);
+    assert.equal(existsSync(join(w.work, alias)), true, "this volume takes the other spelling for the clip's folder");
+    await handed(w);
+    w.t.done();
+  });
+  it("hands over nothing of a Reel whose name writes an accent as a letter and a mark", { skip: volume.composition ? false : "this volume tells composed and decomposed accents apart" }, async () => {
+    const w = aliased("Session clip é 3fa9c1", "Session clip é 3fa9c1");
+    await handed(w);
+    w.t.done();
+  });
+  it("hands over nothing at all when a folder it has to tell from a session clip's cannot be looked at: it cannot be told what that folder is", async () => {
+    // A name too long for the volume is a name no folder can have, so looking at it fails without anything being wrong with the disk.
+    for (const key of ["clip 2", "main", "reel 3"]) {
+      const projects = key === "main" ? [entry("main", { name: "x".repeat(300) })] : [entry("main"), entry("clip 1", { name: CLIP }), entry(key, { name: "x".repeat(300) })];
+      const w = releaseWorld({ projects: ["main"], over: { app: { toolchain: PIN.version, projects } } });
+      fillProject(join(w.work, CLIP));
+      const before = [reread(w.found).rev, listAll(w.found.folder)];
+      const r = await release(w.t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [`The folder for ${NAME} on this Mac is not as it was made, so nothing was handed over. Ask Jason.`]], key);
+      assert.deepEqual([reread(w.found).rev, listAll(w.found.folder)], before, key);
+      w.t.done();
+    }
   });
 });
 

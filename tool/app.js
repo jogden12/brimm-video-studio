@@ -119,6 +119,50 @@ export const isMain = (project) => project.key === "main" && project.state !== K
     deletes inside it). */
 export const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 
+// --- A session clip's folder (PR 15's rule, free.js; the review of PR 11, I4) ---
+// Nothing of a session goes to HyperFrames, nor into Dropbox in a snapshot, unless Sallie confirms. A record that lists a session clip's
+// folder again, as a Reel's or the main video's project, under another spelling of its name, must not make it one: the volume takes
+// "SESSION CLIP 1" for "Session clip 1", and an accent written as a letter and a mark for the composed one.
+
+/** A name as the volume may take it for another: composed, and in lower case. It is only for telling a name the record gives twice; what
+    a folder is, is told by the volume itself (identityOf). */
+export const folded = (name) => name.normalize("NFC").toLowerCase();
+
+/** What a folder is on its volume, { id }: its device and its number there, which no spelling of its name changes; {} when nothing is there;
+    { bad: true } when it cannot be looked at. A link is not followed: it has a number of its own. */
+export function identityOf(path) {
+  try {
+    const found = lstatSync(path, { bigint: true });
+    return { id: `${found.dev}:${found.ino}` };
+  } catch (e) {
+    return e.code === "ENOENT" || e.code === "ENOTDIR" ? {} : { bad: true };
+  }
+}
+
+/** The session clips of the record (a project whose key is `clip N`) as the volume knows their folders in the episode's work folder `work`:
+    { names, ids } the plain names the record gives them and the identity of each folder that is there, or { bad: true } when any cannot be
+    looked at. A clip is never handed over or opened, and nothing that is its folder is either. */
+export function clipFolders(work, record) {
+  const clips = (Array.isArray(record?.app?.projects) ? record.app.projects : []).filter((p) => typeof p?.key === "string" && /^clip [1-9]\d*$/.test(p.key) && plainName(p.name));
+  const ids = new Set();
+  for (const clip of clips) {
+    const there = identityOf(join(work, clip.name));
+    if (there.bad) return { bad: true };
+    if (there.id) ids.add(there.id);
+  }
+  return { names: new Set(clips.map((p) => p.name)), ids };
+}
+
+/** Whether the project called `name` is a session clip's folder: "clip" when its name is a clip's or its folder is a clip's on the volume,
+    whatever the record calls it; "bad" when that cannot be told (a folder cannot be looked at); "" otherwise. `clips` is clipFolders'. */
+export function clipTrouble(work, clips, name) {
+  if (clips.bad) return "bad";
+  if (clips.names.has(name)) return "clip";
+  const there = identityOf(join(work, name));
+  if (there.bad) return "bad";
+  return there.id && clips.ids.has(there.id) ? "clip" : "";
+}
+
 /** The Mac a project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
     otherwise. A project's folder is in the Mac's own work folder, never in Dropbox, so the project of another Mac is not here, and
     everything done in it (the app's history, what is in its folder) is there. Making a new project under its name would drop its

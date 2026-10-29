@@ -87,7 +87,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, olderHere, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
@@ -1240,6 +1240,16 @@ function olderWords(ctx, { found, record }, key, of) {
   return existsSync(dir) && olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
 }
 
+/** The refusal for a project of the record that is a session clip's folder on this Mac, however the record spells its name (PR 15's rule, as
+    free.js has it; the review of PR 11, I4), or that cannot be told from one, or "": decided before anything is claimed or opened. `key` says
+    which project ("main" or "reel 2"), and `of` how its words name it. Nothing of a session goes to HyperFrames by default. */
+function clipWords(ctx, { found, record }, key, of) {
+  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
+  if (!project || !plainName(project.name)) return "";
+  const work = episodeWork(ctx.home, found.name);
+  return clipTrouble(work, clipFolders(work, record), project.name) ? `The folder for ${of} on this Mac is not as it was made, so it wasn't opened. Ask Jason.` : "";
+}
+
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
@@ -1302,6 +1312,8 @@ export async function app(ctx, rest) {
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
   if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere, "", holderOf(ctx, got.record)));
+  const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
+  if (clip) return refuse(ctx, clip);
   const older = olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
@@ -1348,6 +1360,8 @@ async function appReel(ctx, asked, flags) {
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
   if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `, holderOf(ctx, got.record)));
+  const clip = clipWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
+  if (clip) return refuse(ctx, clip);
   const older = olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
@@ -2459,7 +2473,10 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // nor copied (spec 3, "One version model").
   const mine = newest.filter((p) => p.last && p.last.on === ctx.machine && p.last.how !== "render");
   // The HyperFrames projects of the record that are on this Mac (hand-over.js): none for an episode that went the Final Cut way.
-  const inHyperFrames = projectsToHand(ctx, { found, record });
+  const hand = projectsToHand(ctx, { found, record });
+  const inHyperFrames = hand.projects;
+  // A folder that cannot be told from a session clip's (PR 15's rule; the review of PR 11, I4) hands nothing over.
+  if (hand.bad) return refuse(ctx, `The folder for ${name} on this Mac is not as it was made, so nothing was handed over. Ask Jason.`);
   // An episode nobody has open may be changed without opening it, so one this Mac pushed last, or has a project of, is handed over as well.
   if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
