@@ -19,9 +19,9 @@ export const ZONE = fixedZone(-300);
 /** A moment on 2026-10-20 in that zone. The made-up Mac's clock starts at 15:00 that day, so every export is in the past. */
 export const ms = (hours, minutes, seconds = 0) => ZONE.ms(2026, 10, 20, hours, minutes, seconds);
 /** The names of the made-up episode's projects, as project.js gives them (and as `app` and `app … reel 2` record them). */
-export const namesFor = (name) => ({ main: projectName({ name, part: "main", id: ID }), "reel 1": projectName({ name, part: { reel: 1 }, id: ID }), "reel 2": projectName({ name, part: { reel: 2 }, id: ID }) });
+export const namesFor = (name) => ({ main: projectName({ name, part: "main", id: ID }), "reel 1": projectName({ name, part: { reel: 1 }, id: ID }), "reel 2": projectName({ name, part: { reel: 2 }, id: ID }), "reel 3": projectName({ name, part: { reel: 3 }, id: ID }) });
 export const PROJECT_OF = namesFor(NAME);
-export const { main: MAIN, "reel 1": REEL1, "reel 2": REEL2 } = PROJECT_OF;
+export const { main: MAIN, "reel 1": REEL1, "reel 2": REEL2, "reel 3": REEL3 } = PROJECT_OF;
 /** An export's name as the app makes it: the project's name, the day, the time its export began to the minute, and the ending. */
 export const named = (project, when, ending = "mp4") => `${project} 2026-10-20 ${when}.${ending}`;
 export const AT = "2026-10-20T15:00:00-05:00";
@@ -83,13 +83,14 @@ export function screen(w, key, files, { only = false } = {}) {
 /** The made-up recording (phase4.js), answered as `kind` says, with a project on disk for each of `projects` ("main" and "reel 2"), this
     Mac set up for the app (`set`), its hand-off in version 2 (`handoffVersion`), and the app's index.html of each project last changed
     at 13:40. `projects: null` gives a record with no `app` at all. `over` changes the record, `programs` the stand-ins. `name` is another
-    name for the episode, whose projects are named for it (namesFor), as one with an accent and a quote in it. */
-export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null, candidates = null, shown = true } = {}) {
+    name for the episode, whose projects are named for it (namesFor), as one with an accent and a quote in it. `made` is the episode's
+    files and record (phase4.js): the made-up recording's, unless a test gives others (reels-world.js gives a finished video's). */
+export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null, made = EPISODE, candidates = null, shown = true } = {}) {
   const names = name ? namesFor(name) : PROJECT_OF;
   const record = { version: projects ? 4 : 3, kind, answer: ANSWERED, ...(name ? { name: { text: name, placeholder: false } } : {}), ...(projects ? { app: { toolchain: PIN.version, projects: projects.map((key) => entry(key, {}, names)) } } : {}), ...over };
   // `candidates` are the Reel suggestions of the episode's reels.json in place of the made-up two: a reading's, with an opening and a closing, a reason and a point.
-  const made = candidates ? { ...EPISODE, files: { ...EPISODE.files, "reels.json": JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "read", made: AT, candidates }), null, 2) + "\n" } } : EPISODE;
-  const { t, found } = episode(record, { FFPROBE: probeFor(), ...programs }, made);
+  const episodeMade = candidates ? { ...made, files: { ...made.files, "reels.json": JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "read", made: AT, candidates }), null, 2) + "\n" } } : made;
+  const { t, found } = episode(record, { FFPROBE: probeFor(), ...programs }, episodeMade);
   const patch = { ...(set ? { app: "hyperframes" } : {}), handoffVersion };
   writeSettings(t.home, patch);
   t.ctx.settings = { ...t.ctx.settings, ...patch };
