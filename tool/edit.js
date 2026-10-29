@@ -2287,7 +2287,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const main = app ? looked.parts.find((p) => p.key === "main") : undefined;
   if (main && v2) {
     const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
-    const said = mainWordsSaid({ found: read.words, here: read.here, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
+    const said = mainWordsSaid({ found: read.words, here: read.here, incomplete: read.incomplete, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
     if (said.refusal) return refuse(ctx, said.refusal);
     if (said.line) lines.push(said.line);
     if (said.ask) looked.asks.push(said.ask);

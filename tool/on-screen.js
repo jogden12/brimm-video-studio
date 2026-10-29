@@ -18,13 +18,18 @@ import { clockText } from "./clock.js";
 
 /** The most a file may hold for it to be read: a composition is a few kilobytes, and an agent can write anything in the project. */
 const BYTES_MOST = 2 * 1024 * 1024;
-/** The most lines read from a project, and the most a line may have (a longer one is a paragraph, not a title), the deepest element
-    nesting kept (deeper elements are flattened into the one above), the most elements parsed, and how many compositions may nest. */
+/** What the reading of a project may use, all together (review I3): hosts that name hosts multiply the work, so the whole project has
+    one budget, and a project that uses it up is not read in full. The most lines (a project of more is not given cut short), the most
+    elements parsed or walked, and the most files asked of `read`. And the most a line may have (a longer one is a paragraph, not a
+    title), the deepest element nesting kept (deeper elements are flattened into the one above), and how many compositions may nest. */
 const LINES_MOST = 500;
+const ELEMENTS_MOST = 200000;
+const READS_MOST = 300;
 const LINE_MOST = 300;
 const DEPTH_MOST = 100;
-const ELEMENTS_MOST = 200000;
 const NESTING_MOST = 3;
+/** Thrown inside `wordsOnScreen` when the budget is used up, and caught there. */
+const SPENT = Symbol("spent");
 
 // --- A forgiving reader of HTML: tags, attributes, text. It never throws, and what it cannot read it passes over. ---
 
@@ -71,8 +76,9 @@ function attributesFrom(source, from) {
 }
 
 /** A page as a tree: { tag, attrs, kids } for an element, { text } for a text. The content of `script` and `style` is not kept, nor are
-    comments; a stray closing tag is passed over, and a closing tag ends everything open inside the element it closes. */
-function parse(source) {
+    comments; a stray closing tag is passed over, and a closing tag ends everything open inside the element it closes. `spend` is called
+    for each element parsed, and throws when the project's budget is used up. */
+function parse(source, spend) {
   const root = { tag: "#root", attrs: Object.create(null), kids: [] };
   const stack = [root];
   const top = () => stack[stack.length - 1];
@@ -84,7 +90,6 @@ function parse(source) {
       }
     }
   };
-  let elements = 0;
   let i = 0;
   while (i < source.length) {
     const lt = source.indexOf("<", i);
@@ -115,8 +120,7 @@ function parse(source) {
       const tag = named[1].toLowerCase();
       const { attrs, end, selfClosed } = attributesFrom(source, lt + named[0].length);
       i = end;
-      elements += 1;
-      if (elements > ELEMENTS_MOST) break;
+      spend();
       const element = { tag, attrs, kids: [] };
       top().kids.push(element);
       if ((tag === "script" || tag === "style") && !selfClosed) {
@@ -177,20 +181,45 @@ function variablesOf(attrs) {
 }
 
 /** The words on the picture of the project `read` gives, as [{ text, at }] in the order they appear: `at` is the second of the project's
-    timeline, to the thousandth. `read(path)` gives a file's text, from the project's folder, or null when there is none; it is asked for
-    `index.html` and for the compositions its hosts name. A line is the text of a block, or between two line breaks; the lines of one
-    element that is on the screen are in the document's order, and two that start together are in the order they are written in. Captions,
-    pictures and hidden boxes are never words. Nothing here reads a disk, and nothing here throws. */
+    timeline, to the thousandth. `read(path)` gives a file's text, or { text, id } when it can say what the file is (a real file's device
+    and inode: two names of one file give one id), from the project's folder, or null when there is none; it is asked for `index.html` and
+    for the compositions its hosts name, once for each name, and a file is parsed once for each id. A line is the text of a block, or between
+    two line breaks; the lines of one element that is on the screen are in the document's order, and two that start together are in the order
+    they are written in. Captions, pictures and hidden boxes are never words. A file that holds itself, under any name, is read once on its
+    way. The project has one budget (review I3): more than 200,000 elements parsed or walked, more than 300 files asked for, or more than
+    500 lines is a project that was not read in full, and the answer is null, never a list cut short. Nothing here reads a disk, and nothing
+    here throws. */
 export function wordsOnScreen(read) {
   const units = [];
   let lines = 0;
+  let elements = 0;
+  let reads = 0;
+  /** One element parsed or walked. */
+  const spend = () => {
+    elements += 1;
+    if (elements > ELEMENTS_MOST) throw SPENT;
+  };
+  const named = new Map();
+  const trees = new Map();
+  /** A file by the name asked for: { text, id }, or null when there is none; `read` is asked for a name once. */
   const get = (rel) => {
+    if (named.has(rel)) return named.get(rel);
+    reads += 1;
+    if (reads > READS_MOST) throw SPENT;
+    let file = null;
     try {
-      const text = read(rel);
-      return typeof text === "string" ? text : null;
+      const got = read(rel);
+      if (typeof got === "string") file = { text: got, id: `name:${rel}` };
+      else if (got !== null && typeof got === "object" && typeof got.text === "string" && typeof got.id === "string") file = { text: got.text, id: got.id };
     } catch (e) {
-      return null;
+      file = null;
     }
+    named.set(rel, file);
+    return file;
+  };
+  const treeOf = (file) => {
+    if (!trees.has(file.id)) trees.set(file.id, parse(file.text, spend));
+    return trees.get(file.id);
   };
   const unit = (at) => {
     const made = { at, lines: [] };
@@ -202,31 +231,34 @@ export function wordsOnScreen(read) {
     if (!doc.buffer.length) return;
     const line = decode(doc.buffer.join("")).replace(/[\s ]+/g, " ").trim();
     doc.buffer = [];
-    if (doc.unit && lines < LINES_MOST && line.length <= LINE_MOST && /[\p{L}\p{N}]/u.test(line)) {
-      doc.unit.lines.push(line);
+    if (doc.unit && line.length <= LINE_MOST && /[\p{L}\p{N}]/u.test(line)) {
       lines += 1;
+      if (lines > LINES_MOST) throw SPENT;
+      doc.unit.lines.push(line);
     }
   };
-  const walkFile = (rel, { offset, host, vars, path }) => {
-    const source = get(rel);
-    if (source === null) return;
-    const doc = { offset, vars, unit: host ? unit(offset) : null, buffer: [], path: [...path, rel] };
-    walk(parse(source), doc);
+  /** A file read on a clock, with the ids of the files it is inside: a file that is one of them is already being read. */
+  const walkFile = (rel, { offset, host, vars, ids }) => {
+    const file = get(rel);
+    if (file === null || ids.includes(file.id)) return;
+    const doc = { offset, vars, unit: host ? unit(offset) : null, buffer: [], ids: [...ids, file.id] };
+    walk(treeOf(file), doc);
     flush(doc);
   };
   /** A host: the composition it names, on its clock, when it is on the screen at a time and is a file to be read. */
   const walkHost = (attrs, doc) => {
     const timing = timingOf(attrs);
     const rel = compositionPath(attrs["data-composition-src"]);
-    if (!timing || !rel || doc.path.includes(rel) || doc.path.length > NESTING_MOST) return;
+    if (!timing || !rel || doc.ids.length > NESTING_MOST) return;
     if (CAPTIONS_NAME.test(attrs["data-composition-id"] ?? "") || CAPTIONS_NAME.test(stemOf(rel))) return;
-    walkFile(rel, { offset: doc.offset + timing.start, host: true, vars: variablesOf(attrs), path: doc.path });
+    walkFile(rel, { offset: doc.offset + timing.start, host: true, vars: variablesOf(attrs), ids: doc.ids });
   };
   const walk = (node, doc) => {
     if (node.text !== undefined) {
       if (doc.unit) doc.buffer.push(node.text);
       return;
     }
+    spend();
     const { tag, attrs } = node;
     if (tag !== "#root" && (NOT_WORDS.has(tag) || hidden(attrs) || captioned(attrs))) return;
     if (attrs["data-composition-src"] !== undefined) {
@@ -254,16 +286,23 @@ export function wordsOnScreen(read) {
     if (block || timing) flush(doc);
     doc.unit = outer;
   };
-  walkFile("index.html", { offset: 0, host: false, vars: {}, path: [] });
+  try {
+    walkFile("index.html", { offset: 0, host: false, vars: {}, ids: [] });
+  } catch (e) {
+    // The budget is used up, or something went wrong that this was not written for: the project was not read in full.
+    return null;
+  }
   // Two that start together stay in the document's order: sort is stable.
   return units
     .sort((a, b) => a.at - b.at)
     .flatMap((made) => made.lines.map((text) => ({ text, at: Math.round(made.at * 1000) / 1000 })));
 }
 
-/** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder. Only
-    `index.html` and the compositions under `compositions/` that a host names are opened, and only a regular file of at most 2 MB whose
-    real path is inside the project (a link, or a file reached through one, is not read). It writes nothing. */
+/** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder.
+    `incomplete: true` is there only for a project that was not read in full (its budget was used up, see wordsOnScreen), and its
+    words are none. Only `index.html` and the compositions under `compositions/` that a host names are opened, and only a regular file
+    of at most 2 MB whose real path is inside the project (a link, or a file reached through one, is not read). A file is what its
+    device and inode say, so that two names of one file are one file. It writes nothing. */
 export function projectWords(dir) {
   let base;
   try {
@@ -279,12 +318,13 @@ export function projectWords(dir) {
       if (!found.isFile() || found.size > BYTES_MOST) return null;
       // The file is where its name says, under the project's own folder or its own compositions/: through no link on the way.
       const own = rel === "index.html" ? base : join(base, "compositions");
-      return realpathSync(file).startsWith(join(own, sep)) ? readFileSync(file, "utf8") : null;
+      return realpathSync(file).startsWith(join(own, sep)) ? { text: readFileSync(file, "utf8"), id: `${found.dev}:${found.ino}` } : null;
     } catch (e) {
       return null;
     }
   };
-  return { here: true, words: wordsOnScreen(read) };
+  const words = wordsOnScreen(read);
+  return words === null ? { here: true, words: [], incomplete: true } : { here: true, words };
 }
 
 /** The words on the picture of the project called `name` in the work folder `work`: projectWords of its folder. A name that does not
@@ -305,6 +345,7 @@ export const BOTH_SAID = "Say what is on screen, or that nothing is, but not bot
 export const EMPTY_LINE = "A line on the screen needs words. Say what it says.";
 const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
 const NOT_HERE = "I could not look at the main video's project on this Mac, so I do not know what is on its picture. Say what is on screen, or say that nothing is.";
+const NOT_ALL_READ = "I could not read all the words on the main video's picture. Say what is on screen, or say that nothing is.";
 const NOTHING_SAID = "Nothing is on the main video's picture, as you said.";
 
 /** What `finish` says and asks of the words on the main video's picture, as { words, line, ask } or { refusal }:
@@ -315,10 +356,11 @@ const NOTHING_SAID = "Nothing is on the main video's picture, as you said.";
     - Otherwise, for a main video that is taken, the words found are said with their times and "Right?". Her yes is to the words she was
       shown: `shown` is whether the words found are the lines a call before this one showed (`finish` keeps them), and only then does a
       yes take them, and say them again as taken. A yes with words she was not shown shows them, and `shows` are the lines for `finish`
-      to keep, so that her next yes is to them. Nothing found, or a project that is not here, is an ask: nothing starts until she has said.
+      to keep, so that her next yes is to them. Nothing found, a project that is not here, and a project that could not be read in full
+      (`incomplete`: a list cut short is never shown) are asks: nothing starts until she has said.
     `words` are the lines that go on, or null when none is decided; `line` is what is said, and `ask` what is asked, or ""; `shows` is
     there only when the line asks "Right?", and holds the lines it shows. */
-export function mainWordsSaid({ found = [], here = true, given = [], none = false, yes = false, taking = true, shown = false } = {}) {
+export function mainWordsSaid({ found = [], here = true, incomplete = false, given = [], none = false, yes = false, taking = true, shown = false } = {}) {
   const lines = (Array.isArray(given) ? given : []).map(oneLine);
   if (none && lines.length) return { refusal: BOTH_SAID };
   if (lines.some((line) => line === "")) return { refusal: EMPTY_LINE };
@@ -326,6 +368,7 @@ export function mainWordsSaid({ found = [], here = true, given = [], none = fals
   if (lines.length) return { words: lines, line: `On screen in the main video, as you said: ${listed(lines.map((line) => `"${line}"`))}.`, ask: "" };
   if (!taking) return { words: null, line: "", ask: "" };
   if (!here) return { words: null, line: "", ask: NOT_HERE };
+  if (incomplete) return { words: null, line: "", ask: NOT_ALL_READ };
   if (!found.length) return { words: null, line: "", ask: NONE_FOUND };
   const told = listed(found.map(timed));
   const texts = found.map((word) => word.text);

@@ -29,6 +29,7 @@ const START = 'Say "yes, hand it off" to start.';
 const STARTED = "Started. The panel shows how far it is.";
 const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
 const NOT_HERE = "I could not look at the main video's project on this Mac, so I do not know what is on its picture. Say what is on screen, or say that nothing is.";
+const NOT_ALL_READ = "I could not read all the words on the main video's picture. Say what is on screen, or say that nothing is.";
 const REEL2_OPENING = "So the first thing you need to do is know your costs.";
 /** The made-up recording's Reels, with Reel 2's title changed. */
 const reelsWith = (title) => EPISODE.record.reels.map((r) => (r.n === 2 ? { ...r, title } : r));
@@ -171,6 +172,24 @@ describe("B3. nothing found, or no project to look at", () => {
     assert.equal(lines.at(-1), NOT_HERE);
     assert.deepEqual(w.t.started, []);
     plain([NOT_HERE]);
+    w.t.done();
+  });
+  it("asks when the main video's picture is too big to be read in full, with a yes too, and starts nothing, and takes no list cut short", async () => {
+    const w = ready({ shown: false });
+    const hosts = Array.from({ length: 3000 }, (_, i) => `<div id="h${i}" data-composition-id="h${i}" data-composition-src="compositions/big.html" data-start="${i % 100}" data-duration="5"></div>`).join("");
+    const big = `<template><div data-composition-id="big">${Array.from({ length: 320 }, (_, i) => `<div class="clip" data-start="${i % 10}" data-duration="2">Word ${i}</div>`).join("")}</div></template>`;
+    screen(w, "main", { "index.html": `<div id="root" data-composition-id="main" data-start="0" data-duration="180">${hosts}</div>`, "compositions/big.html": big }, { only: true });
+    const started = Date.now();
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
+    assert.ok(Date.now() - started < 10000, `${Date.now() - started} ms`);
+    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, NOT_ALL_READ]);
+    const yes = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([yes.code, yes.said.at(-1)], [0, NOT_ALL_READ]);
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json")), existsSync(join(w.work, "finish.shown.json"))], [[], false, false]);
+    const given = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Her words", "--yes");
+    assert.deepEqual([given.code, given.said.at(-1)], [0, STARTED]);
+    assert.deepEqual(w.asked().parts[0].onPicture, ["Her words"]);
+    plain([NOT_ALL_READ]);
     w.t.done();
   });
   it("is answered by the words she gives, or by nothing, and then starts", async () => {
@@ -444,6 +463,15 @@ describe("C2. a Reel's title that is not proposed", () => {
     w.t.done();
     long.t.done();
     twelve.t.done();
+  });
+  it("asks as it did, and proposes no line, when the Reel's picture is too big to be read in full", async () => {
+    const w = ready({ over: { reels: reelsWith("") } });
+    const hosts = Array.from({ length: 3000 }, (_, i) => `<div id="h${i}" data-composition-id="h${i}" data-composition-src="compositions/big.html" data-start="${i % 100}" data-duration="5"></div>`).join("");
+    const big = `<template><div data-composition-id="big">${Array.from({ length: 320 }, (_, i) => `<div class="clip" data-start="${i % 10}" data-duration="2">Word ${i}</div>`).join("")}</div></template>`;
+    screen(w, "reel 2", { "index.html": `<div id="root" data-composition-id="main" data-start="0" data-duration="75">${hosts}</div>`, "compositions/big.html": big }, { only: true });
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
+    assert.equal(w.t.said().split("\n").at(-1), `Reel 2 has no title on screen. Say what it says: it starts "${REEL2_OPENING}".`);
+    w.t.done();
   });
   it("does not ask, or propose, for a Reel that has a title", async () => {
     const w = ready();

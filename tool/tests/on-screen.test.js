@@ -5,7 +5,7 @@
 // temporary folder. Nothing here touches the real BRIMM Video Work, Dropbox or Downloads, or the files A0 left.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { projectWords, projectWordsIn, wordsOnScreen } from "../on-screen.js";
@@ -196,9 +196,12 @@ describe("A5. lenient, and safe", () => {
     const found = wordsOnScreen(() => deep);
     assert.ok(found.length === 1 && found[0].text.endsWith("Deep"), JSON.stringify(found).slice(0, 80));
   });
-  it("stops reading a page at 200,000 elements: what comes after is not read", () => {
-    const page = `<div id="root" data-composition-id="main" data-start="0" data-duration="9">${"<i></i>".repeat(210000)}<div class="clip" data-start="1" data-duration="2">After</div></div>`;
-    assert.deepEqual(wordsOnScreen(() => page), []);
+  it("gives null, and no words, for a project that holds more than 200,000 elements to read (a page parsed and walked, all together)", () => {
+    // The reading of a whole project has one budget (review I3): an element parsed and an element walked each use one of its 200,000.
+    const page = (count) => `<div id="root" data-composition-id="main" data-start="0" data-duration="9">${"<i></i>".repeat(count)}<div class="clip" data-start="1" data-duration="2">After</div></div>`;
+    assert.equal(wordsOnScreen(() => page(210000)), null);
+    assert.equal(wordsOnScreen(() => page(110000)), null, "parsed once and walked once: 220,000");
+    assert.deepEqual(texts(wordsOnScreen(() => page(90000))), ["After"]);
     assert.deepEqual(texts(wordsOnScreen(() => `<div class="clip" data-start="1" data-duration="2">Before</div>${"<i></i>".repeat(1000)}`)), ["Before"]);
   });
   it("gives nothing for a file that is not HTML, or not there, or that cannot be read", () => {
@@ -284,11 +287,104 @@ describe("A5. lenient, and safe", () => {
     assert.deepEqual(asked, ["index.html", "compositions/c1.html", "compositions/c2.html", "compositions/c3.html"]);
     assert.deepEqual(texts(found), ["Third"]);
   });
-  it("gives only a cap of lines for a page that holds a great many", () => {
-    const many = Array.from({ length: 3000 }, (_, i) => `<div class="clip" data-start="${i}" data-duration="1">Line ${i}</div>`).join("");
-    const found = wordsOnScreen(() => `<div id="root" data-composition-id="main" data-start="0" data-duration="9000">${many}</div>`);
+  it("gives null, and not the first 500, for a project of more than 500 lines: a list cut short is never given", () => {
+    const lines = (count) => Array.from({ length: count }, (_, i) => `<div class="clip" data-start="${i}" data-duration="1">Line ${i}</div>`).join("");
+    const page = (count) => `<div id="root" data-composition-id="main" data-start="0" data-duration="9000">${lines(count)}</div>`;
+    assert.equal(wordsOnScreen(() => page(3000)), null);
+    assert.equal(wordsOnScreen(() => page(501)), null);
+    const found = wordsOnScreen(() => page(500));
     assert.equal(found.length, 500);
     assert.equal(found[0].text, "Line 0");
+  });
+});
+
+describe("A7. a project too big to read in full, and a file that is two names (review I3)", () => {
+  // Hosts that name hosts multiply the reading: 40 hosts that each name a composition that holds 40 more is 64,000 walks at three levels.
+  // The reading of a project has one budget: 200,000 elements parsed or walked, all together, and 300 files asked of `read`. A file is
+  // asked for once by its name and parsed once by what it is, and when the budget is used up the answer is null: nothing is found.
+  const timed = (count) => Array.from({ length: count }, (_, i) => `<div class="clip" data-start="${i % 10}" data-duration="2">Word ${i}</div>`).join("");
+  /** Boxes with no words in them: only the budget of elements can stop the reading of these, not the budget of lines. */
+  const boxes = (count) => Array.from({ length: count }, (_, i) => `<div id="box-${i}" class="clip" data-start="${i % 10}" data-duration="2"></div>`).join("");
+  const asking = (files) => {
+    const asked = [];
+    return { asked, read: (rel) => { asked.push(rel); return files[rel] ?? null; } };
+  };
+  const within = (limit, then) => {
+    const started = Date.now();
+    const result = then();
+    assert.ok(Date.now() - started < limit, `${Date.now() - started} ms`);
+    return result;
+  };
+  it("gives null at once for 3,000 hosts that name one composition of 21 KB, and asks for the file once", () => {
+    // Boxes with words in them (320 lines in the file) and boxes with none: the budget of lines stops the first, that of elements the second.
+    for (const inner of [timed(320), boxes(320)]) {
+      const big = composition("big", inner);
+      assert.ok(big.length > 20000 && big.length < 30000, String(big.length));
+      const hosts = Array.from({ length: 3000 }, (_, i) => hostOf(`h${i}`, "compositions/big.html", i % 100, 5)).join("");
+      const { asked, read } = asking(projectOf(hosts, { "compositions/big.html": big }));
+      assert.equal(within(5000, () => wordsOnScreen(read)), null);
+      assert.deepEqual(asked, ["index.html", "compositions/big.html"]);
+    }
+  });
+  it("gives null at once for 40 hosts that name a composition holding 40 hosts that name one holding 40, at three levels", () => {
+    const level = (name, next) => composition(name, Array.from({ length: 40 }, (_, i) => hostOf(`${name}-${i}`, `compositions/${next}.html`, i % 10, 5)).join(""));
+    for (const inner of [timed(20), boxes(20)]) {
+      const files = projectOf(Array.from({ length: 40 }, (_, i) => hostOf(`top-${i}`, "compositions/a.html", i, 5)).join(""), {
+        "compositions/a.html": level("a", "b"),
+        "compositions/b.html": level("b", "c"),
+        "compositions/c.html": composition("c", inner)
+      });
+      const { asked, read } = asking(files);
+      assert.equal(within(5000, () => wordsOnScreen(read)), null);
+      assert.deepEqual(asked, ["index.html", "compositions/a.html", "compositions/b.html", "compositions/c.html"]);
+    }
+  });
+  it("gives the words of a project of a reasonable size, though many hosts name one composition", () => {
+    const hosts = Array.from({ length: 10 }, (_, i) => hostOf(`h${i}`, "compositions/card.html", i * 5, 4)).join("");
+    const { read } = asking(projectOf(hosts, { "compositions/card.html": composition("card", timed(40)) }));
+    const found = wordsOnScreen(read);
+    assert.equal(found.length, 10 * 40);
+  });
+  it("asks for no more than 300 files: index.html and 299 compositions are read, and one more is too many", () => {
+    const files = (count) => projectOf(Array.from({ length: count }, (_, i) => host(`card${i}`, 1, 3)).join(""), Object.fromEntries(Array.from({ length: count }, (_, i) => [`compositions/card${i}.html`, composition(`card${i}`, '<div class="clip" data-start="0" data-duration="2">Seen</div>')])));
+    const fine = asking(files(299));
+    assert.equal(wordsOnScreen(fine.read).length, 299);
+    assert.equal(fine.asked.length, 300);
+    const toomany = asking(files(300));
+    assert.equal(wordsOnScreen(toomany.read), null);
+    assert.equal(toomany.asked.length, 300, "no file is asked for after the 300th");
+  });
+  it("asks for a host that names a file that is not there once, however many hosts name it", () => {
+    const { asked, read } = asking(projectOf(Array.from({ length: 2000 }, (_, i) => hostOf(`h${i}`, "compositions/gone.html", 1, 3)).join("")));
+    assert.deepEqual(within(5000, () => wordsOnScreen(read)), []);
+    assert.deepEqual(asked, ["index.html", "compositions/gone.html"]);
+  });
+  it("parses a file once, whatever the spellings it is named by: `read` may give { text, id }, and the id is what the file is", () => {
+    // The id is the device and inode of a real file. Two names for one file give one id, so the page is parsed the first time and the
+    // tree is used again (the second text below, which a real file never has, is never looked at). Two hosts are two times, so the
+    // words are told for each.
+    const page = projectOf(`${hostOf("one", "compositions/Card.html", 3, 5)}${hostOf("two", "compositions/card.html", 30, 5)}`);
+    const texts_ = { "compositions/Card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">First spelling</div>'), "compositions/card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Second spelling</div>') };
+    const read = (rel) => (rel === "index.html" ? { text: page["index.html"], id: "1:1" } : texts_[rel] ? { text: texts_[rel], id: "1:77" } : null);
+    assert.deepEqual(wordsOnScreen(read), [{ text: "First spelling", at: 3 }, { text: "First spelling", at: 30 }]);
+  });
+  it("does not read a file inside itself under another spelling: it is the file it is, and its words are told once", () => {
+    // On a disk that does not tell A.html from a.html, a composition that names itself by the other spelling is not a new file.
+    const files = {
+      "index.html": projectOf(hostOf("a", "compositions/A.html", 0, 30))["index.html"],
+      "compositions/A.html": { text: composition("a", `${hostOf("again", "compositions/a.html", 1, 10)}<div class="clip" data-start="0" data-duration="2">In a</div>`), id: "7:1" },
+      "compositions/a.html": { text: composition("a", `${hostOf("again", "compositions/a.html", 1, 10)}<div class="clip" data-start="0" data-duration="2">In a</div>`), id: "7:1" }
+    };
+    const read = (rel) => (typeof files[rel] === "string" ? { text: files[rel], id: "7:0" } : files[rel] ?? null);
+    assert.deepEqual(wordsOnScreen(read), [{ text: "In a", at: 0 }]);
+  });
+  it("does not take two files for one when `read` gives no id, or gives the same one to two things it did not mean", () => {
+    // Without an id a file is what its name says: two names are two files (as a made-up `read` that gives text alone has it).
+    const files = projectOf(`${hostOf("one", "compositions/Card.html", 3, 5)}${hostOf("two", "compositions/card.html", 30, 5)}`, {
+      "compositions/Card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Upper</div>'),
+      "compositions/card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Lower</div>')
+    });
+    assert.deepEqual(texts(wordsOnScreen(readFrom(files))), ["Upper", "Lower"]);
   });
 });
 
@@ -378,6 +474,26 @@ describe("A6. from a folder", () => {
     assert.deepEqual(projectWords(dir).words, []);
     const fine = folder({ "index.html": projectOf(host("card", 3, 5))["index.html"], "compositions/card.html": composition("card", `<div class="clip" data-start="0" data-duration="2">Small</div><!-- ${"x".repeat(1024 * 1024)} -->`) });
     assert.deepEqual(projectWords(fine).words, [{ text: "Small", at: 3 }]);
+    done();
+  });
+  it("says a project it could not read in full is here, with no words, and says it was not read in full (review I3)", () => {
+    const big = composition("big", Array.from({ length: 320 }, (_, i) => `<div class="clip" data-start="${i % 10}" data-duration="2">Word ${i}</div>`).join(""));
+    const hosts = Array.from({ length: 3000 }, (_, i) => hostOf(`h${i}`, "compositions/big.html", i % 100, 5)).join("");
+    const dir = folder({ "index.html": projectOf(hosts)["index.html"], "compositions/big.html": big });
+    const started = Date.now();
+    assert.deepEqual(projectWords(dir), { here: true, words: [], incomplete: true });
+    assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms`);
+    // A project that was read in full says nothing of the kind.
+    const whole = folder({ "index.html": projectOf(host("card", 3, 5))["index.html"], "compositions/card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Whole</div>') });
+    assert.deepEqual(projectWords(whole), { here: true, words: [{ text: "Whole", at: 3 }] });
+    done();
+  });
+  it("takes two names of one file for one file: a composition that names itself by its other name is not told twice", () => {
+    // A hard link is a second name of the same file, as `A.html` and `a.html` are on a disk that does not tell them apart.
+    const inner = (name) => composition("a", `${hostOf("again", `compositions/${name}.html`, 1, 10)}<div class="clip" data-start="0" data-duration="2">In a</div>`);
+    const dir = folder({ "index.html": projectOf(host("a", 0, 30))["index.html"], "compositions/a.html": inner("b") });
+    linkSync(join(dir, "compositions", "a.html"), join(dir, "compositions", "b.html"));
+    assert.deepEqual(projectWords(dir), { here: true, words: [{ text: "In a", at: 0 }] });
     done();
   });
   it("reads a composition in a folder of compositions/", () => {
