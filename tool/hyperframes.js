@@ -475,8 +475,8 @@ const namesOf = (files) => [...new Set((Array.isArray(files) ? files : []).map((
 const changedWords = (names) => (names.length === 0 ? "" : names.length > FILES_MOST ? `changed ${names.length} files` : `changed ${names.join(", ")}`);
 
 /** The time of day a moment is told as, "3:41 pm", in the zone `tz` (an IANA name; the Mac's own when none is given). A zone that
-    is not one throws, here, rather than tell a wrong time later. */
-function clockIn(tz) {
+    is not one throws, here, rather than tell a wrong time later. app-history.js turnTime tells the time of a turn with it too. */
+export function clockIn(tz) {
   const clock = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
   // Built from parts: newer ICU versions put a no-break space before AM and PM, and her words have an ordinary one.
   return (ms) => {

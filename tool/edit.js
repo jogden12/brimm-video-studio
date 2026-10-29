@@ -86,14 +86,14 @@ import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShow
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, plainName, projectOnAnotherMac } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
-import { versionsOf, whatHappened } from "./app-history.js";
+import { historyTail, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode } from "./free.js";
-import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
-import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
+import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -102,18 +102,23 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
                                         answer first, then the newest; this Mac's drop folder in Finder's words; and how
                                         many videos from before the switch are not guided. With a video, its next step,
-                                        and for a step on the BRIMM Ops page the step after it. Only on a Mac that does
-                                        the light import: on any other, every form says to ask Jason
+                                        and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
+                                        clip are followed through HyperFrames: while its video is made, how long is left;
+                                        then to open it there; once it is open, when she last asked the app for something;
+                                        and once it is exported, to hand it off. A raw video that goes the Final Cut way
+                                        keeps its Final Cut steps. Only on a Mac that does the light import: on any other,
+                                        every form says to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
-                                        what the guide says: at once when no video is coming in, being imported or read
+                                        what the guide says: at once when no video is coming in, being imported, being
+                                        read or having its video for HyperFrames made
   node edit.js guide "<video>" done <step> | finished | show | tell
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs.
-                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, or an
-                                        import or reading that did not finish), then say it in one line. Her skill runs it
-                                        in the background
+                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, its
+                                        video for HyperFrames made, or an import or reading that did not finish), then say
+                                        it in one line. Her skill runs it in the background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -2133,9 +2138,10 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 /** Which way `finish` goes for a video, by its record (plan PR 7, item 1): "hyperframes" for a raw video that has a main project in
     use, and for an iPhone clip whose main project in use the app has opened, to be finished from the exports the app made of it
     (exports.js); "clip" for any other iPhone clip she answered, which is asked whether to hand it off as it is (finishClip); "finished"
-    for a finished video, which is not edited here; "unopened" for a raw video with neither a project nor a push, on a Mac whose settings
-    turn the app on, which has nothing to finish yet and is told so in HyperFrames' words; and "final cut" for the rest, which go as they
-    always went. The Final Cut way stays for the episodes already under way in it, until the retirement's wave 4. */
+    for a finished video, which is not edited here; "unopened" for a raw video with no main project in use and no push, on a Mac whose
+    settings turn the app on, or on any Mac when the record lists a project (a Reel's), which has nothing to finish yet and is told so in
+    HyperFrames' words; and "final cut" for the rest, which go as they always went. The Final Cut way stays for the episodes already
+    under way in it, until the retirement's wave 4. */
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
@@ -6162,6 +6168,61 @@ function guideReading(ctx, e, r, kind, running, rates) {
   return due === null ? { reading: "none" } : later();
 }
 
+/** The working copy's run, for the guide (plan PR 10; guide.js VideoFacts `copy`): { left, usual } while this Mac's run makes the video for
+    HyperFrames of the episode, that is while its lock (workcopy.js workCopyLockOf) is held by a live process, and null otherwise. `left`
+    is the seconds left as the panel's file for that very process says (panelRuns), as of when the panel last wrote it, with the time
+    since taken off; null when it says none, or the time has run out. `usual` is how long the step usually takes, by the speed this Mac
+    measured for it (`rates`, guide.js copyIn) and the recording's length, null while either is not known. A Reel's video is made under
+    the same lock, and the lock does not say whose the video is (a project here is the main video's, and `project` goes first), so the
+    panel's file for the process says what it can (review I3): `usual` is said of a run that is making a copy of the main video's own shape,
+    the step of the copy and it alone (`of` 1: a Reel's has a second step, and a recording's length is not its length), that has begun (it
+    does not wait for the import to check its copies, WORK_COPY_WAIT_STEP) and that has told no time of its own that has run out (at its end
+    its time is 0). With no panel file at all, as before the run has begun one, it is said. */
+function guideCopy(ctx, e, r, rates) {
+  const run = runningRun(ctx.home, e.name, ctx.alive, workCopyLockOf(ctx.home, e.name));
+  if (!run) return null;
+  const panel = panelRuns(ctx).find((p) => p.pid === run.pid);
+  const since = panel && Number.isFinite(panel.updated) ? Math.max(0, ctx.now() - panel.updated) / 1000 : 0;
+  const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
+  const left = panel ? readyIn({ left: fresh(panel.left), total: fresh(panel.total), n: panel.n, of: panel.of }) : null;
+  const mainCopy = !panel || (panel.step === WORK_COPY_STEP && panel.of === 1);
+  const toldTime = Boolean(panel) && (Number.isFinite(panel.left) || Number.isFinite(panel.total));
+  return { left, usual: left === null && mainCopy && !toldTime ? copyIn(rates, r.video && r.video.seconds) : null };
+}
+
+/** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when
+    the record has none, or its folder is not on this Mac. `opened` is whether the record lists a time the app opened it; `last` the time
+    of the newest turn that `what-happened` tells in the project's `.hyperframes/app-history.jsonl` (app-history.js toldTurns, so that it is
+    the first time that gives), in words (turnTime, in the zone a test gives as `deps.app.tz`), "" when the app has kept none that can be
+    read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
+    which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in the
+    project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading, is
+    no export seen: the guide only reads, and `finish` tells her what it needs. */
+function guideProject(ctx, e, r) {
+  const main = (r.app?.projects ?? []).find(inUse);
+  if (!main || !plainName(main.name)) return null;
+  const dir = join(episodeWork(ctx.home, e.name), main.name);
+  try {
+    if (!statSync(dir).isDirectory()) return null;
+  } catch (err) {
+    return null;
+  }
+  // The newest turn what-happened tells (app-history.js toldTurns): a later one with nothing in it is left out there, and so here.
+  const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
+  let exported = false;
+  try {
+    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+    if (!seen.unreadable) {
+      // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
+      const looked = lookForExports(seen.input, {}, { rest: false });
+      exported = looked.parts.some((part) => part.key === "main" && part.video !== null) || looked.tied.includes("main");
+    }
+  } catch (err) {
+    exported = false;
+  }
+  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: newest ? turnTime(newest.ms, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported };
+}
+
 /** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can
     read teachings now, how many of its items she has still to keep, drop or change, and whether its empty revision is still owed
     (revisionOwed). Its items are counted from its teachings file, read only when it is whole on this Mac: one that is not, or that
@@ -6186,6 +6247,12 @@ function guideFacts(ctx, e, links, rates) {
   const v2 = writesV2For(ctx.settings, e.folder, r);
   const running = runningCommand(ctx.home, e.name, ctx.alive);
   const pushed = r.main.pushed;
+  const handoff = guideHandoff(ctx, e, r, links, v2);
+  // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
+  // it: its Final Cut stages are for the Final Cut way alone. What the HyperFrames way reads of the disk (the video being made, the
+  // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written. A video the
+  // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2).
+  const way = !hidden && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6207,8 +6274,12 @@ function guideFacts(ctx, e, links, rates) {
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    gated: kind !== "session" && sessionNotCleared(r),
+    way,
+    copy: way ? guideCopy(ctx, e, r, rates) : null,
+    project: way && !handoff ? guideProject(ctx, e, r) : null,
     session: kind === "session" ? guideSession(ctx, e, r) : null,
-    handoff: guideHandoff(ctx, e, r, links, v2),
+    handoff,
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
     source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };

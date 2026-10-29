@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { isMain, plainName, projectOnAnotherMac } from "./app.js";
-import { VERSIONS_LIMIT, childEnv, historyArgs, plainTurns, plainVersions, readHistory, turnsOf } from "./hyperframes.js";
+import { VERSIONS_LIMIT, childEnv, clockIn, historyArgs, plainTurns, plainVersions, readHistory, turnsOf } from "./hyperframes.js";
 import { episodeWork } from "./settings.js";
 
 /** How many turns `what-happened` tells: the newest 10 that have something to say. */
@@ -128,6 +128,31 @@ export function daysOf(items, { tz, now }) {
   return lines;
 }
 
+/** The turns `what-happened` tells, newest first, each { ms, index, line }: those plainTurns has a line for (a turn with nothing in it
+    is left out, even the newest), and for one time the later line first, as plainTurns puts them. `index` is the turn's place in
+    `turns`. At most `most` of them, looking at as few as it takes: the guide, which tells the time of the newest alone (plan PR 10,
+    review M4), has it by this very selection, so that its time is the first that what-happened gives. `tz` is the zone the lines tell
+    their times in (the Mac's own when none is given), and a zone that is not one throws when there is a turn to tell. */
+export function toldTurns(turns, { tz }, most = Infinity) {
+  const told = [];
+  const newestFirst = turns.map((turn, index) => ({ turn, index, ms: Date.parse(turn.at) })).sort((a, b) => b.ms - a.ms || b.index - a.index);
+  for (const { turn, index, ms } of newestFirst) {
+    if (told.length >= most) break;
+    const [line] = plainTurns([turn], { tz });
+    if (line) told.push({ ms, index, line });
+  }
+  return told;
+}
+
+/** The time of a turn, `ms`, as the guide tells it (plan PR 10): the day and the clock of what-happened's lines, "today at 3:41 pm",
+    "yesterday at 3:41 pm" or "on Tuesday 27 October at 3:41 pm". The day is daysOf's, and the clock plainTurns', both in the zone `tz`
+    (an IANA name; the Mac's own when none is given), and a zone that is not one throws. `now` is the clock, in milliseconds. */
+export function turnTime(ms, { tz, now }) {
+  const [heading] = daysOf([{ ms, line: "" }], { tz, now });
+  const day = heading.slice(0, -1);
+  return `${day === "Today" ? "today" : day === "Yesterday" ? "yesterday" : `on ${day}`} at ${clockIn(tz)(ms)}`;
+}
+
 /** The folder of the main project in use on this Mac, or null: the record has none (one kept for an earlier kind is none in use,
     and a folder the record does not list is not looked at: the next `app` takes it into the record), or its name leads nowhere a
     folder is, or its folder is not here. */
@@ -153,16 +178,12 @@ export function whatHappened(ctx, { found, record }, deps = {}) {
     return 1;
   }
   const dir = mainProjectDir(ctx, { found, record });
-  const told = (dir ? turnsOf(historyTail(dir)) : []).flatMap((turn, index) => {
-    const [line] = plainTurns([turn], { tz: deps.tz });
-    return line ? [{ ms: Date.parse(turn.at), index, line }] : [];
-  });
+  // Newest first; for the same time the later line first, as plainTurns puts them.
+  const told = dir ? toldTurns(turnsOf(historyTail(dir)), { tz: deps.tz }) : [];
   if (told.length === 0) {
     ctx.say(nothingYet(name));
     return 0;
   }
-  // Newest first; for the same time the later line first, as plainTurns puts them.
-  told.sort((a, b) => b.ms - a.ms || b.index - a.index);
   const shown = told.slice(0, MOST_TURNS);
   ctx.say(`What was done in HyperFrames on ${name}, newest first:`);
   for (const line of daysOf(shown, { tz: deps.tz, now: ctx.now() })) ctx.say(line);

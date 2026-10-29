@@ -355,6 +355,20 @@ describe("C4. two exports of one minute, and a file she names", () => {
     const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.56", "mov"))]), NONE);
     assert.deepEqual([got.asks, got.parts], [[TWO], []]);
   });
+  it("names the parts it asked which export is final of, `tied`, unless every one of them began before the project last changed (plan PR 10, review M1)", () => {
+    const pair = (over, files) => lookForExports(found([main(over), reel2()], [...(files || [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.56", "mov"))]), file(named(P_REEL2, "14.03"))]), NONE);
+    assert.deepEqual(pair({}).tied, ["main"]);
+    // The number the system gives a copy makes a second name in the minute too.
+    assert.deepEqual(pair({}, [file(named(P_MAIN, "13.56")), file(`${P_MAIN} 2026-10-20 13.56 (1).mp4`)]).tied, ["main"]);
+    // Both began before the change: she changed it after exporting it, so it is asked of as any older export is, and the part is not tied.
+    assert.deepEqual(pair({ changed: ms(14, 30) }).tied, []);
+    // Known to the minute only, one can be after the change that fell inside that minute.
+    assert.deepEqual(pair({ changed: ms(13, 56, 30) }).tied, ["main"]);
+    // One export, or none, ties nothing; and a tie of a Reel's is the Reel's.
+    assert.deepEqual(lookForExports(found([main()], [file(named(P_MAIN, "13.56"))]), NONE).tied, []);
+    assert.deepEqual(lookForExports(found([main()], []), NONE).tied, []);
+    assert.deepEqual(lookForExports(found([main(), reel2()], [file(named(P_MAIN, "13.56")), file(named(P_REEL2, "14.03")), file(named(P_REEL2, "14.03", "mov"))]), NONE).tied, ["reel 2"]);
+  });
   it("says where each is when one name is in both places and the two differ", () => {
     const name = named(P_MAIN, "13.56");
     const got = lookForExports(found([main()], [file(name, { bytes: 5000 })], [file(name, { bytes: 6000 })]), NONE);
