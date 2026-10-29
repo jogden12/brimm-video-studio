@@ -5,7 +5,7 @@
 // program, and none of these writes anything into the video's.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
@@ -361,6 +361,24 @@ describe("B5. where finish would go no further, the guide says nothing new", () 
     // `finish` took the rev it found: the second time goes on, and so does the guide.
     assert.equal(await line(w), says(REEL_2));
     assert.equal((await on(depsOf(w), "finish", FOLDER, "reels")).code, 0);
+  });
+  it("reads a hand-off that is a link to a regular file as one that cannot be read, though finish follows the link: Studio never makes a link there, and the guide's reader follows none (review F4, ruling 7)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const handoff = join(w.found.folder, HANDOFF_REL);
+    const copy = join(w.t.dir, "copy.brimm-ops.json");
+    copyFileSync(handoff, copy);
+    rmSync(handoff);
+    symlinkSync(copy, handoff);
+    const { looked, readdir } = spy();
+    assert.equal(await line(w, { readdir }), says(TAKE));
+    assert.deepEqual(looked, [], "Downloads is not listed");
+    const asked = await on(depsOf(w), "finish", FOLDER, "reels");
+    assert.equal(asked.code, 0, asked.said.join("\n"));
+    // The hand-off as a regular file, the same copy: the Reel line.
+    rmSync(handoff);
+    copyFileSync(copy, handoff);
+    assert.equal(await line(w), says(REEL_2));
   });
   it("has the page's step for a Reel project that is only on the other Mac, though finish takes its export from Downloads: the guide reads Downloads only for a project that is here, as for the main video (review F3)", async () => {
     const w = await W();
