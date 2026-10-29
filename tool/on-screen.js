@@ -45,7 +45,7 @@ const LATIN1 = "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo
 const NAMED = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
   ...Object.fromEntries(LATIN1.map((name, i) => [name, String.fromCharCode(0xa0 + i)])),
-  ensp: " ", emsp: " ", thinsp: " ", ndash: "–", mdash: "—", lsquo: "‘", rsquo: "’", sbquo: "‚", ldquo: "“", rdquo: "”", bdquo: "„",
+  ensp: "\u2002", emsp: "\u2003", thinsp: "\u2009", ndash: "–", mdash: "—", lsquo: "‘", rsquo: "’", sbquo: "‚", ldquo: "“", rdquo: "”", bdquo: "„",
   dagger: "†", bull: "•", hellip: "…", permil: "‰", prime: "′", Prime: "″", lsaquo: "‹", rsaquo: "›", euro: "€", trade: "™",
   larr: "←", uarr: "↑", rarr: "→", darr: "↓", harr: "↔", minus: "−"
 };
@@ -337,7 +337,8 @@ export function wordsOnScreen(read) {
 /** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder.
     `incomplete: true` is there only for a project that was not read in full (its budget was used up, see wordsOnScreen), and its
     words are none. Only `index.html` and the compositions under `compositions/` that a host names are opened, and only a regular file
-    of at most 2 MB whose real path is inside the project (a link, or a file reached through one, is not read). The project's other
+    of at most 2 MB whose real path is its name as written, under the project's real path (a link, or a file reached through one,
+    wherever it leads, is not read). The project's other
     writer, the app's agent, can swap a file between the look and the read, so a file is looked at, opened without following a link and
     without waiting for a writer (as `historyTail` opens the history), and read through the descriptor: it must be the file looked at (the
     same device and inode), a regular file within 2 MB, and no more than 2 MB and a byte is read from it, whatever it grows to. A file is

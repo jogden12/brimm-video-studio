@@ -87,6 +87,8 @@ describe("A1. the shapes of A0 and A0b", () => {
     // One it does not know, one with no semicolon, and one of another case stay as written.
     assert.deepEqual(texts(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3">&bogus; &Eacute &EACUTE; &frac99;</div>'))), ["&bogus; &Eacute &EACUTE; &frac99;"]);
     assert.deepEqual(texts(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3">Caf&eacute; &amp; Cr&egrave;me &mdash; 5&euro;</div>'))), ["Café & Crème — 5€"]);
+    // The spaces of other widths are spaces, and run together with any other.
+    assert.deepEqual(texts(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3">a&ensp;b&emsp;c&thinsp;d &nbsp;e</div>'))), ["a b c d e"]);
   });
 });
 
