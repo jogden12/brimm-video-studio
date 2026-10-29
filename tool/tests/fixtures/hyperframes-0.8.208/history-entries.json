@@ -1,0 +1,99 @@
+{
+  "entries": [
+    {
+      "id": "7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+      "who": {
+        "kind": "agent",
+        "name": "Framey"
+      },
+      "label": "Undid: Make the title bigger and move it up a little",
+      "startedAt": 1793131961000,
+      "endedAt": 1793131961120,
+      "files": [
+        "index.html"
+      ],
+      "undone": false,
+      "pinned": false
+    },
+    {
+      "id": "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091",
+      "who": {
+        "kind": "person",
+        "name": "You"
+      },
+      "label": "Imported media",
+      "startedAt": 1793131675402,
+      "endedAt": 1793131675402,
+      "files": [
+        "assets/music/theme-song.mp3"
+      ],
+      "undone": false,
+      "pinned": false
+    },
+    {
+      "id": "9e8d7c6b-5a49-4382-b1a0-9f8e7d6c5b4a",
+      "who": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1793131563000,
+      "endedAt": 1793131563000,
+      "files": [
+        "recording.transcript.json"
+      ],
+      "undone": false,
+      "pinned": false
+    },
+    {
+      "id": "3f4e5d6c-7b8a-4901-a2b3-c4d5e6f70819",
+      "who": {
+        "kind": "agent",
+        "name": "Framey"
+      },
+      "label": "recording.mp4\n\nAdd the BRIMM logo in the bottom right corner for the whole video",
+      "startedAt": 1793130728000,
+      "endedAt": 1793130764218,
+      "files": [
+        "compositions/logo.html",
+        "assets/logos/brimm-logo.png"
+      ],
+      "undone": false,
+      "pinned": true
+    },
+    {
+      "id": "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d",
+      "who": {
+        "kind": "agent",
+        "name": "Framey"
+      },
+      "label": "1. Remove “um,”: Cut media/recording.mp4 from 12.4s to 12.8s so the take is clean.",
+      "startedAt": 1793130410000,
+      "endedAt": 1793130439730,
+      "files": [
+        "index.html"
+      ],
+      "undone": false,
+      "pinned": false
+    },
+    {
+      "id": "0f1e2d3c-4b5a-4697-8879-6a5b4c3d2e1f",
+      "who": {
+        "kind": "agent",
+        "name": "Framey"
+      },
+      "label": "Make the title bigger and move it up a little",
+      "startedAt": 1793130068000,
+      "endedAt": 1793130091906,
+      "files": [
+        "index.html"
+      ],
+      "undone": true,
+      "pinned": false
+    }
+  ],
+  "_meta": {
+    "version": "0.8.208",
+    "updateAvailable": false
+  }
+}

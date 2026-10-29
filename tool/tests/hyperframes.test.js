@@ -3,13 +3,16 @@
 // tests/fixtures/hyperframes-0.8.208/. Four are captures from the pinned version itself, run in a scratch folder (help.txt,
 // history-empty.json, catch-up-empty.json, open-not-installed.json). The two that need the Mac app (open-opened.json and
 // open-opened-handed-over.json) are what its own code for `open` prints, run with the platform and the opener stubbed, since only
-// a Mac with the app can print them; A0b replaces them with captures. app-history.jsonl is made up. A path in a fixture is the
-// made-up one of an episode on Sallie's laptop.
+// a Mac with the app can print them; A0b replaces them with captures. app-history.jsonl is made up. history-entries.json (plan
+// PR 6) has the keys, their order and the kinds of `who` that the pinned `history --json` printed in a run in a scratch home on
+// 2026-10-28 (a labelled turn, a change made outside it, an undo and a pin); its ids, times, labels and files are made up, and the
+// one `person` entry, which only the app makes, is written by hand in the same shape. A path in a fixture is the made-up one of an
+// episode on Sallie's laptop.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { SESSION_ID } from "../scan.js";
-import { PIN, pinFrom, COMMANDS, toolchainDir, cliPath, openArgs, commandsIn, unclassified, denyRules, settingsFor, childEnv, handoverAllowed, readOpen, turnsOf, plainTurns } from "../hyperframes.js";
+import { PIN, pinFrom, COMMANDS, toolchainDir, cliPath, openArgs, commandsIn, unclassified, denyRules, settingsFor, childEnv, handoverAllowed, readOpen, turnsOf, plainTurns, historyArgs, readHistory, plainText, plainVersions, VERSIONS_LIMIT, QUOTE_MOST, FILES_MOST } from "../hyperframes.js";
 
 const fixture = (name) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/${name}`, import.meta.url), "utf8");
 const help = fixture("help.txt");
@@ -523,8 +526,259 @@ describe("what was done in the app, in her words", () => {
   });
 });
 
+// --- PR 6: what the app's history holds, in her words ---
+
+/** The pattern every test of what she reads holds a line to: no path, no flag, no command (tests/edit-app.test.js has the same). */
+const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|hyperframes\.mjs/;
+const NEW_YORK = "America/New_York";
+
+describe("the pinned history call", () => {
+  const given = { home: HOME, node: NODE, project: `${HOME}/BRIMM Video Work/E/P` };
+  it("is `node <the pinned program> history --json --limit 20 --dir <project>`, in that order, with nothing of npx in it", () => {
+    const { file, args } = historyArgs(given);
+    assert.equal(file, NODE);
+    assert.deepEqual(args, [cliPath(HOME), "history", "--json", "--limit", "20", "--dir", given.project]);
+    assert.equal(VERSIONS_LIMIT, 20);
+    assert.ok(!args.includes("npx"));
+  });
+  it("is given only absolute paths, so that a path can never be taken for an option", () => {
+    for (const project of ["", "BRIMM Video Work/E/P", "./P", "--json", undefined, null, 5]) assert.throws(() => historyArgs({ ...given, project }), /absolute/, String(project));
+    for (const node of ["node", "", undefined]) assert.throws(() => historyArgs({ ...given, node }), /absolute/, String(node));
+    for (const home of ["Users/sallie", "", undefined]) assert.throws(() => historyArgs({ ...given, home }), /absolute/, String(home));
+    assert.throws(() => historyArgs(undefined), /absolute/);
+  });
+});
+
+describe("what `history --json` printed", () => {
+  const printed = fixture("history-entries.json");
+  const entry = (over = {}) => ({ id: "x", who: { kind: "agent", name: "Framey" }, label: "l", startedAt: 1793130068000, endedAt: 1793130091906, files: ["a.html"], undone: false, pinned: false, ...over });
+  const printing = (...entries) => JSON.stringify({ entries, _meta: { version: PIN.version, updateAvailable: false } });
+
+  it("reads the fixture into six entries, in the command line's order, newest first", () => {
+    const read = readHistory(printed, 0);
+    assert.equal(read.ok, true);
+    assert.equal(read.entries.length, 6);
+    assert.deepEqual(read.entries[0], { kind: "agent", label: "Undid: Make the title bigger and move it up a little", endedAt: 1793131961120, files: ["index.html"], undone: false, pinned: false });
+    assert.deepEqual(Object.keys(read.entries[0]), ["kind", "label", "endedAt", "files", "undone", "pinned"]);
+    assert.deepEqual(read.entries.map((e) => e.kind), ["agent", "person", "outside", "agent", "agent", "agent"]);
+    assert.deepEqual(read.entries.map((e) => [e.undone, e.pinned]), [[false, false], [false, false], [false, false], [false, true], [false, false], [true, false]]);
+    assert.deepEqual(read.entries[3].files, ["compositions/logo.html", "assets/logos/brimm-logo.png"]);
+    assert.deepEqual(read.entries.map((e) => e.endedAt), [...read.entries.map((e) => e.endedAt)].sort((a, b) => b - a));
+  });
+  it("reads no entries as none, when the command line says so with status 0", () => {
+    assert.deepEqual(readHistory(fixture("history-empty.json"), 0), { ok: true, entries: [] });
+  });
+  it("cannot read an exit status other than 0, an empty or bad output, or one that is not the list it prints", () => {
+    for (const code of [1, 2, null, undefined, "0", -1]) assert.deepEqual(readHistory(printed, code), { ok: false }, String(code));
+    const outputs = ["", "   ", "not json", "{", "[]", "null", "5", '"text"', "{}", '{"entries": 5}', '{"entries": {}}', '{"entries": null}', '{"ok": false, "error": "No entry"}', '{"ok": false, "entries": [], "error": "x"}',
+      undefined, null, 5, {}, [], Buffer.from(printed)];
+    for (const stdout of outputs) assert.deepEqual(readHistory(stdout, 0), { ok: false }, String(stdout).slice(0, 30));
+  });
+  it("cannot read a list whose entries none can be read, which is not the same as a list with none", () => {
+    assert.deepEqual(readHistory(JSON.stringify({ entries: [5, null, "x", [], {}, { label: "no time" }, { endedAt: "soon" }, { endedAt: null }, { endedAt: true }] }), 0), { ok: false });
+    assert.deepEqual(readHistory(printing(), 0), { ok: true, entries: [] });
+  });
+  it("passes over an entry it cannot date and keeps the others, in the order given", () => {
+    const read = readHistory(printing(entry({ label: "kept" }), entry({ endedAt: "soon" }), entry({ endedAt: null }), entry({ endedAt: undefined }), 5, null, entry({ label: "also kept" })), 0);
+    assert.deepEqual(read.entries.map((e) => e.label), ["kept", "also kept"]);
+  });
+  it("takes a part that is not what it should be as none, and keeps the rest", () => {
+    const [bare] = readHistory(printing({ endedAt: 1793130091906 }), 0).entries;
+    assert.deepEqual(bare, { kind: "", label: "", endedAt: 1793130091906, files: [], undone: false, pinned: false });
+    const [odd] = readHistory(printing(entry({ who: "Framey", label: 7, files: "index.html", undone: "yes", pinned: 1 })), 0).entries;
+    assert.deepEqual(odd, { kind: "", label: "", endedAt: 1793130091906, files: [], undone: false, pinned: false });
+    const [mixed] = readHistory(printing(entry({ who: { kind: 5, name: "x" }, files: ["ok.html", 5, null, "", {}, "also.html"] })), 0).entries;
+    assert.deepEqual([mixed.kind, mixed.files], ["", ["ok.html", "also.html"]]);
+    // Only a true is a flag: whether it was undone is not guessed at.
+    const [flags] = readHistory(printing(entry({ undone: true, pinned: true })), 0).entries;
+    assert.deepEqual([flags.undone, flags.pinned], [true, true]);
+  });
+  it("cuts a label, a kind and a file at 2,000 characters, as the command line cuts a turn's texts", () => {
+    const long = "x".repeat(2500);
+    const [cut] = readHistory(printing(entry({ who: { kind: long, name: "n" }, label: long, files: [long, "short.html"] })), 0).entries;
+    assert.deepEqual([cut.kind.length, cut.label.length, cut.files[0].length, cut.files[1]], [2000, 2000, 2000, "short.html"]);
+  });
+});
+
+describe("what she or the app wrote, in a line of hers", () => {
+  it("puts it on one line, takes markdown's marks off and says a link as its words", () => {
+    assert.equal(plainText("Made the **title** bigger.\n\nNow `index` is\r\n  updated"), "Made the title bigger. Now index is updated");
+    assert.equal(plainText("See [the logo](computer://files/logo.png) and [more](https://example.com/a/b)."), "See the logo and more.");
+    assert.equal(plainText("a *slanted* and **bold** word, and an address https://example.com/a/b?c=d in it"), "a slanted and bold word, and an address in it");
+  });
+  it("says a path as its file's name", () => {
+    assert.equal(plainText("I moved assets/logos/brimm-logo.png and /Users/x/Work/index.html, ../up/y.css and ~/a.mov"), "I moved brimm-logo.png and index.html, y.css and a.mov");
+    assert.equal(plainText("Cut media/recording.mp4 now"), "Cut recording.mp4 now");
+    assert.equal(plainText("the assets/fonts/ folder and file:///Users/x/a.png"), "the fonts folder and a.png");
+  });
+  it("says any other slash as a space, and leaves a bare one out", () => {
+    assert.equal(plainText("a 9/16 frame, and/or square, w/ captions"), "a 9 16 frame, and or square, w captions");
+    assert.equal(plainText("red / blue // green"), "red blue green");
+  });
+  it("leaves a flag out and makes any other double hyphen one", () => {
+    assert.equal(plainText("Run it with --limit 20 or --dir=/x/y now"), "Run it with 20 or now");
+    assert.equal(plainText("wait -- no, a--b and ---"), "wait - no, a-b and -");
+    assert.equal(plainText("keep -20% and -y"), "keep -20% and -y");
+  });
+  it("says nothing of a text with a command in it, since nothing can be made plain of it", () => {
+    for (const text of ["I ran npx hyperframes lint", "then npm install", "run node something", "Node was slow", "see edit.js", "open hyperframes.mjs", "/usr/local/bin/node"]) assert.equal(plainText(text), "", text);
+    // A word that only holds one of them is a word.
+    assert.equal(plainText("node_modules, nodes and an npxy thing"), "node_modules, nodes and an npxy thing");
+  });
+  it("cuts a long text at a word and ends it with an ellipsis, and leaves exactly that long alone", () => {
+    assert.equal(QUOTE_MOST, 200);
+    const exact = `${"word ".repeat(39)}wordy`;
+    assert.equal(exact.length, 200);
+    assert.equal(plainText(exact), exact);
+    const cut = plainText("word ".repeat(100));
+    assert.equal(cut, `${"word ".repeat(39)}word…`);
+    assert.ok(cut.length <= QUOTE_MOST + 1);
+    assert.equal(plainText("x".repeat(201)), `${"x".repeat(200)}…`);
+    assert.equal(plainText("short, and cut at nothing."), "short, and cut at nothing.");
+    assert.equal(plainText("a b c d e f", 5), "a b c…");
+    assert.equal(plainText("lots of words here", 8), "lots of…");
+  });
+  it("says nothing for what is not a text, or has nothing in it", () => {
+    for (const nothing of [undefined, null, 5, {}, ["a"], true, "", "   ", "\n\t", "**", "``", "/", "//", "--"]) assert.equal(plainText(nothing), "", String(nothing));
+  });
+  it("never gives a path, a flag or a command, whatever it is given", () => {
+    const nasty = [
+      "see assets/fonts/a.ttf and compositions/x.html", "/Users/sallie/BRIMM Video Work/E/P/index.html", "C:\\Users\\x\\a.png", "npx hyperframes lint --fix", "node edit.js app",
+      "run `npx hyperframes history --limit 20`", "[go](file:///Users/x/a.png)", "a//b///c", "--", "---", "a --b -- c--d", "9/16 and 16/9, w/o, and/or", "http://example.com/a?b=c",
+      "https://example.com", "hyperframes.mjs open", "~/Movies/x.mp4", "../../etc/passwd", "./a", "a/", "/", "//", "node_modules/.bin/hyperframes", "x".repeat(5000), "\u0000/\u0000",
+      "end /", "/ start", "a/b c/d.e f/g/h", "**bold/path.txt**", "`code --flag`", "[a](b) [c](d/e)", "\n/\n--\n", "Node.js and NPM", "see 1/2 and 3/4/5", "mid--dash--dash", "-- --flag --- -- x"
+    ];
+    for (const text of nasty) {
+      const said = plainText(text);
+      assert.doesNotMatch(said, PLAIN, `${JSON.stringify(text)} -> ${JSON.stringify(said)}`);
+      assert.doesNotMatch(said, /\bnpm\b/i, said);
+      assert.doesNotMatch(said, /[\r\n]/, said);
+    }
+  });
+});
+
+describe("what was done in the app, in her words, with what the real history has in it", () => {
+  const AT = "2026-10-27T19:41:08.000Z";
+  const turn = (fields = {}) => ({ at: AT, engine: "claude", asked: "make it blue", did: "", files: [], ...fields });
+  const say = (fields) => plainTurns([turn(fields)], { tz: NEW_YORK });
+
+  it("says what she asked and what the app did without a path, a link's address, a flag or markdown", () => {
+    assert.deepEqual(say({ asked: "Move **it** to assets/logos/a.png --now", did: "Done: see [it](x://y/z.html).\n\n- the title\n- the logo" }), ["3:41 pm: you asked Move it to a.png; HyperFrames did Done: see it. - the title - the logo"]);
+  });
+  it("leaves out a text it cannot make plain, and says the rest", () => {
+    assert.deepEqual(say({ asked: "run npx hyperframes lint", did: "I checked it.", files: ["index.html"] }), ["3:41 pm: HyperFrames did I checked it.; changed index.html"]);
+    assert.deepEqual(say({ asked: "run npx hyperframes lint", did: "node said so", files: [] }), []);
+  });
+  it("cuts what she asked and what the app did at 200 characters", () => {
+    const [said] = say({ asked: "ask ".repeat(100), did: "did ".repeat(100) });
+    assert.equal(said, `3:41 pm: you asked ${"ask ".repeat(49)}ask…; HyperFrames did ${"did ".repeat(49)}did…`);
+  });
+  it("names up to five files, and says how many when there are more", () => {
+    assert.equal(FILES_MOST, 5);
+    const names = (n) => Array.from({ length: n }, (_, i) => `compositions/c${i + 1}.html`);
+    assert.deepEqual(say({ asked: "", files: names(5) }), ["3:41 pm: changed c1.html, c2.html, c3.html, c4.html, c5.html"]);
+    assert.deepEqual(say({ asked: "", files: names(6) }), ["3:41 pm: changed 6 files"]);
+    assert.deepEqual(say({ asked: "", files: [...names(6), "a/c1.html", "b/c2.html"] }), ["3:41 pm: changed 6 files"], "each file is counted once");
+  });
+  it("leaves out a file whose name holds a command or a double hyphen", () => {
+    assert.deepEqual(say({ asked: "", files: ["node.html", "a--b.png", "x/npx.js", "ok.html", "edit.js"] }), ["3:41 pm: changed ok.html"]);
+  });
+  it("never says a path, a flag or a command, whatever the turn holds", () => {
+    const said = plainTurns(turnsOf(fixture("app-history.jsonl")), { tz: NEW_YORK });
+    for (const line of said) assert.doesNotMatch(line, PLAIN, line);
+    const odd = plainTurns([turn({ asked: "move /Users/x/a.png --now and a/b", did: "see [x](/y/z) -- ok", files: ["/a/--b.html", "node_modules/.bin/x"] })], { tz: NEW_YORK });
+    for (const line of odd) assert.doesNotMatch(line, PLAIN, line);
+  });
+});
+
+describe("the versions, in her words", () => {
+  const { entries } = readHistory(fixture("history-entries.json"), 0);
+  const one = (over = {}) => ({ kind: "agent", label: "make it blue", endedAt: Date.parse("2026-10-27T19:41:08.000Z"), files: [], undone: false, pinned: false, ...over });
+  const say = (...over) => plainVersions(over.map((o) => one(o)), { tz: NEW_YORK });
+
+  it("says the fixture's six entries, newest first: the label, then who it was, and whether it was undone or is kept, and which files", () => {
+    assert.deepEqual(plainVersions(entries, { tz: NEW_YORK }), [
+      "4:12 pm: Undid: Make the title bigger and move it up a little (HyperFrames; changed index.html)",
+      "4:07 pm: Imported media (you; changed theme-song.mp3)",
+      "4:06 pm: Changed outside the app (outside HyperFrames; changed recording.transcript.json)",
+      "3:52 pm: recording.mp4 Add the BRIMM logo in the bottom right corner for the whole video (HyperFrames; kept; changed logo.html, brimm-logo.png)",
+      "3:47 pm: 1. Remove “um,”: Cut recording.mp4 from 12.4s to 12.8s so the take is clean. (HyperFrames; changed index.html)",
+      "3:41 pm: Make the title bigger and move it up a little (HyperFrames; undone; changed index.html)"
+    ]);
+  });
+  it("says who from the kind (readHistory keeps no name), and nothing of a kind it does not know", () => {
+    // The same time for all of them, so that they stay in the order given.
+    assert.deepEqual(say({ kind: "agent" }, { kind: "person" }, { kind: "outside" }, { kind: "robot" }, { kind: "" }), [
+      "3:41 pm: make it blue (HyperFrames)", "3:41 pm: make it blue (you)", "3:41 pm: make it blue (outside HyperFrames)", "3:41 pm: make it blue", "3:41 pm: make it blue"
+    ]);
+  });
+  it("says undone before kept, and each only when it is so", () => {
+    assert.deepEqual(say({ undone: true, pinned: true }, { undone: true }, { pinned: true }, {}), [
+      "3:41 pm: make it blue (HyperFrames; undone; kept)", "3:41 pm: make it blue (HyperFrames; undone)", "3:41 pm: make it blue (HyperFrames; kept)", "3:41 pm: make it blue (HyperFrames)"
+    ]);
+  });
+  it("says a label that is empty or not plain as a change, and still tells the entry", () => {
+    assert.deepEqual(say({ label: "" }, { label: "   " }, { label: "ran npx hyperframes lint", files: ["index.html"] }, { label: "", kind: "", files: [] }), [
+      "3:41 pm: a change (HyperFrames)", "3:41 pm: a change (HyperFrames)", "3:41 pm: a change (HyperFrames; changed index.html)", "3:41 pm: a change"
+    ]);
+  });
+  it("puts a long label, a path and markdown in a label as a line of hers has them", () => {
+    assert.deepEqual(say({ label: `**${"word ".repeat(100)}** in assets/fonts/a.ttf` }), [`3:41 pm: ${"word ".repeat(39)}word… (HyperFrames)`]);
+    assert.deepEqual(say({ label: "Put it in compositions/lt/card.html --now" }), ["3:41 pm: Put it in card.html (HyperFrames)"]);
+  });
+  it("names up to five files, and says how many when there are more", () => {
+    const names = (n) => Array.from({ length: n }, (_, i) => `assets/a${i + 1}.png`);
+    assert.deepEqual(say({ files: names(5) }), ["3:41 pm: make it blue (HyperFrames; changed a1.png, a2.png, a3.png, a4.png, a5.png)"]);
+    assert.deepEqual(say({ files: names(30) }), ["3:41 pm: make it blue (HyperFrames; changed 30 files)"]);
+    assert.deepEqual(say({ files: ["a/x.png", "b/x.png"] }), ["3:41 pm: make it blue (HyperFrames; changed x.png)"]);
+  });
+  it("puts the newest first whatever order it is given, and the given order for the same time", () => {
+    const given = [one({ label: "old", endedAt: Date.parse("2026-10-27T19:00:00.000Z") }), one({ label: "new", endedAt: Date.parse("2026-10-27T20:00:00.000Z") }), one({ label: "a" }), one({ label: "b" })];
+    const frozen = Object.freeze(given.map((e) => Object.freeze(e)));
+    assert.deepEqual(plainVersions(frozen, { tz: NEW_YORK }).map((line) => line.match(/^\d+:\d\d [ap]m: (\w+)/)[1]), ["new", "a", "b", "old"]);
+  });
+  it("tells the time in the time zone it is given, and refuses one that is not one", () => {
+    assert.equal(plainVersions([one()], { tz: "UTC" })[0].slice(0, 7), "7:41 pm");
+    assert.equal(plainVersions([one()], { tz: "Asia/Tokyo" })[0].slice(0, 7), "4:41 am");
+    assert.throws(() => plainVersions([one()], { tz: "Not/AZone" }), RangeError);
+  });
+  it("passes over an entry it cannot date, and takes nothing for nothing", () => {
+    assert.deepEqual(plainVersions([one({ endedAt: "soon" }), one({ endedAt: undefined }), null, 5, "text", one()], { tz: NEW_YORK }), ["3:41 pm: make it blue (HyperFrames)"]);
+    for (const nothing of [[], null, undefined, "text", 5, {}]) assert.deepEqual(plainVersions(nothing, { tz: NEW_YORK }), [], String(nothing));
+  });
+  it("never says a path, a flag or a command, whatever the entries hold", () => {
+    for (const line of plainVersions(entries, { tz: NEW_YORK })) assert.doesNotMatch(line, PLAIN, line);
+    for (const line of say({ label: "move /Users/x/a.png --now and a/b", files: ["/a/--b.html", "node_modules/.bin/x", "node.html"] }, { label: "npx hyperframes history --limit 20" })) assert.doesNotMatch(line, PLAIN, line);
+  });
+});
+
+describe("the fixture of the versions is what the pinned command line prints", () => {
+  const parsed = JSON.parse(fixture("history-entries.json"));
+  it("holds the keys of the command line's entries, in its order, for each kind of who", () => {
+    assert.deepEqual(Object.keys(parsed), ["entries", "_meta"]);
+    assert.deepEqual(Object.keys(parsed._meta), ["version", "updateAvailable"]);
+    assert.equal(parsed._meta.version, PIN.version);
+    for (const entry of parsed.entries) {
+      assert.deepEqual(Object.keys(entry), ["id", "who", "label", "startedAt", "endedAt", "files", "undone", "pinned"]);
+      assert.deepEqual(Object.keys(entry.who), ["kind", "name"]);
+      assert.ok(entry.files.every((file) => typeof file === "string"));
+      assert.ok(Number.isFinite(entry.startedAt) && entry.endedAt >= entry.startedAt);
+    }
+    assert.deepEqual(parsed.entries.map((e) => `${e.who.kind}:${e.who.name}`), ["agent:Framey", "person:You", "outside:Outside", "agent:Framey", "agent:Framey", "agent:Framey"]);
+    assert.deepEqual([parsed.entries.filter((e) => e.undone).length, parsed.entries.filter((e) => e.pinned).length], [1, 1]);
+    assert.deepEqual(parsed.entries.map((e) => e.endedAt), [...parsed.entries.map((e) => e.endedAt)].sort((a, b) => b - a), "newest first, as the command line lists them");
+  });
+  it("holds made-up ids in the shape of a chat's, no scratch or real path, and the day of the history fixture's turns", () => {
+    for (const entry of parsed.entries) assert.match(entry.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.equal(new Set(parsed.entries.map((e) => e.id)).size, parsed.entries.length);
+    assert.ok(!/\/tmp\/|\/home\/|\/root\/|\/Users\/|pr1-scratch|\/private\/var|BRIMM Video Work/.test(fixture("history-entries.json")));
+    const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+    assert.deepEqual([...new Set(parsed.entries.map((e) => day(e.endedAt)))], [day(Date.parse(turnsOf(fixture("app-history.jsonl"))[0].at))]);
+  });
+});
+
 describe("the fixtures are what the pinned command line prints", () => {
-  const JSON_FIXTURES = ["catch-up-empty.json", "history-empty.json", "open-not-installed.json", "open-opened.json", "open-opened-handed-over.json"];
+  const JSON_FIXTURES =["catch-up-empty.json", "history-empty.json", "open-not-installed.json", "open-opened.json", "open-opened-handed-over.json"];
   const PROJECT = "/Users/sallie/BRIMM Video Work/Pricing talk/Pricing talk main 3fa9c1";
 
   it("hold the shapes the command line's own code gives them", () => {
