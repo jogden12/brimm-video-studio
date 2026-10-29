@@ -6509,7 +6509,8 @@ function guideFacts(ctx, e, links, rates, notes) {
   // (the stage of a finish at work is `finish-running`; a bring, a read or an ask is refused by `finish` in "<command> is running"), the chain of
   // its versions has no gap, and Dropbox did not undo this Mac's last change to its record (review F1, F2a and F2c); and she has not said the video
   // is finished: her word stands (guide.js nextFor), so what the Reels would say is never said, and looking for them on every pass, `guide wait`'s
-  // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems).
+  // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems). The
+  // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
   const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
@@ -6535,7 +6536,7 @@ function guideFacts(ctx, e, links, rates, notes) {
     gated: kind !== "session" && sessionNotCleared(r),
     way,
     copy: way ? guideCopy(ctx, e, r, rates) : null,
-    project: way && !handoff ? guideProject(ctx, e, r) : null,
+    project: way && !handoff && !notes.finished[r.id] ? guideProject(ctx, e, r) : null,
     reelsExported: looksForReels ? guideReels(ctx, e, r) : [],
     session: kind === "session" ? guideSession(ctx, e, r) : null,
     handoff,
