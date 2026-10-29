@@ -72,10 +72,16 @@ export function suggestionsFor({ folder, record, main }) {
     return { list: [], left: e && e.code === "ENOENT" ? [] : ["No Reel suggestions are in the hand-off: their list cannot be read."] };
   }
   if (read.why) return { list: [], left: [`No Reel suggestions are in the hand-off: their list cannot be used: ${read.why.replace(/\.$/, "")}.`] };
-  const status = new Map((Array.isArray(record.reels) ? record.reels : []).map((r) => [r && r.n, r && r.status]));
-  const unmade = read.reels.candidates.filter((c) => (status.get(c.n) ?? "candidate") === "candidate");
-  if (!unmade.length) return { list: [], left: [] };
-  const recording = wordsIn(join(folder, `${basename(record.video.file, extname(record.video.file))}.words.json`));
-  if (!recording) return { list: [], left: ["No Reel suggestions are in the hand-off: the recording's words are not on this Mac."] };
-  return suggestionsInMain({ candidates: unmade, words: recording, spellings: Array.isArray(record.spellings) ? record.spellings : [], main });
+  // The suggestions are the one part of the hand-off that can be left out, and the files they come from are ones this finish did not write
+  // (the recording's words, say, with a null among them): whatever cannot be worked out is left out, with a sentence, and never stops the finish.
+  try {
+    const status = new Map((Array.isArray(record.reels) ? record.reels : []).map((r) => [r && r.n, r && r.status]));
+    const unmade = read.reels.candidates.filter((c) => (status.get(c.n) ?? "candidate") === "candidate");
+    if (!unmade.length) return { list: [], left: [] };
+    const recording = wordsIn(join(folder, `${basename(record.video.file, extname(record.video.file))}.words.json`));
+    if (!recording) return { list: [], left: ["No Reel suggestions are in the hand-off: the recording's words are not on this Mac."] };
+    return suggestionsInMain({ candidates: unmade, words: recording, spellings: Array.isArray(record.spellings) ? record.spellings : [], main });
+  } catch (e) {
+    return { list: [], left: ["No Reel suggestions are in the hand-off: they could not be placed in the main video."] };
+  }
 }

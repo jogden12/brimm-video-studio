@@ -10,6 +10,7 @@ import { finishEpisode } from "../edit.js";
 import { recordFile, recordText } from "../episode.js";
 import { finishNow } from "../finish.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
+import { suggestionsFor } from "../suggestions-in-main.js";
 import { EDITED, PROJECT, reread } from "./episodes.js";
 import { CANDIDATES, FOUR, MAIN_WORDS, ONE, THREE, TWO, exportOf, fw, suggestion as candidate } from "./exports-world.js";
 
@@ -101,6 +102,20 @@ describe("F2. which are listed", () => {
     assert.deepEqual(numbers(handoffOf(found)), [1, 3], "2 is picked: it is a Reel being made, not a suggestion");
     w.t.done();
   });
+  it("does not list a suggestion whose number is a Reel in this very hand-off, though the record still calls it unmade (review M11)", async () => {
+    // Reel 1 has a project and an export and goes into the hand-off; the record has it as a candidate (it was never marked picked). The hand-off
+    // never holds a number as a Reel and as a suggestion: the page would offer to make what is made.
+    const w = fw({ projects: ["main", "reel 1", "reel 2"], candidates: CANDIDATES, over: { reels: reelsWith([[1, "candidate"], [2, "picked"]]) } });
+    exportOf(w, "main");
+    exportOf(w, "reel 1");
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const handoff = handoffOf(found);
+    assert.deepEqual(handoff.reels.map((r) => r.n), [1, 2]);
+    assert.deepEqual(numbers(handoff), [3], "1 is a Reel here; 2 is a Reel; 4 is not in the main video");
+    assert.equal(handoffFaultV2(handoff), "");
+    w.t.done();
+  });
   it("lists none when none is left to list, and writes the hand-off all the same", async () => {
     const w = ready({ over: { reels: reelsWith([[1, "dropped"], [2, "picked"], [3, "dropped"], [4, "dropped"]]) } });
     const { found, result } = await finished(w);
@@ -146,6 +161,34 @@ describe("F3. what is said in the result", () => {
     assert.ok(b.next.includes("No Reel suggestions are in the hand-off: the recording's words are not on this Mac."), b.next);
     assert.equal("suggestions" in handoffOf(there), false);
     words.t.done();
+  });
+  // The recording's words are a file the finish does not write, and any hand can have left it odd (review M3): a null among them used to stop
+  // the finish with "Cannot read properties of null". The suggestions are the one part of the hand-off that is optional, so they are left out.
+  const UNPLACED = "No Reel suggestions are in the hand-off: they could not be placed in the main video.";
+  it("says they could not be placed, and writes the hand-off without suggestions, when the recording's words hold a null", async () => {
+    const w = ready();
+    const found = await asked(w);
+    const path = join(found.folder, "Pricing talk.words.json");
+    const held = JSON.parse(readFileSync(path, "utf8"));
+    const words = Array.isArray(held) ? held : held.words;
+    assert.ok(words.length > 0);
+    writeFileSync(path, JSON.stringify([...words.slice(0, 3), null, ...words.slice(3)]));
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.ok(result.next.includes(UNPLACED), result.next);
+    const handoff = handoffOf(found);
+    assert.equal("suggestions" in handoff, false);
+    assert.equal(handoffFaultV2(handoff), "");
+    assert.deepEqual(handoff.reels.map((r) => r.n), [2], "and the rest of the hand-off is as it was");
+    w.t.done();
+  });
+  it("gives that sentence for anything else it cannot work out, and does not throw", async () => {
+    const w = ready();
+    const found = await asked(w);
+    for (const main of [null, undefined, { words: null, seconds: 14, timed: true }]) {
+      assert.deepEqual(suggestionsFor({ folder: found.folder, record: found.record, main }), { list: [], left: [UNPLACED] }, JSON.stringify(main));
+    }
+    w.t.done();
   });
   it("says a list that cannot be read at all, as one that is no file", async () => {
     const w = ready();

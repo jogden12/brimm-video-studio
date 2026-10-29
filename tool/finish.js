@@ -839,10 +839,6 @@ export async function finishNow(ctx, found, deps = {}) {
     // A main video that went the Final Cut way has the record's titles (`record.main.texts`), which brimm-video drew there.
     const linesOf = (list) => (Array.isArray(list) ? list.filter((line) => typeof line === "string" && line.trim() !== "").map((line) => line.replace(/\s+/g, " ").trim()) : null);
     const drawn = main.app ? linesOf(main.onPicture) ?? linesOf(before.main && before.main.onPicture) ?? [] : onPictureOf(record);
-    // The Reel suggestions that fall in the exported main video (plan PR 8; architecture 8.6): for a raw video's main taken from HyperFrames'
-    // export, in a version 2 hand-off. A Final Cut finish never gave a raw video its suggestions, and an iPhone clip's contract has none.
-    const placed = v2 && main.app && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, main: { words: mainWords, seconds: main.seconds, timed: Boolean(main.words) } }) : { list: [], left: [] };
-    next.push(...placed.left);
     const reels = parts.filter((p) => p.reel).sort((a, b) => a.reel - b.reel).map((p) => {
       const reel = (record.reels || []).find((r) => r.n === p.reel) || {};
       const title = String(reel.title || "").trim();
@@ -854,6 +850,12 @@ export async function finishNow(ctx, found, deps = {}) {
       const fromSuggestion = p.app ? (Number.isInteger(p.fromSuggestion) ? p.fromSuggestion : null) : fromSuggestionOf({ ...reel, n: p.reel });
       return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, main.seconds, { spacing: timed }), srt: p.srt, fromSuggestion };
     });
+    // The Reel suggestions that fall in the exported main video (plan PR 8; architecture 8.6): for a raw video's main taken from HyperFrames'
+    // export, in a version 2 hand-off. A Final Cut finish never gave a raw video its suggestions, and an iPhone clip's contract has none. A
+    // number is a Reel or a suggestion in a hand-off, never both: the record can still call unmade a suggestion whose Reel is in this hand-off.
+    const placed = v2 && main.app && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, main: { words: mainWords, seconds: main.seconds, timed: Boolean(main.words) } }) : { list: [], left: [] };
+    placed.list = placed.list.filter((suggestion) => !reels.some((reel) => reel.n === suggestion.n));
+    next.push(...placed.left);
     if (failed.length) return result();
     const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
     const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: drawn, suggestions: placed.list }) : buildHandoff(given);
