@@ -1,0 +1,24 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; background: #E8E3DA; font-family: "Josefin Sans", sans-serif; overflow: hidden; }
+    #title-card-arch { position: absolute; left: 560px; top: 150px; width: 800px; height: 960px; }
+    #title-card-words { position: absolute; left: 0; right: 0; top: 424px; display: flex; flex-direction: column; align-items: center; gap: 28px; color: #1F2D42; text-align: center; }
+    #title-card-line1 { font-size: 120px; line-height: 1; }
+    #title-card-line2 { font-size: 52px; line-height: 1; }
+  </style>
+  <div data-hf-id="hf-m017" id="root" data-composition-variables='[{"id":"line1","type":"string","label":"Title, first line","default":"Your title"},{"id":"line2","type":"string","label":"Title, second line","default":"goes here"}]' data-composition-id="title-card" data-width="1920" data-height="1080">
+    <svg data-hf-id="hf-m018" id="title-card-arch" class="clip" data-start="0" data-duration="3" viewBox="0 0 800 960" data-layout-ignore>
+      <path data-hf-id="hf-m019" id="title-card-arch-line" d="M1 960 V400 A399 399 0 0 1 799 400 V960" fill="none" stroke="#C1AD97" stroke-width="2" />
+    </svg>
+    <div data-hf-id="hf-m020" id="title-card-words" class="clip" data-start="0" data-duration="3">
+      <div data-hf-id="hf-m021" id="title-card-line1" data-var-text="line1">Your title</div>
+      <div data-hf-id="hf-m022" id="title-card-line2" data-var-text="line2">goes here</div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#title-card-line1", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.2, ease: "power2.out" }, 0.35);
+    tl.fromTo("#title-card-line2", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.2, ease: "power2.out" }, 0.5);
+    window.__timelines["title-card"] = tl;
+  </script>
+</template>

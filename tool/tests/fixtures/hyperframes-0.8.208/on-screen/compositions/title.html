@@ -1,0 +1,15 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+    #title-text { position: absolute; left: 60px; right: 60px; top: 150px; font-family: "Josefin Sans", sans-serif; font-size: 84px; line-height: 1.05; text-align: center; color: #1f2d42; }
+  </style>
+  <div data-hf-id="hf-m023" id="root" data-composition-id="title" data-width="1080" data-height="1920">
+    <div data-hf-id="hf-m024" id="title-text" data-var-text="title">Mistake one</div>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#title-text", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 0);
+    window.__timelines["title"] = tl;
+  </script>
+</template>

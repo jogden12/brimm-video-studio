@@ -1,0 +1,34 @@
+<template>
+  <style>
+    @font-face { font-family: "Josefin Sans"; src: url("assets/fonts/josefin-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+    #root { position: absolute; inset: 0; --navy: #1F2D42; --mist: #E8E3DA; --sand: #C1AD97; }
+    #lt-card {
+      position: absolute;
+      left: 170px;
+      bottom: 150px;
+      padding: 38px 56px 34px;
+      background: var(--mist);
+      border-radius: 28px;
+      color: var(--navy);
+      font-family: "Josefin Sans", sans-serif;
+    }
+    #lt-name { font-weight: 500; font-size: 58px; line-height: 1; text-transform: uppercase; white-space: nowrap; }
+    #lt-rule { width: 100%; height: 2px; margin: 20px 0 18px; background: var(--sand); }
+    #lt-title { font-weight: 400; font-size: 36px; line-height: 1; white-space: nowrap; }
+  </style>
+  <div data-hf-id="hf-m012" id="root" data-composition-id="lower-third" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-m013" id="lt-card" class="clip" data-start="0" data-duration="6" data-track-index="0">
+      <div data-hf-id="hf-m014" id="lt-name" data-var-text="name">Alex Rivera</div>
+      <div data-hf-id="hf-m015" id="lt-rule"></div>
+      <div data-hf-id="hf-m016" id="lt-title" data-var-text="title">Head of Pricing</div>
+    </div>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#lt-card", { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 0);
+    tl.fromTo("#lt-name", { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power2.out" }, 0.2);
+    tl.fromTo("#lt-card", { opacity: 1 }, { opacity: 0, duration: 0.25, ease: "power2.in", immediateRender: false }, 5.7);
+    window.__timelines["lower-third"] = tl;
+  </script>
+</template>

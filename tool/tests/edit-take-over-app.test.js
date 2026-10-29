@@ -18,7 +18,7 @@ import { projectChange } from "../exports.js";
 import { settingsText } from "../project.js";
 import { MARKER, readMarker } from "../snapshot.js";
 import { NAME } from "./episodes.js";
-import { ZONE } from "./exports-world.js";
+import { FOUND, LOWER_THIRD, ZONE, screen } from "./exports-world.js";
 import {
   COPY_TEXT, FOLDER, GUIDANCE as GUIDANCE_PATH, HELD, MAIN, REEL2, REEL_COPY_TEXT, T1, entry, exportOf, fillProject, filesBelow, listAll, madeCopy, madeReelCopy, ms, reread, takeOverWorld, textOf
 } from "./snapshot-world.js";
@@ -733,14 +733,17 @@ describe("app: a session clip's folder is never opened, however the record spell
 });
 
 describe("finish on the other Mac, after a take-over (group P)", () => {
-  it("finds the export the first Mac handed over, takes it without asking whether to export again, and says where it came from", async () => {
+  it("finds the export the first Mac handed over, takes it without asking whether to export again, and says where it came from, and finds the words on the picture in the rebuilt project (plan PR 8)", async () => {
     const w = takeOverWorld({ projects: ["main"], over: { reels: [] } });
+    // The main video's picture holds a lower third, as exports-world.js has it; it goes in the snapshot with the rest of the project, so the
+    // other Mac's finish reads the same words out of the project it rebuilt.
+    screen(w, "main", LOWER_THIRD);
     const main = exportOf(w, "main");
     assert.equal((await release(w.t.ctx.deps)).code, 0);
     await app(w.b.deps, FOLDER);
     const r = await on(w.b.deps, "finish", FOLDER);
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual(r.said, [`The main video: ${main.name}, from what the other Mac released, exported 2026-10-20 13:56.`, 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(r.said, [`The main video: ${main.name}, from what the other Mac released, exported 2026-10-20 13:56.`, FOUND, 'Say "yes, hand it off" to start.']);
     w.t.done();
   });
   it("would ask whether to export again if the rebuilt project's files had lost their times: which is why they keep them", async () => {

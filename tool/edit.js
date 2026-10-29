@@ -62,6 +62,7 @@ import { finishNow, finishFinished, finishSession, madeFromImport, importKind, w
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
+import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
@@ -213,13 +214,20 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         stored
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--final "<part>"]
                      [--no-hand-edits "<part>"] [--without "reel <n>"] [--as-it-is]
+                     [--on-screen "<words>"]… [--no-on-screen]
                                         find what HyperFrames exported of each part (in Downloads, or where the export's own
                                         record says it went), or for a video edited in Final Cut what Final Cut Shared and
                                         exported, and ask what it must. --final says an export is the final one though the
                                         project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
                                         detached. An iPhone clip she answered that was not opened in HyperFrames is asked
-                                        about once; --as-it-is writes its hand-off from the import's captions
+                                        about once; --as-it-is writes its hand-off from the import's captions. For a main
+                                        video taken from an export it reads the words on its picture out of the HyperFrames
+                                        project and asks if they are right (a --yes takes them only after a call has shown
+                                        them), and a raw video's hand-off also holds the Reel
+                                        suggestions that fall in it. --on-screen gives those words, once for each line in
+                                        the order they appear, when she changes or drops one, and --no-on-screen says there
+                                        are none. A Reel's title, when it has none, is asked with the Reel's first line
   node edit.js finish "<episode>" reels [--yes] [--take "reel <n>=<file | this Mac | the other Mac>"] [--final "reel <n>"]
                      [--without "reel <n>"]
                                         for a video her editor finished: find the exports of the Reels made from it in
@@ -2242,9 +2250,35 @@ function suggestionOpening(folder, n) {
   }
 }
 
+/** The lines `finish` last showed her as the words on the main video's picture, kept on this Mac's own disk beside finish.asked.json
+    (plan PR 8, review I1): a yes takes the words found only when they are these, so that no yes comes before she has seen them. It
+    holds { version, at, lines }; `shownWords` gives the lines, or null when the file is not there or holds no list of lines. */
+const SHOWN_WORDS = "finish.shown.json";
+function shownWords(work) {
+  try {
+    const kept = JSON.parse(readFileSync(join(work, SHOWN_WORDS), "utf8"));
+    return Array.isArray(kept?.lines) ? kept.lines : null;
+  } catch (e) {
+    return null;
+  }
+}
+/** Keep the lines just shown, in place of any kept before. A file that cannot be written keeps nothing, which asks her again. */
+function keepShownWords(work, lines, at) {
+  try {
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, SHOWN_WORDS), JSON.stringify({ version: 1, at, lines }, null, 2) + "\n");
+  } catch (e) {
+    // Nothing is kept: her next yes shows them again, and nothing starts without it.
+  }
+}
+const sameLines = (kept, lines) => Array.isArray(kept) && kept.length === lines.length && kept.every((line, i) => line === lines[i]);
+
 /** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
     exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
-    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once. */
+    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once.
+    For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
+    (plan PR 8, on-screen.js): `answers.onScreen` are the lines she gave instead, and `answers.noOnScreen` that there are none. A yes
+    takes the words found only if they are the lines the last call showed (finish.shown.json); otherwise it shows them, and starts nothing. */
 export async function finishEpisode(ctx, found, answers = {}) {
   const { record } = found;
   if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
@@ -2349,6 +2383,25 @@ export async function finishEpisode(ctx, found, answers = {}) {
       lines.push(...reels.parts.map((part) => part.line), ...reels.mentions);
     }
   }
+  // The words on the main video's picture (plan PR 8; architecture 8.5): those the project holds, read for her to confirm with her yes, or the
+  // ones she gives; with none found, she is asked. A main video kept as the last finish made it is not asked, and Final Cut's has its own.
+  let onPicture = null;
+  // Whether this call showed her the words found for her to say they are right: her yes is to the words she was shown, so this call starts nothing.
+  let showing = false;
+  const work = episodeWork(ctx.home, found.name);
+  const main = app ? looked.parts.find((p) => p.key === "main") : undefined;
+  if (main && v2) {
+    const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
+    const said = mainWordsSaid({ found: read.words, here: read.here, incomplete: read.incomplete, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
+    if (said.refusal) return refuse(ctx, said.refusal);
+    if (said.line) lines.push(said.line);
+    if (said.ask) looked.asks.push(said.ask);
+    if (said.shows) {
+      showing = true;
+      keepShownWords(work, said.shows, localStamp(new Date(ctx.now())));
+    }
+    onPicture = said.words;
+  }
   // (A Reel of a finished video that is kept stays in the hand-off as it was, with the title it has there: none is asked for it.)
   for (const part of looked.parts.filter((p) => p.reel && !(forReels && p.kept))) {
     const reel = (record.reels || []).find((r) => r.n === part.reel);
@@ -2361,7 +2414,8 @@ export async function finishEpisode(ctx, found, answers = {}) {
       continue;
     }
     const opening = mine ? suggestionOpening(found.folder, part.fromSuggestion) : expectedWords(part, record, plan);
-    looked.asks.push(`Reel ${part.reel} has no title on screen. Say what it says${opening ? `: it starts "${opening}"` : ""}.`);
+    // What the Reel's picture holds is a proposal for its title, which she confirms as she gives any title (plan PR 8).
+    looked.asks.push(reelTitleAsk({ n: part.reel, found: mine && part.project ? projectWordsIn(work, part.project).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
   if (looked.stops.length || stops.length) {
@@ -2371,7 +2425,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // Reels that are all kept as the hand-off has them, or none: there is no revision to write (the questions come first, since an answer
   // may take an export).
   if (forReels && !looked.asks.length && !looked.parts.some((part) => !part.kept)) return refuse(ctx, nothingNewWords(shownName(record), based.base.revision, retitledReels(based.onFile.reels, record.reels)));
-  if (looked.asks.length || !answers.yes) {
+  if (looked.asks.length || !answers.yes || showing) {
     if (!looked.asks.length) ctx.say(forReels ? REELS_START : app ? 'Say "yes, hand it off" to start.' : 'Say "yes, finish it" to start.');
     return 0;
   }
@@ -2391,14 +2445,20 @@ export async function finishEpisode(ctx, found, answers = {}) {
     return {
       key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects,
       ...(mine ? { project: p.project, fromSuggestion: p.fromSuggestion ?? null, expected: p.reel && !p.kept ? suggestionOpening(found.folder, p.fromSuggestion) : "" } : {}),
+      ...(p.key === "main" && onPicture !== null ? { onPicture } : {}),
       video: mine && p.video ? { name: p.video.name, dir: p.video.dir, where: p.video.where, bytes: p.video.bytes, mtimeMs: p.video.mtimeMs } : p.video,
       export: p.export, kept: p.kept, noHandEdits: mine ? false : noHandEdits.includes(p.key)
     };
   };
   const asked = { version: 1, ...(app ? { source: "hyperframes" } : {}), ...(forReels ? { base: based.base } : {}), at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map(askedPart) };
-  const work = episodeWork(ctx.home, found.name);
   mkdirSync(work, { recursive: true });
   writeFileSync(join(work, "finish.asked.json"), JSON.stringify(asked, null, 2) + "\n");
+  // A finish that has started has used what it was shown: the next finish shows its words again.
+  try {
+    rmSync(join(work, SHOWN_WORDS), { force: true });
+  } catch (e) {
+    // Whatever stands in its place is not a file it kept: it is read as nothing shown.
+  }
   startDetached(ctx, { command: "finish", folder: found.name });
   ctx.say("Started. The panel shows how far it is.");
   return 0;
@@ -2408,7 +2468,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     [--no-hand-edits "<part>"]… [--without "reel <n>"]… [--as-it-is]`, and the
     detached part it starts, `finish --now "<episode folder>"`, which runs finishNow holding the episode's lock. */
 async function finish(ctx, rest) {
-  const { words, flags } = flagsOf(rest, ["take", "no-hand-edits", "without", "final"]);
+  const { words, flags } = flagsOf(rest, ["take", "no-hand-edits", "without", "final", "on-screen"]);
   if (flags.now) {
     const found = findEpisode(ctx, words.join(" "));
     if (!found.read || !found.read.record) {
@@ -2444,7 +2504,7 @@ async function finish(ctx, rest) {
   // A session's finish is its own: the hand-off of what she approved of its teachings. It has no Reels to hand off this way.
   if (taughtSession(got.record)) return reels ? refuse(ctx, cannotFinish(got.record)) : finishSessionCommand(ctx, { ...got.found, record: got.record });
   const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
-  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [], final: flags.final || [], asItIs: Boolean(flags["as-it-is"]), reels: Boolean(reels) });
+  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [], final: flags.final || [], asItIs: Boolean(flags["as-it-is"]), onScreen: flags["on-screen"] || [], noOnScreen: Boolean(flags["no-on-screen"]), reels: Boolean(reels) });
 }
 
 /** Is a program running on this Mac, by its name, as pgrep finds it? */

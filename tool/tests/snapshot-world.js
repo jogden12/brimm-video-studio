@@ -2,7 +2,7 @@
 // PR 11): the made-up episode of exports-world.js (Mac Studio, with its main project and Reel 2 on disk, a Downloads folder, the app's
 // records of the exports), the projects filled with what `app` and the app put in a project, and a second Mac sharing the root. Nothing
 // here touches the real home, Dropbox, Downloads or BRIMM Video Work: every folder is a temporary one, and no program is run.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reelStretch } from "../app-reel.js";
@@ -54,7 +54,14 @@ export function fillProject(dir, { held = HELD, notHeld = NOT_HELD, at = ms(13, 
     as exports-world.js makes them. */
 export function releaseWorld({ projects = ["main", "reel 2"], over = {}, fill = true, ...rest } = {}) {
   const w = exportsWorld({ projects, over: { editing: MINE, ...over }, ...rest });
-  if (fill) for (const key of projects || []) fillProject(w.dirOf(key));
+  // exports-world.js writes a lower third into the main project (plan PR 8): here a project is what fillProject makes of it and nothing else, so
+  // that the files a snapshot holds are exactly HELD's.
+  if (fill) {
+    for (const key of projects || []) {
+      rmSync(w.dirOf(key), { recursive: true, force: true });
+      fillProject(w.dirOf(key));
+    }
+  }
   w.t.ctx.deps.running = async () => false;
   return w;
 }

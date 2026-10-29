@@ -24,6 +24,9 @@ const AT = "2026-10-20T15:00:00-05:00";
 const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "no" };
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const REEL2_OPENING = "So the first thing you need to do is know your costs.";
+// The project `app` makes has nothing on its picture yet, so finish asks what is on it (plan PR 8): she says there is nothing.
+const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
+const NOTHING = { noOnScreen: true };
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -92,9 +95,9 @@ describe("finish from the projects `app` and `app … reel N` make (PR 4's code 
     assert.deepEqual(w.t.said().split("\n"), [
       `The main video: ${named(MAIN, "13.56")}, from Downloads, exported 2026-10-20 13:56.`,
       `Reel 2: ${named(REEL2, "14.03")}, from Downloads, exported 2026-10-20 14:03.`,
-      'Say "yes, hand it off" to start.'
+      NONE_FOUND
     ]);
-    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true }), 0, w.t.said());
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true, ...NOTHING }), 0, w.t.said());
     assert.deepEqual(w.asked().parts.map((p) => [p.key, p.project, p.fromSuggestion, p.expected]), [["main", MAIN, null, ""], ["reel 2", REEL2, 2, REEL2_OPENING]]);
     const found = { ...w.found, record: record(w) };
     const result = await finishNow(w.t.ctx, found);
@@ -122,10 +125,10 @@ describe("finish from the projects `app` and `app … reel N` make (PR 4's code 
     // Without an export of it, nothing is asked of it.
     exportOf(w, "main");
     assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [`The main video: ${named(MAIN, "13.56")}, from Downloads, exported 2026-10-20 13:56.`, 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(w.t.said().split("\n"), [`The main video: ${named(MAIN, "13.56")}, from Downloads, exported 2026-10-20 13:56.`, NONE_FOUND]);
     // With an old export of it in Downloads, it is not handed off either.
     const reel = exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true }), 0, w.t.said());
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true, ...NOTHING }), 0, w.t.said());
     assert.deepEqual(w.asked().parts.map((p) => p.key), ["main"]);
     const result = await finishNow(w.t.ctx, { ...w.found, record: record(w) });
     assert.equal(result.ok, true, result.failed.join(" "));
@@ -144,7 +147,7 @@ describe("finish from the projects `app` and `app … reel N` make (PR 4's code 
     assert.deepEqual(record(w).reels.map((r) => [r.n, r.status]), [[1, "candidate"], [2, "picked"]]);
     exportOf(w, "main");
     exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true }), 0, w.t.said());
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: record(w) }, { yes: true, ...NOTHING }), 0, w.t.said());
     assert.deepEqual(w.asked().parts.map((p) => p.key), ["main", "reel 2"]);
     w.t.done();
   });
