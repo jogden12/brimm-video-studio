@@ -1231,7 +1231,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     show: [[label, "transcript"], [label, "notes"], [label, "plan"], []],
     behind: [[]],
     resolve: [[label], [label, "--keep", "B"], []],
-    free: [[label, "library"], []],
+    free: [[label, "library"], [label], []],
     spell: [[label], [label, "add", "Jane", "Jayne"], []],
     logo: [[label, "on"], []],
     captions: [[label, "reel", "1", "on"], []],
@@ -1422,7 +1422,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const label = record.label;
     for (const name of COMMAND_NAMES) {
       // `kind` and `leave` would answer the video the commands after them are walked for, so they are given words that do not.
-      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], free: [[]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
+      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
       for (const given of words) {
         const before = resultsIn(t.home);
         const r = await on(depsOf(t), name, ...given);

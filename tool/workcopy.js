@@ -243,14 +243,21 @@ export function workCopyKey(file) {
   return `${bytes}-${Math.floor(mtimeMs)}${fourK ? "-4k" : ""}`;
 }
 
+/** The folder of the working copies of the episode in `folder` on this Mac: "working copy" in the episode's own folder in BRIMM
+    Video Work. Throws for a folder that is not one folder's name (an episode's folder is a name in Episodes, with no slash in it),
+    so that no path leaves the folder: the job renames into it and takes copies away from it, and `free` takes the folder away
+    (free.js), all by this one name. */
+export function workCopyDir(home, folder) {
+  if (typeof folder !== "string" || !folder || folder === "." || folder === ".." || /[/\0]/.test(folder)) throw new Error(`A working copy goes in an episode's own folder, and ${JSON.stringify(folder)} is not the name of one.`);
+  return join(episodeWork(home, folder), "working copy");
+}
+
 /** Where a working copy goes, for the episode in `folder` on this Mac: { dir, video, facts }. The finished video is in the
-    episode's own folder in BRIMM Video Work, in "working copy", with its facts beside it. Throws for a key that workCopyKey could
-    not have made, and for a folder that is not one folder's name (an episode's folder is a name in Episodes, with no slash in it),
-    so that no path leaves the folder: the job renames into it and takes copies away from it. */
+    folder of the copies (workCopyDir), with its facts beside it. Throws for a key that workCopyKey could not have made, and for a
+    folder that workCopyDir refuses. */
 export function workCopyPaths(home, folder, key) {
   if (typeof key !== "string" || !KEY.test(key)) throw new Error(`A working copy's key is its size and its time, and ${JSON.stringify(key)} is not one.`);
-  if (typeof folder !== "string" || !folder || folder === "." || folder === ".." || /[/\0]/.test(folder)) throw new Error(`A working copy goes in an episode's own folder, and ${JSON.stringify(folder)} is not the name of one.`);
-  const dir = join(episodeWork(home, folder), "working copy");
+  const dir = workCopyDir(home, folder);
   return { dir, video: join(dir, `${key}.mp4`), facts: join(dir, `${key}.json`) };
 }
 
