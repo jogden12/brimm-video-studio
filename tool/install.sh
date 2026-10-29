@@ -628,6 +628,35 @@ if [[ -n "$machine" ]]; then
       say "  $final_cut_label:  ${version:-of a version that could not be read}, here; phase 0 was checked with $FINAL_CUT_CHECKED: $update"
     fi
   fi
+  # Whether this Mac's ffmpeg can make an HDR video standard, which the working copy of an iPhone's clip needs (an iPhone records HDR by
+  # default): tool/workcopy.js has ffmpeg decode it with VideoToolbox (the videotoolbox hwaccel) and size it and make its colour BT.709
+  # (the scale_vt filter), and refuses an HDR video on a Mac whose ffmpeg has either missing. It is said before the lines about the
+  # HyperFrames command line, whose app the working copy is made for. ffmpeg is only asked for the two lists the working copy reads, which
+  # change nothing, so --print asks them too; none of what ffmpeg says is repeated but its version. They are read as workcopy.js's
+  # hasHwaccel and hasFilters read them (tests/install.test.js checks the two agree): a method is a line of its own, and a filter is a
+  # name that follows the column of flags (two characters on ffmpeg 9.0.2, three before it, a few more allowed for) and has a V->V after
+  # it, so that a word of a description or a name that only begins as scale_vt does is not it. A line of the legend is not a filter: its
+  # name is "=".
+  if [[ -z "$ffmpeg" ]]; then
+    say "  HDR video:  ffmpeg is not here yet, so whether it can make an HDR video standard is looked at once it is installed: the working copy refuses an HDR video on a Mac whose ffmpeg cannot"
+  else
+    ffmpeg_hwaccels="$("$ffmpeg" -nostdin -hide_banner -hwaccels 2>/dev/null || true)"
+    ffmpeg_filters="$("$ffmpeg" -nostdin -hide_banner -filters 2>/dev/null || true)"
+    ffmpeg_said=("${(@f)$("$ffmpeg" -nostdin -hide_banner -version 2>/dev/null || true)}")
+    ffmpeg_version="${ffmpeg_said[1]-}"
+    ffmpeg_version="${ffmpeg_version%% Copyright*}"
+    hwaccel_re=$'\n'"[[:space:]]*videotoolbox[[:space:]]*"$'\n'
+    filter_re=$'\n'"[[:space:]]*[A-Za-z.]{2,5}[[:space:]]+scale_vt[[:space:]]+[^[:space:]]+->[^[:space:]]+"
+    hdr_missing=()
+    [[ $'\n'"$ffmpeg_hwaccels"$'\n' =~ $hwaccel_re ]] || hdr_missing+=("no videotoolbox hwaccel")
+    [[ $'\n'"$ffmpeg_filters" =~ $filter_re ]] || hdr_missing+=("no scale_vt filter")
+    hdr_whose="this Mac's ffmpeg${ffmpeg_version:+ ($ffmpeg_version)}"
+    if (( ${#hdr_missing[@]} == 0 )); then
+      say "  HDR video:  $hdr_whose can make an HDR video standard, which an iPhone's clip is by default: it has the videotoolbox hwaccel and the scale_vt filter that the working copy needs for it"
+    else
+      say "  HDR video:  $hdr_whose cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${(j: and :)hdr_missing}. Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour"
+    fi
+  fi
   # The pinned HyperFrames command line, in a folder of its own for its version: what would be installed there, and how the download
   # is checked, or that it is there already and kept. Only said here; the real run installs it (below), after node is in place. A
   # folder is "here already" by the one look the real run also takes (toolchain_here), so what is said is what is done.

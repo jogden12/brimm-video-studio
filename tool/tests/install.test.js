@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
+import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
 const HERE = dirname(INSTALL);
@@ -50,7 +51,10 @@ const ask = (...args) => askOn({}, ...args);
     For one of the two Macs (--machine) the installer asks Claude Code whether it is signed in, and its version, so such a run
     is given a stand-in for it, and no test runs the real one: `claude` is what the stand-in prints for `auth status --json`,
     by default signed in, with an email the installer must never print, and `claudeVersion` what it prints for --version.
-    With `claude: null` there is no stand-in: give `agentPath` too, so that this Mac's own Claude Code is not found. `onPath` names more stand-ins to put first on
+    With `claude: null` there is no stand-in: give `agentPath` too, so that this Mac's own Claude Code is not found. `ffmpegSays` puts a
+    stand-in for ffmpeg first on its PATH too, so that no test runs this Mac's own: { hwaccels, filters, version } are what it prints for
+    -hwaccels, -filters and -version, and any other call it is given is written into `ran`, which a --print never makes; the calls it
+    is given are kept, as what `asked` says of them, one to a line. `onPath` names more stand-ins to put first on
     its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". `finalCut` is the version of a made-up
     Final Cut Pro the installer is pointed at, or null for none; without it the installer looks at this Mac's own. With
     `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
@@ -58,7 +62,7 @@ const ask = (...args) => askOn({}, ...args);
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, finalCut, finalCutText, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, finalCut, finalCutText, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -92,7 +96,10 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
     // call but -p.
     const ran = join(dir, "ran");
     const signedOut = claude !== null && claude.includes('"loggedIn":false');
-    const stands = { ...onPath, ...(args.includes("--machine") && claude !== null ? { "claude-stand-in": `case "$*" in\n  "auth status --json") printf '%s' '${claude}'; exit ${signedOut ? 1 : 0} ;;\n  --version) echo '${claudeVersion}'; exit ${versionExit} ;;\n  *) echo "claude $*" >> "${ran}" ;;\nesac\n` } : {}) };
+    // The stand-in for ffmpeg keeps each call it is given, prints the lists --print asks it for, which change nothing, and writes any
+    // other call into `ran`.
+    const ffmpegStand = ffmpegSays ? { ffmpeg: `echo "$*" >> "${join(dir, "ffmpeg-asked")}"\ncase "$*" in\n  *-hwaccels*) printf '%s' '${ffmpegSays.hwaccels}' ;;\n  *-filters*) printf '%s' '${ffmpegSays.filters}' ;;\n  *-version*) echo '${ffmpegSays.version ?? "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers"}' ;;\n  *) echo "ffmpeg $*" >> "${ran}" ;;\nesac\n` } : {};
+    const stands = { ...onPath, ...ffmpegStand, ...(args.includes("--machine") && claude !== null ? { "claude-stand-in": `case "$*" in\n  "auth status --json") printf '%s' '${claude}'; exit ${signedOut ? 1 : 0} ;;\n  --version) echo '${claudeVersion}'; exit ${versionExit} ;;\n  *) echo "claude $*" >> "${ran}" ;;\nesac\n` } : {}) };
     for (const [name, script] of Object.entries(stands)) {
       const logged = name === "xcode-select" ? `[ "$1" = "-p" ] || echo "xcode-select $*" >> "${ran}"\n` : "";
       writeFileSync(join(bin, name), `#!/bin/sh\n${logged}${script}`);
@@ -126,7 +133,7 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       return { text, ...JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout) };
     });
     const kept = Object.fromEntries(Object.keys(installed).map((label) => [label, readFileSync(fileOf(label), "utf8")]));
-    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "" };
+    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "", asked: existsSync(join(dir, "ffmpeg-asked")) ? readFileSync(join(dir, "ffmpeg-asked"), "utf8") : "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -959,6 +966,91 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       assert.deepEqual([r.left, r.ran], [listing(files), ""], what);
     }
     d.done();
+  });
+  // The working copy of an HDR video (tool/workcopy.js, an iPhone records HDR by default) is made by VideoToolbox: ffmpeg decodes it with
+  // the videotoolbox hwaccel and sizes it and makes its colour BT.709 with the scale_vt filter. A Mac whose ffmpeg has neither refuses
+  // every HDR video, so the installer says whether this Mac's has both. It only asks ffmpeg for the two lists the working copy reads,
+  // which change nothing, and a stand-in for ffmpeg here answers them.
+  describe("whether this Mac's ffmpeg can make an HDR video standard", () => {
+    const VT = "Hardware acceleration methods:\nvideotoolbox\n";
+    /** The filters ffmpeg lists, as ffmpeg 9.0.2 on the Mac Studio prints them (two characters of flags), with the ones given. */
+    const FILTERS = (...names) => `Filters:\n  T.. = Timeline support\n  .S. = Slice threading\n  A = Audio input/output\n  V = Video input/output\n  ------\n TS colorspace        V->V       Convert between colorspaces.\n${names.map((name) => ` .. ${name.padEnd(17)} V->V       Scale Videotoolbox frames\n`).join("")} .S tonemap           V->V       Conversion to/from different dynamic ranges.\n`;
+    const HDR = "  HDR video:  ";
+    const CAN = (version = "ffmpeg version 9.0.2") => `${HDR}this Mac's ffmpeg (${version}) can make an HDR video standard, which an iPhone's clip is by default: it has the videotoolbox hwaccel and the scale_vt filter that the working copy needs for it`;
+    const CANNOT = (missing, version = "ffmpeg version 9.0.2") => `${HDR}this Mac's ffmpeg (${version}) cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${missing}. Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour`;
+    /** Ask for one of the two Macs, with a stand-in for ffmpeg that says what `ffmpegSays` says. */
+    const withFfmpeg = (ffmpegSays) => {
+      const d = dropbox();
+      const r = askWith({ ffmpegSays }, "--print", "--machine", "Mac Studio", d.root);
+      d.done();
+      assert.equal(r.status, 0, r.err + r.out);
+      return r;
+    };
+    it("says it can when ffmpeg lists the videotoolbox hwaccel and the scale_vt filter, with the version of ffmpeg, and changes nothing", () => {
+      const r = withFfmpeg({ hwaccels: VT, filters: FILTERS("scale_vt") });
+      assert.ok(r.out.includes(`\n${CAN()}\n`), r.out);
+      // It asked ffmpeg for its two lists and its version, and for nothing that makes or changes anything.
+      assert.deepEqual(r.asked.trim().split("\n"), ["-nostdin -hide_banner -hwaccels", "-nostdin -hide_banner -filters", "-nostdin -hide_banner -version"]);
+      changedNothing(r);
+    });
+    it("says what is missing when it cannot: the hwaccel, the filter, or both, and that the working copy then refuses every HDR video", () => {
+      for (const [says, missing] of [
+        [{ hwaccels: VT, filters: FILTERS("scale_vaapi", "scale_cuda", "transpose_vt") }, "no scale_vt filter"],
+        [{ hwaccels: "Hardware acceleration methods:\nvaapi\ncuda\n", filters: FILTERS("scale_vt") }, "no videotoolbox hwaccel"],
+        [{ hwaccels: "Hardware acceleration methods:\n", filters: FILTERS() }, "no videotoolbox hwaccel and no scale_vt filter"]
+      ]) {
+        const r = withFfmpeg(says);
+        assert.ok(r.out.includes(`\n${CANNOT(missing)}\n`), `${missing}\n---\n${r.out}`);
+        assert.doesNotMatch(r.out, /can make an HDR video standard/);
+        changedNothing(r);
+      }
+    });
+    it("reads the lists as the working copy does, so the two cannot differ: the whole name of each, in either width of the column of flags", () => {
+      const three = " .S. scale_vt          V->V       Scale Videotoolbox frames\n";
+      const listings = [
+        [VT, FILTERS("scale_vt")],
+        [VT, `Filters:\n${three}`],
+        [VT, FILTERS("scale_vaapi")],
+        [VT, "Filters:\n .. fps               V->V       Applies scale_vt to nothing.\n"],
+        [VT, "Filters:\n  T.. = Timeline support\n"],
+        ["Hardware acceleration methods:\nvideotoolbox_x\n", FILTERS("scale_vt")],
+        ["Hardware acceleration methods:\n  videotoolbox\n\n", FILTERS("scale_vt")],
+        ["Hardware acceleration methods:\n", FILTERS("scale_vt")],
+        ["", ""]
+      ];
+      for (const [hwaccels, filters] of listings) {
+        const r = withFfmpeg({ hwaccels, filters });
+        const can = hasFilters(filters, ["scale_vt"]) && hasHwaccel(hwaccels, "videotoolbox");
+        assert.equal(r.out.includes("can make an HDR video standard"), can, JSON.stringify({ hwaccels, filters }));
+        assert.equal(r.out.includes("cannot make an HDR video standard"), !can, JSON.stringify({ hwaccels, filters }));
+      }
+    });
+    it("says it is looked at once ffmpeg is installed, when ffmpeg is not here", () => {
+      const d = dropbox();
+      const r = askWith({ bare: true }, "--print", "--machine", "Mac Studio", d.root);
+      d.done();
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n${HDR}ffmpeg is not here yet, so whether it can make an HDR video standard is looked at once it is installed: the working copy refuses an HDR video on a Mac whose ffmpeg cannot\n`), r.out);
+      assert.doesNotMatch(r.out, /can make an HDR video standard\b.*videotoolbox/);
+    });
+    it("comes after the lines about the Mac's macOS and Final Cut Pro, which it leaves side by side, and before the HyperFrames command line's, and only for one of the two Macs", () => {
+      const r = withFfmpeg({ hwaccels: VT, filters: FILTERS("scale_vt") });
+      const at = (line) => r.out.indexOf(`\n  ${line}`);
+      const order = ["Homebrew:", "macOS:", "Final Cut Pro, optional now", "HDR video:", "HyperFrames toolchain:"].map(at);
+      assert.deepEqual(order, [...order].sort((a, b) => a - b), r.out);
+      assert.ok(!order.includes(-1), r.out);
+      assert.match(r.out, /\n {2}macOS: {2}[^\n]*\n {2}Final Cut Pro, optional now \(/);
+      // A folder watched on its own, without --machine, says nothing of it, and asks ffmpeg nothing.
+      const plain = askWith({ ffmpegSays: { hwaccels: VT, filters: FILTERS("scale_vt") } }, "--print", "/Volumes/Work/Unedited video");
+      assert.equal(plain.status, 0, plain.err);
+      assert.doesNotMatch(plain.out, /HDR video/);
+      assert.equal(plain.asked, "");
+      changedNothing(plain);
+    });
+    it("leaves ffmpeg's own words out of what it says, and the lists with them: only whether each is there", () => {
+      const r = withFfmpeg({ hwaccels: VT, filters: FILTERS("scale_vt") });
+      assert.doesNotMatch(r.out, /Scale Videotoolbox frames|Timeline support|Conversion to\/from|Hardware acceleration methods/);
+    });
   });
   it("says the HyperFrames command line is here already, and leaves it, only when its folder holds the pinned version and npm's lock file holds the pin's integrity string: anything less is to install", () => {
     const d = dropbox();
