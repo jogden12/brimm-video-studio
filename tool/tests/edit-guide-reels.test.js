@@ -303,6 +303,38 @@ describe("B5. where finish would go no further, the guide says nothing new", () 
     assert.equal(await line(w, { readdir }), says(TAKE));
     assert.deepEqual(looked, []);
   });
+  // The review of PR 16, F1: finish refuses while any run is at work on the episode, and says so in its own words; only a finish at work is the
+  // guide's stage of its own (ruling 4). Another run is a bring, a read or an ask, and `finish` itself starts a bring for a hand-off that is not whole.
+  for (const command of ["bring", "read", "ask"]) {
+    it(`has the page's step while a ${command} run is at work, which finish refuses, and the Reel line once the run is done (review F1)`, async () => {
+      const w = await W();
+      exportOf(w, "reel 2");
+      const lock = lockOf(w.t.home, FOLDER);
+      assert.equal(takeEpisodeLock(lock, command, () => true).taken, true);
+      w.t.ctx.deps.alive = (pid) => pid === process.pid;
+      const { looked, readdir } = spy();
+      assert.equal(await line(w, { readdir }), says(TAKE));
+      assert.deepEqual(looked, [], "Downloads is not listed while another run is at work");
+      const asked = await on(depsOf(w), "finish", FOLDER, "reels");
+      assert.equal(asked.code, 1, asked.said.join("\n"));
+      assert.ok(asked.said.includes(`${command} is running for this episode. Say "how far is it?"`), asked.said.join("\n"));
+      rmSync(lock);
+      assert.equal(await line(w), says(REEL_2));
+    });
+  }
+  it("has the page's step while a bring is at work for a hand-off that is not whole, and the Reel line once it is whole: finish starts the bring, and the guide does not send her round again (review F1)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const notWhole = { isWhole: (path) => !path.endsWith(".brimm-ops.json") };
+    assert.equal(await line(w, notWhole), says(REEL_2));
+    const asked = await on(depsOf(w, notWhole), "finish", FOLDER, "reels");
+    assert.equal(asked.code, 1, asked.said.join("\n"));
+    assert.deepEqual(w.t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, HANDOFF_REL]]);
+    // The bring is at work (the stand-in does not run it: its lock is taken here).
+    assert.equal(takeEpisodeLock(lockOf(w.t.home, FOLDER), "bring", () => true).taken, true);
+    w.t.ctx.deps.alive = (pid) => pid === process.pid;
+    assert.equal(await line(w, notWhole), says(TAKE));
+  });
   it("has the Reel line on a Mac whose settings say version 1 when the hand-off on file is version 2, as finish goes on there", async () => {
     const w = await W();
     exportOf(w, "reel 2");

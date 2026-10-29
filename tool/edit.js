@@ -6503,6 +6503,10 @@ function guideFacts(ctx, e, links, rates) {
   // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written. A video the
   // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2).
   const way = !hidden && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
+  // A finished video's Reels (plan PR 16) are looked for only where `finish "<episode>" reels` would go on, so far as a look that costs no other
+  // read can tell: the gate lets the video through, a hand-off is written, the other Mac does not have it open, and no run is at work but a finish
+  // (the stage of a finish at work is `finish-running`; a bring, a read or an ask is refused by `finish` in "<command> is running": review F1).
+  const looksForReels = !hidden && kind === "finished" && handoff && !away && (running === "" || running === "finish");
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6528,8 +6532,7 @@ function guideFacts(ctx, e, links, rates) {
     way,
     copy: way ? guideCopy(ctx, e, r, rates) : null,
     project: way && !handoff ? guideProject(ctx, e, r) : null,
-    // A finished video's Reels: read only for one the gate lets through, with a hand-off written, that the other Mac does not have open.
-    reelsExported: !hidden && kind === "finished" && handoff && !away ? guideReels(ctx, e, r) : [],
+    reelsExported: looksForReels ? guideReels(ctx, e, r) : [],
     session: kind === "session" ? guideSession(ctx, e, r) : null,
     handoff,
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
