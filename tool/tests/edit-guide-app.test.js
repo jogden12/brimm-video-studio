@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { KEPT } from "../app.js";
+import { KEPT, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
@@ -85,10 +85,11 @@ describe("the guide picks the way as finish does, by the record", () => {
     assert.equal(await line(w), says(OPEN));
     w.t.done();
   });
-  it("sends a raw video that has a Reel's project and no push to open it, on a Mac whose settings have the app off too: the Reel's project makes it unopened, as it does for finish (review M6)", async () => {
-    for (const set of [true, false]) {
+  it("sends a raw video that has a Reel's project and no push the HyperFrames way, on a Mac whose settings have the app off too: the Reel's project makes it unopened, as it does for finish (review M6); where the app is off it is told that this Mac isn't set up, which is what `app` says there (plan PR 17)", async () => {
+    for (const [set, said] of [[true, OPEN], [false, NOT_SET_UP]]) {
       const w = guideWorld({ projects: ["reel 2"], set });
-      assert.equal(await line(w), says(OPEN), `app ${set}`);
+      assert.equal(await line(w), says(said), `app ${set}`);
+      assert.doesNotMatch(await line(w), /Final Cut/);
       w.t.done();
     }
     // A Reel's project beside a push to Final Cut is the Final Cut way, as without it.
@@ -124,6 +125,56 @@ describe("the guide picks the way as finish does, by the record", () => {
     assert.equal(await line(old), says(AGAIN));
     app.t.done();
     old.t.done();
+  });
+});
+
+describe("the guide on a Mac whose settings have the app off (plan PR 17; the review of PR 10, M2)", () => {
+  /** A raw video whose main project in use was made on the other Mac and is not here, on a Mac whose settings turn the app on, or not. */
+  const elsewhere = (set, kind = "raw") => {
+    const w = guideWorld({ kind, projects: ["main"], set, over: { app: { toolchain: PIN.version, projects: [entry("main", { on: "Sallie's laptop" })] } } });
+    rmSync(w.dirOf("main"), { recursive: true });
+    return w;
+  };
+  it("says this Mac isn't set up, in the words `app` has there, and not to open the video, which `app` cannot do on that Mac", async () => {
+    const w = elsewhere(false);
+    // What `app` says there comes first: the settings are asked before the project, so a project of the other Mac's changes nothing.
+    const asked = await on(depsOf(w), "app", FOLDER);
+    assert.deepEqual([asked.code, asked.said], [1, [NOT_SET_UP]]);
+    assert.equal(await line(w), says(NOT_SET_UP));
+    assert.deepEqual((await on(depsOf(w), "guide")).said, [DROP_LINE, "Under way:", `  ${NAMED}: ${NOT_SET_UP}`]);
+    w.t.done();
+  });
+  it("still says to open it on a Mac that is set up for the app, where `app` goes on to say what is on the other Mac: that is no state of the guide's own", async () => {
+    const w = elsewhere(true);
+    const cli = join(w.t.dir, "hyperframes-stand-in");
+    writeFileSync(cli, "");
+    assert.equal(await line(w), says(OPEN));
+    const asked = await on(depsOf(w, { app: { tz: "America/Chicago", cli } }), "app", FOLDER);
+    assert.equal(asked.code, 1, asked.text);
+    assert.match(asked.said[0], /^The HyperFrames project for Pricing: what to charge\? is on Sallie's laptop, and Sallie's laptop has not handed it over yet\./);
+    w.t.done();
+  });
+  it("says it wherever it would say to open the video there: a project here that the app never opened, one whose video is being made again, and an iPhone clip whose project the app opened", async () => {
+    const never = guideWorld({ projects: ["main"], set: false, over: { app: { toolchain: PIN.version, projects: [entry("main", { opened: [] })] } } });
+    assert.equal(await line(never), says(NOT_SET_UP));
+    const remade = elsewhere(false);
+    atWork(remade.t, "workcopy");
+    assert.equal(await line(remade), says(NOT_SET_UP));
+    const clip = elsewhere(false, "short video");
+    assert.equal(await line(clip), says(NOT_SET_UP));
+    for (const w of [never, remade, clip]) w.t.done();
+  });
+  it("still says a project here that the app opened is in HyperFrames, and finds its export, as `finish` needs no setting; and `guide wait` answers at once, with nothing to wait for", async () => {
+    const w = guideWorld({ set: false });
+    assert.equal(await line(w), says(edit()));
+    exportOf(w, "main");
+    assert.equal(await line(w), says(EXPORTED));
+    const gone = elsewhere(false);
+    atWork(gone.t, "workcopy");
+    const waited = await on(depsOf(gone), "guide", "wait");
+    assert.deepEqual([waited.said, gone.t.waits], [[DROP_LINE, "Under way:", `  ${NAMED}: ${NOT_SET_UP}`], []]);
+    w.t.done();
+    gone.t.done();
   });
 });
 
