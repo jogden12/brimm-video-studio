@@ -28,6 +28,12 @@
 //     that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
+// The last three steps are openProjectInApp, which a Reel's project is opened by too (app-reel.js, plan PR 5): it asks the app,
+// says what the command line printed, and writes the record, for any project it is given (`keeps` says which other projects stay as
+// they are, and `also` may change the record that is written, as a Reel's picking does). The words and the readers of a project
+// folder that a Reel's project has in common with the main project's (noWords, notWhole, recordingChanged, factsIn, copyIn and the
+// like) are exported for app-reel.js to use as they are.
+//
 // What it says goes into her chat, so it holds no path, no flag and no name of a command. What it touches beyond the episode's own
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`; each but `save` has a default, and the
 // defaults fail closed.
@@ -57,11 +63,13 @@ const OPEN_MS = 60 * 1000;
     edit.js `kind` writes it, in the record that changes the kind. */
 export const KEPT = "kept for an earlier kind";
 
-const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
+/** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
+    the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
+export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
 const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
-const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
-const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
+export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
+export const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 const videoBack = (name) => `The video HyperFrames was given for ${name} had been taken away; it is back in the project.`;
 const videoGoneAndChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made, and the video that project was made from has been taken away, so it can't be opened. Ask Jason.`;
 const noRecording = (name) => `The recording of ${name} is not in its folder, so the video of its HyperFrames project could not be made again. Ask Jason.`;
@@ -83,24 +91,28 @@ const BUTTONS = "In HyperFrames, share only with people you invite, export on Th
 export const isMain = (project) => project.key === "main" && project.state !== KEPT;
 
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
-    Mac write, and is joined to a folder here (and by app-history.js, which looks at the project, and by free.js, which deletes inside it). */
+    Mac write, and is joined to a folder here (by app-reel.js and app-history.js too, which look at a project, and by free.js, which
+    deletes inside it). */
 export const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 
-/** The Mac a main project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
+/** The Mac a project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
     otherwise. A project's folder is in the Mac's own work folder, never in Dropbox, so the project of another Mac is not here, and
     everything done in it (the app's history, what is in its folder) is there. Making a new project under its name would drop its
     entry from the record and leave that Mac's work unreachable, so `app` refuses such an episode (edit.js), until a take-over can
     rebuild the project from the snapshot (plan PR 11). The project of this Mac is not asked about: when its folder is gone it is made
     again, under its own name (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads
-    nowhere a folder is, is a folder that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's. */
-export function projectOnAnotherMac(ctx, { found, record }) {
-  const earlier = (record.app?.projects ?? []).find(isMain);
+    nowhere a folder is, is a folder that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's.
+    `key` says which project: "main", the main video's in use (isMain), or a Reel's, "reel 2" (plan PR 5), the record's entry of
+    that key, in whatever state it is in. */
+export function projectOnAnotherMac(ctx, { found, record }, key = "main") {
+  const earlier = (record.app?.projects ?? []).find((p) => (key === "main" ? isMain(p) : p.key === key));
   if (!earlier || typeof earlier.on !== "string" || earlier.on === "" || earlier.on === ctx.machine) return null;
   return plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name)) ? null : earlier.on;
 }
 
-/** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. */
-function jsonIn(path) {
+/** What a JSON file holds, or undefined when there is no such file. A file that is there and is not JSON throws. (app-reel.js reads
+    the cut plan with it, as the main video's project does.) */
+export function jsonIn(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {
@@ -111,7 +123,7 @@ function jsonIn(path) {
 
 /** The episode's words, [{ w, start, end }], from its .words.json: the import writes { video, duration, words }, and a bare list is
     taken too. null when the file is not there, cannot be read, or holds no list: then the words are not on this Mac yet. */
-function wordsIn(path) {
+export function wordsIn(path) {
   try {
     const held = JSON.parse(readFileSync(path, "utf8"));
     const words = Array.isArray(held) ? held : held?.words;
@@ -123,7 +135,7 @@ function wordsIn(path) {
 
 /** The logos in the Assets folder of BRIMM Video, `Assets/Logos` (5.2): the .svg and .png files in it, as paths, sorted. None when
     the folder is not there. */
-function logosIn(root) {
+export function logosIn(root) {
   const dir = join(root, "Assets", "Logos");
   try {
     return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && /\.(?:svg|png)$/i.test(entry.name)).map((entry) => join(dir, entry.name)).sort();
@@ -134,7 +146,7 @@ function logosIn(root) {
 }
 
 /** The guidance the pinned package ships, the CLAUDE.md its projects start from (5.4, item 3). */
-const guidanceOf = (home) => join(toolchainDir(home), "node_modules", "hyperframes", "dist", "templates", "_shared", "CLAUDE.md");
+export const guidanceOf = (home) => join(toolchainDir(home), "node_modules", "hyperframes", "dist", "templates", "_shared", "CLAUDE.md");
 
 /** Whether `path` is a file that can be read. */
 function readable(path) {
@@ -174,7 +186,7 @@ function chatOf(home, env) {
 }
 
 /** What a JSON file holds, or null when there is no such file, it cannot be read, or it is not JSON. */
-function factsIn(path) {
+export function factsIn(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch {
@@ -183,7 +195,7 @@ function factsIn(path) {
 }
 
 /** A file's facts as stat gives them, or undefined when there is no such file or it cannot be looked at. */
-function statOf(path) {
+export function statOf(path) {
   try {
     return statSync(path);
   } catch {
@@ -193,7 +205,7 @@ function statOf(path) {
 
 /** What the record keeps of a working copy, { bytes, seconds, fps }, from facts that hold them, or null when they do not hold what
     the record needs (episode.js isAppProject): a size in bytes, a length in seconds above 0, and a frame rate. */
-function copyOf(facts) {
+export function copyOf(facts) {
   const { bytes, seconds, fps } = facts ?? {};
   const rate = (typeof fps === "number" && Number.isFinite(fps) && fps > 0) || (typeof fps === "string" && /^[1-9]\d*\/[1-9]\d*$/.test(fps));
   return Number.isInteger(bytes) && bytes >= 0 && typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && rate ? { bytes, seconds, fps } : null;
@@ -214,13 +226,13 @@ function nothingAt(path) {
 
 /** What the record keeps of the working copy a project holds, from the project's own brimm/facts.json (project.js), which has the
     length and the rate but not the size, and from the size of the video in the project. null when either cannot be had. */
-function copyIn(dir) {
+export function copyIn(dir) {
   const video = statOf(videoIn(dir));
   return video?.isFile() ? copyOf({ ...factsIn(join(dir, "brimm", "facts.json")), bytes: video.size }) : null;
 }
 
 /** What a project was made from, as the record keeps it (7.1): the raw file's name, size and time, as stat gives them. */
-const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) });
+export const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) });
 
 /** Whether the recording is not the one a project was made from (4.8): its size or its time is not what the project's `from` says.
     The times are compared as moments, to the second the record keeps, and not as the text the record holds: that is written with
@@ -316,7 +328,7 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const { name, number } = nextMain(record, projects);
   const reels = jsonIn(join(found.folder, REELS_FILE));
   writeProject(join(episodeWork(home, found.name), name), projectFiles({
-    kind: "main", number, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
+    kind: "main", number, short: record.kind === "short video", id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
@@ -451,16 +463,35 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     if (taken.code !== undefined) return taken.code;
     ({ project } = taken);
   }
+  return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+}
 
+/** Ask the app to open a project of the episode, say what came of it in her words, and write the record: the part of opening that the
+    main video's project and a Reel's (app-reel.js, plan PR 5) have in common. Resolves the exit code: 0 when the app opened, 1 when
+    it did not or when the record could not be written.
+    `project` is the record's entry for the project, made or made before, and `dir` its folder. `projects` are the record's, and
+    `keeps` says which of them stay as they are in the record that is written: the project's own entry is replaced by the updated
+    one, and the others, the main project's and the other Reels', are kept. `at` is the moment, as the record keeps one (the moment
+    the project was made, when it was made by the same run). `also(next)` may change the record that is written (a Reel is marked
+    picked in the same write); it is given it whole and gives it back. `restored` is what the record keeps of the working copy that
+    was put back into the project's folder a moment before (putVideoBack), when one was: the project's entry gets it.
+    What it says is the command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not
+    made, and last the line about the buttons Studio cannot control (BUTTONS), which is said whenever the app opened. The record gets
+    the time of the open only if the app opened, `handover` true if the command line says it took her chat, and the state moved
+    from made to opened and never back.
+    `deps` are the `save` that writes the record (resolves 0 when it has), the pinned command line's program `cli`, and `spawn`,
+    `env`, `node` and `chat` as openInApp has them. The chat is asked only when this Mac's setting wants the handover. */
+export async function openProjectInApp(ctx, { record, project, dir, projects, keeps, at = localStamp(new Date(ctx.now())), also = (next) => next, restored = null }, { save, cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
+  const { home } = ctx;
   // A handover is looked into only where it is wanted: it is all the chat decides, and finding out can take a while.
   const wanted = appHandoverOn(ctx.settings);
-  const askChat = deps.chat ?? (() => chatOf(home, env));
+  const askChat = given ?? (() => chatOf(home, env));
   const chat = wanted ? askChat() : { sessionId: "", held: true };
   const handover = handoverAllowed({
     setting: wanted, sessionId: chat.sessionId, held: chat.held,
     episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
   });
-  const ran = spawn(node, [cli, "open", join(work, project.name), "--json"], {
+  const ran = spawn(node, [cli, "open", dir, "--json"], {
     env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
     encoding: "utf8", timeout: OPEN_MS
   });
@@ -481,7 +512,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   };
   // The app has been asked by now, so a record that could not be written ends the run with 1, whether or not the app opened: what the
   // project is stays on this Mac, and the next run finds it again (adoptProject).
-  const written = await save({ ...record, app: { ...record.app, toolchain: PIN.version, projects: [...projects.filter((p) => !isMain(p)), updated] } });
+  const written = await save(also({ ...record, app: { ...record.app, toolchain: PIN.version, projects: [...projects.filter(keeps), updated] } }));
   if (written !== 0) return 1;
   return read.opened ? 0 : 1;
 }

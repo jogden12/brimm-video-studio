@@ -214,6 +214,20 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.started, []);
     plain(e.said);
   });
+  it("gives the notes of a short video's project one line in place of the Reels': no Reel and no new project from it; a raw video's keep the Reels'", async (c) => {
+    // `app … reel` answers that a short video has no Reels, so it is not told to send her to "Open Reel 2 in HyperFrames". But asked
+    // for a Reel, the app's agent would make a project of its own, outside Studio's reach: it is told never to, as a session clip is.
+    const short = episode(c, { record: { kind: "short video" } });
+    assert.equal(await run(short), 0);
+    const shortNotes = readFileSync(join(short.project, "CLAUDE.md"), "utf8");
+    assert.doesNotMatch(shortNotes, /Open Reel \d in HyperFrames|Never make a Reel as a new project/);
+    assert.match(shortNotes, /- \*\*No new projects\.\*\* Never make a Reel or any other new project from this video: .*a short video has no Reels\./);
+    const raw = episode(c);
+    assert.equal(await run(raw), 0);
+    const rawNotes = readFileSync(join(raw.project, "CLAUDE.md"), "utf8");
+    assert.match(rawNotes, /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat/);
+    assert.doesNotMatch(rawNotes, /No new projects/);
+  });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);
     await run(e);
@@ -675,6 +689,23 @@ describe("app: opening an episode in HyperFrames", () => {
     it("takes a name that leads nowhere a folder is for a folder that is not here", async (c) => {
       const { e, record } = await madeHere(c);
       for (const name of ["", ".", "..", "../Pricing talk main 3fa9c1", "a/b"]) assert.equal(asked(e, changed(record, { on: "Sallie's laptop", name })), "Sallie's laptop", JSON.stringify(name));
+    });
+    it("is asked about a Reel's project by its key (plan PR 5): the Reel's, whatever state it is in, and not the main project's", async (c) => {
+      const { e, record } = await madeHere(c);
+      const reel = { ...record.app.projects[0], key: "reel 2", name: "Pricing talk reel 2 3fa9c1", fromSuggestion: 2, on: "Sallie's laptop" };
+      const both = { ...record, app: { ...record.app, projects: [record.app.projects[0], reel] } };
+      // Its folder is not here: another Mac made it, and everything done in it is there.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 2"), "Sallie's laptop");
+      // The main project is this Mac's, and the Reel's other Mac does not make it another's.
+      assert.equal(asked(e, both), null);
+      // This Mac's own Reel, whose folder is gone, is made again; one whose folder is here is opened, whichever Mac made it.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: { ...both, app: { ...both.app, projects: [record.app.projects[0], { ...reel, on: "Mac Studio" }] } } }, "reel 2"), null);
+      mkdirSync(join(episodeWork(e.home, FOLDER), reel.name));
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 2"), null);
+      // A Reel with no project in the record, and one the record keeps in another state, are asked the same way.
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: both }, "reel 3"), null);
+      rmSync(join(episodeWork(e.home, FOLDER), reel.name), { recursive: true });
+      assert.equal(projectOnAnotherMac(e.ctx, { found: e.found, record: { ...both, app: { ...both.app, projects: [record.app.projects[0], { ...reel, state: "exported" }] } } }, "reel 2"), "Sallie's laptop");
     });
   });
   describe("her chat, found by chatOf (plan PR 4, \"The chat\": no readable transcript, no handover, never guessed)", () => {

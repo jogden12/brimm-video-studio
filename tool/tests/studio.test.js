@@ -154,14 +154,35 @@ describe("her folder's settings", () => {
     assert.ok(!/Not ready yet[\s\S]*Showing the Reels/.test(skill), skill);
   });
   it("have the skill say, where she would be sent to make a Reel brimm-video cannot make yet, that she cuts it in OpusClip and BRIMM Ops writes its post text (Sallie's walkthrough, 25 Oct)", () => {
-    // "Show me the Reels" listed them, "Finish Reels 1 and 3" said to make Reel 1 first, and nothing made one: a circle.
+    // "Show me the Reels" listed them, "Finish Reels 1 and 3" said to make Reel 1 first, and nothing made one: a circle. Since plan PR 5 a
+    // Mac set up for HyperFrames makes a Reel by "Open Reel 2 in HyperFrames", and `reels` ends by saying so; a Mac that is not set up is
+    // still sent where it was.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const row = (start) => skill.split("\n").find((line) => line.startsWith(start));
-    assert.match(row('| "Show me the Reels" |'), /When it says brimm-video cannot make Reels from this video yet, say so\. For now she cuts them in OpusClip; BRIMM Ops writes their post text \("New short video from a clip", on the episode's Reels card\)\. Never send a client or group session's Reels to OpusClip\. \|$/);
-    assert.match(row('| "Finish Reels 1 and 3" / "Drop 2" |'), /When it says brimm-video cannot make Reels from this video yet, say so, as for "Show me the Reels": never offer to make one/);
+    assert.match(row('| "Show me the Reels" |'), /When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames"\. When it says brimm-video cannot make Reels from this video yet, say so\. For now she cuts them in OpusClip; BRIMM Ops writes their post text \("New short video from a clip", on the episode's Reels card\)\. Never send a client or group session's Reels to OpusClip\. \|$/);
+    assert.match(row('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |'), /If it says this Mac isn't set up for HyperFrames, say so, and where she cuts Reels for now, as for "Show me the Reels": never offer to make one here \|$/);
     const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut"));
-    assert.ok(notReady.includes(`- A Reel from Claude's suggestions: say brimm-video can't make it yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.`), notReady);
+    assert.ok(notReady.includes(`- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say brimm-video can't make it here yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.`), notReady);
     assert.doesNotMatch(skill, /make Reel \d|make it first/);
+  });
+  it("have the skill make a Reel with app … reel, drop one with reel drop, and pick one by no other command (plan PR 5)", () => {
+    // `reel pick` is gone: a Reel is picked by opening it. The rows of a Reel's making and dropping are the skill's only words for either.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const rowOf = (start) => skill.split("\n").filter((line) => line.startsWith(start));
+    const [make] = rowOf('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |');
+    assert.equal(rowOf('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |').length, 1);
+    assert.ok(make.includes('| `app "<episode>" reel 2`: '), make);
+    // Its take-over is app's, with the Reel in it, and the row sends her to the episode's own row for how a take-over goes.
+    assert.deepEqual([...new Set([...make.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over']);
+    assert.ok(make.includes('go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2 --take-over` for the take-over'), make);
+    assert.doesNotMatch(make, /`open /);
+    // The video is made first, in the background, and she is told so: "how far is it?" shows how far it has got.
+    assert.ok(make.includes('Its video is made first, in the background: tell her so, and when "how far is it?" says it is done, run it again.'), make);
+    const [drop] = rowOf('| "Drop 2" |');
+    assert.equal(rowOf('| "Drop 2" |').length, 1);
+    assert.ok(drop.startsWith('| "Drop 2" | `reel drop "<episode>" 2`: '), drop);
+    assert.doesNotMatch(skill, /reel pick|Finish Reels|`reel pick/);
+    assert.ok(commandsIn(skill).every((span) => !/^reel pick/.test(span)));
   });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
@@ -387,8 +408,8 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
   });
   /** HELP's usage lines, each as { command, keys, text }: a line starts at "  node edit.js <command>", its usage runs to the column where
       the description starts (two spaces or more), and goes on in the lines indented 21 spaces ("                     [--again]").
-      The description lines (indented 40) are not usage. `keys` are the subcommands the usage is for: "pick" and "drop" for
-      "reel pick|drop …", and "" for a usage that goes on with a quoted word, a bracket or nothing ("reel "<label>" …"). */
+      The description lines (indented 40) are not usage. `keys` are the subcommands the usage is for: "drop" for "reel drop …",
+      and "" for a usage that goes on with a quoted word, a bracket or nothing ("reel "<label>" …"). */
   const subcommandsOf = (words) => (/^[a-z]+(\|[a-z]+)*$/.test(words[0] || "") ? words[0].split("|") : [""]);
   const usages = (() => {
     const found = [];
@@ -435,10 +456,15 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     for (const flag of alone) assert.ok(anywhere.has(flag), `the skill names ${flag}, which edit.js's help does not give`);
   });
   it("gives a flag to the subcommand whose usage has it, and the editable fields to the list that has them", () => {
-    // reel pick|drop has no --client-agreed, though another usage of reel has; and --name is a principle's field, not a Reel idea's.
+    // reel drop has no --client-agreed, though another usage of reel has, and reel pick has no usage at all (plan PR 5); and --name is a
+    // principle's field, not a Reel idea's.
     assert.ok(flagsHelpGives("reel", ['"<label>"', "2", "--client-agreed"]).has("--client-agreed"));
-    assert.ok(!flagsHelpGives("reel", ["pick", '"<episode>"', "1"]).has("--client-agreed"));
+    assert.equal(flagsHelpGives("reel", ["pick", '"<episode>"', "1"]).size, 0);
     assert.ok(!flagsHelpGives("reel", ["drop", '"<episode>"', "1"]).has("--client-agreed"));
+    assert.ok(usages.some((u) => u.command === "reel" && u.keys.includes("drop")));
+    assert.ok(!usages.some((u) => u.command === "reel" && u.keys.includes("pick")));
+    // app takes --take-over for the Reel's form as it does for the episode's: both usages are app's, under the same key.
+    assert.ok(flagsHelpGives("app", ['"<episode>"', "reel", "2", "--take-over"]).has("--take-over"));
     assert.ok(flagsHelpGives("principles", ['"<label>"', "edit", "3"]).has("--name"));
     assert.ok(!flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--name"));
     assert.ok(flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--text"));
@@ -465,6 +491,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       'finish "<video>" --as-it-is [--as-it-is]', // the made-up video is no iPhone clip she answered: the flag is for that clip's hand-off alone
       'open "<episode>" --take-over [--take-over]', // no other Mac has the episode
       'app "<episode>" --take-over [--take-over]', // this Mac is not set up for HyperFrames, which app says before it looks at a claim (and no other Mac has the episode)
+      'app "<episode>" reel 2 --take-over [--take-over]', // the same, for a Reel
       'finish "<episode>" --yes [--yes]', // the main video was never shown in Final Cut, which it says first
       'resolve "<episode>" --keep A [--keep]', // there is no conflict, whatever is kept
       'principles "<label>" edit 3 --name "<words>" [--name]' // teachings are not turned on in this world
@@ -511,7 +538,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     assert.ok(ran.length >= 60, `${ran.length} commands run`);
-    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"', 'app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions']) assert.ok(ran.includes(span), span);
+    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"', 'app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over', 'reel drop "<episode>" 2']) assert.ok(ran.includes(span), span);
     assert.deepEqual(inert, KNOWN_INERT, "the flags that change nothing in these worlds are not the known ones");
   });
   it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
@@ -903,7 +930,7 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
     assert.deepEqual(rowOf(openSkill()), rowOf(strictSkill));
     const apps = (skill) => [...new Set(commandsIn(skill).filter((span) => span.split(" ")[0] === "app"))];
     assert.deepEqual(apps(openSkill()), apps(strictSkill));
-    assert.deepEqual(apps(openSkill()), ['app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions']);
+    assert.deepEqual(apps(openSkill()), ['app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over']);
   });
   it("has the skill say what was done in HyperFrames and which versions there are in the very rows the strict skill has", () => {
     const rowsOf = (skill, start) => skill.split("\n").filter((line) => line.startsWith(start));
@@ -912,6 +939,12 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
       assert.deepEqual(rowsOf(openSkill(), start), rowsOf(strictSkill, start), start);
     }
     assert.ok(openSkill().split("\n")[2].includes("what was done in HyperFrames and its versions"), "the description names them too");
+  });
+  it("has the skill make and drop a Reel in the very rows the strict skill has (plan PR 5)", () => {
+    const rowsOf = (skill) => skill.split("\n").filter((line) => line.startsWith('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |') || line.startsWith('| "Drop 2" |') || line.startsWith('| "Show me the Reels" |'));
+    assert.equal(rowsOf(strictSkill).length, 3, "the strict skill has not the three rows of a Reel's making, dropping and listing");
+    assert.deepEqual(rowsOf(openSkill()), rowsOf(strictSkill));
+    for (const skill of [strictSkill, openSkill()]) assert.doesNotMatch(skill, /reel pick|Finish Reels/);
   });
   it("has the skill ask the card exactly as episodes prints it, and never word it itself", () => {
     const skill = openSkill();

@@ -7,8 +7,8 @@
 // It deletes files, so it takes nothing it has not named, and names nothing it has not looked at:
 //   - The paths are named: the episode's folder of copies (workcopy.js workCopyDir), and for each project of the record's
 //     `app.projects` but a session clip's, its renders/; and the media/recording.mp4 of the main project in use alone, because that
-//     is the one project `app` puts the video back into. A Reel's video, and a kept project's, cannot be made again yet (a Reel
-//     made from times she gave may have them nowhere else), so they stay, and it says so. Nothing is found by listing a folder or by
+//     is the one project `app` puts the video back into. A Reel's video, and a kept project's, cannot be made again yet
+//     (app-reel.js makes a Reel once and opens it as it is), so they stay, and it says so. Nothing is found by listing a folder or by
 //     a pattern, so a file that only looks like one of them stays. A session clip's project is not named at all (`clips … done` is
 //     its way out), and neither is a folder the record does not list. The record comes from Dropbox, where the other Mac writes it,
 //     so a project's name that is not one plain folder name (app.js plainName) is left out and never joined to a path, and a folder
@@ -58,7 +58,7 @@ const changed = (name) => `The recording of ${name} has changed since its HyperF
 const nothing = (name) => `There is nothing to take away for ${name} on this Mac.`;
 const stuck = (bytes) => (bytes > 0 ? `Took away ${sizeText(bytes)}, but part of it could not be taken away. Ask Jason.` : "Part of it could not be taken away. Ask Jason.");
 /** The last line, when the video of a Reel's project or of a kept project is left where it is: app puts back the main project's
-    alone, so nothing can make those again yet. It changes when a Reel can be cut again (plan PR 5). */
+    alone, so nothing can make those again yet. It changes when `app … reel N` can put a Reel's video back. */
 const STAYS = "The video of a Reel, or of a project kept for an earlier kind, stays: it can't be made again yet.";
 
 // --- What it names ---

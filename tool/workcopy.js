@@ -21,6 +21,7 @@ import { runningCommand, startDetached } from "./detached.js";
 import { runGuarded } from "./guard.js";
 import { sizeText } from "./kinds.js";
 import { noProgress } from "./progress.js";
+import { STILL_EVERY } from "./reframe.js";
 import { lastLine, runProgram } from "./run.js";
 import { episodeWork, runsFolder } from "./settings.js";
 
@@ -32,6 +33,16 @@ const GB = 1024 ** 3;
 /** The step of the work, as the progress panel says it. The job has this one only: the run is the copy being made. */
 export const WORK_COPY_STEP = "Making the video for HyperFrames";
 export const WORK_COPY_STEPS = [WORK_COPY_STEP];
+/** The second step of a Reel's copy (architecture 4.3, plan PR 5): once the video is in place, the faces are looked for in it, to be
+    offered to the app for the upright crop. A copy that is given no finder has the first step alone. */
+export const FACES_STEP = "Finding the faces";
+export const REEL_COPY_STEPS = [WORK_COPY_STEP, FACES_STEP];
+/** How long each of the face finder's two programs, the ffmpeg that cuts the stills and the finder that looks in them (unedited.js
+    facesIn), may run for a Reel's video, in milliseconds. A Reel is at most 90 seconds, so its stills are few and looking in them
+    takes seconds. The run holds the working copy's lock for as long as it works, so a finder that hangs would hold it for good, and
+    with it every copy of the episode and every `app` that waits for the video (app-reel.js). One stopped for its time offers no faces
+    and costs the copy nothing. */
+export const REEL_FACES_MS = 3 * 60 * 1000;
 /** The step the progress panel shows while the run waits, before it makes the copy, for the import to have checked its copies of the
     video (edit.js workcopy): "how far is it?" says it. It is no step of the work, so it is not among WORK_COPY_STEPS: it is of any
     length, and the panel never measures it. */
@@ -287,8 +298,17 @@ export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeB
       converted it. A video in standard colour is taken to be BT.709, as the iPhone's, the OBSBOT's and Zoom's are, and its pixels
       are not converted. One that is not (BT.601, wide colour with no HDR, full range) would be tagged as what it is not, and its
       colours shifted a little: the plan asks only for HDR to be converted, and none of the cameras here makes such a video.
-    - The file is told it is an mp4, so it can be written under another name and given its own when it is whole. */
-export function workCopyArgs(input, output, { facts, streams = null, colour = null, rate = FALLBACK_RATE, fourK = false, stored } = {}) {
+    - The file is told it is an mp4, so it can be written under another name and given its own when it is whole.
+    - A Reel's copy is of a stretch of the video, { start, end } in seconds of it (architecture 4.3, plan PR 5), and is made with
+      this very chain, which is the whole point: its colours (an HDR video's made standard by VideoToolbox, with the turn it needs,
+      included), its size, its rate and its clock are the working copy's, and no chain of its own is made for a Reel. Two arguments
+      are added and nothing else. `-ss` is an input option, so it goes before the input, after the hardware's options an HDR video
+      has there (HDR_INPUT), and seeks to the start (the start of the stretch is then the new video's 0, and ffmpeg decodes from
+      the picture before it up to it, which is exact when it writes the pictures again); and `-t` after the pictures and the sound
+      are made, in the output's own time, stops at the stretch's length: on the even grid fps puts the pictures on, from the 0 the
+      seek made. A stretch that is not one throws: its ends are times in seconds, the end after the start, the start 0 or later. */
+export function workCopyArgs(input, output, { facts, streams = null, colour = null, rate = FALLBACK_RATE, fourK = false, stored, stretch } = {}) {
+  if (stretch != null && !isStretch(stretch)) throw new Error(`A stretch of a video is { start, end } in seconds, the end after the start, and ${JSON.stringify(stretch)} is not one.`);
   if (unusable({ facts, streams })) return null;
   const at = rate || FALLBACK_RATE;
   const { width, height } = workCopySize(facts, fourK);
@@ -299,15 +319,23 @@ export function workCopyArgs(input, output, { facts, streams = null, colour = nu
   const chain = hdr ? hdrChain({ rate: at, width, height, stored }) : [`fps=${at}:start_time=0`, `scale=${width}:${height}`, "format=yuv420p"];
   const sound = streams.audio !== null;
   return [
-    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...(hdr ? HDR_INPUT : []), "-i", input,
+    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...(hdr ? HDR_INPUT : []), ...(stretch != null ? ["-ss", secondsText(stretch.start)] : []), "-i", input,
     "-map", `0:${streams.video}`, ...(sound ? ["-map", `0:${streams.audio}`] : []),
     "-vf", chain.join(","), ...(sound ? ["-af", "aresample=async=1:first_pts=0"] : ["-an"]),
     "-sn", "-dn", ...encodeArgs(WORK_COPY_CRF, WORK_COPY_PRESET),
     "-profile:v", "high", "-g", String(Math.max(1, Math.round(framesASecond(at)))),
     "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
+    ...(stretch != null ? ["-t", secondsText(stretch.end - stretch.start)] : []),
     "-f", "mp4", output
   ];
 }
+
+/** A time in seconds as ffmpeg is given it: to the thousandth of a second, which leaves 0.1 + 0.2 as 0.3 and not as
+    0.30000000000000004, and never in the exponent form JavaScript writes a very small number in, which ffmpeg cannot read. */
+const secondsText = (seconds) => String(Math.round(Number(seconds) * 1000) / 1000);
+
+/** Whether `stretch` is a stretch of a video: { start, end } in seconds, the start 0 or later and the end after it. */
+const isStretch = (stretch) => stretch !== null && typeof stretch === "object" && Number.isFinite(stretch.start) && Number.isFinite(stretch.end) && stretch.start >= 0 && stretch.end > stretch.start;
 
 // --- The key and the places of a copy ---
 
@@ -317,7 +345,7 @@ const KEY = /^\d+-\d+(?:-4k)?$/;
 /** The key of a working copy, from the raw file's size and the time it was last written, as stat gives them: the same file gives
     the same key, and a file of another size or time another. A time is taken to the millisecond. A copy of 4K has "-4k" after it,
     so that asking for 4K when a copy of 1080 is there makes another, and not "it is made already". It is safe to be a file's name.
-    "" when the size or the time cannot be one. */
+    "" when the size or the time cannot be one. A Reel's copy has a key of its own (reelCopyKey). */
 export function workCopyKey(file) {
   const { bytes, mtimeMs, fourK } = file || {};
   if (!(Number.isInteger(bytes) && bytes >= 0 && Number.isFinite(mtimeMs) && mtimeMs >= 0)) return "";
@@ -340,6 +368,32 @@ export function workCopyPaths(home, folder, key) {
   if (typeof key !== "string" || !KEY.test(key)) throw new Error(`A working copy's key is its size and its time, and ${JSON.stringify(key)} is not one.`);
   const dir = workCopyDir(home, folder);
   return { dir, video: join(dir, `${key}.mp4`), facts: join(dir, `${key}.json`) };
+}
+
+/** What a Reel's key looks like: the raw file's size, its time, and the two ends of the stretch, each in milliseconds. */
+const REEL_KEY = /^\d+-\d+-\d+-\d+$/;
+
+/** The key of a Reel's copy (architecture 4.3, plan PR 5), from the raw file's size and the time it was last written, as workCopyKey
+    has them, and the two ends of the stretch it is made of, in seconds of the video, each to the millisecond: the same stretch of the
+    same file gives the same key, and another file or another stretch another. A Reel's copy is never of 4K. It is safe to be a
+    file's name. "" when the file or the stretch cannot be one. */
+export function reelCopyKey(file, stretch) {
+  const base = workCopyKey({ bytes: file && file.bytes, mtimeMs: file && file.mtimeMs });
+  if (!base || !isStretch(stretch)) return "";
+  return `${base}-${Math.round(stretch.start * 1000)}-${Math.round(stretch.end * 1000)}`;
+}
+
+/** Where Reel `n`'s copy goes, for the episode in `folder` on this Mac: { dir, video, facts, faces }. They are in the folder of the
+    working copies, named for the Reel and its key: `reel-<n>-<key>.mp4`, the facts beside it, and the file of faces the face
+    finder found in it, if it found any. The working copy's own files are named by their keys alone, so neither is taken for the
+    other. Throws for a number that is not a whole number from 1, a key that reelCopyKey could not have made, and a folder that is
+    not one folder's name. */
+export function reelCopyPaths(home, folder, n, key) {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`A Reel's copy is of a Reel, a whole number from 1, and ${JSON.stringify(n)} is not one.`);
+  if (typeof key !== "string" || !REEL_KEY.test(key)) throw new Error(`A Reel's copy has a key of its own, the file's size and time and the stretch's two ends, and ${JSON.stringify(key)} is not one.`);
+  const dir = workCopyDir(home, folder);
+  const stem = join(dir, `reel-${n}-${key}`);
+  return { dir, video: `${stem}.mp4`, facts: `${stem}.json`, faces: `${stem}.faces.json` };
 }
 
 /** The facts of a finished working copy, read from what ffprobe printed of it, and its size on disk: { seconds, fps, width, height,
@@ -384,12 +438,14 @@ export const workCopyLockOf = (home, folder) => join(episodeWork(home, folder), 
     already, which is the answer to a second request. The reading and every other command hold the episode's lock, not this one,
     so none of them stops it. A run whose lock was left by one that died counts as none, as it does for every command. A request
     made in the moment before a run has taken the lock starts a second run, which finds the lock taken and does nothing
-    (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `ctx` is what edit.js gives its commands: {
+    (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `reel` is the number of a Reel, whose stretch of the
+    recording the run makes the copy of instead (`--reel <n>`; plan PR 5): a Reel's copy is never of 4K, and it has the same lock, so
+    one copy of an episode is made at a time, a Reel's or the video's. `ctx` is what edit.js gives its commands: {
     home, alive, start, settings }. */
-export function requestWorkCopy(ctx, { folder, fourK = false }) {
+export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0 }) {
   const running = runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder));
   if (running) return { started: false, running };
-  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: fourK ? ["--4k"] : [] });
+  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: reel ? ["--reel", String(reel)] : fourK ? ["--4k"] : [] });
   return { started: true, running: "" };
 }
 
@@ -414,6 +470,33 @@ const freeOn = (path) => {
   return Number(disk.bavail) * Number(disk.bsize);
 };
 
+/** Look for the faces in the Reel's video that is in place, and keep them beside it, in `paths.faces`, when the finder found one:
+    { every, stills }, the stills as the finder printed them. The file is made whole in the run's own folder and renamed into
+    place, as the copy is. Nothing here can cost the copy anything: a finder that finds none, says why, fails, throws or prints
+    what cannot be read, and a file that cannot be put in place, are said in the log and leave no file. */
+async function keepFaces({ faces, paths, work, shown, write, rename, log }) {
+  let stills = null;
+  try {
+    const seen = await faces(paths.video, work);
+    if (seen && Array.isArray(seen.stills)) stills = seen.stills;
+    if (!(stills && stills.some((still) => still && Array.isArray(still.faces) && still.faces.length > 0))) {
+      stills = null;
+      log(`${shown}: no face was found in the video${seen && seen.why ? ` (${seen.why})` : ""}, so the faces are not offered.`);
+    }
+  } catch (e) {
+    stills = null;
+    log(`${shown}: the faces could not be looked for (${e.code || e.message}), so they are not offered.`);
+  }
+  if (!stills) return;
+  try {
+    const made = join(work, basename(paths.faces));
+    write(made, `${JSON.stringify({ every: STILL_EVERY, stills }, null, 2)}\n`);
+    rename(made, paths.faces);
+  } catch (e) {
+    log(`${shown}: the faces could not be put in place (${e.code || e.message}), so they are not offered.`);
+  }
+}
+
 /** Make the working copy of the raw video at `video`, of the episode in `folder`, on this Mac: resolves { ok, made, failed, next,
     words, key, paths }, which is the shape a detached run's work gives runDetached, with `words` the one line to say of it, and
     never throws. `name` is how the video is called in the progress panel and the log, its file's name when it is not given.
@@ -435,33 +518,53 @@ const freeOn = (path) => {
       better than none is kept until its replacement is whole. One that cannot be taken away is said in the log and left.
     - It says nothing to a person that holds a path, a flag or the name of a program: Done, or "It can't be used" and why. What
       ffmpeg said is in the log.
+    A Reel's copy (`reel`: { n, start, end }, the Reel's number and its stretch of the video in seconds; architecture 4.3, plan PR 5)
+    is made by this very job, with the same chain, checks, limits and places, and differs only in what is of the stretch and not
+    of the video:
+    - its key and its files are the Reel's (reelCopyKey, reelCopyPaths), so that they are asked for and found by Reel and stretch,
+      and the working copy's job never takes them away, nor theirs the working copy's;
+    - the end of the stretch is held to the video's length, and a stretch with less than one picture of the video in it, or none,
+      is refused: "Reel 2 is not in the video". The key is of the stretch as it was asked for;
+    - the length it is made for, the limits it runs under and the length checked afterwards are the stretch's, and so is the room
+      it asks for, twice the stretch's share of the raw video's size;
+    - the facts hold the stretch that was cut, { start, end }, as the project's writer needs it;
+    - once the copy is in place and the copies it replaces are gone, `faces` (a function from the placed video and the run's own
+      folder to what the face finder found, unedited.js facesIn: { stills } or { why }) is asked, as a second step. The faces are
+      kept beside the copy, in `reel-<n>-<key>.faces.json` as { every, stills }, only when a still holds a face; none found, no
+      finder, a finder that fails or throws, or a file that cannot be put in place costs the copy nothing, and is said in the log.
+      A copy made already is not looked for faces again.
     The `deps` are all what it touches: `run` (runProgram) for ffprobe and for ffmpeg's lists of filters and of hardware decoders
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
-    `progress`, `log`, `now`, and `pid`, which names the run's own folder. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false }, deps = {}) {
+    `progress`, `log`, `now`, `pid`, which names the run's own folder, and `faces`. */
+export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
-    rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid
+    rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
+    faces = null
   } = deps;
   const shown = name || (typeof video === "string" && video ? basename(video) : "a video");
+  // What the video is called in what is logged: the Reel's, or HyperFrames'.
+  const for_ = reel !== null && reel !== undefined && Number.isInteger(reel.n) ? `Reel ${reel.n}` : "HyperFrames";
   /** The job ends here when it cannot make the copy: `reason` is said to the person, and `why` is what the log says. */
   const refuse = (reason, why = reason) => {
-    log(`${shown}: the video for HyperFrames could not be made: ${why}.`);
+    log(`${shown}: the video for ${for_} could not be made: ${why}.`);
     return { ok: false, made: [], failed: [canNotBeUsed(reason)], next: "", words: canNotBeUsed(reason) };
   };
   let work = "";
   let began = false;
   let finished = false;
   try {
+    // A Reel's copy is of a stretch, and of a Reel: anything else is no Reel's.
+    if (reel !== null && reel !== undefined && !(typeof reel === "object" && Number.isInteger(reel.n) && reel.n >= 1 && isStretch(reel))) return refuse("it is not a stretch of the video", "it is not a Reel with a stretch of the video");
     if (!tools.ffmpeg || !tools.ffprobe) return refuse("this Mac has no program to make it with: ask Jason", "ffmpeg or ffprobe is not installed");
     const raw = stat(video);
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
-    const key = workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK });
+    const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK });
     if (!key) return refuse("it could not be read as a video", "the video's size and time cannot be read");
-    const paths = workCopyPaths(home, folder, key);
+    const paths = reel ? reelCopyPaths(home, folder, reel.n, key) : workCopyPaths(home, folder, key);
     if (stat(paths.video) && stat(paths.facts)) {
-      log(`${shown}: the video for HyperFrames is made already.`);
+      log(`${shown}: the video for ${for_} is made already.`);
       return { ok: true, made: [], failed: [], next: "", words: WORK_COPY_DONE, key, paths };
     }
 
@@ -469,9 +572,9 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     mkdir(work, { recursive: true });
     progress.begin(shown);
     began = true;
-    progress.steps(WORK_COPY_STEPS);
+    progress.steps(reel && faces ? REEL_COPY_STEPS : WORK_COPY_STEPS);
     progress.step(WORK_COPY_STEP);
-    log(`${shown}: making the video for HyperFrames.`);
+    log(`${shown}: making the video for ${for_}.`);
 
     // What ffprobe says of a file, in a file of the run's own folder, as the import reads a video's facts.
     let probes = 0;
@@ -490,12 +593,21 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     });
     const printed = await probe(video);
     const facts = factsOf(printed);
-    if (facts) progress.length(facts.duration);
     const streams = streamsOf(printed);
     const colour = colourOf(printed);
     const { rate, steady } = rateOf(printed);
     const stored = storedOf(printed);
     const hdr = isHdr(colour);
+    // A Reel's copy is of the stretch as far as the video goes: it has at least one picture of the video in it, or it is no Reel of
+    // this video. What is made, checked and limited is then the stretch's, and the video's length is not.
+    let stretch = null;
+    if (reel && facts) {
+      const end = Math.min(reel.end, facts.duration);
+      if (!(end - reel.start >= 1 / (framesASecond(rate) || framesASecond(FALLBACK_RATE)))) return refuse(`Reel ${reel.n} is not in the video`, `Reel ${reel.n} is from ${reel.start} to ${reel.end} seconds, and the video is ${facts.duration}`);
+      stretch = { start: reel.start, end: Math.round(end * 1000) / 1000 };
+    }
+    const seconds = stretch ? Math.round((stretch.end - stretch.start) * 1000) / 1000 : facts && facts.duration;
+    if (facts) progress.length(seconds);
     // Only an HDR video needs the filter and the hardware decoder that make it standard, so ffmpeg is asked which it has for one
     // alone, once each.
     let filters = "";
@@ -514,17 +626,20 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     } catch (e) {
       log(`${shown}: the room left on the disk could not be read (${e.code || e.message}).`);
     }
-    const fault = workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes: free, rawBytes: raw.size });
+    // The room a copy needs is twice the raw video's size, or twice the stretch's share of it.
+    const fault = workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes: free, rawBytes: stretch ? raw.size * (seconds / facts.duration) : raw.size });
     if (fault) return refuse(fault);
 
-    const writing = join(work, `${key}.mp4`);
-    const args = workCopyArgs(video, writing, { facts, streams, colour, rate, fourK, stored });
+    const writing = join(work, basename(paths.video));
+    // How the picture is stored (`stored`) is the Reel's as much as the video's: an HDR picture is turned by hand, from the note the
+    // recording is stored with, whichever stretch of it is cut.
+    const args = workCopyArgs(video, writing, { facts, streams, colour, rate, fourK: reel ? false : fourK, stored, ...(stretch ? { stretch } : {}) });
     if (!args) return refuse("it could not be read as a video");
     // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
-    const watch = progress.encoding(facts.duration);
+    const watch = progress.encoding(seconds);
     let ended;
     try {
-      ended = await guarded(tools.ffmpeg, [...watch.args, ...args], workCopyLimits(facts.duration, fourK));
+      ended = await guarded(tools.ffmpeg, [...watch.args, ...args], workCopyLimits(seconds, reel ? false : fourK));
     } finally {
       watch.stop();
     }
@@ -538,15 +653,16 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     const printedCopy = await probe(writing);
     const shape = workCopyFacts(printedCopy, copy.size);
     if (!shape) return refuse("what was made could not be read back", "ffprobe could not read what ffmpeg wrote");
-    if (Math.abs(shape.seconds - facts.duration) > 1) return refuse("what was made came out the wrong length", `what ffmpeg wrote is ${shape.seconds} seconds long, and the video is ${facts.duration}`);
+    if (Math.abs(shape.seconds - seconds) > 1) return refuse("what was made came out the wrong length", `what ffmpeg wrote is ${shape.seconds} seconds long, and the ${stretch ? "stretch" : "video"} is ${seconds}`);
     if (streams.audio !== null && !factsOf(printedCopy).sound) return refuse("what was made has no sound", "what ffmpeg wrote has no sound, and the video has");
 
-    // The facts first and the video last: the video is the copy, and it is never there without its facts.
-    const madeFacts = join(work, `${key}.json`);
+    // The facts first and the video last: the video is the copy, and it is never there without its facts. A Reel's facts say which
+    // stretch of the recording its video is, as it was cut (its end held to the video's).
+    const madeFacts = join(work, basename(paths.facts));
     const placed = [];
     let madeDir = false;
     try {
-      write(madeFacts, `${JSON.stringify(shape, null, 2)}\n`);
+      write(madeFacts, `${JSON.stringify(stretch ? { ...shape, stretch } : shape, null, 2)}\n`);
       if (!stat(paths.dir)) {
         mkdir(paths.dir, { recursive: true });
         madeDir = true;
@@ -579,8 +695,10 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     } catch (e) {
       log(`${shown}: the copies made before could not be looked at (${e.code || e.message}), so they are left.`);
     }
+    // A Reel's copy replaces the same Reel's copies of other keys, and a working copy its own: each kind is known by its whole name.
+    const copyFile = reel ? new RegExp(`^reel-${reel.n}-(\\d+-\\d+-\\d+-\\d+)(?:\\.faces)?\\.(?:mp4|json)$`) : COPY_FILE;
     for (const entry of before) {
-      const other = COPY_FILE.exec(entry);
+      const other = copyFile.exec(entry);
       if (!other || other[1] === key) continue;
       try {
         rm(join(paths.dir, entry), { force: true });
@@ -590,9 +708,14 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false },
     }
 
     finished = true;
+    // The faces are looked for last, for a Reel's copy: it is whole and in place, and does without them.
+    if (reel && faces) {
+      progress.step(FACES_STEP);
+      await keepFaces({ faces, paths, work, shown, write, rename, log });
+    }
     const notes = workCopyNotes({ steady, rate, hdr });
-    log(`${shown}: the video for HyperFrames is made${notes.length ? `, with ${notes.join(" and ")}` : ""}.`);
-    return { ok: true, made: ["the video for HyperFrames", ...notes], failed: [], next: "", words: WORK_COPY_DONE, key, paths };
+    log(`${shown}: the video for ${for_} is made${notes.length ? `, with ${notes.join(" and ")}` : ""}.`);
+    return { ok: true, made: [reel ? `the video for Reel ${reel.n}` : "the video for HyperFrames", ...notes], failed: [], next: "", words: WORK_COPY_DONE, key, paths };
   } catch (e) {
     return refuse("the work stopped part-way", `the work stopped (${e.code || e.message})`);
   } finally {

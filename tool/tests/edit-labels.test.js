@@ -97,7 +97,7 @@ const TODAY_ASKED = {
   retry: [["Pricing talk again.mov"], ["pricing talk again"], ["Nothing here"], []],
   name: [[FOLDER, "A new name"], [FOLDER], []],
   title: [[FOLDER], [FOLDER, "--words", "Price like you mean it", "--approve"], []],
-  reel: [["pick", FOLDER, "1"], ["drop", FOLDER, "1"], []],
+  reel: [["drop", FOLDER, "1"], []],
   reels: [[FOLDER, "--no-play"], []],
   ask: [[FOLDER], ["--now", FOLDER], []],
   finish: [[FOLDER], ["--now", FOLDER], []],
@@ -1224,7 +1224,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     retry: [[SECOND_LABEL], [label], []],
     name: [[label, "A new name"], []],
     title: [[label], [label, "--words", "A title", "--approve"], []],
-    reel: [["pick", label, "1"], [label, "1", "--client-agreed"], []],
+    reel: [["drop", label, "1"], [label, "1", "--client-agreed"], []],
     reels: [[label, "--no-play"], []],
     ask: [[label], ["--now", LIGHT_FOLDER], []],
     finish: [[label], ["--now", LIGHT_FOLDER], []],
@@ -1244,7 +1244,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
-    app: [[label], [label, "what-happened"], [label, "versions"], [], ["2026"], ["nothing fits this"]]
+    app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

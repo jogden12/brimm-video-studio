@@ -45,9 +45,11 @@ const ENDED = { code: 0, signal: null, stderr: "", overMemory: false, outOfTime:
 /** The made-up recording (phase4.js), answered as `record` says, with what the command is given in place of the programs: ffprobe
     answers for the raw video and for what is made of it (tests/phase4.js), ffmpeg under the watchdog writes `COPY` into the file it
     is asked for, and the progress panel is a recorder. `how` is how ffmpeg ends, as workcopy.test.js has it: "works" or "fail".
-    `inside` is called with each ffmpeg the watchdog runs, while it runs. Gives back what the command made and where. */
-export function world({ record = RAW, how = "works", inside = async () => {} } = {}) {
-  const { t, found } = episode(record);
+    `inside` is called with each ffmpeg the watchdog runs, while it runs. `programs` are stand-ins laid over those of the made-up Mac
+    (tests/episodes.js setup), as a test of a Reel's video gives ffprobe an answer for what is made of the recording. Gives back what
+    the command made and where. */
+export function world({ record = RAW, how = "works", inside = async () => {}, programs = {} } = {}) {
+  const { t, found } = episode(record, programs);
   const raw = statSync(join(found.folder, "Pricing talk.mp4"));
   const key = workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs });
   const paths = workCopyPaths(t.home, FOLDER, key);
