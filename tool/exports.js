@@ -229,9 +229,12 @@ function candidatesOf(part, input, zone) {
     `released` are { dir, files }, their video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
     `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }. `rest` is false when
     the main video is finished another way, in which case a Reel the last finish finished that has no project here is left to that way.
-    Gives { parts, asks, stops, mentions, looked }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video, export:
-    null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is to
-    answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); and where it looked. Nothing is touched. */
+    Gives { parts, asks, stops, mentions, looked, tied }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video,
+    export: null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is
+    to answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); where it looked; and `tied`, the keys of the
+    parts whose newest exports began in one minute, so that she is asked which is final, unless every one of those began before the project
+    last changed (then she is told it changed after, as of any older export, and the part is not tied): what the guide counts as exported
+    (plan PR 10, review M1). Nothing is touched. */
 export function lookForExports(input, answers = {}, { rest = true } = {}) {
   const { take = {}, final = [], without = [] } = answers || {};
   const zone = input.zone || LOCAL_ZONE;
@@ -240,6 +243,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
   const asks = [];
   const stops = [];
   const mentions = [];
+  const tied = [];
   const out = [];
   for (const part of input.parts) {
     const { key, label } = part;
@@ -320,6 +324,10 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     const top = exports.filter((file) => minuteOf(file.began.ms) === newest);
     if (top.length > 1) {
       asks.push(`For ${label} there are ${count(top.length)} exports that began at ${zone.text(top[0].began.ms)}: ${shown(top)}. Which is the final one?`);
+      // Whichever she names is the one handed off: the part has an export, unless all began before the project last changed (known to the minute
+      // alone, one is counted to the end of it, as below).
+      const latest = Math.max(...top.map((file) => (file.began.exact ? file.began.ms : file.began.ms + 59999)));
+      if (!(part.here && part.changed !== null && secondOf(part.changed) > secondOf(latest))) tied.push(key);
       passedOver();
       continue;
     }
@@ -352,7 +360,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     }
   }
   const names = input.parts.map((part) => part.project);
-  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.` };
+  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.`, tied };
 }
 
 // --- What is read from the disk ---

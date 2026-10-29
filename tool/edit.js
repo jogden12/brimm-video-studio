@@ -6137,7 +6137,11 @@ function guideProject(ctx, e, r) {
   let exported = false;
   try {
     const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
-    exported = !seen.unreadable && lookForExports(seen.input, {}, { rest: false }).parts.some((part) => part.key === "main" && part.video !== null);
+    if (!seen.unreadable) {
+      // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
+      const looked = lookForExports(seen.input, {}, { rest: false });
+      exported = looked.parts.some((part) => part.key === "main" && part.video !== null) || looked.tied.includes("main");
+    }
   } catch (err) {
     exported = false;
   }

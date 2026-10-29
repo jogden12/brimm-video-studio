@@ -299,6 +299,25 @@ describe("the guide once a video is exported from HyperFrames", () => {
       w.t.done();
     }
   });
+  it("says so when two exports of the main video began in one minute, after the last change: finish asks which is final (review M1)", async () => {
+    for (const [what, make] of [
+      ["an MP4 and a MOV", (w) => { exportOf(w, "main", { record: false }); exportOf(w, "main", { ending: "mov", record: false }); }],
+      ["a file and the copy of it the system numbered", (w) => { exportOf(w, "main", { record: false }); exportOf(w, "main", { name: `${w.names.main} 2026-10-20 13.56 (1).mp4`, record: false }); }],
+      ["an MP4 the app's record names and a MOV it does not", (w) => { exportOf(w, "main"); exportOf(w, "main", { ending: "mov", record: false }); }]
+    ]) {
+      const w = guideWorld();
+      make(w);
+      assert.equal(await line(w), says(EXPORTED), what);
+      w.t.done();
+    }
+  });
+  it("does not say so when two exports in one minute both began before the project last changed", async () => {
+    const w = guideWorld();
+    exportOf(w, "main", { start: [13, 30, 0], record: false });
+    exportOf(w, "main", { start: [13, 30, 0], ending: "mov", record: false });
+    assert.equal(await line(w), says(edit()));
+    w.t.done();
+  });
   it("does not say so when this Mac will not let Downloads be read", async () => {
     const w = guideWorld();
     exportOf(w, "main");
