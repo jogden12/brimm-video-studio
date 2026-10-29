@@ -47,6 +47,11 @@ const LET_GO = "The episode is let go again, as it was before the finish.";
 const reasons = (result) => result.failed.filter((line) => line !== LET_GO);
 /** Every file of the episode's folder but its records (a claim and its letting go write those): what a finish that copies nothing leaves. */
 const filesOf = (found) => listAll(found.folder).filter((file) => !file.startsWith("record/"));
+/** The record written again with `change` laid over it, as a command of her chat would leave it. */
+function rewrite(w, change) {
+  const now = reread(w.found);
+  writeFileSync(recordFile(w.found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, ...(typeof change === "function" ? change(now) : change) }));
+}
 async function on(deps, ...argv) {
   const said = [];
   const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
@@ -145,6 +150,14 @@ describe("7. the hand-off: the next revision of the one the video has", () => {
       assert.deepEqual(w.t.calls.filter((c) => c.cmd === "WHISPER"), []);
     }
   });
+  it("keeps the hand-off under the name it has when the episode was named another way since, and writes no second one", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    rewrite(w, { name: { text: "Pricing, named again", placeholder: false } });
+    const { found } = await finished(w);
+    assert.deepEqual(w.t.inFinal(found).filter((file) => file.endsWith(".brimm-ops.json")), [HANDOFF]);
+    assert.deepEqual([reread(found).finished.handoff, handoffIn(found).revision, handoffIn(found).video.name], [HANDOFF_REL, 2, "Pricing, named again"]);
+  });
   it("puts the Reel's export, its transcripts and the Story parts of a Reel over a minute into final/, and the hand-off, of the name it had, last", async () => {
     const w = await W();
     const reel = exportOf(w, "reel 2");
@@ -195,6 +208,8 @@ describe("8. again: the Reels taken before stay as they were", () => {
     const second = (await finished(w, { without: ["reel 1"] })).found;
     const two = handoffIn(second);
     assert.equal(two.revision, 2);
+    // Reel 2's title is changed meanwhile, in the record: the Reel stays in the hand-off as it was, and is not made again.
+    rewrite(w, (now) => ({ reels: now.reels.map((r) => (r.n === 2 ? { ...r, title: "A new title" } : r)) }));
     const one = exportOf(w, "reel 1");
     assert.deepEqual(await lines(w), [`Reel 1: ${one.name}, from Downloads, exported 2026-10-20 14:00.`, "Reel 2: kept as the last finish made it.", 'Say "yes, hand off the Reels" to start.']);
     const { found } = await finished(w);
@@ -205,6 +220,7 @@ describe("8. again: the Reels taken before stay as they were", () => {
     assert.deepEqual(three.suggestions, two.suggestions);
     assert.deepEqual(three.reels.map((r) => r.n), [1, 2]);
     assert.deepEqual(three.reels[1], two.reels[0]);
+    assert.equal(three.reels[1].title, "Know your costs", "as it was, not as the record says now");
     assert.equal(three.reels[0].file, one.name);
     assert.deepEqual(Object.keys(reread(found).finished.parts).sort(), ["main", "reel 1", "reel 2"]);
   });
@@ -259,6 +275,7 @@ describe("9. the Dropbox rule, and the record", () => {
     const result = await finishNow(w.t.ctx, found);
     assert.equal(result.ok, false);
     assert.match(reasons(result).join("\n"), /^Sallie's laptop took Pricing: what to charge\? over while finish was copying into final\/, so the finish is not in the record\./);
+    assert.match(reasons(result).join("\n"), / The record lists what final\/ holds now, and keeps the hand-off it had: the Reels are taken again from their exports\. Take it over and say "hand off the Reels" again, or finish it there\.$/);
     assert.deepEqual(readdirSync(w.downloads), [reel.name], "every original stays in Downloads");
     const record = reread(found);
     assert.deepEqual([record.editing.by, record.finished.revision, Object.keys(record.finished.parts)], ["Sallie's laptop", 1, ["main"]], "the other Mac's record is not written over, and says no finish of the Reels");
