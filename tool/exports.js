@@ -456,13 +456,23 @@ function recordsIn(dir, downloads, zone) {
   return { recorded, renders };
 }
 
+/** Downloads, listed the first time it is asked for and never again: what `exportsFound` is given as `listDownloads` by a caller that looks for
+    exports of many videos in one pass, the guide (edit.js guideItems; plan PR 17, the review of PR 10, M5). The folder is read once however many
+    videos look in it, and not at all when none does, and a folder this Mac will not let be read is tried once and is unreadable for every video.
+    It gives what the listing of Downloads is, { files, unreadable }, as `videosIn` has it. `readdir` lists a folder as readdirSync does. */
+export function downloadsOnce({ home, readdir = readdirSync }) {
+  let seen = null;
+  return () => (seen ??= videosIn(downloadsFolder(home), readdir));
+}
+
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
     the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
     files its records name and the renders in its renders/ that none does; and the videos in Downloads and in what the other Mac
     released into the episode (`edit/from-hyperframes/`). `home` is this Mac's home, `name` the episode's folder name and `folder` its
     folder in Episodes. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
-    not let Downloads be read. `readdir` lists a folder as readdirSync does, for a test to give another. Nothing is written. */
-export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, readdir = readdirSync }) {
+    not let Downloads be read. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
+    (downloadsOnce), lists Downloads in its place: so that a caller that asks for many videos reads the folder once. Nothing is written. */
+export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
   const downloads = downloadsFolder(home);
   const work = episodeWork(home, name);
   const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
@@ -480,7 +490,7 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
       changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone) : { recorded: [], renders: [] })
     };
   });
-  const seen = videosIn(downloads, readdir);
+  const seen = listDownloads ? listDownloads() : videosIn(downloads, readdir);
   const releasedDir = join(folder, RELEASED_FOLDER);
   return {
     unreadable: seen.unreadable,
