@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { childEnv, PIN, readOpen } from "../hyperframes.js";
+import { childEnv, PIN, readHistory, readOpen } from "../hyperframes.js";
 import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
@@ -24,12 +24,14 @@ const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
 /** The line `app` ends with whenever the app opened: the buttons Studio cannot turn off (architecture 5.9). */
 const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
 
-/** A home folder for the stand-in, which reads how to answer `open` from a file there (`hyperframes-stand-in.json`) and writes each
-    run it makes to another (`hyperframes-stand-in.log`): it is run in PR 1's environment, which carries no variable of a test's. */
-function standIn(c, { open = "opened" } = {}) {
+/** A home folder for the stand-in, which reads how to answer `open` and `history` from a file there (`hyperframes-stand-in.json`) and
+    writes each run it makes to another (`hyperframes-stand-in.log`): it is run in PR 1's environment, which carries no variable of a
+    test's. `history` is "empty" (an untouched project's, the default), "entries" (the fixture's), "far" (the fixture's, with times no
+    date can hold), "fails" or "garbled". */
+function standIn(c, { open = "opened", history = "empty" } = {}) {
   const home = mkdtempSync(join(tmpdir(), "brimm-stand-in-"));
   c.after(() => rmSync(home, { recursive: true, force: true }));
-  writeFileSync(join(home, "hyperframes-stand-in.json"), JSON.stringify({ open }));
+  writeFileSync(join(home, "hyperframes-stand-in.json"), JSON.stringify({ open, history }));
   const env = (more = {}) => childEnv({ base: { HOME: home, LANG: "en_US.UTF-8" }, node: process.execPath, ...more });
   const run = (args, more) => spawnSync(process.execPath, [STAND_IN, ...args], { env: env(more), encoding: "utf8" });
   const runs = () => (existsSync(join(home, "hyperframes-stand-in.log")) ? readFileSync(join(home, "hyperframes-stand-in.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
@@ -66,8 +68,51 @@ describe("the HyperFrames stand-in", () => {
     const s = standIn(c);
     const caught = s.run(["catch-up", s.project, "--json"]);
     assert.deepEqual([caught.status, JSON.parse(caught.stdout)], [0, { project: s.project, turns: [], files: [] }]);
-    const history = s.run(["history", "--dir", s.project, "--json"]);
+    const history = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
     assert.deepEqual([history.status, JSON.parse(history.stdout).entries], [0, []]);
+    assert.deepEqual(readHistory(history.stdout, history.status), { ok: true, entries: [] });
+  });
+  it("answers history as the fixture's entries when the test says so, the newest of them up to the limit it is given", (c) => {
+    const s = standIn(c, { history: "entries" });
+    const all = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
+    assert.equal(all.status, 0);
+    const read = readHistory(all.stdout, all.status);
+    assert.deepEqual([read.ok, read.entries.length, read.entries.map((e) => e.kind)], [true, 6, ["agent", "person", "outside", "agent", "agent", "agent"]]);
+    assert.deepEqual(Object.keys(JSON.parse(all.stdout)), ["entries", "_meta"]);
+    const two = s.run(["history", "--json", "--limit", "2", "--dir", s.project]);
+    assert.deepEqual(readHistory(two.stdout, two.status).entries.map((e) => e.kind), ["agent", "person"]);
+  });
+  it("answers history with times no date can hold when the test says so: the fixture's entries, each ended 1e20, -1e20, one past the edge of a Date and so on", (c) => {
+    const s = standIn(c, { history: "far" });
+    const far = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
+    assert.equal(far.status, 0);
+    const said = JSON.parse(far.stdout);
+    assert.deepEqual(Object.keys(said), ["entries", "_meta"]);
+    assert.equal(said.entries.length, 6);
+    for (const entry of said.entries) assert.ok(typeof entry.endedAt === "number" && Number.isFinite(entry.endedAt) && Math.abs(entry.endedAt) > 8.64e15, String(entry.endedAt));
+    assert.deepEqual(said.entries.slice(0, 4).map((e) => e.endedAt), [1e20, -1e20, 8.64e15 + 1, 1e300]);
+    assert.deepEqual(said.entries.map((e) => e.label), JSON.parse(readFileSync(new URL("./fixtures/hyperframes-0.8.208/history-entries.json", import.meta.url), "utf8")).entries.map((e) => e.label));
+  });
+  it("fails history as the pinned version does when a project cannot be listed: {ok: false} on stdout and exit 2", (c) => {
+    const s = standIn(c, { history: "fails" });
+    const failed = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
+    assert.equal(failed.status, 2);
+    const said = JSON.parse(failed.stdout);
+    assert.deepEqual([said.ok, typeof said.error, Object.keys(said)], [false, "string", ["ok", "error", "_meta"]]);
+    assert.deepEqual(readHistory(failed.stdout, failed.status), { ok: false });
+  });
+  it("prints what is not JSON for history when the test says so, with exit 0", (c) => {
+    const s = standIn(c, { history: "garbled" });
+    const garbled = s.run(["history", "--json", "--limit", "20", "--dir", s.project]);
+    assert.equal(garbled.status, 0);
+    assert.deepEqual(readHistory(garbled.stdout, garbled.status), { ok: false });
+  });
+  it("answers history in the order Studio runs it, and no other, as it answers nothing it was not built for", (c) => {
+    const s = standIn(c, { history: "entries" });
+    for (const args of [["history", "--dir", s.project, "--json"], ["history", "--json", "--dir", s.project], ["history", "--json", "--limit", "20"], ["history", "--limit", "20", "--json", "--dir", s.project], ["history"]]) {
+      const r = s.run(args);
+      assert.deepEqual([r.status, r.stdout], [2, ""], args.join(" "));
+    }
   });
   it("writes down each run: its arguments and the names of its environment", (c) => {
     const s = standIn(c);

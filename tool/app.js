@@ -82,7 +82,7 @@ const BUTTONS = "In HyperFrames, share only with people you invite, export on Th
 export const isMain = (project) => project.key === "main" && project.state !== KEPT;
 
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
-    Mac write, and is joined to a folder here. */
+    Mac write, and is joined to a folder here (by app-reel.js and app-history.js too, which look at a project). */
 export const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 
 /** The Mac a project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null

@@ -1,7 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
-- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4 are merged, and PR 5 (Reel projects, 4.3) is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
+- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4 and PR 6 are merged, and PR 5 (Reel projects, 4.3) is built on its branch, not yet merged. Nothing else in it is built, and nothing in it is installed or turned on.
 - **It rests on:**
   - the design accepted on 2026-10-27, `2026-10-27-brimm-video-with-the-hyperframes-app.md` (until it is merged, on the branch `claude/zealous-bell-esuqck` of brimm-video, or `claude/design-2026-10-27` of brimm-video-studio);
   - Jason's decisions in `docs/requirements.md`;
@@ -308,7 +308,7 @@ sequenceDiagram
 | 6 | Sallie | "Open it in HyperFrames" | `app "<episode>"`, new |
 | 7 | Studio | Claims the episode for this Mac, brings its files over if they are online-only, asks for the working copy if it is not made, writes the project, opens the app, and says in plain words that it is open. The bring and the copy are detached runs, so `app` does not wait for them: it says what is being made, and tells her to say "open `<name>` in HyperFrames" again when it is done ("how far is it?" shows how far it has got), since a command has two minutes in the Code tab | `app.js`: today's claim and bring from `open`, then `project.js` and `hyperframes.js` |
 | 8 | Sallie and Framey, in the app | Cuts (the Script panel's suggestions, and Studio's in `brimm/cut-suggestions.json`), a name, a title card, music, captions, graphics. Each request is an entry in the project's history | Not Studio's |
-| 9 | Sallie, in her chat | "What did I do in HyperFrames?" | `app "<episode>" what-happened` reads `.hyperframes/app-history.jsonl` and says it in plain words |
+| 9 | Sallie, in her chat | "What did I do in HyperFrames?" | `app "<episode>" what-happened` reads the last megabyte of `.hyperframes/app-history.jsonl` and says the newest 10 requests in plain words, newest first, under the day they happened (4.6). It claims nothing and writes nothing |
 | 10 | Sallie | A Reel: says "Open Reel 2 in HyperFrames" (or "make Reel 2") in her chat. If she asks the app for one, its assistant tells her to say that in her chat: the app never makes a Reel as a project of its own (4.3) | `app "<episode>" reel 2` makes a Reel project from suggestion 2 and opens it |
 | 11 | Sallie, in the app | Exports on This Mac: the main video (1080p), each Reel 9:16 | Not Studio's |
 | 12 | Sallie, in her chat | "Hand it off" | `finish "<episode>"` (section 8) |
@@ -383,10 +383,21 @@ Section 8. In short: Studio takes the exports, transcribes them again on the Mac
 
 ### 4.6 Versions, and "what changed"
 
-- **The app's history is the version list** (design section 3.5). Studio does not keep versions.
-- `app "<episode>" versions` runs the pinned `history --json --limit 20 --dir <project>` and says each entry in plain words: when, who, the label. "Go back to before the music" is said to the app's assistant, which runs `history restore`; Studio never changes history.
-- `history` is a trial (F7). If it fails, Studio says "I can't list the versions right now; HyperFrames shows its history", and nothing else depends on it.
-- Versions do not cross Macs (F12).
+- **The app's history is the version list** (design section 3.5). Studio does not keep versions. The app keeps two lists, and Studio's own code writes neither (a listing does write, by the command line's own doing: see "A listing is not read-only", below):
+  - `.hyperframes/app-history.jsonl`, in the project, which the app writes with no handover (A0, item 1): one line for each request, `{at, engine, asked, did, files}`: what she typed, what the app's assistant answered (up to 2,000 characters each, in markdown), and the files it changed. `app "<episode>" what-happened` tells it (4.1 step 9).
+  - the store `history` lists, `~/.cache/hyperframes/history/<id>/`. This is the version list.
+- `app "<episode>" versions` runs the pinned `history --json --limit 20 --dir <project>` and says each entry in plain words. **What an entry carries** (the command line's own code, a run of it on 2026-10-28, and A0 with the real app): `id`, `who: {kind, name}`, `label`, `startedAt`, `endedAt`, `files` (paths from the project), `undone` and `pinned`. `who.kind` is `agent` (the app's assistant, called Framey), `person` (`You`: what she does by hand in the app) or `outside` (a change the app did not make: the brand kit arriving, a transcript saved; A0 counted 17 entries in the command line's list against 13 in the app's own, the others being these). **The label is whatever the app writes**: her request to the assistant, often headed by the name of the file she attached; `Imported media` for what she did by hand; `Changed outside the app`; `Undid: …` for an undo. It is not a name the assistant chose, since the project's notes no longer ask it to record versions (the app records every change on its own). So "when, who, the label" is `endedAt`, `who.kind` and `label`, and a line also says whether the entry was undone or is kept (`pinned`) and which files it changed, by name: "4:42 pm: bring the title card back (HyperFrames; undone; changed index.html)". Entries are told newest first, under the day they happened. The label, like what `what-happened` quotes of her and of the app, is told as a line of hers has it (`plainText`): on one line; without markdown's marks (bold, slant and code); a link as its words and a bare address left out; a path as its file's name; any other slash as a space; every `--word` token left out whole, and any other run of hyphens made one; and cut at 200 characters at a word. That is all it takes out of what was said: a single-dash option, or the name of a program other than the five below, stays. A text that holds the name of one of five programs (`npx`, `npm`, `node`, `edit.js`, `hyperframes.mjs`) cannot be made plain and is left out whole, and a label so left out is told as "a change". So what is told holds no slash, no `--word` and none of those five names.
+- "Go back to before the music" is said to the app's assistant, which runs `history restore`; Studio never changes history.
+- **A listing is not read-only.** Studio's code only reads, but the command line, when it lists, does write, as it does for any agent that runs `history` (seen on 2026-10-28 with a made-up project and with the real 0.8.208). When the app does not hold the project, it takes the history up itself and files what changed outside the app since as an entry of its own, "Changed outside the app". It may also:
+  - make `.hyperframes/history-id` and the store for a project that has none, which is why `versions` lists only a project the app (or the command line) has recorded;
+  - recreate `.hyperframes/video-state.json` and its lock when they are missing;
+  - write its store's `project.json` and `.last-prune`;
+  - rewrite `history-id` for a folder that is a copy of a recorded project, which then has an id of its own;
+  - once a day, prune the history stores of other projects whose folders have been gone for more than 14 days.
+
+  All of this is the command line's own doing, in the app's folders (its store, and the project's `.hyperframes/`), and none of it touches the project's own files.
+- `history` is a trial (F7). If it fails, Studio says "I can't list the versions right now; HyperFrames shows its history.", and nothing else depends on it.
+- Versions do not cross Macs (F12). Both questions look at this Mac's project, claim nothing and write no record.
 
 ### 4.7 Two Macs
 
@@ -584,7 +595,7 @@ The app's buttons: Share, Render in the cloud, the Script panel's transcription,
 | `reel` | Reduced to `reel drop N`. `reel pick` becomes `app … reel N`, which also marks the candidate picked (`parts.js` and the hand-off read "picked" and "dropped"); `reel pick` is gone as of plan PR 5: it is the help and 2. The client's agreement moves to `clips … send` (until then it is `reel "<label>" <n> --client-agreed`, as before) |
 | `free` | Today a stub: it says deleting a library "comes in a later version", and `freeLibrary` and `unkeptParts` are unreachable. Studio builds it (plan, PR 15) to take a project's working copy and `renders/` away |
 | `push`, `logo`, `captions`, `text`, `graphic`, `preset`, `cut` | Retire, after the app path works (section 10). `push` and the Final Cut files it uses wait for Jason's call on Final Cut. Until then, for a Reel `app … reel N` made (a project in HyperFrames, with no timeline in Final Cut) `push` and the changes say so and send her back to HyperFrames, and for a Reel not picked they say how it is picked now: by opening it (plan PR 5) |
-| **`app`** | New. `app "<episode>"` opens; `… reel N`; `… what-happened`; `… versions`; `--take-over` |
+| **`app`** | New. `app "<episode>"` opens; `… reel N`; `… what-happened`; `… versions`; `--take-over`. The last two ask about this Mac's project (4.6): they claim nothing, bring nothing and write no record, and `--take-over` is not read for them |
 | **`clips`** | New. `clips "<label>"` lists; `… make`; `… show N`; `… send N`; `… done N` |
 | **`workcopy`** | New, and a detached run's alone, like `read` (`startDetached` runs `edit.js <command> --now <folder>`), in no help |
 
@@ -599,7 +610,7 @@ What a new command does need, or the suite fails:
 - a row in the README's command tables, when its usage is in `HELP` (`part-f-fixes.test.js`);
 - if the skill runs it, a skill span that names it (`studio.test.js` only checks that every command the skill runs exists; the skill is a subset and never runs `read`, `bring` or `free`).
 
-- **`app`** goes in no list. It runs for an answered raw video or iPhone clip. For a finished video it passes the gate and then says it has no project and stops (4.3). It is refused for a session in the gate's own words ("This is a client or group session: that is not done for one."), which is the rule that nothing of a session reaches the app by default. A session she has corrected (mark cleared) becomes an ordinary video, and `app` goes by its new kind.
+- **`app`** goes in no list. It runs for an answered raw video or iPhone clip. For a finished video it passes the gate and then says it has no project and stops (4.3). It is refused for a session in the gate's own words ("This is a client or group session: that is not done for one."), which is the rule that nothing of a session reaches the app by default. A session she has corrected (mark cleared) becomes an ordinary video, and `app` goes by its new kind. `app … what-happened` and `app … versions` go through the same gate, which decides by the command word, and say a finished video has no project in the same words.
 - **`clips`** goes in `SESSION_TAUGHT`, so it runs for a session only once the training gate is on, and its `send` is narrowed by its words the way `reel` is (`reelWords`): a clip number, and the consent recorded for it. `agreedTo` (a Reel number and a day in `session.agreed`) is the model; clips get a list of their own so their numbers never meet a Reel idea's.
 - **`workcopy`** goes in no list either. It is run only detached, like `read`, and is never started for a session (a session clip's project has its own clip file).
 - A video one of whose other versions is a session not cleared is held (`heldGateFor`), so `app` is refused for it too, without any new code.
