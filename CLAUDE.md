@@ -74,6 +74,7 @@ cd tool && ./install.sh --print "<folder>"   # what the installer would do. It c
 - The installer is only ever run with `--print`, by a test or by hand, unless Jason has said yes in chat.
 - No test calls the real `claude` program, the HyperFrames app or HeyGen: a stand-in says what each would print.
 - `tool/shared/`, `tool/lib.js` and `tool/run.js` are copies from brimm-operations, each named in its first line, and are kept in step by hand.
+- Every by-hand step for Jason goes into an artifact: what to do on a Mac, the commands to run, and a place for his results, which the session reads back. A pull request or a chat message links to it and never holds the steps alone (Jason, 2026-10-28).
 
 ## Both Macs
 
