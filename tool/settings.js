@@ -49,6 +49,9 @@ export const importingFolder = (root) => join(episodesFolder(root), ".importing"
 export const workFolder = (home) => join(home, "BRIMM Video Work");
 /** The one folder Final Cut's Share and File > Export XML… both save into, on this Mac's own disk. */
 export const fromFinalCutFolder = (home) => join(workFolder(home), "From Final Cut");
+/** Where the HyperFrames app saves an export unless the Export dialog is given another folder (architecture 8.1). On the Mac Studio it is a
+    link into Dropbox, so a file in it can be a Dropbox placeholder. exports.js is the one module that looks in it. */
+export const downloadsFolder = (home) => join(home, "Downloads");
 /** Where an import keeps its own folder while it works and until its late check: on the same disk as Dropbox, so its files
     can be cloned in, and not in the temp folder, which macOS may clear before a late check left by a restart is made. */
 export const runsFolder = (home) => join(workFolder(home), ".runs");
