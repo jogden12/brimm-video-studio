@@ -430,6 +430,17 @@ describe("the guide for a video the gate holds as a session, though its kind is 
       });
     }
   }
+  it("takes a session whose mark was cleared for the ordinary video it is: the gate holds it no more, and it goes the way its record picks", async () => {
+    const cleared = { ...MARKED, cleared: { at: "2026-10-20T09:00:00-05:00", on: "Mac Studio", to: "raw", confirmed: "dialog" } };
+    const none = guideWorld({ projects: null, over: { session: cleared } });
+    assert.equal(await line(none), says(OPEN));
+    const editing = guideWorld({ over: { session: cleared } });
+    assert.equal(await line(editing), says(edit()));
+    exportOf(editing, "main");
+    assert.equal(await line(editing), says(EXPORTED));
+    none.t.done();
+    editing.t.done();
+  });
   it("says the BRIMM Ops page's step once its hand-off is written, as it did, and a video held beside a session is held and nothing of it is read", async () => {
     const written = guideWorld({ over: { session: MARKED, finished: FINISHED } });
     handOff(written);
