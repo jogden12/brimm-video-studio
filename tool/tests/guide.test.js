@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
+import { COPY_STEP, copyIn } from "../guide.js";
 import { TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "../guide.js";
+import { WORK_COPY_STEP } from "../workcopy.js";
 
 const AT = "2026-10-25T12:00:00-05:00";
 const LATER = "2026-10-26T09:00:00-05:00";
@@ -115,9 +117,19 @@ const NOW = Date.parse("2026-10-25T12:00:00-05:00");
 const DROP = (over) => ({ kind: null, drop: { here: true, state: "arriving", step: "", left: null, total: null, readyAt: "", ...over } });
 const SESSION = (over) => ({ kind: "session", session: { choice: "asked", teachingsOn: true, undecided: 0, emptyOwed: false, ...over } });
 const RAW = (over) => ({ kind: "raw", ...over });
+/** A raw video on the HyperFrames way (plan PR 10): the record picks the way, as finish's does (edit.js finishWay). Its way is "unopened" until
+    a project is in use here, then "hyperframes". A raw video with no `way`, or on the Final Cut way, keeps the Final Cut stages. */
+const APP = (over) => ({ kind: "raw", way: "unopened", ...over });
+/** The main project in use, here: whether the app opened it, the time of the last turn in the app's history in words, and whether it
+    has an export that began after its last change. */
+const PROJECT = (over) => ({ opened: true, last: "", exported: false, ...over });
+const CLIP = (over) => ({ kind: "short video", way: "clip", ...over });
 const shown = (n) => (n.done ? { done: true } : { stage: n.stage, text: n.text });
 const OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 const V1 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What a video says that the gate holds as a session, though its kind is a raw video's, a clip's or a finished video's (a Dropbox conflict or a
+    hand edit leaves one): how to clear the mark (plan PR 10, review I2). */
+const MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const STAGE_ROWS = [
   [DROP(), "arriving", 'It is coming into your drop folder. Wait for the "Ready" notice.'],
   [{ ...DROP({ here: false }), mac: "Mac Studio" }, "arriving", 'It is in the drop folder of the Mac Studio. Wait for the "Ready" notice on that Mac.'],
@@ -170,7 +182,63 @@ const STAGE_ROWS = [
   [{ ...SESSION(), reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
   [SESSION({ undecided: 3 }), "session-decide", 'Keep, drop or change each of its principles and Reel ideas. Say "show me the principles".'],
   [SESSION(), "session-done", 'Every item is decided. Say "done" to write its hand-off.'],
-  [{ ...SESSION(), v2: false }, "waits-v2", V1]
+  [{ ...SESSION(), v2: false }, "waits-v2", V1],
+  // The HyperFrames way (plan PR 10). What comes first is as it was: the reading, the spellings, the name.
+  [APP({ reading: "running", copy: { left: 90, usual: null } }), "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
+  [APP({ offersAnswered: false, copy: { left: 90, usual: null } }), "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
+  [APP({ placeholder: true, copy: { left: 90, usual: null } }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
+  // The video for HyperFrames being made: how long is left when the panel says, else how long it usually takes, else no time.
+  [APP({ copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: 20, usual: null } }), "making-copy", 'The video for HyperFrames is being made, less than a minute left. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames" when it is done.'],
+  [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
+  // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
+  [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],
+  [APP({ way: "hyperframes", project: PROJECT(), elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
+  // Open it: no project and no copy at work, or a project the app never opened.
+  [APP(), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
+  [APP({ way: "hyperframes" }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
+  [APP({ way: "hyperframes", project: PROJECT({ opened: false }) }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
+  [APP({ way: "hyperframes", project: PROJECT({ opened: false }), copy: { left: 30, usual: null } }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
+  // In HyperFrames: the time of the last turn in the app's history when there is one.
+  [APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [APP({ way: "hyperframes", project: PROJECT({ last: "yesterday at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was yesterday at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [APP({ way: "hyperframes", project: PROJECT({ last: "on Tuesday 13 October at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was on Tuesday 13 October at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [APP({ way: "hyperframes", project: PROJECT() }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [APP({ way: "hyperframes", project: PROJECT(), copy: { left: 30, usual: null } }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  // Exported: before in-app, whether or not the record lists a time the app opened it.
+  [APP({ way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [APP({ way: "hyperframes", project: PROJECT({ opened: false, exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  // An iPhone clip: in HyperFrames only once the app has opened its project; before, the offer of PR 7's F5 stands.
+  [CLIP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [CLIP({ project: PROJECT({ opened: false }) }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  [CLIP({ v2: false }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
+  [CLIP({ app: false, v2: false }), "waits-v2", V1],
+  // A finish at work is said of an iPhone clip too, since it is finished from its export now.
+  [CLIP({ finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
+  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }), finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
+  [APP({ way: "hyperframes", project: PROJECT({ exported: true }), finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
+  // A video the gate holds as a session, though its kind is not one: it is told how to clear the mark, and nothing of HyperFrames or Final Cut,
+  // whatever else the facts hold (plan PR 10, review I2).
+  [RAW({ gated: true }), "session-mark", MARK],
+  [CLIP({ gated: true }), "session-mark", MARK],
+  [{ kind: "finished", gated: true }, "session-mark", MARK],
+  [{ kind: "finished", gated: true, v2: false }, "session-mark", MARK],
+  [RAW({ gated: true, way: "final cut", shownInFinalCut: true }), "session-mark", MARK],
+  [APP({ gated: true }), "session-mark", MARK],
+  [APP({ gated: true, way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "session-mark", MARK],
+  [APP({ gated: true, copy: { left: 90, usual: 120 } }), "session-mark", MARK],
+  [CLIP({ gated: true, way: "hyperframes", project: PROJECT() }), "session-mark", MARK],
+  [RAW({ gated: true, reading: "running" }), "session-mark", MARK],
+  [RAW({ gated: true, reading: "failed" }), "session-mark", MARK],
+  [RAW({ gated: true, offersAnswered: false }), "session-mark", MARK],
+  [RAW({ gated: true, placeholder: true }), "session-mark", MARK],
+  // The Final Cut way keeps its stages, whatever else the facts hold.
+  [RAW({ way: "final cut", copy: { left: 90, usual: null } }), "show", 'Ask for any changes in your own words, then say "show it in Final Cut".'],
+  [RAW({ way: "final cut", shownInFinalCut: true }), "finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".'],
+  [RAW({ way: "final cut", shownInFinalCut: true, shownSinceFinish: true, handoff: { id: "e-20261020-3fa9c1", revision: 1, kind: "raw", emptyAt: null, at: NOW, file: "Talk.mov" } }), "finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".']
 ];
 const OPS_HANDOFF = { id: "e-20261020-3fa9c1", revision: 1, kind: "finished", emptyAt: null, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "Talk.mp4" };
 
@@ -246,6 +314,71 @@ describe("the next step for a video", () => {
   });
 });
 
+describe("the next step on the HyperFrames way (plan PR 10)", () => {
+  const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
+  it("never sends a video on the HyperFrames way to Final Cut, and leaves the Final Cut way its three stages", () => {
+    for (const over of [
+      APP(), APP({ copy: { left: 90, usual: 120 } }), APP({ way: "hyperframes" }), APP({ way: "hyperframes", project: PROJECT() }), APP({ way: "hyperframes", project: PROJECT({ exported: true }) }),
+      APP({ placeholder: true }),
+      // Shown in Final Cut, before or since a finish, is nothing to a video that goes the other way.
+      APP({ shownInFinalCut: true }), APP({ way: "hyperframes", project: PROJECT(), shownInFinalCut: true, shownSinceFinish: true }),
+      APP({ way: "hyperframes", shownInFinalCut: true, shownSinceFinish: true, handoff: handoffOf("raw") })
+    ]) {
+      const n = nextFor({ ...BASE, ...over }, NONE, NOW);
+      assert.doesNotMatch(n.text, /Final Cut|Share|Export XML/, JSON.stringify(over));
+      assert.ok(!["show", "finish", "finish-again"].includes(n.stage), `${n.stage}: ${JSON.stringify(over)}`);
+    }
+    // The Final Cut way, named or not given at all, keeps all three, with whatever else the facts hold of a project.
+    for (const way of ["final cut", undefined]) {
+      assert.equal(nextFor({ ...BASE, ...RAW({ way }) }, NONE, NOW).stage, "show", String(way));
+      assert.equal(nextFor({ ...BASE, ...RAW({ way, shownInFinalCut: true }) }, NONE, NOW).stage, "finish", String(way));
+      assert.equal(nextFor({ ...BASE, ...RAW({ way, shownInFinalCut: true, shownSinceFinish: true, handoff: handoffOf("raw") }) }, NONE, NOW).stage, "finish-again", String(way));
+    }
+    // An iPhone clip, a finished video and a session never had them.
+    for (const over of [CLIP(), CLIP({ way: "hyperframes", project: PROJECT() }), { kind: "finished", way: "finished" }]) assert.doesNotMatch(nextFor({ ...BASE, ...over }, NONE, NOW).text, /Final Cut/, JSON.stringify(over));
+  });
+  it("shows none of the new stages once a hand-off is written: the BRIMM Ops page's step comes, as it did", () => {
+    for (const [over, kind] of [
+      [APP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "raw"], [APP({ way: "hyperframes", project: PROJECT() }), "raw"], [APP({ copy: { left: 5, usual: null } }), "raw"],
+      [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "short video"], [CLIP({ copy: { left: 5, usual: null } }), "short video"]
+    ]) {
+      const n = nextFor({ ...BASE, ...over, handoff: handoffOf(kind) }, NONE, NOW);
+      assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
+    }
+  });
+  it("puts the reading, the spellings and a raw video's name before the new stages, and a conflict, her answer and the other Mac's claim before them all", () => {
+    const copying = { copy: { left: 90, usual: null }, project: null };
+    const stages = (over) => nextFor({ ...BASE, ...APP({ ...copying, ...over }) }, NONE, NOW).stage;
+    assert.equal(stages({}), "making-copy");
+    assert.equal(stages({ placeholder: true }), "name");
+    assert.equal(stages({ offersAnswered: false }), "spellings");
+    assert.equal(stages({ reading: "failed" }), "reading-failed");
+    assert.equal(stages({ reading: "running" }), "reading");
+    assert.equal(stages({ elsewhere: true, mac: "Mac Studio" }), "open-elsewhere");
+    assert.equal(stages({ conflicted: true }), "conflicted");
+    assert.equal(stages({ finishRunning: true }), "finish-running");
+  });
+  it("tells a video the gate holds as a session how to clear the mark, with nothing of HyperFrames or Final Cut, after a written hand-off's steps and before the reading's", () => {
+    for (const over of [RAW({ gated: true }), CLIP({ gated: true }), { kind: "finished", gated: true }, APP({ gated: true, way: "hyperframes", project: PROJECT({ exported: true }) }), RAW({ gated: true, shownInFinalCut: true, way: "final cut" })]) {
+      const n = nextFor({ ...BASE, ...over }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], ["session-mark", MARK], JSON.stringify(over));
+      assert.doesNotMatch(n.text, /HyperFrames|Final Cut/);
+    }
+    // A conflict, her answer, the other Mac's claim and a finish at work come first, as they do for every video.
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, conflicted: true }) }, NONE, NOW).stage, "conflicted");
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, elsewhere: true, mac: "Mac Studio" }) }, NONE, NOW).stage, "open-elsewhere");
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, finishRunning: true }) }, NONE, NOW).stage, "finish-running");
+    // A hand-off written is the BRIMM Ops page's step, as it was.
+    const written = nextFor({ ...BASE, ...RAW({ gated: true }), handoff: handoffOf("raw") }, NONE, NOW);
+    assert.deepEqual([written.stage, written.step], ["ops", "taken"]);
+    // A session is a session's: its own steps, not this one.
+    assert.notEqual(nextFor({ ...BASE, ...SESSION({ choice: null }), gated: true }, NONE, NOW).stage, "session-mark");
+  });
+  it("is the same for a Reel's project: a project here is the main video's, and a copy at work beside it is not said", () => {
+    assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT(), copy: { left: 90, usual: null } }) }, NONE, NOW).stage, "in-app");
+  });
+});
+
 describe("the guide's lists", () => {
   const item = (name, over = {}, next = { done: false, stage: "spellings", text: "T.", step: "", after: "" }) => ({ facts: { ...BASE, name, ...over }, next, folder: null, record: null });
   const waiting = { done: false, stage: "waiting", text: "W.", step: "", after: "" };
@@ -295,6 +428,16 @@ describe("the times the guide gives", () => {
     assert.equal(roughIn({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }, undefined), null);
     assert.equal(roughIn({}, 2400), null);
   });
+  it("give the working copy's time from the speed progress.js learned for its step, and none while the speed or the length is not known", () => {
+    assert.equal(COPY_STEP, "Making the video for HyperFrames");
+    assert.equal(COPY_STEP, WORK_COPY_STEP);
+    assert.equal(copyIn({ [COPY_STEP]: 0.1 }, 2400), 240);
+    assert.equal(copyIn({ [COPY_STEP]: 0.0999 }, 2400), 240);
+    assert.equal(copyIn({ [COPY_STEP]: 0.1, "Asking Claude": 0.31 }, 600), 60);
+    for (const [rates, seconds] of [[{}, 2400], [{ [COPY_STEP]: 0.1 }, undefined], [{ [COPY_STEP]: 0.1 }, 0], [{ [COPY_STEP]: 0.1 }, -5], [{ [COPY_STEP]: 0 }, 2400], [{ [COPY_STEP]: "fast" }, 2400], [{ [COPY_STEP]: null }, 2400], [{ "Asking Claude": 0.31 }, 2400]]) assert.equal(copyIn(rates, seconds), null, JSON.stringify([rates, seconds]));
+    // The reading's two steps are as they were: the rough cut is made until wave 2 stops the reading making one.
+    assert.deepEqual(READING_STEPS, ["Asking Claude", "Making the rough cut"]);
+  });
 });
 
 describe("the names of videos with no label yet", () => {
@@ -317,8 +460,16 @@ describe("what counts as a change while the guide waits", () => {
     assert.notEqual(signatureOf([at({}), at({})]), base);
     assert.notEqual(signatureOf([at({}, { done: false, stage: "arriving", text: "x", step: "", after: "" })]), base);
   });
-  it("waits only while a video is coming in, being imported or being read", () => {
-    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading"]);
+  it("waits only while a video is coming in, being imported, being read or having its video for HyperFrames made", () => {
+    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"]);
+  });
+  it("sees a video pass from the video for HyperFrames being made to its being opened, and not the time left", () => {
+    const at = (over) => ({ facts: { ...BASE, ...APP(over) }, next: nextFor({ ...BASE, ...APP(over) }, NONE, NOW), folder: null, record: null });
+    const making = signatureOf([at({ copy: { left: 90, usual: 120 } })]);
+    assert.equal(signatureOf([at({ copy: { left: 30, usual: null } })]), making);
+    assert.notEqual(signatureOf([at({})]), making);
+    assert.notEqual(signatureOf([at({ way: "hyperframes", project: PROJECT() })]), signatureOf([at({})]));
+    assert.notEqual(signatureOf([at({ way: "hyperframes", project: PROJECT({ exported: true }) })]), signatureOf([at({ way: "hyperframes", project: PROJECT() })]));
   });
 });
 
@@ -388,5 +539,27 @@ describe("what guide tell says", () => {
       [done, done, done, "Pricing talk (3fa9c1) is done: nothing is left to do for it."]
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
     assert.equal(stillLine(arriving), 'A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
+  });
+  it("keeps waiting while the video for HyperFrames is made, and says the next step in one line when it is done", () => {
+    const making = at({ ...BASE, ...APP({ copy: { left: 90, usual: null } }) });
+    const later = at({ ...BASE, ...APP({ copy: { left: 30, usual: null } }) });
+    const open = at({ ...BASE, ...APP() });
+    const editing = at({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }) });
+    const stage = (item) => item.next.stage;
+    assert.deepEqual([making, later, open, editing].map(stage), ["making-copy", "making-copy", "open-app", "in-app"]);
+    for (const [was, seen, now, want] of [
+      [making, making, making, null],
+      [making, making, later, null],
+      [making, later, open, 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
+      [making, making, editing, 'Pricing talk (3fa9c1): Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+      [making, making, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
+      // A video with nothing on its way gets its next step at once.
+      [open, open, open, 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
+      [editing, editing, editing, 'Pricing talk (3fa9c1): Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".']
+    ]) assert.equal(told(was, seen, now), want, JSON.stringify([stage(was), stage(seen), now && stage(now)]));
+    // Past an hour it is still on its way, with its step.
+    assert.equal(stillLine(making), 'Pricing talk (3fa9c1): It is still on its way after 60 minutes. The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.');
+    // It is followed by its id, as every video in Episodes is.
+    assert.deepEqual(trailOf(making.facts), { id: BASE.id });
   });
 });

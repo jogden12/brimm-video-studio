@@ -8,9 +8,10 @@
 // in the project, which says where the file went. The app updates itself, so everything here reads what it writes tolerantly.
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { KEPT, isMain } from "./app.js";
+import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
 import { downloadsFolder, episodeWork } from "./settings.js";
@@ -121,30 +122,28 @@ export function lastChangeOf({ files = [], turns = [] } = {}) {
   return latest;
 }
 
-/** How much of the end of app-history.jsonl is read: a megabyte, as the command line's catch-up reads it. */
-const HISTORY_BYTES = 1000000;
+/** The flags by which a file the app keeps is opened to be read: no link is followed, and no wait is made on a file that is not a regular
+    one. A pipe where the file should be has no writer, and opening it as a plain read waits for one for good (plan PR 10, review I1). */
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 
-/** The end of a text file, at most `bytes` of it, or "" when it cannot be read. The first line may be cut: a reader of turns passes over a
-    line that is not JSON. */
-function tailOf(path, bytes) {
+/** A file the app keeps, `path`, read as text when it is a regular file; null for anything else (a link, a folder, a pipe, a file that is
+    not there or cannot be read). It is looked at once it is open, so that what is read is the very file that was looked at. */
+function readRegular(path) {
   let fd;
   try {
-    fd = openSync(path, "r");
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - bytes);
-    const buffer = Buffer.alloc(size - start);
-    readSync(fd, buffer, 0, buffer.length, start);
-    return buffer.toString("utf8");
+    fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : null;
   } catch (e) {
-    return "";
+    return null;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
 
 /** When the project in the folder `dir` last changed (lastChangeOf), read from the disk: every file in it but those in the folders it
-    skips, a link counting for its own time and never followed, and the app's history. null when the folder is not here, or holds nothing
-    that counts. */
+    skips, a link counting for its own time and never followed, and the app's history (app-history.js historyTail, which reads a regular
+    file alone: a pipe in its place is no history, and is not waited on). null when the folder is not here, or holds nothing that counts. */
 export function projectChange(dir) {
   const files = [];
   const walk = (folder, rel) => {
@@ -169,7 +168,7 @@ export function projectChange(dir) {
     }
   };
   walk(dir, "");
-  return lastChangeOf({ files, turns: turnsOf(tailOf(join(dir, ".hyperframes", "app-history.jsonl"), HISTORY_BYTES)) });
+  return lastChangeOf({ files, turns: turnsOf(historyTail(dir)) });
 }
 
 // --- Which export a part takes ---
@@ -230,9 +229,12 @@ function candidatesOf(part, input, zone) {
     `released` are { dir, files }, their video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
     `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }. `rest` is false when
     the main video is finished another way, in which case a Reel the last finish finished that has no project here is left to that way.
-    Gives { parts, asks, stops, mentions, looked }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video, export:
-    null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is to
-    answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); and where it looked. Nothing is touched. */
+    Gives { parts, asks, stops, mentions, looked, tied }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video,
+    export: null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is
+    to answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); where it looked; and `tied`, the keys of the
+    parts whose newest exports began in one minute, so that she is asked which is final, unless every one of those began before the project
+    last changed (then she is told it changed after, as of any older export, and the part is not tied): what the guide counts as exported
+    (plan PR 10, review M1). Nothing is touched. */
 export function lookForExports(input, answers = {}, { rest = true } = {}) {
   const { take = {}, final = [], without = [] } = answers || {};
   const zone = input.zone || LOCAL_ZONE;
@@ -241,6 +243,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
   const asks = [];
   const stops = [];
   const mentions = [];
+  const tied = [];
   const out = [];
   for (const part of input.parts) {
     const { key, label } = part;
@@ -321,6 +324,10 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     const top = exports.filter((file) => minuteOf(file.began.ms) === newest);
     if (top.length > 1) {
       asks.push(`For ${label} there are ${count(top.length)} exports that began at ${zone.text(top[0].began.ms)}: ${shown(top)}. Which is the final one?`);
+      // Whichever she names is the one handed off: the part has an export, unless all began before the project last changed (known to the minute
+      // alone, one is counted to the end of it, as below).
+      const latest = Math.max(...top.map((file) => (file.began.exact ? file.began.ms : file.began.ms + 59999)));
+      if (!(part.here && part.changed !== null && secondOf(part.changed) > secondOf(latest))) tied.push(key);
       passedOver();
       continue;
     }
@@ -353,7 +360,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     }
   }
   const names = input.parts.map((part) => part.project);
-  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.` };
+  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.`, tied };
 }
 
 // --- What is read from the disk ---
@@ -429,12 +436,9 @@ function recordsIn(dir, downloads, zone) {
   const named = new Set();
   for (const name of names.filter((n) => n.endsWith(".meta.json"))) {
     const when = metaNameOf(name);
-    let told = null;
-    try {
-      told = metaOf(readFileSync(join(folder, name), "utf8"));
-    } catch (e) {
-      // A record that cannot be read is none.
-    }
+    // A record that cannot be read, or is not a regular file (a pipe, a link, a folder), is none.
+    const text = readRegular(join(folder, name));
+    const told = text === null ? null : metaOf(text);
     if (!told || !told.complete || !told.exportedTo) continue;
     named.add(resolve(told.exportedTo));
     if (!when || !ENDINGS.includes(endingOf(told.exportedTo)) || !isFile(told.exportedTo)) continue;
