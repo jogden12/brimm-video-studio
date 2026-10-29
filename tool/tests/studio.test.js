@@ -230,15 +230,15 @@ describe("her folder's settings", () => {
     const takeOver = open.slice(open.indexOf("If it says another Mac has it"), open.lastIndexOf(" |"));
     assert.ok(takeOver.includes("Never take an episode over unasked otherwise."), takeOver);
     const twin = takeOver.replaceAll('`open "<episode>"', '`app "<episode>"');
-    assert.ok(app.slice(app.indexOf("If it says another Mac has it")).startsWith(twin), app);
     // After the twin, what `app` alone can say (plan PR 11): a project the other Mac has not handed over, one rebuilt from its snapshot (its
-    // video is made again, so she is told to ask again), and one here that is older than the snapshot.
-    const alone = app.slice(app.indexOf(twin) + twin.length, app.lastIndexOf(" |"));
-    for (const words of [
+    // video is made again, so she is told to ask again), and one here that is older than the snapshot. The row from open's take-over to its
+    // end is the twin and those three, in that order, and nothing else (the review of PR 11, M10: pinned whole, not by its start).
+    const ALONE = [
       'If it says the project is on another Mac and that Mac has not handed it over, tell her so in its words, which are either to say "I\'m done with it for now" there and then ask again here, or, when that Mac cannot hand it over while this one has the episode open, to ask Jason; nothing was claimed.',
       "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; its video is then made again in the background, so tell her so, and when \"how far is it?\" says it is done, run it again.",
       "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
-    ]) assert.ok(alone.includes(words), words);
+    ];
+    assert.equal(app.slice(app.indexOf("If it says another Mac has it")), `${twin} ${ALONE.join(" ")} |`);
     // The two rows are twins and neither runs the other's command: this one runs app, in the two forms the help gives it, and never open.
     assert.doesNotMatch(app, /`open /);
     assert.doesNotMatch(open, /`app /);
