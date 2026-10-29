@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
+  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, listedBy, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
   timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
@@ -414,6 +414,38 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     put(e.base, `work/${MAIN}/theirs.txt`, "kept");
     assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { why: "could not" });
     assert.deepEqual(readdirSync(e.dir), ["theirs.txt"]);
+  });
+});
+
+describe("listedBy: the Mac that first listed a file in the record's own revisions (the review of PR 11, C1)", () => {
+  const A = "app-snapshot/2026-10-20 20.00.00Z/P/index.html";
+  const B = "app-snapshot/2026-10-20 20.01.00Z/P/index.html";
+  /** An episode folder whose record/ holds the revisions `revs` ({ n: [files listed, writer's Mac] }). */
+  function episodeOf(c, revs) {
+    const folder = scratch(c);
+    for (const [n, [files, on]] of Object.entries(revs)) put(folder, `record/${String(n).padStart(4, "0")}.json`, JSON.stringify({ rev: Number(n), files: Object.fromEntries(files.map((f) => [f, 1])), writer: { commit: "c709b57", on } }));
+    return folder;
+  }
+  it("is the writer of the oldest revision that lists it without a break, whoever listed it again after", (c) => {
+    const folder = episodeOf(c, { 1: [[], "Mac Studio"], 2: [[A], "Mac Studio"], 3: [[A, B], "Sallie's laptop"], 4: [[A, B], "Mac Studio"], 5: [[B], "Sallie's laptop"] });
+    assert.deepEqual(listedBy(folder, [A, B]), { [A]: "", [B]: "Sallie's laptop" }, "A is no longer listed in the newest revision");
+    const kept = episodeOf(c, { 1: [[], "Mac Studio"], 2: [[A], "Mac Studio"], 3: [[A, B], "Sallie's laptop"], 4: [[A, B], "Mac Studio"] });
+    assert.deepEqual(listedBy(kept, [A, B, "never listed"]), { [A]: "Mac Studio", [B]: "Sallie's laptop", "never listed": "" });
+  });
+  it("is the first revision's writer for a file every revision lists, and nobody's when the record has no revisions", (c) => {
+    const folder = episodeOf(c, { 1: [[A], "Mac Studio"], 2: [[A], "Sallie's laptop"] });
+    assert.deepEqual(listedBy(folder, [A]), { [A]: "Mac Studio" });
+    assert.deepEqual(listedBy(scratch(c), [A]), { [A]: "" });
+  });
+  it("tells nobody's when a revision between is missing or cannot be read: it will not name a Mac it cannot be sure of", (c) => {
+    const gap = episodeOf(c, { 1: [[], "Mac Studio"], 2: [[A], "Mac Studio"], 4: [[A], "Sallie's laptop"] });
+    assert.deepEqual(listedBy(gap, [A]), { [A]: "" }, "revision 3 is not here, so the first listing may be in it");
+    const broken = episodeOf(c, { 1: [[], "Mac Studio"], 2: [[A], "Mac Studio"], 3: [[A], "Sallie's laptop"] });
+    writeFileSync(join(broken, "record", "0002.json"), "{ not json");
+    assert.deepEqual(listedBy(broken, [A]), { [A]: "" });
+    const wrong = episodeOf(c, { 1: [[], "Mac Studio"], 2: [[A], "Mac Studio"], 3: [[A], "Sallie's laptop"] });
+    put(wrong, "record/0002.json", JSON.stringify({ rev: 9, files: {}, writer: { on: "x" } }));
+    assert.deepEqual(listedBy(wrong, [A]), { [A]: "" }, "a revision that is not the number it is named for is not read");
   });
 });
 

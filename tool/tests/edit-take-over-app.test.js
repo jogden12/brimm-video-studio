@@ -691,13 +691,15 @@ describe("app: a session clip's folder is never opened, however the record spell
   const ALIAS = "SESSION CLIP 1 3FA9C1";
   const NOT_AS_MADE = (of = "") => `The folder for ${of}${NAME} on this Mac is not as it was made, so it wasn't opened. Ask Jason.`;
   /** The laptop with a session clip's folder in its work folder, which the record lists again as the project of `key` under `name`. */
-  function clipped(key, name) {
+  function clipped(key, name, { folder = true } = {}) {
     const projects = key === "main"
       ? [entry("main", { name, on: "Sallie's laptop" }), entry("clip 1", { name: CLIP, on: "Sallie's laptop" })]
       : [entry("main", { on: "Sallie's laptop" }), entry("clip 1", { name: CLIP, on: "Sallie's laptop" }), entry(key, { name, on: "Sallie's laptop" })];
     const w = takeOverWorld({ projects: ["main"], over: { editing: null, app: { toolchain: PIN.version, projects } } });
-    fillProject(join(w.b.work, CLIP));
-    rmSync(join(w.b.work, CLIP, "node_modules"), { recursive: true, force: true }); // its link leads nowhere here, and listAll follows links
+    if (folder) {
+      fillProject(join(w.b.work, CLIP));
+      rmSync(join(w.b.work, CLIP, "node_modules"), { recursive: true, force: true }); // its link leads nowhere here, and listAll follows links
+    }
     return w;
   }
   for (const [key, words, of] of [["main", [], ""], ["reel 2", ["reel", "2"], "Reel 2 of "]]) {
@@ -712,7 +714,8 @@ describe("app: a session clip's folder is never opened, however the record spell
     });
   }
   it("refuses a project the record gives the clip's own name, though no folder is there to tell it by", async () => {
-    const w = clipped("reel 2", CLIP);
+    const w = clipped("reel 2", CLIP, { folder: false });
+    assert.equal(existsSync(join(w.b.work, CLIP)), false);
     const before = stateOf(w);
     const r = await app(w.b.deps, FOLDER, "reel", "2");
     assert.deepEqual([r.code, r.said], [1, [NOT_AS_MADE("Reel 2 of ")]]);
