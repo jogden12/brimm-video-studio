@@ -10,7 +10,8 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf, timeName, timeOf
+  ASSETS_MOST, BEHIND_MS, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
+  timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
 const GUIDANCE = readFileSync(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url), "utf8");
@@ -222,6 +223,16 @@ describe("the snapshots an episode's record lists (7.3)", () => {
     assert.equal(snapshotOf(files, "Pricing talk main 2 3fa9c1").files.length, 1);
     assert.equal(snapshotOf({ [`app-snapshot/${T1}/${MAIN}/index.html`]: 5 }, "Pricing talk main 3fa9c1/index.html"), null);
   });
+  it("order the snapshots by the record's own order of listing, not by the clock that named them: the one listed last is the newest (the review of PR 11, I1)", () => {
+    // The laptop's clock is behind: its snapshot, listed after Mac Studio's, is named a quarter of an hour before it.
+    const behind = { [`app-snapshot/${T2}/${MAIN}/index.html`]: 1, [`app-snapshot/${T1}/${MAIN}/index.html`]: 2 };
+    assert.deepEqual(snapshotsOf(behind).map((s) => s.time), [T1, T2]);
+    assert.equal(snapshotOf(behind, MAIN).time, T1);
+    // A file of an earlier snapshot listed again after a later one's does not move it: a snapshot stands where its first file does.
+    const apart = { [`app-snapshot/${T2}/${MAIN}/index.html`]: 1, [`app-snapshot/${T1}/${MAIN}/index.html`]: 2, [`app-snapshot/${T2}/${MAIN}/brimm/facts.json`]: 3 };
+    assert.deepEqual(snapshotsOf(apart).map((s) => s.time), [T1, T2]);
+    assert.deepEqual(keptSnapshots({ ...behind, [`app-snapshot/2026-10-22 08.00.00Z/${MAIN}/index.html`]: 5 }, () => true), { keep: ["2026-10-22 08.00.00Z", T1], drop: [T2] });
+  });
   it("keep the two newest that are whole: every file listed for a snapshot there at its size; the others, older or not whole, are named to go", () => {
     const three = { ...listed, [`app-snapshot/2026-10-22 08.00.00Z/${MAIN}/index.html`]: 7 };
     const all = () => true;
@@ -304,7 +315,7 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     const e = episodeWith(c);
     const got = rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
     assert.deepEqual(got, { assetsLeft: false });
-    assert.deepEqual(readdirSync(e.dir, { recursive: true }).filter((rel) => !lstatSync(join(e.dir, rel)).isDirectory()).sort(), [...Object.keys(FILES), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(readdirSync(e.dir, { recursive: true }).filter((rel) => !lstatSync(join(e.dir, rel)).isDirectory()).sort(), [...Object.keys(FILES), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     for (const [rel, text] of Object.entries(FILES)) {
       assert.equal(readFileSync(join(e.dir, rel), "utf8"), text);
       assert.equal(lstatSync(join(e.dir, rel)).mtimeMs, Date.parse("2026-10-20T13:40:00Z"), rel);
@@ -312,6 +323,23 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     assert.equal(readFileSync(join(e.dir, ".claude", "settings.json"), "utf8"), settingsText("main"));
     assert.equal(readlinkSync(join(e.dir, "node_modules", ".bin", "hyperframes")), CLI);
     assert.deepEqual(readdirSync(join(e.base, "work")), [MAIN], "no half-built folder is left beside it");
+  });
+  it("writes the marker: the snapshot it was made from and the Mac that made that snapshot (the review of PR 11, I1)", (c) => {
+    const e = episodeWith(c);
+    rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI, by: "Mac Studio" });
+    assert.deepEqual(readMarker(e.dir), { snapshot: T, by: "Mac Studio" });
+    const other = episodeWith(c);
+    rebuildProject({ folder: other.folder, snapshot: other.snapshot, dir: other.dir, cli: CLI });
+    assert.deepEqual(readMarker(other.dir), { snapshot: T, by: "" });
+  });
+  it("does not let a file dated after the moment of the rebuild stand for the project's last change: its time is the rebuild's, and the others keep theirs", (c) => {
+    const e = episodeWith(c);
+    const future = join(e.folder, "app-snapshot", T, MAIN, "compositions", "title.html");
+    utimesSync(future, new Date("2026-12-01T00:00:00Z"), new Date("2026-12-01T00:00:00Z"));
+    const now = Date.parse("2026-10-20T20:30:00Z");
+    rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI, now });
+    assert.equal(lstatSync(join(e.dir, "compositions", "title.html")).mtimeMs, now);
+    assert.equal(lstatSync(join(e.dir, "index.html")).mtimeMs, Date.parse("2026-10-20T13:40:00Z"));
   });
   it("writes nothing in the episode's folder", (c) => {
     const e = episodeWith(c);
@@ -329,7 +357,7 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     const got = rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
     assert.deepEqual(got, { assetsLeft: false });
     const made = readdirSync(e.dir, { recursive: true }).filter((rel) => !lstatSync(join(e.dir, rel)).isDirectory()).sort();
-    assert.deepEqual(made, [...Object.keys(FILES), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(made, [...Object.keys(FILES), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     assert.equal(readFileSync(join(e.dir, ".claude", "settings.json"), "utf8"), settingsText("main"));
   });
   it("is { why: \"not whole\" } when a file the record lists is not here, is short, is not a file, or when the snapshot holds nothing a snapshot holds, and makes nothing", (c) => {
@@ -358,6 +386,88 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     put(e.base, `work/${MAIN}/theirs.txt`, "kept");
     assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { why: "could not" });
     assert.deepEqual(readdirSync(e.dir), ["theirs.txt"]);
+  });
+});
+
+describe("a project's marker: which snapshot it was last rebuilt from or handed over as (the review of PR 11, I1)", () => {
+  const T1 = "2026-10-20 20.00.00Z";
+  const T2 = "2026-10-20 20.01.00Z";
+  const MAIN = "Pricing talk main 3fa9c1";
+  const at = (ms) => ({ mtimeMs: ms });
+  const BASE = Date.parse("2026-10-20T14:00:00Z");
+  /** The newest snapshot the record lists, as snapshotOf gives it, and the folder it is in. */
+  function episodeWith(c, time = T2) {
+    const folder = scratch(c);
+    put(folder, `app-snapshot/${time}/${MAIN}/index.html`, "<html>");
+    utimesSync(join(folder, "app-snapshot", time, MAIN, "index.html"), new Date(BASE), new Date(BASE));
+    return { folder, newest: snapshotOf({ [`app-snapshot/${time}/${MAIN}/index.html`]: 6 }, MAIN), dir: join(folder, "work", MAIN) };
+  }
+  it("is a dot-file in the project's folder, written whole beside it and read back, and a snapshot never holds it", (c) => {
+    const dir = join(scratch(c), "project");
+    put(dir, "index.html", "<html>");
+    assert.equal(readMarker(dir), null);
+    writeMarker(dir, T1, "Mac Studio");
+    assert.equal(MARKER.startsWith("."), true);
+    assert.deepEqual(readMarker(dir), { snapshot: T1, by: "Mac Studio" });
+    assert.deepEqual(readdirSync(dir).sort(), [MARKER, "index.html"]);
+    assert.deepEqual(relsOf(snapshotFiles(dir)), ["index.html"]);
+    writeMarker(dir, T2, "");
+    assert.deepEqual(readMarker(dir), { snapshot: T2, by: "" });
+    assert.equal(holds(MARKER), false);
+  });
+  it("is none when it is not there, is not JSON, or names no snapshot: the project counts as having never been handed over", (c) => {
+    const dir = join(scratch(c), "project");
+    for (const text of ["", "not json", "[]", "null", '{"snapshot":5}', '{"snapshot":"yesterday"}', '{"by":"Mac Studio"}']) {
+      put(dir, MARKER, text);
+      assert.equal(readMarker(dir), null, text);
+    }
+    put(dir, MARKER, '{"snapshot":"2026-10-20 20.00.00Z","by":5}');
+    assert.deepEqual(readMarker(dir), { snapshot: T1, by: "" });
+  });
+  it("makes a project older when it names another snapshot than the newest listed, whatever the times of its files say", (c) => {
+    const e = episodeWith(c);
+    put(e.dir, "index.html", "<html>");
+    utimesSync(join(e.dir, "index.html"), new Date(BASE + 3600 * 1000), new Date(BASE + 3600 * 1000));
+    writeMarker(e.dir, T1, "Mac Studio");
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), true, "a project an hour newer by its files is older by its marker");
+    writeMarker(e.dir, T2, "Sallie's laptop");
+    utimesSync(join(e.dir, "index.html"), new Date(BASE - 3600 * 1000), new Date(BASE - 3600 * 1000));
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), false, "a project an hour older by its files is current by its marker");
+  });
+  it("makes a project older when it names a snapshot the record lists no more", (c) => {
+    const e = episodeWith(c);
+    put(e.dir, "index.html", "<html>");
+    writeMarker(e.dir, "2026-10-19 08.00.00Z", "Mac Studio");
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), true);
+  });
+  it("falls back to the times of the files when there is no marker, and when it is none", (c) => {
+    const e = episodeWith(c);
+    put(e.dir, "index.html", "<html>");
+    const stamp = (ms) => utimesSync(join(e.dir, "index.html"), new Date(ms), new Date(ms));
+    stamp(BASE - 60000);
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), true);
+    stamp(BASE - BEHIND_MS + 100);
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), false);
+    stamp(BASE - 60000);
+    put(e.dir, MARKER, "garbage");
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), true);
+  });
+  it("is never older when the record lists no snapshot of the project, or the snapshot is not whole here and there is no marker, or the project cannot be read", (c) => {
+    const e = episodeWith(c);
+    put(e.dir, "index.html", "<html>");
+    assert.equal(olderThan(null, e.dir, { folder: e.folder }), false);
+    writeMarker(e.dir, T1, "Mac Studio");
+    assert.equal(olderThan(null, e.dir, { folder: e.folder }), false);
+    rmSync(join(e.dir, MARKER));
+    rmSync(join(e.folder, "app-snapshot", T2, MAIN, "index.html"));
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder }), false);
+    assert.equal(olderThan(e.newest, join(e.dir, "nowhere"), { folder: e.folder }), false);
+  });
+  it("is told by the files the caller has already listed when it is given them, and they are not listed again", (c) => {
+    const e = episodeWith(c);
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder, local: { files: [at(BASE - 60000)] } }), true);
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder, local: { files: [at(BASE)] } }), false);
+    assert.equal(olderThan(e.newest, e.dir, { folder: e.folder, local: { unreadable: true } }), false);
   });
 });
 

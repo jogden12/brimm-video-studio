@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { PIN } from "../hyperframes.js";
 import { NAME } from "./episodes.js";
+import { MARKER, markerAsItIs, readMarker } from "../snapshot.js";
 import { FOLDER, HELD, HERS, MAIN, REEL2, T1, entry, exportOf, fillProject, filesBelow, listAll, ms, releaseWorld, reread, snapshotListing, textOf } from "./snapshot-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -63,7 +64,13 @@ describe("release: the projects of an episode edited in HyperFrames (group C)", 
     for (const project of [MAIN, REEL2]) for (const rel of HELD_RELS) assert.equal(record.files[`app-snapshot/${T1}/${project}/${rel}`], Buffer.byteLength(HELD[rel]), rel);
     assert.deepEqual(record.released.files, record.files);
     assert.deepEqual([record.rev, record.editing, record.released.by], [2, null, "Mac Studio"]);
-    assert.deepEqual(disk(w), before, "the projects on this Mac's disk are as they were");
+    // Each project names the snapshot it was handed over as, and this Mac as its maker (snapshot.js MARKER); the rest is as it was.
+    const after = disk(w);
+    for (const key of ["main", "reel 2"]) {
+      assert.deepEqual(readMarker(w.dirOf(key)), { snapshot: T1, by: "Mac Studio" }, key);
+      delete after[`${key}/${MARKER}`];
+    }
+    assert.deepEqual(after, before, "the projects on this Mac's disk are as they were");
     t.done();
   });
   it("makes every file by a clone from the project (made outside, never over a file) and writes the record after all of them", async () => {
@@ -521,6 +528,33 @@ describe("release: a failure leaves nothing half there (group H)", () => {
     const r = await release(w.t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [1, [`${NAME} could not be handed over: no room left on the disk. Nothing was handed over: say hand it over again.`]]);
     assert.equal(`edit/from-hyperframes/${main.name}` in reread(w.found).files, false, "the record does not list what is gone");
+    w.t.done();
+  });
+  it("puts a project's marker back as it was when a copy cannot be made or the record cannot be written, so that it never names a snapshot that is not there (the review of PR 11, I1)", async () => {
+    const w = releaseWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    const marked = markerAsItIs(w.dirOf("main"));
+    assert.deepEqual(readMarker(w.dirOf("main")), { snapshot: T1, by: "Mac Studio" });
+    await w.t.ctx.deps.wait(60000);
+    // The record cannot be written: the other Mac wrote while the files were copied.
+    const clone = w.t.ctx.deps.clone;
+    w.t.ctx.deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.endsWith("index.html")) writeFileSync(join(w.found.folder, "record", "0003.json"), "{}");
+    };
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 1);
+    assert.equal(markerAsItIs(w.dirOf("main")), marked, "as it was");
+    // A copy cannot be made: the marker is never written.
+    w.t.ctx.deps.clone = () => {
+      throw new Error("no room left on the disk");
+    };
+    rmSync(join(w.found.folder, "record", "0003.json"));
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 1);
+    assert.equal(markerAsItIs(w.dirOf("main")), marked, "as it was");
+    // And a project that had none is left with none.
+    rmSync(join(w.dirOf("main"), MARKER));
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 1);
+    assert.equal(markerAsItIs(w.dirOf("main")), null);
     w.t.done();
   });
   it("removes what it put in when the record cannot be written because the other Mac wrote meanwhile", async () => {

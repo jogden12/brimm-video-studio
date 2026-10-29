@@ -38,7 +38,7 @@ function world(c, { files = { "index.html": "<html>", "brimm/facts.json": "{}", 
   }
   const record = { name: { text: NAME }, files: listed, released: { by: "Mac Studio" }, app: { projects: [{ key: "main", name: project, state: "opened" }] } };
   const said = [];
-  const ctx = { machine: "Sallie's laptop", say: (line) => said.push(line), deps: { zone: fixedZone(-300) } };
+  const ctx = { machine: "Sallie's laptop", say: (line) => said.push(line), now: () => Date.parse("2026-10-20T21:00:00Z"), deps: { zone: fixedZone(-300) } };
   return { base, folder, record, ctx, said, found: { folder }, dir: join(base, "work", project) };
 }
 

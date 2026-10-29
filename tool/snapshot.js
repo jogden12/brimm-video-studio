@@ -19,7 +19,7 @@
 // an episode after the other Mac worked on it would otherwise go on from an older state.
 //
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordFile, recordNumbers } from "./episode.js";
 import { settingsText, writeProject } from "./project.js";
@@ -112,22 +112,28 @@ export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
 /** The snapshots an episode's record lists, newest first, from its `files` (paths from the episode's folder, to their sizes):
     [{ time, ms, projects }], where `projects` is { <project name>: [{ rel, bytes }] }, each list in path order. A path that is not under
     `app-snapshot/<time>/<project name>/<file>`, whose time is not one timeName makes, or that has an empty name or a `.` or `..` in it,
-    is none. The record is written by both Macs and by Dropbox, so nothing it lists is trusted to stay inside the episode's folder. */
+    is none. The record is written by both Macs and by Dropbox, so nothing it lists is trusted to stay inside the episode's folder.
+    Which is newer is the record's own order of listing, never the clock that named a snapshot (a Mac whose clock is behind names its
+    snapshot earlier than the one it was rebuilt from): a snapshot stands where its first file stands in `files`, and the one listed last is
+    the newest. A release adds its files at the end of the list ({ ...record.files, ...copies }) and nothing in this tool sorts or builds
+    the list again, so the order of the list is the order the releases were written in. */
 export function snapshotsOf(files) {
   const found = new Map();
+  let at = 0;
   for (const [path, bytes] of Object.entries(files && typeof files === "object" ? files : {})) {
+    at++;
     const names = path.split("/");
     if (names.length < 4 || names[0] !== SNAPSHOT_DIR) continue;
     const [, time, project, ...rest] = names;
     const ms = timeOf(time);
     if (ms === null || [project, ...rest].some((name) => name === "" || name === "." || name === "..")) continue;
-    if (!found.has(time)) found.set(time, { time, ms, projects: {} });
+    if (!found.has(time)) found.set(time, { time, ms, projects: {}, at });
     const of = found.get(time).projects;
     if (!Object.hasOwn(of, project)) of[project] = [];
     of[project].push({ rel: rest.join("/"), bytes });
   }
   for (const snapshot of found.values()) for (const list of Object.values(snapshot.projects)) list.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  return [...found.values()].sort((a, b) => b.ms - a.ms);
+  return [...found.values()].sort((a, b) => b.at - a.at).map(({ at: listed, ...snapshot }) => snapshot);
 }
 
 /** The Mac that first listed each of `paths` (paths from the episode's folder) in the episode's record, from the record's own revisions, which
@@ -164,6 +170,13 @@ export function listedBy(folder, paths) {
   }
   for (const path of open) out[path] = whole ? (last.get(path) ?? "") : "";
   return out;
+}
+
+/** The Mac that made `snapshot` (snapshotOf) in the episode's `folder`: who first listed its first file (listedBy), or "" when the record does
+    not say or the snapshot holds no file. */
+export function makerOf(folder, snapshot) {
+  const first = snapshot.files[0] ? `${snapshot.dir}/${snapshot.files[0].rel}` : null;
+  return first === null ? "" : listedBy(folder, [first])[first];
 }
 
 /** The newest snapshot that holds files of the project called `name`: { time, ms, dir, files }, `dir` being its folder from the episode's
@@ -220,17 +233,22 @@ export function momentText(ms, zone) {
 }
 
 /** Rebuild the project that `snapshot` (snapshotOf) holds, in the folder `dir` on this Mac, whole or not at all (project.js writeProject):
-    every file of the snapshot that a snapshot holds (holds), with the time it had, `.claude/settings.json` made again from the pin's table,
-    and `node_modules/.bin/hyperframes` a link to `cli`, this Mac's own toolchain. The video is not in a snapshot and is not made here: it is
+    every file of the snapshot that a snapshot holds (holds), with the time it had (but for one dated after `now`, which is given that
+    moment), `.claude/settings.json` made again from the pin's table, the marker (MARKER) that names this snapshot and `by`, the Mac that
+    made it ("" when the record does not say), and `node_modules/.bin/hyperframes` a link to `cli`, this Mac's own toolchain. The video is not in a snapshot and is not made here: it is
     made again from the raw video, as `free` leaves a project without it (app.js putVideoBack). `folder` is the episode's folder in Dropbox.
     `deps.fs` is node:fs, which a test replaces to make a step fail. Gives { assetsLeft }, true when no file of `assets/` was in the snapshot
     (they weighed too much to be handed over), or { why }: "not whole" when a file the record lists for it is not here at its size, or it
     holds nothing, and "could not" when the folder could not be made (then none is left). Nothing in `folder` is written. */
-export function rebuildProject({ folder, snapshot, dir, cli }, deps = {}) {
+export function rebuildProject({ folder, snapshot, dir, cli, by = "", now }, deps = {}) {
   const stats = snapshotStats(folder, { ...snapshot, files: snapshot.files.filter(({ rel }) => holds(rel)) });
   if (stats === null || stats.length === 0) return { why: "not whole" };
-  const files = new Map(stats.map(({ rel, mtimeMs }) => [rel, { copy: join(folder, snapshot.dir, rel), mtimeMs }]));
+  // A file keeps the time it had, but not one in the future: the project's last change (exports.js projectChange) is read from these
+  // times, and one file dated after the moment of the rebuild would stand for it, and make every export look older.
+  const timed = (mtimeMs) => (Number.isFinite(now) ? Math.min(mtimeMs, now) : mtimeMs);
+  const files = new Map(stats.map(({ rel, mtimeMs }) => [rel, { copy: join(folder, snapshot.dir, rel), mtimeMs: timed(mtimeMs) }]));
   files.set(".claude/settings.json", settingsText("main"));
+  files.set(MARKER, markerText(snapshot.time, by));
   files.set("node_modules/.bin/hyperframes", { link: cli });
   try {
     writeProject(dir, files, deps.fs ? { fs: deps.fs } : {});
@@ -242,11 +260,80 @@ export function rebuildProject({ folder, snapshot, dir, cli }, deps = {}) {
 
 /** Whether a project's files `local` are older than a snapshot's `there`: the newest of them is more than BEHIND_MS older than the snapshot's.
     Each is a list of { mtimeMs }. A project that holds no file with a time is older than any snapshot that has one, and a snapshot with none
-    is older than nothing. */
+    is older than nothing. This is the file-time test, which a project that has no marker (olderThan) falls back to: a clock that is behind,
+    a file that is only deleted, or one dated in the future fool it. */
 export function behindSnapshot(local, there) {
   const newest = (list) => (Array.isArray(list) ? list : []).reduce((most, file) => (Number.isFinite(file?.mtimeMs) && (most === null || file.mtimeMs > most) ? file.mtimeMs : most), null);
   const snapshot = newest(there);
   if (snapshot === null) return false;
   const here = newest(local);
   return here === null || here + BEHIND_MS < snapshot;
+}
+
+// --- Which snapshot a project is (the review of PR 11, I1) ---
+
+/** The file in a project's folder (on the Mac's own disk, never in a snapshot: it starts with a dot) that says which snapshot the project was
+    last rebuilt from or handed over as, and the Mac that made that snapshot: { "snapshot": "<time>", "by": "<Mac>" }. `by` is "" when the
+    record does not say. */
+export const MARKER = ".brimm-snapshot.json";
+
+/** What a project's marker says, { snapshot, by }, or null when there is none, it cannot be read, or it names no snapshot. */
+export function readMarker(dir) {
+  try {
+    const told = JSON.parse(readFileSync(join(dir, MARKER), "utf8"));
+    if (told === null || typeof told !== "object" || timeOf(told.snapshot) === null) return null;
+    return { snapshot: told.snapshot, by: typeof told.by === "string" ? told.by : "" };
+  } catch (e) {
+    return null;
+  }
+}
+
+/** The marker's text. */
+export const markerText = (snapshot, by = "") => `${JSON.stringify({ snapshot, by })}\n`;
+
+/** Write a project's marker, whole: beside it under another name, then renamed over it. Throws when it cannot be written. */
+export function writeMarker(dir, snapshot, by = "") {
+  putMarkerText(dir, markerText(snapshot, by));
+}
+
+/** What a project's marker file holds, as text, or null when there is none: for putting it back as it was (putMarkerText). */
+export function markerAsItIs(dir) {
+  try {
+    return readFileSync(join(dir, MARKER), "utf8");
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Put a project's marker file back as `text` says (markerAsItIs), whole, or take it away when `text` is null. Throws when it cannot. */
+export function putMarkerText(dir, text) {
+  const file = join(dir, MARKER);
+  if (text === null) {
+    rmSync(file, { force: true });
+    return;
+  }
+  try {
+    writeFileSync(`${file}.writing`, text);
+    renameSync(`${file}.writing`, file);
+  } catch (e) {
+    rmSync(`${file}.writing`, { force: true });
+    throw e;
+  }
+}
+
+/** Whether the project in `dir` on this Mac is older than `newest`, the newest snapshot the record lists of it (snapshotOf): the other Mac
+    worked on it since, and a project that is opened or handed over from here would go on from an older state. null for `newest` is no
+    question. A project whose marker names another snapshot than the newest is older, whatever the times of its files say: a deletion, a
+    clock that is behind and a file dated in the future change nothing there; a marker that names a snapshot the record lists no more is
+    older too, since the snapshots the record keeps are the newest. A project with no marker (made here and never handed over) is judged by
+    the times of its files (behindSnapshot) against the snapshot's in the episode's `folder`, as before; `local` is its files if the caller
+    has listed them already (snapshotFiles). false when nothing says it is: the snapshot is not whole here, or the project cannot be read. */
+export function olderThan(newest, dir, { folder, local } = {}) {
+  if (!newest) return false;
+  const marker = readMarker(dir);
+  if (marker) return marker.snapshot !== newest.time;
+  const there = snapshotStats(folder, newest);
+  if (there === null) return false;
+  const here = local ?? snapshotFiles(dir);
+  return here.unreadable ? false : behindSnapshot(here.files, there);
 }

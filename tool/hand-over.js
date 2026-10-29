@@ -27,7 +27,7 @@ import { hyperFramesRunning } from "./free.js";
 import { sessionNotCleared } from "./gate.js";
 import { sizeText } from "./kinds.js";
 import { episodeWork } from "./settings.js";
-import { SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, listedBy, snapshotFiles, snapshotOf, snapshotStats, timeName } from "./snapshot.js";
+import { SNAPSHOT_DIR, SNAPSHOT_MOST, makerOf, markerAsItIs, olderThan, putMarkerText, snapshotFiles, snapshotOf, snapshotStats, timeName, writeMarker } from "./snapshot.js";
 
 /** The program the app runs as, which is asked of `running`. */
 const APP_PROGRAM = "HyperFrames";
@@ -118,16 +118,17 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
     if (got.unreadable) return { refused: cantRead(name, project) };
     if (got.bytes > SNAPSHOT_MOST) return { refused: tooBig(name, project, got.bytes) };
     const newest = snapshotOf(record.files, project.name);
-    const there = newest ? snapshotStats(found.folder, newest) : null;
-    if (newest && there === null) {
+    if (newest) {
       // The newest snapshot of this project is not all here. If another Mac made it, what is missing is on its way, and this Mac's older
       // project must not take its place as the newest (the review of PR 11, C1). A snapshot this Mac made itself that lost a file is none
       // to wait for: a new one takes its place.
-      const first = `${newest.dir}/${newest.files[0]?.rel ?? ""}`;
-      const by = listedBy(found.folder, [first])[first];
-      if (by !== ctx.machine) return { refused: arriving(name, project, by) };
+      if (snapshotStats(found.folder, newest) === null) {
+        const by = makerOf(found.folder, newest);
+        if (by !== ctx.machine) return { refused: arriving(name, project, by) };
+      }
+      // A project that is not the newest snapshot (its marker says so, or, with no marker, the times of its files) is not handed over again.
+      if (olderThan(newest, project.dir, { folder: found.folder, local: got })) return { refused: older(name, project) };
     }
-    if (there && behindSnapshot(got.files, there)) return { refused: older(name, project) };
     planned.push({ ...project, ...got });
   }
 
@@ -138,7 +139,17 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
   const made = [];
   const replaced = [];
   const time = planned.length ? freeTime(found.folder, ctx.now()) : "";
+  // Each project's marker (snapshot.js) is made to name this snapshot as the last thing before the record is written, and put back as it was
+  // when the run fails or the record cannot be written, so that a project never names a snapshot that is not in the episode.
+  const markers = [];
   const undo = () => {
+    for (const { dir, was } of markers.splice(0).reverse()) {
+      try {
+        putMarkerText(dir, was);
+      } catch (e) {
+        // A marker that cannot be put back names a snapshot that is gone: the project then counts as older, which is the safe way to be wrong.
+      }
+    }
     for (const rel of made.reverse()) rm(at(rel), { force: true });
     if (time) rm(join(found.folder, SNAPSHOT_DIR, time), { recursive: true, force: true });
   };
@@ -173,6 +184,10 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
       }
       copies[rel] = statSync(at(rel)).size;
       names.push(file.name);
+    }
+    for (const project of planned) {
+      markers.push({ dir: project.dir, was: markerAsItIs(project.dir) });
+      writeMarker(project.dir, time, ctx.machine);
     }
   } catch (e) {
     undo();

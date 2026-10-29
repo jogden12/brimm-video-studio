@@ -13,7 +13,9 @@ import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { localStamp, shown } from "../episode.js";
 import { handOver } from "../hand-over.js";
 import { PIN, cliPath } from "../hyperframes.js";
+import { projectChange } from "../exports.js";
 import { settingsText } from "../project.js";
+import { MARKER, readMarker } from "../snapshot.js";
 import { NAME } from "./episodes.js";
 import { ZONE } from "./exports-world.js";
 import {
@@ -157,7 +159,7 @@ describe("app: the project is rebuilt from the snapshot (group K)", () => {
     assert.deepEqual([first.code, first.said], [0, [REBUILT(), MAKING]]);
     const dir = join(w.b.work, MAIN);
     const rels = Object.keys(HELD).sort();
-    assert.deepEqual(filesBelow(dir), [...rels, ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(filesBelow(dir), [...rels, ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     for (const rel of rels) {
       assert.equal(textOf(join(dir, rel)), HELD[rel], rel);
       assert.equal(statSync(join(dir, rel)).mtimeMs, ms(13, 40), `${rel} has the time it had`);
@@ -212,7 +214,7 @@ describe("app: the project is rebuilt from the snapshot (group K)", () => {
     rmSync(w.dirOf("main"), { recursive: true });
     const r = await app(w.t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [`The HyperFrames project for ${NAME} is rebuilt on this Mac from the snapshot taken at ${WHEN}. What HyperFrames kept of its history stays behind.`, MAKING]]);
-    assert.deepEqual(filesBelow(w.dirOf("main")), [...Object.keys(HELD), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(filesBelow(w.dirOf("main")), [...Object.keys(HELD), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     w.t.done();
   });
   it("makes the project again as before when a Mac's own folder is gone and nothing was handed over", async () => {
@@ -241,7 +243,7 @@ describe("app: the video, made again (group L)", () => {
     const project = reread(w.found).app.projects[0];
     assert.deepEqual([project.key, project.on, project.opened.length, project.state, project.workingCopy], ["main", "Mac Studio", 2, "opened", { bytes: COPY_TEXT.length, seconds: 23.423, fps: 30 }]);
     // The project's files are as the rebuild made them, but for the video.
-    assert.deepEqual(filesBelow(dir), [...Object.keys(HELD), ".claude/settings.json", "media/recording.mp4", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(filesBelow(dir), [...Object.keys(HELD), ".claude/settings.json", MARKER, "media/recording.mp4", "node_modules/.bin/hyperframes"].sort());
     w.t.done();
   });
   it("opens it as it opens any project once the video is in, and asks for nothing again", async () => {
@@ -288,7 +290,7 @@ describe("app … reel: a Reel project is rebuilt from the snapshot, and its vid
     const { w, first } = await rebuilt();
     assert.deepEqual([first.code, first.said], [0, [REBUILT(OF), MAKING_REEL]]);
     const dir = join(w.b.work, REEL2);
-    assert.deepEqual(filesBelow(dir), [...Object.keys(HELD), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(filesBelow(dir), [...Object.keys(HELD), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     for (const rel of Object.keys(HELD)) {
       assert.equal(textOf(join(dir, rel)), textOf(join(w.dirOf("reel 2"), rel)), rel);
       assert.equal(statSync(join(dir, rel)).mtimeMs, ms(13, 40), rel);
@@ -398,7 +400,7 @@ describe("app: a project that cannot be rebuilt (group N)", () => {
     writeFileSync(join(w.found.folder, "record", "0003.json"), JSON.stringify({ ...now, rev: 3, files: { ...now.files, ...listed }, released: { ...now.released, files: { ...now.released.files, ...listed } } }, null, 2) + "\n");
     const r = await app(w.b.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [REBUILT(), MAKING]]);
-    assert.deepEqual(filesBelow(join(w.b.work, MAIN)), [...Object.keys(HELD), ".claude/settings.json", "node_modules/.bin/hyperframes"].sort());
+    assert.deepEqual(filesBelow(join(w.b.work, MAIN)), [...Object.keys(HELD), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     assert.equal(textOf(join(w.b.work, MAIN, ".claude", "settings.json")), settingsText("main"), "made again from the pin's table, not the snapshot's");
     assert.ok(reread(w.found).files[`app-snapshot/${T1}/${MAIN}/.env`] > 0, "the record did list the files it should not");
     w.t.done();
@@ -477,10 +479,11 @@ describe("app: a project older than its snapshot is neither opened nor handed ov
     assert.deepEqual([main.code, main.said], [0, [OPEN, BUTTONS]]);
     w.t.done();
   });
-  it("is opened when it is as new as the snapshot, within 2 seconds, or newer, and not when it is more than 2 seconds older", async () => {
+  it("is, for a project with no marker, opened when it is as new as the snapshot, within 2 seconds, or newer, and not when it is more than 2 seconds older", async () => {
     for (const [lag, code] of [[0, 0], [1900, 0], [2100, 1], [60000, 1]]) {
       const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
       assert.equal((await release(w.t.ctx.deps)).code, 0);
+      rmSync(join(w.dirOf("main"), MARKER));
       const there = join(w.found.folder, "app-snapshot", T1, MAIN, "index.html");
       utimesSync(there, new Date(ms(13, 40) + lag), new Date(ms(13, 40) + lag));
       const r = await app(w.t.ctx.deps, FOLDER);
@@ -489,9 +492,21 @@ describe("app: a project older than its snapshot is neither opened nor handed ov
       w.t.done();
     }
   });
+  it("is not judged by the times of its files when its marker names the newest snapshot: it is the one that handed it over", async () => {
+    for (const lag of [0, 60000, 24 * 3600 * 1000]) {
+      const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
+      assert.equal((await release(w.t.ctx.deps)).code, 0);
+      const there = join(w.found.folder, "app-snapshot", T1, MAIN, "index.html");
+      utimesSync(there, new Date(ms(13, 40) + lag), new Date(ms(13, 40) + lag));
+      const r = await app(w.t.ctx.deps, FOLDER);
+      assert.equal(r.code, 0, `${lag}: ${r.text}`);
+      w.t.done();
+    }
+  });
   it("counts a new file the snapshot does not hold as newer: the project is opened", async () => {
     const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
     assert.equal((await release(w.t.ctx.deps)).code, 0);
+    rmSync(join(w.dirOf("main"), MARKER));
     const there = join(w.found.folder, "app-snapshot", T1, MAIN, "index.html");
     utimesSync(there, new Date(ms(15, 0)), new Date(ms(15, 0)));
     writeFileSync(join(w.dirOf("main"), "compositions", "end-card.html"), "<div>The end</div>");
@@ -504,6 +519,93 @@ describe("app: a project older than its snapshot is neither opened nor handed ov
     const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
     const r = await app(w.t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
+    w.t.done();
+  });
+});
+
+describe("app and release: which project is older goes by the marker, not by the clocks or the files (the review of PR 11, I1)", () => {
+  const OLDER = `The HyperFrames project for ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
+  const OLDER_HANDING = `The HyperFrames project for ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't handed over again. Nothing was handed over. Ask Jason.`;
+  /** Mac Studio releases; Sallie's laptop takes over, rebuilds, makes the video, does `change` to the project, and releases. Gives the world
+      and the folder name of each snapshot, the laptop's last. */
+  async function laptopWorked(change, { behind = 0 } = {}) {
+    const w = takeOverWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER);
+    madeCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER)).code, 0);
+    change(join(w.b.work, MAIN));
+    await w.t.ctx.deps.wait(60000);
+    if (behind) w.b.deps.now = () => w.t.now() - behind;
+    const handed = await release(w.b.deps);
+    assert.equal(handed.code, 0, handed.text);
+    return { w, snapshots: readdirSync(join(w.found.folder, "app-snapshot")).sort() };
+  }
+  const listedTimes = (w) => [...new Set(Object.keys(reread(w.found).files).filter((rel) => rel.startsWith("app-snapshot/")).map((rel) => rel.split("/")[1]))];
+  it("when the other Mac only deleted a file: Mac Studio's project is not opened and not handed over, and the file does not come back", async () => {
+    const { w } = await laptopWorked((dir) => rmSync(join(dir, "compositions", "title-card.html")));
+    const [, second] = listedTimes(w);
+    assert.equal(`app-snapshot/${second}/${MAIN}/compositions/title-card.html` in reread(w.found).files, false, "the laptop's snapshot has no such file");
+    const opened = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([opened.code, opened.said], [1, [OLDER]]);
+    const handed = await release(w.t.ctx.deps);
+    assert.deepEqual([handed.code, handed.said], [1, [OLDER_HANDING]]);
+    assert.equal(`app-snapshot/${second}/${MAIN}/compositions/title-card.html` in reread(w.found).files, false);
+    w.t.done();
+  });
+  it("when the other Mac's clock is ten minutes behind: its snapshot is named before the first, is the newest all the same, and Mac Studio's project is older", async () => {
+    const { w, snapshots } = await laptopWorked((dir) => {
+      const edited = join(dir, "compositions", "title-card.html");
+      writeFileSync(edited, "<div>Pricing, in a new way</div>");
+      utimesSync(edited, new Date(ms(13, 30)), new Date(ms(13, 30)));
+    }, { behind: 10 * 60 * 1000 });
+    assert.deepEqual(snapshots.length, 2);
+    assert.equal(snapshots[0] < T1, true, "the laptop's snapshot sorts before Mac Studio's by its name");
+    assert.deepEqual(listedTimes(w), [T1, snapshots[0]], "and the record lists it last");
+    const opened = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([opened.code, opened.said], [1, [OLDER]]);
+    // Rebuilt from the newest, Mac Studio has what the laptop changed.
+    renameSync(w.dirOf("main"), join(w.t.dir, "older copy of the project"));
+    const rebuilt = await app(w.t.ctx.deps, FOLDER);
+    assert.equal(rebuilt.code, 0, rebuilt.text);
+    assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
+    w.t.done();
+  });
+  it("does not take a file dated in the future for the project's last change: a rebuilt file is given the moment of the rebuild at most", async () => {
+    const w = takeOverWorld({ projects: ["main"] });
+    const future = new Date("2026-12-01T00:00:00Z");
+    utimesSync(join(w.dirOf("main"), "compositions", "title-card.html"), future, future);
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER);
+    const made = join(w.b.work, MAIN);
+    assert.equal(lstatSync(join(made, "compositions", "title-card.html")).mtimeMs <= w.t.now(), true);
+    assert.equal(projectChange(made) <= w.t.now(), true, "so an export made after the rebuild is not older than the last change");
+    assert.equal(lstatSync(join(made, "index.html")).mtimeMs, ms(13, 40), "a file with an ordinary time keeps it");
+    w.t.done();
+  });
+  it("names the snapshot a project was rebuilt from in its marker, with the Mac that made it; and the Mac that hands a project over names its own", async () => {
+    const w = takeOverWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    assert.deepEqual(readMarker(w.dirOf("main")), { snapshot: T1, by: "Mac Studio" });
+    await app(w.b.deps, FOLDER);
+    assert.deepEqual(readMarker(join(w.b.work, MAIN)), { snapshot: T1, by: "Mac Studio" });
+    madeCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER)).code, 0);
+    await w.t.ctx.deps.wait(60000);
+    assert.equal((await release(w.b.deps)).code, 0);
+    const second = readdirSync(join(w.found.folder, "app-snapshot")).sort().at(-1);
+    assert.equal(second > T1, true);
+    assert.deepEqual(readMarker(join(w.b.work, MAIN)), { snapshot: second, by: "Sallie's laptop" });
+    w.t.done();
+  });
+  it("with no marker, goes by the times of the files as before: a project made here and never handed over is not refused for being new, and is for being old", async () => {
+    const w = takeOverWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    rmSync(join(w.dirOf("main"), MARKER));
+    const stamp = new Date(ms(13, 40) - 60000);
+    for (const rel of Object.keys(HELD)) utimesSync(join(w.dirOf("main"), rel), stamp, stamp);
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [OLDER]]);
     w.t.done();
   });
 });

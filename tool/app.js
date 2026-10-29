@@ -57,7 +57,7 @@ import { transcriptOf } from "./loosened.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
-import { behindSnapshot, momentText, rebuildProject, snapshotFiles, snapshotOf, snapshotStats } from "./snapshot.js";
+import { makerOf, momentText, olderThan, rebuildProject, snapshotOf } from "./snapshot.js";
 import { studioFolder } from "./studio.js";
 import { requestWorkCopy, workCopyKey, workCopyPaths } from "./workcopy.js";
 
@@ -376,7 +376,7 @@ export function projectSnapshot(record, key = "main") {
     here, or the folder could not be made). `name` is how the project is named in her words ("Pricing talk", "Reel 2 of Pricing talk"),
     `dir` its folder and `cli` this Mac's own toolchain, which the project's link leads to. `deps.fs` is for a test to make a step fail. */
 export function rebuildHere(ctx, { found, record, snapshot, dir, name }, { cli, fs }) {
-  const built = rebuildProject({ folder: found.folder, snapshot, dir, cli }, { fs });
+  const built = rebuildProject({ folder: found.folder, snapshot, dir, cli, by: makerOf(found.folder, snapshot), now: ctx.now() }, { fs });
   if (built.why === "not whole") {
     ctx.say(snapshotNotWhole(name));
     return { code: 1 };
@@ -390,15 +390,12 @@ export function rebuildHere(ctx, { found, record, snapshot, dir, name }, { cli, 
   return {};
 }
 
-/** Whether the project in `dir` on this Mac is older than the newest snapshot the record lists of it (snapshot.js behindSnapshot): the other
-    Mac worked on it since, and a project that is opened or handed over from here would go on from an older state. false when there is
-    no snapshot, when it is not whole here, or when the project cannot be read: nothing says it is. */
+/** Whether the project in `dir` on this Mac is older than the newest snapshot the record lists of it (snapshot.js olderThan): the other
+    Mac worked on it since, and a project that is opened or handed over from here would go on from an older state. The project's marker
+    says which snapshot it is; with no marker, the times of its files do. false when there is no snapshot, when (with no marker) it is not
+    whole here, or when the project cannot be read: nothing says it is. */
 export function olderHere(found, { record, project, dir }) {
-  const snapshot = snapshotOf(record.files, project.name);
-  const there = snapshot ? snapshotStats(found.folder, snapshot) : null;
-  if (there === null) return false;
-  const here = snapshotFiles(dir);
-  return here.unreadable ? false : behindSnapshot(here.files, there);
+  return olderThan(snapshotOf(record.files, project.name), dir, { folder: found.folder });
 }
 
 /** Put the video back into a project whose video has been taken away (`free`, free.js): { workingCopy }, what the record keeps of the
