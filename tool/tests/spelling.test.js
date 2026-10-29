@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { spellingFault, withSpelling, spellWords, respelledPart, respelledHandoff, respelledHandoffV2 } from "../spelling.js";
+import { spellingFault, withSpelling, spellWords, respelledHeldReel, respelledPart, respelledHandoff, respelledHandoffV2 } from "../spelling.js";
 import { spelled } from "../final-transcript.js";
 import { buildHandoff, handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
@@ -62,6 +62,46 @@ describe("the final transcripts, spelled again", () => {
     const next = respelledHandoff(handoff, { record: now, srts: { main: srt("Sallie.") }, revision: 2, made: "2026-10-21T09:00:00-05:00", madeOn: "Sallie's laptop", commit: "e72a170" });
     assert.deepEqual([next.episode.name, next.episode.title, next.main.file], ["Pricing, part one", "What to charge, and why", "m.mov"]);
     assert.equal(handoffFault(next), "");
+  });
+});
+
+describe("a Reel a hand-off holds, spelled again (plan PR 9, the review's I1)", () => {
+  const srt = "1\n00:00:01,000 --> 00:00:02,000\n Thank you, Cynthia and Sallie.\n\n";
+  const words = `${JSON.stringify({ video: "r.mp4", duration: 2, words: [{ w: "Cynthia", start: 1, end: 1.5 }, { w: "Sallie.", start: 1.5, end: 2 }] }, null, 2)}\n`;
+  const ALLISON = ["Cynthia", "Allison"];
+  it("applies the pairs it does not hold to its captions, its transcript and its word times, and holds those that changed them", () => {
+    const made = respelledHeldReel({ srt, words }, { held: [], now: [ALLISON, ["Hormozy", "Hormozi"]] });
+    assert.equal(made.srt, srt.replace("Cynthia", "Allison"));
+    assert.match(made.txt, /Thank you, Allison and Sallie\./);
+    assert.deepEqual(JSON.parse(made.words).words.map((w) => w.w), ["Allison", "Sallie."]);
+    assert.deepEqual(made.held, [ALLISON], "a pair whose word is not in it is not held");
+    assert.equal(made.keeps, false);
+  });
+  it("applies none twice: a pair it holds is left, and what it gives back is what it was given", () => {
+    const spelled = respelledHeldReel({ srt, words }, { held: [], now: [ALLISON] });
+    const again = respelledHeldReel({ srt: spelled.srt, words: spelled.words }, { held: spelled.held, now: [ALLISON] });
+    assert.deepEqual([again.srt, again.words, again.held, again.keeps], [spelled.srt, spelled.words, [ALLISON], false]);
+    const unchanged = respelledHeldReel({ srt, words }, { held: [], now: [] });
+    assert.deepEqual([unchanged.srt, unchanged.words, unchanged.held], [srt, words, []], "byte for byte");
+    // A spelling that holds its own word would grow at every spelling after, were it applied again.
+    const FULL = ["Sallie", "Sallie Ogden"];
+    const full = respelledHeldReel({ srt, words }, { held: [], now: [FULL] });
+    assert.match(full.srt, /Cynthia and Sallie Ogden\./);
+    const next = respelledHeldReel({ srt: full.srt, words: full.words }, { held: full.held, now: [FULL, ALLISON] });
+    assert.match(next.srt, /Allison and Sallie Ogden\./);
+    assert.doesNotMatch(next.srt, /Ogden Ogden/);
+    assert.deepEqual(next.held, [FULL, ALLISON]);
+  });
+  it("keeps what a spelling gave it that was taken back or changed since, and says so, when its captions still hold it: the spelling cannot be taken out of words that hold it", () => {
+    const spelled = respelledHeldReel({ srt, words }, { held: [], now: [ALLISON] });
+    for (const now of [[], [["Cynthia", "Alison"]]]) {
+      const made = respelledHeldReel({ srt: spelled.srt, words: spelled.words }, { held: [ALLISON], now });
+      assert.deepEqual([made.srt, made.words, made.keeps, made.held], [spelled.srt, spelled.words, true, [ALLISON]], JSON.stringify(now));
+    }
+    assert.equal(respelledHeldReel({ srt, words }, { held: [ALLISON], now: [] }).keeps, false, "its captions do not hold it, so there is nothing it keeps");
+  });
+  it("cannot be done for words that are not a words file, which it says by throwing, for its caller to say the Reel keeps its captions", () => {
+    assert.throws(() => respelledHeldReel({ srt, words: "not json" }, { held: [], now: [ALLISON] }));
   });
 });
 

@@ -1227,7 +1227,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     reel: [["drop", label, "1"], [label, "1", "--client-agreed"], []],
     reels: [[label, "--no-play"], []],
     ask: [[label], ["--now", LIGHT_FOLDER], []],
-    finish: [[label], ["--now", LIGHT_FOLDER], []],
+    finish: [[label], [label, "reels"], ["--now", LIGHT_FOLDER], []],
     release: [[label], []],
     show: [[label, "transcript"], [label, "notes"], [label, "plan"], []],
     behind: [[]],
