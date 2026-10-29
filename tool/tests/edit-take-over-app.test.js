@@ -613,6 +613,29 @@ describe("release: the other Mac's newer snapshot is never dropped, and an older
     assert.deepEqual(got, { refused: `Dropbox is still bringing what Sallie's laptop handed over of ${NAME}. Say it again when it is done. Nothing was handed over.` });
     w.t.done();
   });
+  it("does not excuse a copy of an export that the laptop made and Dropbox has not brought: it is waited for, and stays listed", async () => {
+    const w = takeOverWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER);
+    madeCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER)).code, 0);
+    mkdirSync(join(w.b.work, MAIN, "renders"), { recursive: true });
+    const made = exportOf({ ...w, downloads: join(w.b.home, "Downloads"), dirOf: () => join(w.b.work, MAIN) }, "main");
+    await w.t.ctx.deps.wait(60000);
+    const handed = await release(w.b.deps);
+    assert.equal(handed.code, 0, handed.text);
+    const rel = `edit/from-hyperframes/${made.name}`;
+    assert.equal(rel in reread(w.found).files, true, "the laptop listed its export");
+    rmSync(join(w.found.folder, rel));
+    const before = stateOf(w);
+    const r = await release(w.t.ctx.deps);
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /is not whole in Dropbox/);
+    assert.match(r.text, /Nothing was handed over\./);
+    assert.deepEqual(stateOf(w), before);
+    assert.equal(rel in reread(w.found).files, true, "the record still lists what the laptop handed over");
+    w.t.done();
+  });
 });
 
 describe("what pins the words (group S)", () => {

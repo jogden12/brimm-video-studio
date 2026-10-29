@@ -59,7 +59,7 @@ import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
-import { SNAPSHOT_DIR, keptSnapshots } from "./snapshot.js";
+import { SNAPSHOT_DIR, keptSnapshots, listedBy } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2477,8 +2477,12 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
   const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
   // A snapshot's or an export's copy made here that Dropbox has taken away is no more waited for than a Final Cut one: it is listed no more.
+  // One the other Mac made, that is not here, is on its way: it is checked as any other file is, and the release waits (the review of PR 11,
+  // C1). Who made a copy is who first listed it in the record's own revisions (snapshot.js listedBy).
   const carried = (rel) => rel.startsWith(`${SNAPSHOT_DIR}/`) || rel.startsWith(`${RELEASED_FOLDER}/`);
-  const goneCarried = Object.keys(record.files).filter((rel) => carried(rel) && !existsSync(at(rel)));
+  const missingCarried = Object.keys(record.files).filter((rel) => carried(rel) && !existsSync(at(rel)));
+  const madeBy = missingCarried.length ? listedBy(found.folder, missingCarried) : {};
+  const goneCarried = missingCarried.filter((rel) => madeBy[rel] === ctx.machine);
   const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel) && !goneCarried.includes(rel))) });
   if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
   if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
@@ -2568,7 +2572,7 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // snapshot with a file gone is not whole, so it is judged before the copies Dropbox took away are left out of the list; a copy of an
   // export that is gone is listed no more, and one this release made again is there.
   const { drop } = keptSnapshots(listedNow, (rel, bytes) => ctx.stat(at(rel))?.size === bytes);
-  const files = Object.fromEntries(Object.entries(listedNow).filter(([rel]) => !(rel.startsWith(`${SNAPSHOT_DIR}/`) && drop.includes(rel.split("/")[1])) && !(carried(rel) && !existsSync(at(rel)))));
+  const files = Object.fromEntries(Object.entries(listedNow).filter(([rel]) => !(rel.startsWith(`${SNAPSHOT_DIR}/`) && drop.includes(rel.split("/")[1])) && !(goneCarried.includes(rel) && !existsSync(at(rel)))));
   const stillWriting = [...notYet, ...hf.notYet];
   const later = stillWriting.length ? ` Not copied yet, still being written: ${listed(stillWriting)}.` : "";
   const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
