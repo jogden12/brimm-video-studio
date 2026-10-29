@@ -571,6 +571,30 @@ describe("app and release: which project is older goes by the marker, not by the
     assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
     w.t.done();
   });
+  it("is decided before the episode is claimed: the refusal leaves the record's rev and its claim as they were, waits for nothing and asks for nothing (the review of PR 11, I2)", async () => {
+    const { w } = await laptopWorked((dir) => rmSync(join(dir, "compositions", "title-card.html")));
+    const before = stateOf(w);
+    assert.equal(before.editing, null);
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [OLDER]]);
+    assert.deepEqual(stateOf(w), before);
+    w.t.done();
+  });
+  it("is the same for a Reel project that is older: nothing is claimed, and it is said of the Reel", async () => {
+    const w = takeOverWorld();
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER, "reel", "2");
+    madeReelCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER, "reel", "2")).code, 0);
+    rmSync(join(w.b.work, REEL2, "compositions", "title-card.html"));
+    await w.t.ctx.deps.wait(60000);
+    assert.equal((await release(w.b.deps)).code, 0);
+    const before = stateOf(w);
+    const r = await app(w.t.ctx.deps, FOLDER, "reel", "2");
+    assert.deepEqual([r.code, r.said], [1, [`The HyperFrames project for Reel 2 of ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`]]);
+    assert.deepEqual(stateOf(w), before);
+    w.t.done();
+  });
   it("does not take a file dated in the future for the project's last change: a rebuilt file is given the moment of the rebuild at most", async () => {
     const w = takeOverWorld({ projects: ["main"] });
     const future = new Date("2026-12-01T00:00:00Z");

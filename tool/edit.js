@@ -87,7 +87,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac, projectSnapshot } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, olderHere, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
@@ -1222,6 +1222,18 @@ const finishedHasNoProject = (name) => `${name} was finished by your editor, so 
     name the video. */
 const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
 
+/** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it (app.js olderHere), or "": decided
+    before anything is claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2).
+    `key` says which project ("main" or "reel 2"), and `of` how its words name it. With the project's marker (snapshot.js) that needs no
+    file of the snapshot; a project with no marker is judged by the times of its files when the snapshot is whole here, and otherwise
+    openInApp judges it again once the claim has brought the files. */
+function olderWords(ctx, { found, record }, key, of) {
+  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
+  if (!project || !plainName(project.name)) return "";
+  const dir = join(episodeWork(ctx.home, found.name), project.name);
+  return existsSync(dir) && olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
+}
+
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
@@ -1253,6 +1265,8 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       drop the other Mac's from the record. With a snapshot listed (the other Mac released the episode; plan PR 11) it goes on to the
       claim, and openInApp rebuilds the project from the snapshot. A project of this Mac's own whose folder is gone is rebuilt from its
       snapshot when there is one, and made again, as before, when there is not;
+    - a project of this Mac's that is older than the newest snapshot the record lists of it (olderWords; the other Mac worked on it
+      since) is refused in words before anything is claimed, so that the refusal leaves the record and its claim as they were;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
@@ -1282,6 +1296,8 @@ export async function app(ctx, rest) {
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
   if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
+  const older = olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
+  if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
@@ -1303,6 +1319,7 @@ export async function app(ctx, rest) {
     - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
       and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
       one, openReelInApp rebuilds it from the snapshot;
+    - a Reel project of this Mac's that is older than the newest snapshot of it (olderWords) is refused before anything is claimed;
     - the claim and the bring, as `open` and `app` make them (claimAndBring). What she is told to say again is "open Reel <n> of
       <name> in HyperFrames", and the bring it starts is told so (`bring … --asked-by "app reel <n>"`);
     - openReelInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record the
@@ -1325,6 +1342,8 @@ async function appReel(ctx, asked, flags) {
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
   if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
+  const older = olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
+  if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
