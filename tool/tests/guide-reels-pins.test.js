@@ -42,6 +42,8 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
       "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish runs it says so instead",
       "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
+      // The hand-off is read as a regular file alone, on a Mac whose settings say version 2 (review F4 and F5).
+      "Its hand-off is read as a regular file alone, so that a pipe where it should be is never waited for and a link there is read as unreadable, though `finish` follows one; this holds on a Mac whose settings say hand-off version 2: on any other, `writesV2For` first reads each hand-off of `final/` and `history/` with a plain read, as it does for every command that asks it.",
       'A video she has set aside ("that one is all done") stays set aside',
       "only when the video has a hand-off and a Reel project on this Mac"
     ]) assert.ok(first.includes(words), words);
@@ -95,7 +97,10 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "**The guide says it** (4.5; plan PR 16)", "as a regular file alone", "a pipe or a link where a file should be is never waited for",
       "It says nothing where `finish … reels` would go no further and a look that costs no other read can tell (4.5).",
       "a hand-off that went to the page under another id and a Reel number another version gave under the same id (each ends \"Ask Jason\", and the guide goes on saying the stage until Jason has settled it)",
-      "a file of the episode not whole in Dropbox (it comes right as Dropbox syncs), and the shape and sound of the exported file"
+      "a file of the episode not whole in Dropbox (it comes right as Dropbox syncs), and the shape and sound of the exported file",
+      // Only on a Mac whose settings say hand-off version 2 (review F5); a link is read as unreadable (F4).
+      "That holds on a Mac whose settings say hand-off version 2: on any other, `writesV2For` first reads each hand-off of `final/` and `history/` with a plain read, as it does for `finish` and `spell`, and a pipe where one should be would be waited for.",
+      "A link is read as unreadable, though `finish` follows one: Studio never makes a link there."
     ]) assert.ok(reels.includes(words), `${words} in 8.7`);
   });
 });
