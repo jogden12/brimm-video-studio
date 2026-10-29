@@ -37,6 +37,12 @@ export const WORK_COPY_STEPS = [WORK_COPY_STEP];
     offered to the app for the upright crop. A copy that is given no finder has the first step alone. */
 export const FACES_STEP = "Finding the faces";
 export const REEL_COPY_STEPS = [WORK_COPY_STEP, FACES_STEP];
+/** How long each of the face finder's two programs, the ffmpeg that cuts the stills and the finder that looks in them (unedited.js
+    facesIn), may run for a Reel's video, in milliseconds. A Reel is at most 90 seconds, so its stills are few and looking in them
+    takes seconds. The run holds the working copy's lock for as long as it works, so a finder that hangs would hold it for good, and
+    with it every copy of the episode and every `app` that waits for the video (app-reel.js). One stopped for its time offers no faces
+    and costs the copy nothing. */
+export const REEL_FACES_MS = 3 * 60 * 1000;
 /** The step the progress panel shows while the run waits, before it makes the copy, for the import to have checked its copies of the
     video (edit.js workcopy): "how far is it?" says it. It is no step of the work, so it is not among WORK_COPY_STEPS: it is of any
     length, and the panel never measures it. */

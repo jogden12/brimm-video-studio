@@ -397,17 +397,27 @@ export async function roughCut(file, to, { plan, facts, spans, streams = null },
 const isStills = (told) => Array.isArray(told) && told.every((still) => still && typeof still.file === "string" && Array.isArray(still.faces)
   && still.faces.every((box) => box && [box.x, box.y, box.w, box.h].every((n) => Number.isFinite(n))));
 
+/** A time limit as a log line says it: "3 minutes", "90 seconds". */
+const limitText = (ms) => (ms % 60000 === 0 ? `${ms / 60000} minute${ms === 60000 ? "" : "s"}` : `${Math.round(ms / 1000)} seconds`);
+
 /** Where the faces are in a video: {stills}, what the face finder printed for stills of it, or {why} they could not be looked
-    for. The stills go into the run's own folder `work`, which is taken away when the run ends. */
-export async function facesIn(file, work, { run, tools }) {
+    for. The stills go into the run's own folder `work`, which is taken away when the run ends.
+    `limit` is how long each of its two programs, the ffmpeg that cuts the stills and the finder that looks in them, may run, in
+    milliseconds (run.js runProgram kills one still running then); one stopped for it is said so. A Reel's video is looked in by the
+    working copy's run, which holds the working copy's lock for as long as it works, so that a finder that hangs would hold it for
+    good (workcopy.js REEL_FACES_MS). Given none, a program has all the time it takes, as the import's upright version always gave
+    it: the stills of a long recording take as long as they take. */
+export async function facesIn(file, work, { run, tools, limit = 0 }) {
   if (!tools.swift) return { why: "swift, which finds the faces, is not installed" };
   const folder = join(work, "stills");
   mkdirSync(folder, { recursive: true });
-  const cut = await run(tools.ffmpeg, stillsArgs(file, folder));
-  if (cut.code !== 0) return { why: `the stills to look in could not be made (${lastLine(cut.stderr)})` };
+  const asked = limit > 0 ? { limit } : {};
+  const stoppedFor = (ended) => (ended.outOfTime ? `it took more than ${limitText(limit)}, so it was stopped` : reasonOf(ended));
+  const cut = await run(tools.ffmpeg, stillsArgs(file, folder), asked);
+  if (cut.code !== 0) return { why: `the stills to look in could not be made (${cut.outOfTime ? stoppedFor(cut) : lastLine(cut.stderr)})` };
   // What the face finder prints is its answer, so that is kept, whole.
-  const found = await run(tools.swift, [FACES, folder], { out: FACES_PRINTED });
-  if (found.code !== 0) return { why: `the face finder stopped (${reasonOf(found)})` };
+  const found = await run(tools.swift, [FACES, folder], { out: FACES_PRINTED, ...asked });
+  if (found.code !== 0) return { why: `the face finder stopped (${stoppedFor(found)})` };
   try {
     const stills = JSON.parse(found.stdout);
     if (isStills(stills)) return { stills };

@@ -18,7 +18,7 @@ import { writePending } from "../filing.js";
 import { READ_LOOK_MS } from "../reading.js";
 import { STILL_EVERY } from "../reframe.js";
 import { pendingFolder } from "../settings.js";
-import { REEL_COPY_STEPS, WORK_COPY_STEP, reelCopyKey, reelCopyPaths, workCopyLimits, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { REEL_COPY_STEPS, REEL_FACES_MS, WORK_COPY_STEP, reelCopyKey, reelCopyPaths, workCopyLimits, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { probed } from "./fixtures.js";
 import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
 import { ANSWERED, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, world } from "./workcopy-world.js";
@@ -309,6 +309,29 @@ describe("workcopy --reel: the progress panel, and the faces looked for in the R
     assert.ok(!bare.t.calls.some((call) => call.cmd === "SWIFT"));
     w.t.done();
     bare.t.done();
+  });
+  it("limits how long the finder's two programs may run, so that one that hangs does not hold the working copy's lock for good", async () => {
+    const stills = [{ file: "0001.jpg", faces: [BOX] }];
+    const w = reelWorld({ programs: { SWIFT: () => ({ code: 0, stderr: "", stdout: JSON.stringify(stills) }) } });
+    w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, swift: "SWIFT" };
+    const run = w.t.ctx.deps.run;
+    const asked = [];
+    w.t.ctx.deps.run = async (cmd, args, options) => (asked.push({ cmd, args, options }), run(cmd, args, options));
+    assert.equal((await on(w.t.ctx.deps, ...ASK)).code, 0);
+    const finder = asked.filter(({ cmd, args }) => cmd === "SWIFT" || (cmd === "FFMPEG" && args.some((arg) => /fps=1\/2/.test(arg))));
+    assert.deepEqual(finder.map(({ cmd, options }) => [cmd, options && options.limit]), [["FFMPEG", REEL_FACES_MS], ["SWIFT", REEL_FACES_MS]]);
+    assert.ok(REEL_FACES_MS >= 60000 && REEL_FACES_MS <= 10 * 60 * 1000, "a Reel is at most 90 seconds: minutes are enough, and hours are not wanted");
+    w.t.done();
+  });
+  it("offers no faces, says why in the log, and still makes the copy, when the finder runs out of its time", async () => {
+    const w = reelWorld({ programs: { SWIFT: () => ({ code: 1, stderr: "", signal: "SIGKILL", outOfTime: true }) } });
+    w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, swift: "SWIFT" };
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /no face was found in the video \(the face finder stopped \(it took more than 3 minutes, so it was stopped\)\), so the faces are not offered/);
+    assert.deepEqual([existsSync(w.copy.video), existsSync(w.copy.faces)], [true, false]);
+    assert.equal(existsSync(workCopyLockOf(w.t.home, FOLDER)), false, "the lock is let go");
+    w.t.done();
   });
   it("is never looked for in the working copy of the whole video, and a run without --reel has the one step as before", async () => {
     const w = world();

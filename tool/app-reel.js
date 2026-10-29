@@ -18,7 +18,9 @@
 //   - the Reel's video is a stretch of the recording as filed, from the suggestion's first moment to its last, made as the working
 //     copy is, with its chain and its checks (workcopy.js reelCopyKey, makeWorkCopy), by the detached run `workcopy --reel <n>` that
 //     has the working copy's lock. When it is not there it is asked for and she is told to say it again when it is done; this does
-//     not wait for it (a command has two minutes in the Code tab). It is cut from the recording and not from the working copy
+//     not wait for it (a command has two minutes in the Code tab). While a run is at work on the episode, whichever video it makes,
+//     she is told a video is being made and to say it again, and the project is not written under a run that is still looking for
+//     the faces in the video it has put in place. It is cut from the recording and not from the working copy
 //     because the working copy is moved into the main project, which the app may hold open, and a finished video has none. Beside
 //     it the run keeps the faces it found in it, if it found any;
 //   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words,
@@ -40,7 +42,7 @@ import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE, readReels, reelEntries } from "./reels.js";
 import { episodeWork } from "./settings.js";
 import { changedSince, copyIn, factsIn, fromOf, guidanceOf, jsonIn, logosIn, noWords, notWhole, openProjectInApp, plainName, recordingChanged, wordsIn } from "./app.js";
-import { reelCopyKey, reelCopyPaths, requestWorkCopy } from "./workcopy.js";
+import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 /** The kinds of video a Reel's video is made for (architecture 4.3): a raw video, and a video finished by her editor. A short video
     has no Reels, and a session reaches the app only as a clip of its own. */
@@ -60,6 +62,11 @@ export const makeOneWords = (numbers, name) => (numbers.length === 1
   : `To make one, say "${openReelWords(numbers[0], name)}", with the number of the one you want.`);
 
 const beingMade = (n, name) => `The video for Reel ${n} is being made. Say "${openReelWords(n, name)}" again when it is done; "how far is it?" shows how far it has got.`;
+/** What is said while a video is being made already, and Reel `n`'s is not started: one run at a time makes a video for an episode,
+    whichever video it is (workcopy.js requestWorkCopy), and the lock that says so does not say which. It may be this Reel's own, a
+    second `app` made while it works or while it looks for the faces in the video it has put in place, or the main video's, or
+    another Reel's; so it is not said that Reel `n`'s is being made, nor that another is, but that a video is. */
+const busyWith = (n, name) => `A video for HyperFrames is being made already, and they are made one at a time. Say "${openReelWords(n, name)}" again when it is done; "how far is it?" shows how far it has got.`;
 const stillReading = (n, name) => `Claude is still reading it. Say "${openReelWords(n, name)}" again when it has finished; "how far is it?" shows how far it has got.`;
 const reelMade = ({ start, end }, n) => `Reel ${n} is made: the recording from ${clockText(start)} to ${clockText(end)}.`;
 const unreadable = (name) => `The Reel suggestions of ${name} cannot be read. Ask Jason.`;
@@ -145,9 +152,12 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
     - Without the episode's words there is nothing to start from (1).
     - While Claude's reading is at work (`read` holds the episode's lock) nothing is made or asked for (0): she is told to say it again.
     - The Reel must still be in the list of suggestions, with a stretch to show (1, in words).
-    - Without the Reel's video, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told to say
-      it again when it is done (0). The video is looked for by the key of the stretch the suggestion has now, so a copy made for
-      another stretch of the Reel is none.
+    - Without the Reel's video, it is asked for, and she is told to say it again when it is done (0). When a run is at work on the
+      episode already, whichever video it makes (workcopy.js requestWorkCopy: one at a time, one lock), nothing is asked for, and
+      she is told a video is being made and to say it again when it is done (busyWith). The video is looked for by the key of the
+      stretch the suggestion has now, so a copy made for another stretch of the Reel is none.
+    - With the video in place and a run still at work (the lock is held), she is told the same and nothing is made: the run looks for
+      the faces in the video it has put in place, and a project written now would move the video out from under the finder.
     The project is written whole or not at all (project.js writeProject), and a folder at its name that is there already is never
     written over: it throws. adoptReel takes such a folder first, so what is left to throw is one that appeared between the two. */
 function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
@@ -172,8 +182,16 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const raw = statSync(join(found.folder, record.video.file));
   const copy = reelCopyPaths(home, found.name, n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, asked));
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    requestWorkCopy(ctx, { folder: found.name, reel: n });
-    ctx.say(beingMade(n, name));
+    // Asked for once: when a run is at work already, whichever video it makes, nothing is started, and she is not told that it is.
+    const requested = requestWorkCopy(ctx, { folder: found.name, reel: n });
+    ctx.say(requested.started ? beingMade(n, name) : busyWith(n, name));
+    return { code: 0 };
+  }
+  // The video is in place, but the run that put it there may be at work still: it looks for the faces in it, and a project written
+  // now would move the video out from under the finder, and the faces it finds would be beside a video that is gone. The lock is the
+  // run's whole life, so she is told to say it again when it has ended (a lock left by a run that died is none).
+  if (runningCommand(home, found.name, ctx.alive, workCopyLockOf(home, found.name))) {
+    ctx.say(busyWith(n, name));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));

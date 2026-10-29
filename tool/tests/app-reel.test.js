@@ -95,6 +95,9 @@ const WHOLE = { ...newEpisode({ id: "e-20261028-3fa9c1", machine: "Mac Studio", 
 const unreadable = (next) => episodeFault({ ...WHOLE, app: next.app });
 const STILL = 'Claude is still reading it. Say "open Reel 2 of Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';
 const MAKING = 'The video for Reel 2 is being made. Say "open Reel 2 of Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.';
+/** What is said while a video is being made already and Reel 2's is not started: the run at work holds the one lock, whichever video it is
+    making, so it may be this Reel's own (its faces are being looked for) or another's. */
+const BUSY = 'A video for HyperFrames is being made already, and they are made one at a time. Say "open Reel 2 of Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.';
 
 describe("openReelInApp: a Reel opened in HyperFrames", () => {
   it("makes the Reel's project from its video, opens it with the pinned command line in PR 1's environment, and records it with the Reel picked", async (c) => {
@@ -212,13 +215,60 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
     assert.deepEqual([e.started, e.said], [[["workcopy", "--now", FOLDER, "--reel", "2"]], [MAKING]]);
     assert.ok(existsSync(e.paths.video), "the video is not moved into a project without its facts");
   });
-  it("starts no second copy while one is being made, a Reel's or the video's", async (c) => {
+  it("starts no second copy while one is being made, a Reel's or the video's, and does not say Reel 2's is: another video may be", async (c) => {
     const e = episode(c, { copy: false });
     mkdirSync(e.work, { recursive: true });
     assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, []);
-    assert.deepEqual(e.said, [MAKING]);
+    assert.deepEqual(e.said, [BUSY]);
+    assert.deepEqual([e.saved, e.runs(), existsSync(e.project)], [[], [], false]);
+    plain(e.said);
+  });
+  describe("while the run that makes the video is at work, as it is while it looks for the faces in the video it has put in place", () => {
+    const atWork = (e) => {
+      mkdirSync(e.work, { recursive: true });
+      assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
+    };
+    it("writes no project and moves no video: the finder is reading it. She is told a video is being made, and to say it again", async (c) => {
+      const e = episode(c);
+      atWork(e);
+      const before = readdirSync(e.work).sort();
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [BUSY]);
+      assert.deepEqual([e.saved, e.runs(), e.started, existsSync(e.project)], [[], [], [], false]);
+      assert.deepEqual(readdirSync(e.work).sort(), before);
+      assert.equal(readFileSync(e.paths.video, "utf8"), "the Reel's bytes", "the video is where the finder is reading it");
+      plain(e.said);
+    });
+    it("makes the project once the run has ended, with the faces it found", async (c) => {
+      const e = episode(c);
+      atWork(e);
+      await run(e);
+      // The run puts the faces beside the video and lets the lock go.
+      writeFileSync(e.paths.faces, JSON.stringify(FACES));
+      rmSync(workCopyLockOf(e.home, FOLDER));
+      e.said.splice(0);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["Reel 2 is made: the recording from 0:01 to 0:03.", "It's open in HyperFrames.", BUTTONS]);
+      assert.ok(existsSync(join(e.project, "brimm", "face-track.json")), "the faces are in the project");
+      assert.ok(!existsSync(e.paths.video), "the video was moved in");
+    });
+    it("makes the project as it always did when the lock was left by a run that died", async (c) => {
+      const e = episode(c);
+      atWork(e);
+      e.ctx.alive = () => false;
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["Reel 2 is made: the recording from 0:01 to 0:03.", "It's open in HyperFrames.", BUTTONS]);
+    });
+    it("opens a project made before whatever run is at work: the video is not in question", async (c) => {
+      const e = episode(c);
+      assert.equal(await run(e), 0);
+      atWork(e);
+      e.said.splice(0);
+      assert.equal(await run(e, e.saved[0]), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+    });
   });
   describe("while Claude is still reading the episode (a `read` run holds the episode's lock): the suggestions are its work", () => {
     const atWork = (e, command = "read") => {

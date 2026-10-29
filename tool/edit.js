@@ -86,7 +86,7 @@ import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, op
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { versionsOf, whatHappened } from "./app-history.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
-import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -3457,7 +3457,8 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
     the reading `kind` starts at the same moment. `--4k` makes a copy of 4K. What it needs of this Mac it takes from ctx.deps, as
     the other detached runs do, so that a test gives it stand-ins: `run` (for ffprobe), `tools` (ffmpeg and ffprobe, as
     findPrograms finds them), `runGuarded` (ffmpeg under the watchdog), `progress` (the panel's reporter, made as `finish`'s
-    is when none is given) and `faces` (the face finder, unedited.js facesIn, for a Reel's video). Resolves 0 when the copy is made,
+    is when none is given) and `faces` (the face finder, unedited.js facesIn, for a Reel's video, each of its two programs given
+    REEL_FACES_MS, so that one that hangs does not hold the working copy's lock for good). Resolves 0 when the copy is made,
     or was before, and 1 when it is not.
     `--reel <n>` (a whole number from 1; anything else is the help and 2) makes the video of Reel `n` instead (plan PR 5;
     architecture 4.3): the stretch of the recording as filed that the suggestion has in reels.json (app-reel.js reelStretch), from
@@ -3515,7 +3516,7 @@ async function workcopy(ctx, rest) {
       deps.log(`${shownName(held.record)}: the video for Reel ${reel} could not be made: ${why}.`);
       return { ok: false, made: [], failed: [canNotBeUsed(why)], next: "" };
     }
-    const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools }));
+    const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools, limit: REEL_FACES_MS }));
     return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces });
   });
   if (result.taking || result.running) {

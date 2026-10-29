@@ -72,6 +72,9 @@ const PROJECT = "Pricing- what to charge- reel 2 3fa9c1";
 const AGAIN = openReelWords(2, NAME);
 const MAKING = `The video for Reel 2 is being made. Say "${AGAIN}" again when it is done; "how far is it?" shows how far it has got.`;
 const STILL = `Claude is still reading it. Say "${AGAIN}" again when it has finished; "how far is it?" shows how far it has got.`;
+/** What is said while a video is being made already and Reel 2's is not started: the run at work holds the one lock, so it may be
+    this Reel's own (its faces are being looked for) or the main video's or another Reel's. */
+const BUSY = `A video for HyperFrames is being made already, and they are made one at a time. Say "${AGAIN}" again when it is done; "how far is it?" shows how far it has got.`;
 
 /** The made-up recording (phase4.js: its words, its cut plan and its Reel candidates, as the import files them, Reel 2 not picked),
     answered as `record` says. `set`: this Mac's settings turn the app on. `copy`: the Reel's video is made already (and `faces`, the
@@ -390,13 +393,29 @@ describe("app … reel: the Reel's video", () => {
     assert.deepEqual([reread(found).editing.by, reread(found).app, runsOf(t), existsSync(join(episodeWork(t.home, FOLDER), PROJECT))], ["Mac Studio", undefined, [], false]);
     t.done();
   });
-  it("starts no second copy while one is being made, a Reel's or the video's: they share a lock", async () => {
+  it("starts no second copy while one is being made, a Reel's or the video's: they share a lock. It does not say Reel 2's is being made, but that a video is", async () => {
     const { t } = world({ copy: false });
     mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
     assert.equal(takeEpisodeLock(workCopyLockOf(t.home, FOLDER), "workcopy", () => true).taken, true);
     t.ctx.deps.alive = (pid) => pid === process.pid;
     const r = await app(t.ctx.deps, FOLDER, "reel", "2");
-    assert.deepEqual([r.code, r.said, t.started], [0, [MAKING], []]);
+    assert.deepEqual([r.code, r.said, t.started], [0, [BUSY], []]);
+    t.done();
+  });
+  it("writes no project while the run that made the video is still at work, as it is while it looks for the faces, and makes it when the run has ended", async () => {
+    const { t, found, paths, work } = world({ faces: true });
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(workCopyLockOf(t.home, FOLDER), "workcopy", () => true).taken, true);
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    const waiting = await app(t.ctx.deps, FOLDER, "reel", "2");
+    assert.deepEqual([waiting.code, waiting.said, t.started, runsOf(t), existsSync(join(work, PROJECT))], [0, [BUSY], [], [], false]);
+    assert.equal(readFileSync(paths.video, "utf8"), REEL_COPY, "the video is where the finder is reading it");
+    // The claim was made, as app's is, and no project was recorded.
+    assert.deepEqual([reread(found).editing.by, reread(found).app], ["Mac Studio", undefined]);
+    rmSync(workCopyLockOf(t.home, FOLDER));
+    const opened = await app(t.ctx.deps, FOLDER, "reel", "2");
+    assert.equal(opened.code, 0, opened.text);
+    assert.ok(existsSync(join(work, PROJECT, "brimm", "face-track.json")), "the faces the run found are in the project");
     t.done();
   });
   it("is made by the run it asked for, and the project is then made from what that run made: the key it looks for is the key the run wrote", async () => {
