@@ -6,11 +6,11 @@
 // BRIMM Video Work.
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { episodeWork } from "../settings.js";
-import { finishFinished } from "../finish.js";
+import { finishFinished, finishNow } from "../finish.js";
 import { HELD, LEFT } from "../gate.js";
 import { DOWNLOADS_UNREADABLE } from "../exports.js";
 import { recordFile, recordText } from "../episode.js";
@@ -240,6 +240,34 @@ describe("3. the refusals: each ends with 1 and claims, writes and starts nothin
     const r = await ask(locked, { yes: true });
     assert.deepEqual([r.code, r.lines], [1, [DOWNLOADS_UNREADABLE]]);
   });
+  // A finish that adds a Reel reads none of the files of the Reels the hand-off holds (plan PR 17, the review of PR 9, M2), so this check of the record's list of
+  // files is the one guard of a held Reel's file that is gone from final/ or short: it stops here, before anything is claimed or started.
+  for (const [what, ending, hurt, says] of [
+    ["gone from final/", "srt", (file) => rmSync(file), (rel) => `${rel} is missing`],
+    ["short", "words.json", (file) => truncateSync(file, 10), (rel, bytes) => `${rel} is short: 10 bytes of ${bytes}`]
+  ]) {
+    it(`says a file of a Reel the hand-off holds is not whole in Dropbox when it is ${what}, ends with 1 and claims, writes and starts nothing (plan PR 17, ruling 1)`, async () => {
+      // Reel 2 is handed off for real, so that its files are in final/ and listed by the record; Reel 1 is exported after it.
+      const w = await W({ projects: ["reel 1", "reel 2"] });
+      exportOf(w, "reel 2");
+      const first = await ask(w, { yes: true, without: ["reel 1"] });
+      assert.equal(first.code, 0, first.lines.join("\n"));
+      const done = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) });
+      assert.equal(done.ok, true, done.failed.join(" "));
+      exportOf(w, "reel 1");
+      const rel = `final/${named(REEL2, "14.03").replace(/\.mp4$/, "")}.${ending}`;
+      const listed = reread(w.found).files[rel];
+      assert.ok(listed > 10, "the record lists it");
+      hurt(join(w.found.folder, rel));
+      const asked = () => readFileSync(join(w.work, "finish.asked.json"), "utf8");
+      const before = [tree(w), reread(w.found), w.t.started.length, asked()];
+      const r = await ask(w, { yes: true });
+      assert.equal(r.code, 1, r.lines.join("\n"));
+      assert.ok(r.lines.includes(`${FOLDER} is not whole in Dropbox: ${says(rel, listed)}`), r.lines.join("\n"));
+      assert.deepEqual([tree(w), reread(w.found), w.t.started.length, asked()], before, "nothing is written, claimed or started");
+      assert.equal(reread(w.found).editing, null, "nothing is claimed");
+    });
+  }
   it("says what a gap in the chain of the video's versions, or a version that is a session, says, as every hand-off writer does", async () => {
     const w = await W();
     rewrite(w, { versionOf: "e-20261010-7c1d2e" });

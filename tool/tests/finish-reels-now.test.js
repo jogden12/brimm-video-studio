@@ -19,6 +19,7 @@ import { tidyTranscript } from "../shared/transcript.js";
 import { episodeAs, listAll, reread, FOLDER, ID, NAME } from "./episodes.js";
 import { REEL1, REEL2, entry, exportOf, named, probeFor } from "./exports-world.js";
 import { HANDOFF, HANDOFF_REL, finishedWorld, handoffIn } from "./reels-world.js";
+import { deadlock, watched } from "./watched-fs.js";
 
 const FIXTURE = JSON.parse(readFileSync(new URL("./fixtures/handoff-v2-finished.json", import.meta.url), "utf8"));
 const stem = (file) => file.replace(/\.[^.]+$/, "");
@@ -260,6 +261,57 @@ describe("8. again: the Reels taken before stay as they were", () => {
     // The Reel exported again takes the new title in.
     exportOf(w, "reel 2", { start: [14, 10, 0], text: "the Reel exported again" });
     assert.equal(handoffIn((await finished(w)).found).reels[0].title, "A new title");
+  });
+});
+
+describe("M2. a Reel the hand-off holds is not read by a finish that adds another (the review of PR 9, M2; plan PR 17)", () => {
+  /** Reel 2 handed off as revision 2, and its three files in final/ (captions, transcript, word times) as Dropbox leaves a file it has not brought
+      down: not whole on this Mac, and refused to a program that may not wait for it. Then Reel 1 is exported and the finish asked for. */
+  async function held() {
+    const w = await W({ projects: ["reel 1", "reel 2"] });
+    exportOf(w, "reel 2");
+    const two = handoffIn((await finished(w, { without: ["reel 1"] })).found);
+    const files = ["srt", "transcript.txt", "words.json"].map((ending) => join(w.found.folder, "final", `${stem(two.reels[0].file)}.${ending}`));
+    w.t.ctx.isWhole = (path) => !files.includes(path);
+    exportOf(w, "reel 1");
+    return { w, two, files, found: await asked(w) };
+  }
+  const refused = (files) => ({ deny: (name, path) => (files.includes(path) ? deadlock(path) : null) });
+  it("goes through when Reel 2's captions and word times in final/ cannot be read, reads none of its files, and leaves Reel 2 as it was while it adds Reel 1", async () => {
+    const { w, two, files, found } = await held();
+    const part = reread(found).finished.parts["reel 2"];
+    const { result, calls } = await watched(() => finishNow(w.t.ctx, found), refused(files));
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual(calls.filter((call) => files.includes(call.path)), [], "none of Reel 2's files is read");
+    const three = handoffIn(found);
+    assert.deepEqual([three.revision, three.video.id, three.reels.map((r) => r.n)], [3, ID, [1, 2]]);
+    assert.deepEqual([three.main, three.suggestions, three.reels[1]], [two.main, two.suggestions, two.reels[0]], "main, the suggestions and Reel 2 are as they were");
+    assert.equal(handoffFaultV2(three), "");
+    assert.deepEqual(reread(found).finished.parts["reel 2"], part, "its part in the record is as it was");
+    assert.deepEqual(Object.keys(reread(found).finished.parts).sort(), ["main", "reel 1", "reel 2"]);
+    assert.deepEqual(reread(found).reels.map((r) => [r.n, r.status]), [[1, "finished"], [2, "finished"]]);
+  });
+  it("still says what it says of a spelling that needs the Reels it holds: it reads their captions and word times, a Reel whose files cannot be read keeps its old spelling, and one not whole here is brought over first", async () => {
+    const { w, files, found } = await held();
+    const done = await finishNow(w.t.ctx, found);
+    assert.equal(done.ok, true, done.failed.join(" "));
+    const [srt, , words] = files;
+    // The spelling reaches Reel 2: its captions and word times are read.
+    const reached = await watched(() => on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally"));
+    assert.equal(reached.result.code, 0, reached.result.said.join("\n"));
+    assert.deepEqual(reached.result.said, ['"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 4: drop it on the BRIMM Ops page again.']);
+    for (const file of [srt, words]) assert.ok(reached.calls.some((call) => call.name === "readFileSync" && call.path === file), `${file} is read`);
+    assert.match(handoffIn(found).reels[1].srt, /Thank you so much, Sally\./);
+    // Another spelling, with Reel 2's files refused to a read: what it says for word times that cannot be read.
+    const unreadable = await watched(() => on(w.t.ctx.deps, "spell", FOLDER, "add", "Ogden", "Ogdin"), refused(files));
+    assert.equal(unreadable.result.code, 0, unreadable.result.said.join("\n"));
+    assert.equal(unreadable.result.said.at(-1), `Reel 2's captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".`);
+    assert.ok(unreadable.calls.some((call) => call.path === srt), "it tried to read them");
+    // And with them not whole on this Mac, Dropbox is asked to bring them over, and nothing is written.
+    w.t.ctx.deps.isWhole = (path) => !files.includes(path);
+    const rev = reread(found).rev;
+    const bringing = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Ogden", "Ogdon");
+    assert.deepEqual([bringing.code, bringing.said, reread(found).rev], [1, ["Dropbox is still bringing the final captions and the final transcript over: say it again in a minute."], rev]);
   });
 });
 

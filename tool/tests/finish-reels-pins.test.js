@@ -37,7 +37,9 @@ describe("14. what pins them: the help, the README and the spec", () => {
       "the new title goes in once the Reel is exported again",
       "a Reel whose word times cannot be read keeps its captions",
       "`--take`, `--final` and `--without`",
-      'say "hand off the Reels"'
+      'say "hand off the Reels"',
+      // The Reels the hand-off holds are not read by a finish that adds another (the review of PR 9, M2; plan PR 17).
+      "the other Reels are copied from it as they were, and the files of those Reels in `final/` are not read (their captions and word times are not used, so a file Dropbox has not brought down cannot stop the finish)"
     ]) assert.ok(paragraph.includes(words), `${words} in the README's paragraph`);
   });
   it("says in the spec, at 8.7, 4.3, 6.1 and 6.3, the form, the hand-off it adds to and the words she says", () => {
@@ -49,6 +51,7 @@ describe("14. what pins them: the help, the README and the spec", () => {
     assert.ok(reels.includes("that the new title goes in once the Reel is exported again"), "8.7 says what a changed title waits for");
     assert.ok(reels.includes('Reel 2\'s captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".'), "8.7 gives the words that say a Reel keeps its captions");
     assert.ok(reels.includes("is not made again, since the new one would hold none"), "8.7 says a spelling does not make a hand-off again without its Reels");
+    assert.ok(reels.includes("None of the files in `final/` of the Reels it holds is read for it (their captions and word times are not used), so a file of theirs that Dropbox has not brought down cannot stop the finish; a spelling later reads them when it needs them (below)."), "8.7 says the Reels the hand-off holds are not read by a finish that adds another");
     for (const words of ["The hand-off on file is its base, and it never writes the first", "`nextHandoff`", "Numbers.", "`expectRev`", "The late check puts nothing back over a later write.", "A spelling later"]) assert.ok(reels.includes(words), `${words} in 8.7`);
     assert.ok(section("### 4.3 ", "### 4.4 ").includes("never writes the first one"), "4.3");
     assert.ok(section("### 6.1 Commands", "### 6.2 ").includes('`finish "<episode>" reels` hands off the Reels of a video her editor finished'), "6.1");

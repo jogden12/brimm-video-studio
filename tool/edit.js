@@ -60,7 +60,7 @@ import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports, readRegular } from "./exports.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
@@ -108,7 +108,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
-                                        and once it is exported, to hand it off. A finished video whose hand-off is
+                                        and once it is exported, to hand it off. On a Mac that Jason has not set up for
+                                        HyperFrames it says that this Mac is not set up, where it would say to open the
+                                        video there or that its video is being made. A finished video whose hand-off is
                                         written is told to hand off the Reels once a Reel is exported from HyperFrames
                                         that the hand-off does not hold. A raw video that goes the Final Cut way keeps
                                         its Final Cut steps. Only on a Mac that does the light import: on any other,
@@ -6411,8 +6413,8 @@ function guideCopy(ctx, e, r, rates) {
     read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
     which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in the
     project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading, is
-    no export seen: the guide only reads, and `finish` tells her what it needs. */
-function guideProject(ctx, e, r) {
+    no export seen: the guide only reads, and `finish` tells her what it needs. `downloads` is the pass's one listing of Downloads (guideItems). */
+function guideProject(ctx, e, r, downloads) {
   const main = (r.app?.projects ?? []).find(inUse);
   if (!main || !plainName(main.name)) return null;
   const dir = join(episodeWork(ctx.home, e.name), main.name);
@@ -6425,7 +6427,7 @@ function guideProject(ctx, e, r) {
   const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
   let exported = false;
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (!seen.unreadable) {
       // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
       const looked = lookForExports(seen.input, {}, { rest: false });
@@ -6446,8 +6448,8 @@ function guideProject(ctx, e, r) {
     (exports.js exportsFound and lookForExports, for those projects alone): the Reels with an export to take now that the last finish did not
     take, and those with two exports that began in one minute, which `finish` asks the final one of (as for the main video, plan PR 10, B13). An
     export of a Reel the record does not hold stops `finish`, so it stops this. A Downloads folder this Mac will not let be read, or any trouble
-    in reading, is no export seen: the guide only reads. */
-function guideReels(ctx, e, r) {
+    in reading, is no export seen: the guide only reads. `downloads` is the pass's one listing of Downloads (guideItems). */
+function guideReels(ctx, e, r, downloads) {
   const work = episodeWork(ctx.home, e.name);
   const dropped = new Set((r.reels ?? []).filter((reel) => reel && reel.status === "dropped").map((reel) => `reel ${reel.n}`));
   const folderHere = (path) => {
@@ -6462,7 +6464,7 @@ function guideReels(ctx, e, r) {
   const based = reelsBase(e.folder, r, { isWhole: ctx.isWhole, read: regularJson });
   if (!based.onFile && !based.coming) return [];
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (seen.unreadable) return [];
     const looked = lookForExports(seen.input, {}, { rest: false });
     const numberOf = (key) => Number(key.slice(5));
@@ -6489,8 +6491,9 @@ function guideSession(ctx, e, r) {
     what this Mac holds of it, the speeds this Mac measured (`rates`, progress.js readRates) and her notes on this Mac (`notes`, guide-note.js,
     read once for the pass). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
-    given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
-function guideFacts(ctx, e, links, rates, notes) {
+    given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. `downloads` is
+    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it. */
+function guideFacts(ctx, e, links, rates, notes, downloads) {
   const r = e.inForce;
   const kind = recordKind(r);
   const hidden = isGated(e);
@@ -6509,7 +6512,8 @@ function guideFacts(ctx, e, links, rates, notes) {
   // (the stage of a finish at work is `finish-running`; a bring, a read or an ask is refused by `finish` in "<command> is running"), the chain of
   // its versions has no gap, and Dropbox did not undo this Mac's last change to its record (review F1, F2a and F2c); and she has not said the video
   // is finished: her word stands (guide.js nextFor), so what the Reels would say is never said, and looking for them on every pass, `guide wait`'s
-  // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems).
+  // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems). The
+  // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
   const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
@@ -6535,8 +6539,8 @@ function guideFacts(ctx, e, links, rates, notes) {
     gated: kind !== "session" && sessionNotCleared(r),
     way,
     copy: way ? guideCopy(ctx, e, r, rates) : null,
-    project: way && !handoff ? guideProject(ctx, e, r) : null,
-    reelsExported: looksForReels ? guideReels(ctx, e, r) : [],
+    project: way && !handoff && !notes.finished[r.id] ? guideProject(ctx, e, r, downloads) : null,
+    reelsExported: looksForReels ? guideReels(ctx, e, r, downloads) : [],
     session: kind === "session" ? guideSession(ctx, e, r) : null,
     handoff,
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
@@ -6629,6 +6633,10 @@ function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
   const rates = readRates(progressFolder(ctx.home));
+  // Downloads is listed once for the pass, by the first video that looks in it for an export, and given to every other (exports.js downloadsOnce;
+  // plan PR 17, the review of PR 10, M5): a pass is one `guide`, one look of `guide wait` (every 5 seconds) or one of `guide … tell` (every 15), and a
+  // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing.
+  const downloads = downloadsOnce({ home: ctx.home, readdir: ctx.deps.readdir });
   const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -6639,7 +6647,7 @@ function guideItems(ctx) {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links, rates, notes);
+    const facts = guideFacts(ctx, e, links, rates, notes, downloads);
     items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
   }
   const newest = new Map();

@@ -220,6 +220,10 @@ export function copyIn(rates, seconds) {
   return seconds > 0 && Number.isFinite(speed) && speed > 0 ? Math.round(speed * seconds) : null;
 }
 
+/** What `app` says on a Mac whose settings have the app off (app.js NOT_SET_UP, which a test holds this to), and what the guide says in its place
+    where it would send her to open a video there: nothing on such a Mac opens a project (plan PR 17; the review of PR 10, M2). */
+export const APP_NOT_SET_UP = "This Mac isn't set up for HyperFrames yet: ask Jason.";
+
 /** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
 
@@ -298,11 +302,16 @@ function copyStep({ left, usual }) {
 
 /** The next step of a video on the HyperFrames way (plan PR 10): its main project, if one is here, says where it is. Exported, it waits
     for its hand-off; opened and not exported, she edits it, and the time of her last request there is said when the app's history
-    has one; made and never opened, or not made yet, she opens it, unless the video for it is still being made. */
+    has one; made and never opened, or not made yet, she opens it, unless the video for it is still being made. On a Mac whose settings
+    have the app off nothing opens a project: `app` says this Mac isn't set up, whether the project's folder is here or not, so the
+    guide says that where it would say to open it, or that its video is being made, which she could not open either (plan PR 17; the
+    review of PR 10, M2). A project here that the app opened is still in HyperFrames, and one with an export is still exported: she may
+    have it open by hand, and `finish` needs no setting. */
 function appStep(facts) {
   const project = facts.project;
   if (project && project.exported) return toDo("exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.');
   if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+  if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
 }
@@ -350,8 +359,10 @@ function videoNext(facts, notes, now) {
     return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
   }
   // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
-  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app.
-  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy ? copyStep(facts.copy) : clipStep(facts);
+  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
+  // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
+  // plan PR 17, the review of PR 10, M3).
+  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }

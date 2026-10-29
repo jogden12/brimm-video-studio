@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
-import { COPY_STEP, copyIn } from "../guide.js";
+import { APP_NOT_SET_UP, COPY_STEP, copyIn } from "../guide.js";
+import { NOT_SET_UP as APP_SAYS } from "../app.js";
 import { TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "../guide.js";
 import { WORK_COPY_STEP } from "../workcopy.js";
 
@@ -126,6 +127,8 @@ const PROJECT = (over) => ({ opened: true, last: "", exported: false, ...over })
 const CLIP = (over) => ({ kind: "short video", way: "clip", ...over });
 const shown = (n) => (n.done ? { done: true } : { stage: n.stage, text: n.text });
 const OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
+/** What `app` says on a Mac whose settings have the app off, which the guide says in its place (plan PR 17). */
+const APP_OFF = "This Mac isn't set up for HyperFrames yet: ask Jason.";
 const V1 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What a video says that the gate holds as a session, though its kind is a raw video's, a clip's or a finished video's (a Dropbox conflict or a
     hand edit leaves one): how to clear the mark (plan PR 10, review I2). */
@@ -201,6 +204,21 @@ const STAGE_ROWS = [
   [APP({ way: "hyperframes" }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
   [APP({ way: "hyperframes", project: PROJECT({ opened: false }) }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
   [APP({ way: "hyperframes", project: PROJECT({ opened: false }), copy: { left: 30, usual: null } }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
+  // On a Mac whose settings have the app off nothing opens a project: `app` says this Mac isn't set up, whatever state the project is in, so the guide says
+  // that where it would say to open it, or that its video is being made (plan PR 17; the review of PR 10, M2). The reading, the spellings, the name, the other
+  // Mac's claim and a finish at work come first, as they did; a project here that the app opened is in HyperFrames, and an export is an export.
+  [APP({ app: false }), "app-off", APP_OFF],
+  [APP({ way: "hyperframes", app: false }), "app-off", APP_OFF],
+  [APP({ way: "hyperframes", app: false, project: PROJECT({ opened: false }) }), "app-off", APP_OFF],
+  [APP({ way: "hyperframes", app: false, copy: { left: 180, usual: 240 } }), "app-off", APP_OFF],
+  [CLIP({ way: "hyperframes", app: false }), "app-off", APP_OFF],
+  [APP({ app: false, reading: "running" }), "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
+  [APP({ app: false, offersAnswered: false }), "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
+  [APP({ app: false, placeholder: true }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
+  [APP({ way: "hyperframes", app: false, elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
+  [APP({ way: "hyperframes", app: false, finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
+  [APP({ way: "hyperframes", app: false, project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
+  [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
   // In HyperFrames: the time of the last turn in the app's history when there is one.
   [APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", project: PROJECT({ last: "yesterday at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was yesterday at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
@@ -214,6 +232,10 @@ const STAGE_ROWS = [
   [CLIP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
   [CLIP({ project: PROJECT({ opened: false }) }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  // With its video being made again beside the project (a video at work beside a project here is not the main video's: a Reel's holds the same lock), it is offered
+  // the same, as a raw video in the same state is told to open it, and not that its video is being made (plan PR 17; the review of PR 10, M3).
+  [CLIP({ project: PROJECT({ opened: false }), copy: { left: 120, usual: null } }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  [CLIP({ project: PROJECT({ opened: false }), copy: { left: null, usual: 240 }, v2: false }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
   [CLIP({ v2: false }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
   [CLIP({ app: false, v2: false }), "waits-v2", V1],
   // A finish at work is said of an iPhone clip too, since it is finished from its export now.
@@ -351,6 +373,35 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
       const n = nextFor({ ...BASE, ...over, handoff: handoffOf(kind) }, NONE, NOW);
       assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
     }
+  });
+  it("tells an iPhone clip and a raw video the same of a video at work: it is being made only while no project is here, and beside a project the next step stands (plan PR 17; the review of PR 10, M3)", () => {
+    const copy = { left: 120, usual: null };
+    for (const [project, clip, raw] of [[null, "making-copy", "making-copy"], [PROJECT({ opened: false }), "clip-next", "open-app"]]) {
+      const forClip = nextFor({ ...BASE, ...CLIP({ project, copy }) }, NONE, NOW);
+      const forRaw = nextFor({ ...BASE, ...APP({ way: "hyperframes", project, copy }) }, NONE, NOW);
+      assert.deepEqual([forClip.stage, forRaw.stage], [clip, raw], JSON.stringify(project));
+    }
+    // Where the app is off neither is told it is being made, with a project here or not: the clip is offered what it is offered, the raw video told this Mac is not set up.
+    for (const project of [null, PROJECT({ opened: false })]) {
+      assert.equal(nextFor({ ...BASE, ...CLIP({ project, copy }), app: false }, NONE, NOW).stage, "clip-next", "a clip, with the app off");
+      assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project, copy }), app: false }, NONE, NOW).stage, "app-off", "a raw video, with the app off");
+    }
+  });
+  it("says on a Mac whose settings have the app off what `app` says there, in the words `app` has, and that is no stage to wait for (plan PR 17; the review of PR 10, M2)", () => {
+    assert.equal(APP_NOT_SET_UP, APP_SAYS);
+    assert.equal(APP_NOT_SET_UP, APP_OFF);
+    assert.ok(!COMING.includes("app-off"));
+    // A video of the HyperFrames way is told to open it where this Mac is set up for the app, and where it is not that it is not.
+    for (const over of [APP(), APP({ way: "hyperframes" }), APP({ way: "hyperframes", project: PROJECT({ opened: false }) }), APP({ copy: { left: 90, usual: null } }), CLIP({ way: "hyperframes" })]) {
+      const on = nextFor({ ...BASE, ...over, app: true }, NONE, NOW);
+      const off = nextFor({ ...BASE, ...over, app: false }, NONE, NOW);
+      assert.ok(["making-copy", "open-app"].includes(on.stage), `${on.stage}: ${JSON.stringify(over)}`);
+      assert.deepEqual([off.stage, off.text], ["app-off", APP_OFF], JSON.stringify(over));
+      assert.doesNotMatch(off.text, /open it in HyperFrames/);
+    }
+    // A hand-off written is the BRIMM Ops page's step on either Mac: the page needs no app.
+    const written = nextFor({ ...BASE, ...APP({ way: "hyperframes", app: false }), handoff: handoffOf("raw") }, NONE, NOW);
+    assert.deepEqual([written.stage, written.step], ["ops", "taken"]);
   });
   it("puts the reading, the spellings and a raw video's name before the new stages, and a conflict, her answer and the other Mac's claim before them all", () => {
     const copying = { copy: { left: 90, usual: null }, project: null };
