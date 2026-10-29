@@ -100,6 +100,15 @@ describe("B1. the guide says which Reels of a finished video are exported from H
     assert.deepEqual(all.said, [DROP_LINE, "Under way:", `  ${NAMED}: ${REEL_2}`]);
     assert.doesNotMatch(all.text, PLAIN);
   });
+  it("says it of a Reel that has no title yet: finish asks for the title once she says it, which is not another export to wait for", async () => {
+    const w = await W();
+    rewrite(w, (now) => ({ reels: now.reels.map((r) => (r.n === 2 ? { ...r, title: "" } : r)) }));
+    exportOf(w, "reel 2");
+    assert.equal(await line(w), says(REEL_2));
+    const asked = await on(depsOf(w), "finish", FOLDER, "reels");
+    assert.equal(asked.code, 0, asked.said.join("\n"));
+    assert.ok(asked.said.some((said) => said.startsWith("Reel 2 has no title on screen.")), asked.said.join("\n"));
+  });
   it("says it ahead of the page's steps, whatever her note holds and however old the hand-off is", async () => {
     const w = await W();
     exportOf(w, "reel 2");
