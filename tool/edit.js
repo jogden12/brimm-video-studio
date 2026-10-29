@@ -2461,8 +2461,11 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
     The HyperFrames side (hand-over.js; plan PR 11) comes after those refusals and before the Final Cut copies: when the record has
     projects whose folders are on this Mac, HyperFrames must be quit, and a snapshot of each project and the newest export of each go
     into the episode by the rule (a failure removes what it put in, and hands nothing over). The record lists them, and lists no
-    snapshot but the two newest that are whole: the others, and a copy of its own that Dropbox has taken away, are listed no more, and
-    the older snapshots' folders are removed after the record is written.
+    snapshot but the two newest that are whole (and one newer than the newest of those, which the other Mac is still bringing over, is
+    never dropped): the others, and a copy of its own that Dropbox has taken away, are listed no more, and the older snapshots' files are
+    removed after the record is written, by the names the record gave them (removeSnapshots). A copy the other Mac made that is not here
+    yet is not excused: the release waits for it (who made a copy is who first listed it, snapshot.js listedBy). A folder that is a
+    session clip's on the volume, however the record spells its name, or cannot be told from one, is no project to hand over.
     Resolves 0 when it was handed over, and 1 when it refused, having said why. */
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;

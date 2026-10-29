@@ -7,8 +7,10 @@
 //     whichever Mac made it: a take-over on the other Mac, or a Mac whose own folder is gone (rebuildHere). The files come back with the
 //     times they had, the settings file is made again, the link leads into this Mac's own toolchain, and she is told the app's history
 //     stays behind. The project is then here without its video, as `free` leaves one, which is the next step;
-//   - a project here that is older than the newest snapshot (olderHere) is neither opened nor handed over (4.7): the other Mac worked on
-//     it since;
+//   - a project here that is older than the newest snapshot (olderHere: its marker, snapshot.js MARKER, names another snapshot than the
+//     newest the record lists of it) is neither opened nor handed over (4.7): the other Mac worked on it since. edit.js decides that before
+//     it claims anything (olderWords), so the refusal leaves the record and its claim as they were; the same goes for a project whose folder
+//     is a session clip's on the volume, however the record spells its name (clipFolders, clipTrouble: PR 15's rule, as free.js has it);
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - unless its video has been taken away (`free`, free.js; plan PR 15). The project is still the one in use, so no second is made:

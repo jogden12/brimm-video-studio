@@ -6,15 +6,18 @@
 //   - asks whether HyperFrames is open (free.js hyperFramesRunning, as `free` asks): what is copied is what was saved, and no export is
 //     half written, only when the app is quit. Open, or when that cannot be told, it hands nothing over;
 //   - lists each project's files (snapshotFiles) and refuses, before it writes anything, a project that cannot be read, that weighs more
-//     than a snapshot may (SNAPSHOT_MOST), or that is older than the newest snapshot the episode holds (a Mac that came back to an episode
-//     after the other Mac worked on it would otherwise hand its older state over as the newest);
+//     than a snapshot may (SNAPSHOT_MOST), whose newest snapshot, which another Mac made, is not all here yet (Dropbox is still bringing it:
+//     this Mac's older project must not take its place as the newest), or that is older than the newest snapshot the episode holds (its
+//     marker names another; a Mac that came back to an episode after the other Mac worked on it would otherwise hand its older state over as
+//     the newest);
 //   - finds the newest export of each project of this Mac (exports.js exportsToCarry);
 //   - puts them in by the rule for writing into Dropbox (dropbox.js): every file made outside, in the project or in Downloads, and cloned
 //     in under a name that is new, never over a file. The snapshot goes in a folder of its own, named by the moment, so nothing in it is
 //     there already. An export of the same name and size already listed is kept; one of the same name and another size is replaced, the
 //     old one deleted first, as the rule does; a file that is not whole is left and named.
 // A failure removes what this run made (the new snapshot folder and the new export copies), so no snapshot is ever half there; the record
-// is edit.js's, written last, and lists what was put in. When the record cannot be written, `undo` removes it again.
+// is edit.js's, written last, and lists what was put in. Each project's marker (snapshot.js) is made to name the new snapshot as the last thing
+// before the record is written. When the record cannot be written, `undo` removes the copies and puts the markers back as they were.
 //
 // What it says goes into her chat, so it holds no path, no flag and no name of a command.
 import { existsSync, lstatSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";

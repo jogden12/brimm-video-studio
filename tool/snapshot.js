@@ -9,14 +9,20 @@
 //     depth (`.hyperframes/`, `.claude/`, the app's thumbnails and caches, `.DS_Store`, a `.env`): Dropbox does not sync such names, and a
 //     file the record lists that never arrives stops the other Mac's `open` for good (edit.js `filesUnder` leaves them out of the Final
 //     Cut copies for the same reason). A link is neither followed nor listed;
-//   - `assets/` while it is small: the app copies the media it is given into `assets/` (A0's project held a 213 MB video there beside 0.6 MB
-//     of fonts and brand kit), so over ASSETS_MOST none of it goes. The whole of what goes is at most SNAPSHOT_MOST, or the project is
-//     refused in words by hand-over.js, never half copied.
+//   - `assets/` while what the app was given is small: the app copies the media it is given into `assets/` (A0's project held a 213 MB video
+//     there beside 0.6 MB of fonts and brand kit), so over ASSETS_MOST none of that goes, and a note in the snapshot (LEFT_OUT_NOTE) says so; but
+//     Studio's own `assets/fonts/` and `assets/logos/` always go, since the project's page cannot draw without them. The whole of what goes is
+//     at most SNAPSHOT_MOST, or the project is refused in words by hand-over.js, never half copied.
 // The record lists the snapshot's files in its `files`, written last, so a snapshot is whole when the record lists it. The two newest whole
-// ones are kept (keptSnapshots). `<time>` is UTC, so that the names sort as the moments do whatever zone a Mac is in.
+// ones are kept (keptSnapshots), and one newer than the newest of those, which the other Mac is still bringing over, is never dropped. Which is
+// newer is the record's own order of listing (snapshotsOf), never the clock that named it: `<time>` is UTC, so that the names read as the
+// moments do whatever zone a Mac is in, but a Mac whose clock is behind names its snapshot earlier than the one it was rebuilt from.
 //
-// A project here that is older than the newest snapshot (behindSnapshot) is neither opened nor handed over again: a Mac that came back to
-// an episode after the other Mac worked on it would otherwise go on from an older state.
+// A project here that is older than the newest snapshot (olderThan) is neither opened nor handed over again: a Mac that came back to an
+// episode after the other Mac worked on it would otherwise go on from an older state. Each project folder keeps a dot-file, the marker
+// (MARKER), that names the snapshot the project was last rebuilt from or handed over as, and the Mac that made it; a project whose marker
+// names another snapshot than the newest the record lists is older, whatever the times of its files say. A project with no marker (made
+// here, never handed over) is judged by the times of its files (behindSnapshot), as before.
 //
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
 import { lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
