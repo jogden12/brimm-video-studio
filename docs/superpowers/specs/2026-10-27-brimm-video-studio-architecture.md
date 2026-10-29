@@ -1,7 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
-- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4, PR 5 (#13, Reel projects, 4.3), PR 6 (#11, what was done in HyperFrames and its versions), PR 7 (#14, exports and `finish` from HyperFrames), PR 8 (#17, the words on the picture and the suggestions), PR 9 (#16, Reels of a finished video), PR 10 (#15, the guide's HyperFrames stages) and PR 15 (#12, free) are merged, with the notes changes (#7), the word-times fix (#8), the HDR working copy (#9) and the by-hand rule (#10); main is b136091. Nothing else in it is built on main, and nothing in it is installed or turned on.
+- **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4, PR 5 (#13, Reel projects, 4.3), PR 6 (#11, what was done in HyperFrames and its versions), PR 7 (#14, exports and `finish` from HyperFrames), PR 8 (#17, the words on the picture and the suggestions), PR 9 (#16, Reels of a finished video), PR 10 (#15, the guide's HyperFrames stages), PR 11 (#18, release's snapshot and the take-over), PR 15 (#12, free) and PR 16 (#19, the guide's "hand off the Reels") are merged, with the notes changes (#7), the word-times fix (#8), the HDR working copy (#9) and the by-hand rule (#10); main is 0c042c6. Nothing else in it is built on main, and nothing in it is installed or turned on.
 - **It rests on:**
   - the design accepted on 2026-10-27, `2026-10-27-brimm-video-with-the-hyperframes-app.md` (until it is merged, on the branch `claude/zealous-bell-esuqck` of brimm-video, or `claude/design-2026-10-27` of brimm-video-studio);
   - Jason's decisions in `docs/requirements.md`;
