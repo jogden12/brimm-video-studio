@@ -108,7 +108,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
-                                        and once it is exported, to hand it off. A finished video whose hand-off is
+                                        and once it is exported, to hand it off. On a Mac that Jason has not set up for
+                                        HyperFrames it says that this Mac is not set up, where it would say to open the
+                                        video there or that its video is being made. A finished video whose hand-off is
                                         written is told to hand off the Reels once a Reel is exported from HyperFrames
                                         that the hand-off does not hold. A raw video that goes the Final Cut way keeps
                                         its Final Cut steps. Only on a Mac that does the light import: on any other,
