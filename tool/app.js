@@ -4,6 +4,10 @@
 // one (projectOnAnotherMac), claims it for this Mac, and then gives it to openInApp, which does the rest:
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
+//   - unless its video has been taken away (`free`, free.js; plan PR 15). The project is still the one in use, so no second is made:
+//     the working copy is asked for if it is not there (she is told it is being made, and to say it again), and when it is, and is the
+//     size and length the project was made at, it is renamed into media/recording.mp4, as the writer put it there. A recording that
+//     has changed since cannot be made into that video again, so the project is not opened (5.6);
 //   - a folder at the project's name that the record does not know, as a run whose record was not written leaves, is taken as the
 //     project it is and recorded: nothing is made or started for it either;
 //   - the project's name is the first that no project the record keeps has: "main", and "main 2", "main 3" and so on once a correction
@@ -28,8 +32,8 @@
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`; each but `save` has a default, and the
 // defaults fail closed.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
@@ -58,6 +62,11 @@ const beingMade = (name) => `The video for HyperFrames is being made. Say "open 
 const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
+const videoBack = (name) => `The video HyperFrames was given for ${name} had been taken away; it is back in the project.`;
+const videoGoneAndChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made, and the video that project was made from has been taken away, so it can't be opened. Ask Jason.`;
+const noRecording = (name) => `The recording of ${name} is not in its folder, so the video of its HyperFrames project could not be made again. Ask Jason.`;
+const notTheSame = (name) => `The video made again for ${name} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
+const notPutBack = (name) => `The video for ${name} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
 /** Why her chat stayed where it is when the setting asked for it to go (handoverAllowed's `why`), in her words. */
 const STAYS = {
   held: "This chat has held a client or group session's words, so it stays here.",
@@ -74,7 +83,7 @@ const BUTTONS = "In HyperFrames, share only with people you invite, export on Th
 export const isMain = (project) => project.key === "main" && project.state !== KEPT;
 
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
-    Mac write, and is joined to a folder here (and by app-history.js, which looks at the project). */
+    Mac write, and is joined to a folder here (and by app-history.js, which looks at the project, and by free.js, which deletes inside it). */
 export const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 
 /** The Mac a main project in use was made on, when that is not this Mac and the project's folder is not on this Mac either; null
@@ -190,10 +199,23 @@ function copyOf(facts) {
   return Number.isInteger(bytes) && bytes >= 0 && typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && rate ? { bytes, seconds, fps } : null;
 }
 
+/** The video of a project: where project.js moves the working copy to, last, and where `free` (free.js) takes it from. */
+const videoIn = (dir) => join(dir, "media", "recording.mp4");
+
+/** Whether there is nothing at a path, not even a link. Anything else that stops it being looked at is something there. */
+function nothingAt(path) {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (e) {
+    return e.code === "ENOENT";
+  }
+}
+
 /** What the record keeps of the working copy a project holds, from the project's own brimm/facts.json (project.js), which has the
     length and the rate but not the size, and from the size of the video in the project. null when either cannot be had. */
 function copyIn(dir) {
-  const video = statOf(join(dir, "media", "recording.mp4"));
+  const video = statOf(videoIn(dir));
   return video?.isFile() ? copyOf({ ...factsIn(join(dir, "brimm", "facts.json")), bytes: video.size }) : null;
 }
 
@@ -203,10 +225,15 @@ const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.size, mod
 /** Whether the recording is not the one a project was made from (4.8): its size or its time is not what the project's `from` says.
     The times are compared as moments, to the second the record keeps, and not as the text the record holds: that is written with
     the offset the Mac's zone had on the day, so the same moment is other text once the clocks change. A recording that cannot be
-    looked at is no change that can be told, since a project is opened without it. */
-function changedSince(project, { found, record }) {
+    looked at is no change that can be told, since a project is opened without it. A project that says nothing readable of the
+    recording it was made from (no `from`, or one that is no record of a file) may have been made from another: it counts as changed,
+    and the record, which two Macs write, is never taken to hold what it does not. */
+export function changedSince(project, { found, record }) {
   const raw = statOf(join(found.folder, record.video.file));
-  return raw !== undefined && (project.from.bytes !== raw.size || Date.parse(project.from.modified) !== Math.floor(raw.mtimeMs / 1000) * 1000);
+  if (raw === undefined) return false;
+  const from = project?.from;
+  if (from === null || typeof from !== "object") return true;
+  return from.bytes !== raw.size || Date.parse(from.modified) !== Math.floor(raw.mtimeMs / 1000) * 1000;
 }
 
 /** The record's entry for a main project that is made and has never been opened. */
@@ -295,6 +322,72 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
 }
 
+/** Put the video back into a project whose video has been taken away (`free`, free.js): { workingCopy }, what the record keeps of the
+    copy that was put in, when it was, or { code }, when nothing was put back and a line said why: the exit code to end with. The
+    project is still the project in use, so nothing is made but the video, and the app is not asked until it is back.
+    - A recording that is not the one the project was made from (changedSince) cannot be made into that video again, and one that is
+      not in the episode cannot be made into any: the project is not opened (1). `free` takes nothing in either case, so this is a
+      video taken away by hand.
+    - Without the working copy, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told to say
+      it again when it is done (0), as for a new project. A copy is there when its video and its facts both are.
+    - The copy must be the size and the length the project was made at, to the second, as its own brimm/facts.json says (project.js):
+      its page, its words and their times were made from that video. Facts that cannot be read are no check, so a project whose facts
+      cannot be read is not opened (notWhole), nor a copy whose facts cannot (notPutBack), and a copy of another size or length is left
+      where it is, with the project (notTheSame): all 1. And the file must be as large as its own facts say, as the job leaves it: one
+      that is not is not whole (notPutBack).
+    - Then the copy is renamed into media/recording.mp4, on the same disk, as the writer put it there, so that the project never holds
+      a half-written video; its facts stay beside it. A rename that fails leaves the copy where it was (notPutBack, 1).
+    `rename` is how a file is moved: a test gives another. */
+function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
+  const { home } = ctx;
+  const name = record.name.text;
+  const raw = statOf(join(found.folder, record.video.file));
+  if (raw === undefined) {
+    ctx.say(noRecording(name));
+    return { code: 1 };
+  }
+  if (changedSince(project, { found, record })) {
+    ctx.say(videoGoneAndChanged(name));
+    return { code: 1 };
+  }
+  const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  if (!(existsSync(copy.video) && existsSync(copy.facts))) {
+    requestWorkCopy(ctx, { folder: found.name });
+    ctx.say(beingMade(name));
+    return { code: 0 };
+  }
+  const sized = (facts) => Boolean(facts) && Number.isFinite(facts.seconds) && facts.seconds > 0 && Number.isFinite(facts.width) && facts.width > 0 && Number.isFinite(facts.height) && facts.height > 0;
+  const was = factsIn(join(dir, "brimm", "facts.json"));
+  if (!sized(was)) {
+    ctx.say(notWhole(name));
+    return { code: 1 };
+  }
+  const made = factsIn(copy.facts);
+  const workingCopy = copyOf(made);
+  if (!sized(made) || !workingCopy) {
+    ctx.say(notPutBack(name));
+    return { code: 1 };
+  }
+  if (made.width !== was.width || made.height !== was.height || Math.abs(made.seconds - was.seconds) > 1) {
+    ctx.say(notTheSame(name));
+    return { code: 1 };
+  }
+  // The copy's own facts say how large it is when the job puts it in place whole; a file of another size is not that copy.
+  if (statOf(copy.video)?.size !== workingCopy.bytes) {
+    ctx.say(notPutBack(name));
+    return { code: 1 };
+  }
+  try {
+    mkdirSync(dirname(videoIn(dir)), { recursive: true });
+    rename(copy.video, videoIn(dir));
+  } catch (e) {
+    ctx.say(notPutBack(name));
+    return { code: 1 };
+  }
+  ctx.say(videoBack(name));
+  return { workingCopy };
+}
+
 /** Open the episode's main video in the HyperFrames app, making its project first when it has none, and resolve the exit code: 0
     when the app opened on the project, or when the working copy is being made and she has been told to say it again; 1 when the
     app did not open, or the episode's words are not on this Mac, or a project folder of this Mac cannot be read, or the record
@@ -305,7 +398,9 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     The main project in the record's `app` whose folder is on this Mac is opened again, with one more time it was opened, and
     nothing is made or started. If the recording is not the one it was made from (its size or its time is not what `from` says,
     and a recording that is not there is no change), that is said first, and the project is opened as it was, with nothing in it
-    replaced and no new project made: a new project for the new recording is a later step. A main project in the record whose
+    replaced and no new project made: a new project for the new recording is a later step. Unless its video has been taken away
+    (`free`, free.js): then the video is put back first (putVideoBack), from a working copy made again, or the copy is asked for and
+    she is told to say it again, and the recording having changed means the project is not opened at all. A main project in the record whose
     folder is not here is replaced, when this Mac made it: by the folder at the name the project would get, when one is there
     that the record does not know (adoptProject), and otherwise by a new project (makeProject). One that another Mac made is not
     replaced: its work is on that Mac, and a new project under its name would drop its entry, so edit.js refuses it before the
@@ -326,10 +421,11 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
     - `cli` and `node`: the pinned command line's program (hyperframes.js cliPath), and the program that runs it (this one);
     - `guidance`: the path of the CLAUDE.md the pinned package ships, in the toolchain's folder;
     - `spawn` (spawnSync) runs the command line, and `env` (this process's) is where the chat's id and the LANG come from;
+    - `rename` (renameSync) moves a working copy made again into a project whose video was taken away (putVideoBack);
     - `chat()` gives { sessionId, held } for the chat that asked (chatOf). It is asked only when this Mac's setting wants the
       handover, since that is all it decides. */
 export async function openInApp(ctx, { found, record }, deps = {}) {
-  const { save, spawn = spawnSync, env = process.env, node = process.execPath } = deps;
+  const { save, spawn = spawnSync, env = process.env, node = process.execPath, rename = renameSync } = deps;
   if (typeof save !== "function") throw new Error("openInApp: no save was given, so the record could not be written");
   const { home } = ctx;
   const cli = deps.cli ?? cliPath(home);
@@ -339,9 +435,17 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   const earlier = projects.find(isMain);
 
   let project = earlier && plainName(earlier.name) && existsSync(join(work, earlier.name)) ? earlier : null;
+  let restored = null;
   if (project) {
-    // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
-    if (changedSince(project, { found, record })) ctx.say(recordingChanged(record.name.text));
+    if (nothingAt(videoIn(join(work, project.name)))) {
+      // Its video has been taken away (free.js): it is put back before the app is asked, or the project is not opened.
+      const back = putVideoBack(ctx, { found, record, project, dir: join(work, project.name) }, { rename });
+      if (back.code !== undefined) return back.code;
+      restored = back.workingCopy;
+    } else if (changedSince(project, { found, record })) {
+      // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
+      ctx.say(recordingChanged(record.name.text));
+    }
   } else {
     const taken = adoptProject(ctx, { found, record, at, projects }) ?? makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
     if (taken.code !== undefined) return taken.code;
@@ -370,6 +474,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {
     ...project,
+    ...(restored ? { workingCopy: restored } : {}),
     opened: read.opened ? [...project.opened, at] : project.opened,
     handover: project.handover || read.handedOver,
     state: read.opened && project.state === "made" ? "opened" : project.state

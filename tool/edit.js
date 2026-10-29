@@ -24,6 +24,8 @@
 //                                         the episode's name, its title, its Reels, and a Reel shown in Final Cut Pro
 //   node edit.js finish "<episode>"       gather what Final Cut Shared and exported, ask what it must, and then, detached,
 //                                         transcribe again, copy into final/ and write the hand-off for BRIMM Ops
+//   node edit.js free "<episode>"         take the working copy and the renders of its HyperFrames projects away from this
+//                                         Mac to give the room back, by named paths in BRIMM Video Work alone (free.js)
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
@@ -83,6 +85,7 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
 import { versionsOf, whatHappened } from "./app-history.js";
+import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
 import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -208,6 +211,16 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         into its folder, and let it go. When this Mac pushed a part last, it asks first
                                         whether it was changed in Final Cut since: --no-hand-edits says it was not,
                                         --hand-edits-stay that the changes stay in this Mac's library
+  node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode's main
+                                        project and what it rendered for every project, to give the room back. Their projects
+                                        and everything done in them stay, and app makes the main video again; a Reel's video
+                                        and a kept project's stay, since nothing can make them again yet. It refuses while the
+                                        other Mac has the episode, while HyperFrames is running or cannot be told, while
+                                        something is at work on the episode, while a video HyperFrames rendered may be kept
+                                        nowhere else (the episode is not handed off yet), and when the recording is not in the
+                                        episode as the project was made from it: the video could not be made again. It takes
+                                        no flag. Deleting a Final Cut library by command is not built: free "<episode>"
+                                        library says so
   node edit.js captions "<episode>" reel <n> on|off
                                         a Reel's running captions, in its caption style; its title on screen stays
   node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
@@ -3035,12 +3048,33 @@ async function release(ctx, rest) {
   return releaseEpisode(ctx, { ...got.found, record: got.record }, { answer: flags["no-hand-edits"] ? "no changes" : flags["hand-edits-stay"] ? "changes stay" : "" });
 }
 
-/** `free "<episode>" library`: held back from this version (the lead's ruling, 2026-10-14). Deleting a library by command
-    needs the record of every version handed to Final Cut on this Mac, which phase 5 brings. freeLibrary and unkeptParts
-    stay, with their tests, for then; nothing on the command line reaches them. */
-async function free(ctx) {
-  ctx.say("Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.");
-  return 1;
+/** What `free "<episode>" library` says: held back from this version (the lead's ruling, 2026-10-14). Deleting a Final Cut library by
+    command needs the record of every version handed to Final Cut on this Mac, which phase 5 was to bring. freeLibrary and
+    unkeptParts stay, with their tests, unreachable, until the Final Cut half is retired with parts.js (architecture 10, wave 4). */
+const LIBRARY_HELD_BACK = "Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.";
+
+/** `free "<episode>"`: take away an episode's working copy and the renders of its HyperFrames projects from this Mac, to give the room
+    back (free.js; plan PR 15; architecture 6.1 and 7.4). The project, with everything done in it, stays, and `app` makes the video
+    again. In order:
+    - the old spelling, `free "<episode>" library` (with or without `--yes`), is a Final Cut library, which is still held back: it
+      says so (LIBRARY_HELD_BACK) and takes nothing. It names no episode in what it says, so the gate does not ask;
+    - it takes no flag, and with no words it says the help and ends with 2. A flag nobody built (`--dry-run`) is not taken for one
+      that is, since this command deletes files;
+    - the gate, as for every command that names an episode (episodeFor): `free` is in no gate list (architecture 6.2), so a video not
+      yet answered, a video left alone, a session not cleared and a video held beside a session are refused in the gate's own words;
+    - free.js freeEpisode, which refuses before it takes anything, takes named paths in this Mac's work folder (the video of the main
+      project in use, the renders of every project but a session clip's, and the folder of copies), and writes no record.
+      `ctx.deps.running` is how a test says whether HyperFrames is running; it asks pgrep otherwise. */
+async function free(ctx, rest) {
+  const { words, flags } = flagsOf(rest, []);
+  if (words.length >= 2 && words[words.length - 1] === "library") return refuse(ctx, LIBRARY_HELD_BACK);
+  if (Object.keys(flags).length) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  return freeEpisode(ctx, { found: got.found, record: got.record }, { running: ctx.deps.running });
 }
 
 /** `name "<episode>" "<name>"`. For a client or group session, a name that holds a name brimm-video can see in it is refused
