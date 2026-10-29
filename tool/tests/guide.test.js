@@ -127,6 +127,9 @@ const CLIP = (over) => ({ kind: "short video", way: "clip", ...over });
 const shown = (n) => (n.done ? { done: true } : { stage: n.stage, text: n.text });
 const OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 const V1 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
+/** What a video says that the gate holds as a session, though its kind is a raw video's, a clip's or a finished video's (a Dropbox conflict or a
+    hand edit leaves one): how to clear the mark (plan PR 10, review I2). */
+const MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const STAGE_ROWS = [
   [DROP(), "arriving", 'It is coming into your drop folder. Wait for the "Ready" notice.'],
   [{ ...DROP({ here: false }), mac: "Mac Studio" }, "arriving", 'It is in the drop folder of the Mac Studio. Wait for the "Ready" notice on that Mac.'],
@@ -217,6 +220,21 @@ const STAGE_ROWS = [
   [CLIP({ finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }), finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [APP({ way: "hyperframes", project: PROJECT({ exported: true }), finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
+  // A video the gate holds as a session, though its kind is not one: it is told how to clear the mark, and nothing of HyperFrames or Final Cut,
+  // whatever else the facts hold (plan PR 10, review I2).
+  [RAW({ gated: true }), "session-mark", MARK],
+  [CLIP({ gated: true }), "session-mark", MARK],
+  [{ kind: "finished", gated: true }, "session-mark", MARK],
+  [{ kind: "finished", gated: true, v2: false }, "session-mark", MARK],
+  [RAW({ gated: true, way: "final cut", shownInFinalCut: true }), "session-mark", MARK],
+  [APP({ gated: true }), "session-mark", MARK],
+  [APP({ gated: true, way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "session-mark", MARK],
+  [APP({ gated: true, copy: { left: 90, usual: 120 } }), "session-mark", MARK],
+  [CLIP({ gated: true, way: "hyperframes", project: PROJECT() }), "session-mark", MARK],
+  [RAW({ gated: true, reading: "running" }), "session-mark", MARK],
+  [RAW({ gated: true, reading: "failed" }), "session-mark", MARK],
+  [RAW({ gated: true, offersAnswered: false }), "session-mark", MARK],
+  [RAW({ gated: true, placeholder: true }), "session-mark", MARK],
   // The Final Cut way keeps its stages, whatever else the facts hold.
   [RAW({ way: "final cut", copy: { left: 90, usual: null } }), "show", 'Ask for any changes in your own words, then say "show it in Final Cut".'],
   [RAW({ way: "final cut", shownInFinalCut: true }), "finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".'],
@@ -339,6 +357,22 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     assert.equal(stages({ elsewhere: true, mac: "Mac Studio" }), "open-elsewhere");
     assert.equal(stages({ conflicted: true }), "conflicted");
     assert.equal(stages({ finishRunning: true }), "finish-running");
+  });
+  it("tells a video the gate holds as a session how to clear the mark, with nothing of HyperFrames or Final Cut, after a written hand-off's steps and before the reading's", () => {
+    for (const over of [RAW({ gated: true }), CLIP({ gated: true }), { kind: "finished", gated: true }, APP({ gated: true, way: "hyperframes", project: PROJECT({ exported: true }) }), RAW({ gated: true, shownInFinalCut: true, way: "final cut" })]) {
+      const n = nextFor({ ...BASE, ...over }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], ["session-mark", MARK], JSON.stringify(over));
+      assert.doesNotMatch(n.text, /HyperFrames|Final Cut/);
+    }
+    // A conflict, her answer, the other Mac's claim and a finish at work come first, as they do for every video.
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, conflicted: true }) }, NONE, NOW).stage, "conflicted");
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, elsewhere: true, mac: "Mac Studio" }) }, NONE, NOW).stage, "open-elsewhere");
+    assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, finishRunning: true }) }, NONE, NOW).stage, "finish-running");
+    // A hand-off written is the BRIMM Ops page's step, as it was.
+    const written = nextFor({ ...BASE, ...RAW({ gated: true }), handoff: handoffOf("raw") }, NONE, NOW);
+    assert.deepEqual([written.stage, written.step], ["ops", "taken"]);
+    // A session is a session's: its own steps, not this one.
+    assert.notEqual(nextFor({ ...BASE, ...SESSION({ choice: null }), gated: true }, NONE, NOW).stage, "session-mark");
   });
   it("is the same for a Reel's project: a project here is the main video's, and a copy at work beside it is not said", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT(), copy: { left: 90, usual: null } }) }, NONE, NOW).stage, "in-app");

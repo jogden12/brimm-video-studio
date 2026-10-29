@@ -144,6 +144,9 @@ export function opsText(handoff, step, again) {
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning` (an iPhone clip's too);
       and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
       them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
+    - `gated`, when the gate holds a video as a session whose mark is not cleared, though its kind is not a session's (a record of
+      another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
+      HyperFrames or Final Cut (plan PR 10, review I2).
     - For a raw video and an iPhone clip (plan PR 10): `way`, how `finish` goes for it (edit.js finishWay): "hyperframes" (a main project
       in use), "unopened" (a raw video with neither a project nor a push, on a Mac set up for the app), "clip" (an iPhone clip the app
       has not opened), "final cut" or "finished"; the first two are the HyperFrames way (viaApp). `copy`, while this Mac's run makes
@@ -177,6 +180,7 @@ export const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see 
 
 /** Steps said at more than one stage. */
 const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.';
+const SESSION_MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
@@ -308,6 +312,9 @@ function videoNext(facts, notes, now) {
     if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     return opsStep(facts, notes, now) || { done: true };
   }
+  // The gate holds it as a session whose mark is not cleared, though its kind is another (a Dropbox conflict or a hand edit leaves one): `app`
+  // and `finish` refuse it, so it is sent neither to HyperFrames nor to Final Cut, and nothing of either is read for it (plan PR 10, review I2).
+  if (facts.gated) return toDo("session-mark", SESSION_MARK);
   if (facts.reading !== "done") {
     if (facts.readingsOff) return toDo("readings-off", "Readings are off on this Mac: ask Jason.");
     if (facts.reading === "later") return toDo("reading-later", `Claude starts reading it about ${facts.readsAt}, once the import has checked its copies.${facts.roughAt ? ` Its rough cut is ready about ${facts.roughAt}.` : ""} A notice comes when it is done.`);

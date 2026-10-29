@@ -6165,8 +6165,9 @@ function guideFacts(ctx, e, links, rates) {
   const handoff = guideHandoff(ctx, e, r, links, v2);
   // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
   // it: its Final Cut stages are for the Final Cut way alone. What the HyperFrames way reads of the disk (the video being made, the
-  // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written.
-  const way = kind === "raw" || kind === "short video" ? finishWay(ctx, r) : "";
+  // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written. A video the
+  // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2).
+  const way = !hidden && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6188,6 +6189,7 @@ function guideFacts(ctx, e, links, rates) {
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
+    gated: kind !== "session" && sessionNotCleared(r),
     way,
     copy: way ? guideCopy(ctx, e, r, rates) : null,
     project: way && !handoff ? guideProject(ctx, e, r) : null,

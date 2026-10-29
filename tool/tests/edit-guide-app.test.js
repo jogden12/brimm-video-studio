@@ -17,8 +17,8 @@ import { COPY_STEP } from "../guide.js";
 import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
 import { workCopyLockOf } from "../workcopy.js";
-import { FOLDER, ID, listAll, reread } from "./episodes.js";
-import { entry, exportOf } from "./exports-world.js";
+import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
+import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
 
@@ -324,6 +324,50 @@ describe("the guide for an iPhone clip", () => {
   });
 });
 
+describe("the guide for a video the gate holds as a session, though its kind is not one (plan PR 10, review I2)", () => {
+  /** A session's mark, not cleared: what a Dropbox conflict or a hand edit can leave on a record of another kind. */
+  const MARKED = { marked: "2026-10-20T08:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
+  const CLEAR = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
+  /** A `readdir` that writes down the folders it is asked to list. */
+  const spy = () => {
+    const looked = [];
+    return { looked, readdir: (dir) => (looked.push(dir), readdirSync(dir)) };
+  };
+  for (const kind of ["raw", "short video", "finished"]) {
+    for (const app of [true, false]) {
+      it(`tells a ${kind} video how to clear the mark, whether it has no project, a project here, or an export too, on a Mac whose settings have the app ${app ? "on" : "off"}; nothing of HyperFrames or Final Cut, and Downloads not listed`, async () => {
+        for (const [what, projects, exported] of [["no project", null, false], ["a project here", ["main"], false], ["a project and an export in Downloads", ["main"], true]]) {
+          const w = guideWorld({ kind, projects, set: app, over: { session: MARKED } });
+          if (exported) exportOf(w, "main");
+          const { looked, readdir } = spy();
+          const said = await line(w, { readdir });
+          const [name, ...rest] = said.split("): ");
+          assert.match(`${name})`, /\(3fa9c1\)$/, said);
+          assert.equal(rest.join("): "), CLEAR, `${what}: ${said}`);
+          assert.doesNotMatch(said, /HyperFrames|Final Cut/, what);
+          assert.deepEqual(looked, [], `${what}: Downloads was listed`);
+          w.t.done();
+        }
+      });
+    }
+  }
+  it("says the BRIMM Ops page's step once its hand-off is written, as it did, and a video held beside a session is held and nothing of it is read", async () => {
+    const written = guideWorld({ over: { session: MARKED, finished: FINISHED } });
+    handOff(written);
+    assert.match(await line(written), /On the BRIMM Ops page: Drag the hand-off onto Episodes/);
+    // A session that is a version of the video: the video is held beside it, and is not a session itself.
+    const w = guideWorld();
+    exportOf(w, "main");
+    episodeAs(w.t, { id: "e-20261020-a2a2a2", name: "2026-10-20 Group call (Mac Studio)", record: { kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Video of 20 Oct, 10:00 (Mac Studio)", name: { text: "Session, 2026-10-20", placeholder: false }, session: MARKED, versionOf: ID, imported: { on: "Mac Studio", at: "2026-10-20T10:00:00-05:00" } } });
+    const { looked, readdir } = spy();
+    const said = await line(w, { readdir });
+    assert.match(said, /^a video \(3fa9c1\): One of its other versions is a client or group session\. Say "it was a session after all" for this one too\.$/);
+    assert.deepEqual(looked, []);
+    written.t.done();
+    w.t.done();
+  });
+});
+
 describe("the guide waits while the video for HyperFrames is made", () => {
   it("waits in steps of 5 seconds, and says the overview once the video is made", async () => {
     const w = guideWorld({ projects: null });
@@ -393,7 +437,8 @@ describe("what says the guide's new states: the help and the README (the skills'
     const first = row('| `guide ["<video>"]`');
     for (const words of [
       "followed through HyperFrames (plan PR 10)", "Making the video for HyperFrames", "how long is left", "usually takes", ".hyperframes/app-history.jsonl", "the time of her last request there",
-      "export on This Mac", "an export that began after its last change", "Final Cut way", "until the retirement's wave 4", "These only read, and write nothing"
+      "export on This Mac", "an export that began after its last change", "Final Cut way", "until the retirement's wave 4", "These only read, and write nothing",
+      "is told to clear the mark, and nothing of HyperFrames or Final Cut is said or read for it"
     ]) assert.ok(first.includes(words), words);
     assert.ok(row("| `guide drop [zoom]").includes("being imported, being read or having its video for HyperFrames made"));
     assert.ok(row('| `guide "<video>" done').includes("Its video for HyperFrames being made is waited for too, and ends with its next step; no notice is posted for it"));
