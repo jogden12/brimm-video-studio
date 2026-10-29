@@ -180,7 +180,8 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
-/** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. */
+/** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
+    rough cut stays among them until the retirement's wave 2 stops the reading making one (spec section 10). */
 export const READING_STEPS = ["Asking Claude", "Making the rough cut"];
 
 /** Seconds until an import on this Mac is Ready, from its run in the panel (progress.js): the time left in all, or on its last

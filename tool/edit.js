@@ -99,18 +99,23 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
                                         answer first, then the newest; this Mac's drop folder in Finder's words; and how
                                         many videos from before the switch are not guided. With a video, its next step,
-                                        and for a step on the BRIMM Ops page the step after it. Only on a Mac that does
-                                        the light import: on any other, every form says to ask Jason
+                                        and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
+                                        clip are followed through HyperFrames: while its video is made, how long is left;
+                                        then to open it there; once it is open, when she last asked the app for something;
+                                        and once it is exported, to hand it off. A raw video that goes the Final Cut way
+                                        keeps its Final Cut steps. Only on a Mac that does the light import: on any other,
+                                        every form says to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
-                                        what the guide says: at once when no video is coming in, being imported or read
+                                        what the guide says: at once when no video is coming in, being imported, being
+                                        read or having its video for HyperFrames made
   node edit.js guide "<video>" done <step> | finished | show | tell
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs.
-                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, or an
-                                        import or reading that did not finish), then say it in one line. Her skill runs it
-                                        in the background
+                                        With tell, wait up to 60 minutes for its next point (ready, read by Claude, its
+                                        video for HyperFrames made, or an import or reading that did not finish), then say
+                                        it in one line. Her skill runs it in the background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a

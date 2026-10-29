@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "nod
 import { dirname, join } from "node:path";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
+import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
 import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
@@ -377,6 +378,29 @@ describe("the speed of the working copy", () => {
     const usual = aboutLeft(Math.round(speed * reread(c.found).video.seconds));
     assert.equal((await on(deps, "guide", "3fa9c1")).said[0], says(`The video for HyperFrames is being made. It usually takes ${usual}. ${AFTER}`));
     c.t.done();
+  });
+});
+
+describe("what says the guide's new states: the help and the README (the skills' words are studio.test.js's)", () => {
+  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+  const row = (start) => readme.split("\n").find((text) => text.startsWith(start)) ?? "";
+  it("has the help say that a raw video and an iPhone clip are followed through HyperFrames, and what the wait and the tell wait for", () => {
+    const guide = HELP.slice(HELP.indexOf('node edit.js guide ["<video>"]'), HELP.indexOf('node edit.js kind "<video>"'));
+    for (const words of [
+      "A raw video and an iPhone clip are followed through HyperFrames", "while its video is made, how long is left", "then to open it there", "when she last asked the app for something",
+      "and once it is exported, to hand it off", "A raw video that goes the Final Cut way keeps its Final Cut steps",
+      "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, or an import or reading that did not finish"
+    ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);
+  });
+  it("has the README's rows for guide say the same: the stages, the times and where they come from, the Final Cut way's until wave 4, and that it only reads", () => {
+    const first = row('| `guide ["<video>"]`');
+    for (const words of [
+      "followed through HyperFrames (plan PR 10)", "Making the video for HyperFrames", "how long is left", "usually takes", ".hyperframes/app-history.jsonl", "the time of her last request there",
+      "export on This Mac", "an export that began after its last change", "Final Cut way", "until the retirement's wave 4", "These only read, and write nothing"
+    ]) assert.ok(first.includes(words), words);
+    assert.ok(row("| `guide drop [zoom]").includes("being imported, being read or having its video for HyperFrames made"));
+    assert.ok(row('| `guide "<video>" done').includes("Its video for HyperFrames being made is waited for too, and ends with its next step; no notice is posted for it"));
+    assert.ok(row("| `tool/guide.js`, `tool/guide-note.js`").includes("where a raw video and an iPhone clip are in HyperFrames"));
   });
 });
 
