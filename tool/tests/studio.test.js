@@ -275,6 +275,16 @@ describe("her folder's settings", () => {
     assert.ok(goes[0].startsWith("3. "), goes[0]);
     assert.match(goes[0], /Never add `--yes` before she has said yes to what `finish` just said\./);
   });
+  it("have the skill point --on-screen at the rule for quotes at its top, and say what to do with a line that holds both kinds (build plan PR 8, review M10)", () => {
+    // A line on the screen is words she says, and can hold an apostrophe, a straight double quote, or both: the rule says which quotes
+    // pass each, and that both cannot be passed, so the chat asks her to say that line another way.
+    const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
+    const rule = skill.split("\n").findIndex((line) => line.startsWith("Words with a `$`, a backtick, a backslash or a straight double quote go in single quotes instead of double."));
+    assert.ok(rule >= 0 && rule < 12, "the rule is among the first lines");
+    const goes = sectionOf(skill, "## In HyperFrames, to hand it off").split("\n").filter((line) => line.startsWith("3. "));
+    assert.equal(goes.length, 1);
+    assert.match(goes[0], /`--on-screen "<words>"`, once for each line, in the order they appear, each quoted by the rule at the top of this file \(a line with both an apostrophe and a straight double quote cannot be passed: ask her to say that line another way\), and `--no-on-screen` when nothing is on screen\./);
+  });
   it("have the skill say which quotes a word with a $, a backtick, a backslash or a straight double quote goes in, and what to do when none will do", () => {
     // A straight double quote can be passed only in single quotes: the guard refuses it inside double quotes, escaped or not.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
