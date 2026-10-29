@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { PIN } from "../hyperframes.js";
 import { NAME } from "./episodes.js";
+import { reasonOf } from "../hand-over.js";
 import { MARKER, markerAsItIs, readMarker } from "../snapshot.js";
 import { FOLDER, HELD, HERS, MAIN, REEL2, T1, entry, exportOf, fillProject, filesBelow, listAll, ms, releaseWorld, reread, snapshotListing, textOf } from "./snapshot-world.js";
 
@@ -570,6 +571,35 @@ describe("release: a failure leaves nothing half there (group H)", () => {
     const again = await release(w.t.ctx.deps, FOLDER);
     assert.deepEqual([again.code, again.said], [0, [SAID(BOTH)]]);
     w.t.done();
+  });
+  it("says why a copy failed in plain words whatever the error looks like: no path, no quote, no name of a call (the review of PR 11, M1)", async () => {
+    const shapes = [
+      ["ENOSPC: no space left on device, copyfile '/Users/sallie/BRIMM Video Work/x/AGENTS.md' -> '/Dropbox/x/AGENTS.md'", "no space left on device"],
+      ["cp: /Users/sallie/BRIMM Video Work/x/AGENTS.md: No space left on device", "No space left on device"],
+      ["EACCES: permission denied, open '/Users/sallie/x/index.html'", "permission denied"]
+    ];
+    for (const [message, why] of shapes) {
+      const w = releaseWorld({ projects: ["main"] });
+      w.t.ctx.deps.clone = () => {
+        throw new Error(message);
+      };
+      const r = await release(w.t.ctx.deps, FOLDER);
+      assert.deepEqual([r.code, r.said], [1, [`${NAME} could not be handed over: ${why}. Nothing was handed over: say hand it over again.`]], message);
+      w.t.done();
+    }
+    // A clone can only be made on one disk, which cloneIn says in its own words.
+    const w = releaseWorld({ projects: ["main"] });
+    w.t.ctx.deps.sameDisk = () => false;
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [1, [`${NAME} could not be handed over: it is on another disk than the run's own folder, and a clone can only be made on one disk. Nothing was handed over: say hand it over again.`]]);
+    w.t.done();
+  });
+  it("gives a reason that holds a path, or none, as a file that could not be copied", () => {
+    assert.equal(reasonOf(new Error("AGENTS.md is in /Dropbox/x/app-snapshot already, and a file there is never written over.")), "a file could not be copied");
+    assert.equal(reasonOf(new Error("")), "a file could not be copied");
+    assert.equal(reasonOf(undefined), "a file could not be copied");
+    assert.equal(reasonOf("no room left on the disk"), "a file could not be copied", "only an error's own message is told");
+    assert.equal(reasonOf(new Error("x could not be put into /y: no room left on the disk. Nothing was copied.")), "no room left on the disk");
   });
   it("leaves the earlier snapshots as they were", async () => {
     const w = releaseWorld({ projects: ["main"] });

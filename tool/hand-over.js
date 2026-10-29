@@ -18,7 +18,7 @@
 //
 // What it says goes into her chat, so it holds no path, no flag and no name of a command.
 import { existsSync, lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { KEPT, clipFolders, clipTrouble, folded, isMain, plainName } from "./app.js";
 import { cloneIn, replaceIn } from "./dropbox.js";
 import { kindOf, shownName } from "./episode.js";
@@ -99,8 +99,14 @@ function freeTime(folder, ms) {
   for (let at = ms; ; at += 1000) if (!existsSync(join(folder, SNAPSHOT_DIR, timeName(at)))) return timeName(at);
 }
 
-/** The reason a copy failed, in words that hold no path: the last of cloneIn's phrases. */
-const reasonOf = (e) => basename(String(e && e.message ? e.message : e).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "").split(": ").pop());
+/** The reason a copy failed, in words that hold no path: the last of cloneIn's phrases ("…: no room left on the disk. Nothing was copied."),
+    or, of one of Node's own ("ENOSPC: no space left on device, copyfile '/a' -> '/b'"), the words before the call and the paths. A reason
+    that still holds a path, or none, is "a file could not be copied" (the review of PR 11, M1). */
+export const reasonOf = (e) => {
+  const text = String(typeof e?.message === "string" ? e.message : "").replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
+  const reason = text.split(": ").pop().replace(/, [a-z]+ '.*$/s, "").trim();
+  return reason === "" || reason.includes("/") ? "a file could not be copied" : reason;
+};
 
 /** Hand over the projects `own` (projectsToHand) of the episode `found` with `record`, this Mac holding it. Resolves one of:
     - { refused }, words to say, ending the release with 1: nothing was written, or, with `lost`, the paths of copies in the episode that
