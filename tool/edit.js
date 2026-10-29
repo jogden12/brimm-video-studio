@@ -6486,10 +6486,11 @@ function guideSession(ctx, e, r) {
 }
 
 /** What the guide reads of the answered video `e` (episodeAt's) in Episodes (guide.js VideoFacts), from its record in force and
-    what this Mac holds of it, and the speeds this Mac measured (`rates`, progress.js readRates). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
+    what this Mac holds of it, the speeds this Mac measured (`rates`, progress.js readRates) and her notes on this Mac (`notes`, guide-note.js,
+    read once for the pass). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. */
-function guideFacts(ctx, e, links, rates) {
+function guideFacts(ctx, e, links, rates, notes) {
   const r = e.inForce;
   const kind = recordKind(r);
   const hidden = isGated(e);
@@ -6506,8 +6507,10 @@ function guideFacts(ctx, e, links, rates) {
   // A finished video's Reels (plan PR 16) are looked for only where `finish "<episode>" reels` would go on, so far as a look that costs no other
   // read can tell: the gate lets the video through, a hand-off is written, the other Mac does not have it open, no run is at work but a finish
   // (the stage of a finish at work is `finish-running`; a bring, a read or an ask is refused by `finish` in "<command> is running"), the chain of
-  // its versions has no gap, and Dropbox did not undo this Mac's last change to its record (review F1, F2a and F2c).
-  const looksForReels = !hidden && kind === "finished" && handoff && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
+  // its versions has no gap, and Dropbox did not undo this Mac's last change to its record (review F1, F2a and F2c); and she has not said the video
+  // is finished: her word stands (guide.js nextFor), so what the Reels would say is never said, and looking for them on every pass, `guide wait`'s
+  // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems).
+  const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6636,7 +6639,7 @@ function guideItems(ctx) {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links, rates);
+    const facts = guideFacts(ctx, e, links, rates, notes);
     items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
   }
   const newest = new Map();

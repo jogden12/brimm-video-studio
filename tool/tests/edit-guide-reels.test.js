@@ -5,8 +5,9 @@
 // program, and none of these writes anything into the video's.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import fs, { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { join, sep } from "node:path";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { acceptRev, recordFile, recordText } from "../episode.js";
@@ -473,6 +474,53 @@ describe("B7. where the guide reads", () => {
       assert.doesNotMatch(said, /hand off the Reels/, `${kind}: ${said}`);
       assert.deepEqual(looked, [], kind);
     }
+  });
+});
+
+describe("B7b. a video she set aside is read for nothing of its Reels (review F6)", () => {
+  /** The paths this process asks the file system about while `run` goes: the functions of `fs` that look at a path are wrapped, and put back
+      whatever happens. (The test files run one by one, and each test in a file after the one before, so nothing else is looking meanwhile.) */
+  async function touched(run) {
+    const names = ["statSync", "lstatSync", "readdirSync", "readFileSync", "openSync", "existsSync", "realpathSync", "accessSync", "readlinkSync", "opendirSync"];
+    const real = Object.fromEntries(names.map((name) => [name, fs[name]]));
+    const paths = new Set();
+    for (const name of names) {
+      fs[name] = function (...args) {
+        if (typeof args[0] === "string") paths.add(args[0]);
+        return real[name].apply(this, args);
+      };
+    }
+    syncBuiltinESMExports();
+    try {
+      await run();
+    } finally {
+      Object.assign(fs, real);
+      syncBuiltinESMExports();
+    }
+    return [...paths];
+  }
+  const inside = (dir) => (path) => path === dir || path.startsWith(`${dir}${sep}`);
+  it("looks in no Reel project and no Downloads, nor in what the other Mac released, for a video she said was finished, in every form that reads: the overview, the video, wait and tell", async () => {
+    const w = await W({ projects: ["reel 1", "reel 2"] });
+    exportOf(w, "reel 2");
+    // (The episode's lock, in the work folder, is looked at for every video: whether a run is at work is the guide's own business.)
+    const places = [w.dirOf("reel 1"), w.dirOf("reel 2"), w.downloads, join(w.found.folder, "edit")].map(inside);
+    const reads = async () => {
+      const said = [];
+      const paths = await touched(async () => {
+        for (const argv of [["guide"], ["guide", "3fa9c1"], ["guide", "wait"], ["guide", "3fa9c1", "tell"]]) said.push((await on(depsOf(w), ...argv)).said);
+      });
+      return { said, paths: paths.filter((path) => places.some((is) => is(path))) };
+    };
+    // The same video before she said it: its projects and Downloads are looked in (the control, so that this test would see a read at all).
+    const before = await reads();
+    assert.ok(before.paths.some(inside(w.downloads)), "Downloads is read for a video not set aside");
+    assert.ok(before.paths.some(inside(w.dirOf("reel 2"))), "its Reel project is read for a video not set aside");
+    assert.ok(before.said.every((lines) => lines.some((said) => said.includes(REEL_2))), JSON.stringify(before.said));
+    writeGuideNotes(w.t.home, { version: 1, handoffs: {}, finished: { [ID]: AT } });
+    const after = await reads();
+    assert.deepEqual(after.paths, [], "nothing of its Reel projects or Downloads is looked in");
+    assert.deepEqual(after.said, [[DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`], [DROP_LINE, NOTHING_UNDER_WAY], [`${NAMED} is done: nothing is left to do for it.`]]);
   });
 });
 

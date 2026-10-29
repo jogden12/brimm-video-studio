@@ -157,8 +157,9 @@ export function opsText(handoff, step, again) {
       the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none), and
       whether it has an export that began after its last change.
     - For a finished video whose hand-off is written (plan PR 16): `reelsExported`, the numbers of its Reels, in order, that were exported from
-      HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, or when that
-      command would go no further. It is said ahead of the BRIMM Ops page's steps, and below her note that the video is finished.
+      HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
+      command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
+      BRIMM Ops page's steps, and below her note that the video is finished.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
