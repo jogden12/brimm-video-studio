@@ -119,7 +119,8 @@ const TODAY_ASKED = {
   ideas: [],
   // The guide, new since the switch: tests/edit-guide.test.js pins its words.
   guide: [],
-  // The app, new with Studio: tests/edit-app.test.js pins its words.
+  // The app, new with Studio: tests/edit-app.test.js pins its words, and tests/edit-app-history.test.js those of `app … what-happened`
+  // and `app … versions`. The walk below runs both for a video waiting for its answer and for a session.
   app: []
 };
 
@@ -1243,7 +1244,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
-    app: [[label], [], ["2026"], ["nothing fits this"]]
+    app: [[label], [label, "what-happened"], [label, "versions"], [], ["2026"], ["nothing fits this"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);
