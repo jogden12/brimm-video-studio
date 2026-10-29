@@ -5,7 +5,7 @@
 // projects are in a temporary home, and no program: HyperFrames is a stand-in that is running or not.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
@@ -494,7 +494,7 @@ describe("release: the two newest snapshots are kept (group G)", () => {
     const w = releaseWorld({ projects: ["main"] });
     const asked = [];
     w.t.ctx.deps.rm = (path, options) => {
-      asked.push([path, Object.keys(reread(w.found).files).some((rel) => rel.startsWith("app-snapshot/2026-10-20 20.00.00Z/"))]);
+      asked.push([path.replace(w.found.folder, ""), Object.keys(reread(w.found).files).some((rel) => rel.startsWith("app-snapshot/2026-10-20 20.00.00Z/"))]);
       return rmSync(path, options);
     };
     assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
@@ -506,7 +506,64 @@ describe("release: the two newest snapshots are kept (group G)", () => {
     assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
     assert.deepEqual(folders(w), ["2026-10-20 20.01.00Z", "2026-10-20 20.02.00Z"]);
     assert.deepEqual(listedTimes(w), ["2026-10-20 20.01.00Z", "2026-10-20 20.02.00Z"]);
-    assert.deepEqual(asked, [[join(w.found.folder, "app-snapshot", T1), false]], "the record no longer listed it when it was removed");
+    // Each file the record listed of it is removed by its own name, once the record no longer lists it (the review of PR 11, M6).
+    assert.deepEqual(asked.map(([path]) => path).sort(), HELD_RELS.map((rel) => `/app-snapshot/${T1}/${MAIN}/${rel}`).sort());
+    assert.equal(asked.every(([, listed]) => listed === false), true, "the record no longer listed it when it was removed");
+    w.t.done();
+  });
+  it("removes a dropped snapshot by the names the record listed and no other: a file of its own that it never named stays, and so does the folder it is in (the review of PR 11, M6)", async () => {
+    const w = releaseWorld({ projects: ["main"] });
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    const stray = join(w.found.folder, "app-snapshot", T1, MAIN, "compositions", "a conflicted copy.html");
+    writeFileSync(stray, "not listed");
+    for (let i = 0; i < 2; i++) {
+      await later(w);
+      assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    }
+    assert.deepEqual(listedTimes(w), ["2026-10-20 20.01.00Z", "2026-10-20 20.02.00Z"]);
+    assert.equal(textOf(stray), "not listed");
+    assert.deepEqual(filesBelow(join(w.found.folder, "app-snapshot", T1)), [`${MAIN}/compositions/a conflicted copy.html`], "every file it named is gone, and no other");
+    w.t.done();
+  });
+  it("follows no link when it removes a dropped snapshot: with a link in the way, nothing beyond it is touched", async () => {
+    const w = releaseWorld({ projects: ["main"] });
+    const elsewhere = join(w.t.dir, "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    await later(w);
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    // The snapshots' folder is moved away and a link left in its place, as a Dropbox folder reached some other way might be.
+    renameSync(join(w.found.folder, "app-snapshot"), join(elsewhere, "app-snapshot"));
+    symlinkSync(join(elsewhere, "app-snapshot"), join(w.found.folder, "app-snapshot"));
+    const before = filesBelow(join(elsewhere, "app-snapshot", T1));
+    await later(w);
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(filesBelow(join(elsewhere, "app-snapshot", T1)), before, "what the link leads to is not removed from");
+    w.t.done();
+  });
+  it("looks again at each path just before it goes: a folder swapped for a link meanwhile is not followed", async () => {
+    const w = releaseWorld({ projects: ["main"] });
+    const decoy = join(w.t.dir, "decoy");
+    mkdirSync(join(decoy), { recursive: true });
+    writeFileSync(join(decoy, "title-card.html"), "someone else's");
+    assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    for (let i = 0; i < 2; i++) {
+      await later(w);
+      if (i === 1) {
+        let swapped = false;
+        w.t.ctx.deps.rm = (path, options) => {
+          if (!swapped) {
+            swapped = true;
+            rmSync(join(w.found.folder, "app-snapshot", T1, MAIN, "compositions"), { recursive: true, force: true });
+            symlinkSync(decoy, join(w.found.folder, "app-snapshot", T1, MAIN, "compositions"));
+          }
+          return rmSync(path, options);
+        };
+      }
+      assert.equal((await release(w.t.ctx.deps, FOLDER)).code, 0);
+    }
+    assert.equal(textOf(join(decoy, "title-card.html")), "someone else's");
     w.t.done();
   });
   it("names a snapshot made in the second of another by the next free second", async () => {

@@ -2623,14 +2623,54 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     hf.undo();
     return code;
   }
-  for (const time of drop) {
+  removeSnapshots(ctx, found, drop, listedNow);
+  return 0;
+}
+
+/** Remove the snapshots the record lists no more (`drop`: their folder names; `listed` the record's files as they were listed before they went),
+    once the record is written, by the names the record gave their files and no other (the review of PR 11, M6; as free.js removes what it
+    names): each file is looked at where it stands, with the real path of its folder being the folder's own path (no link on the way, the
+    episode's folder itself aside) and the file being a file, and looked at again just before it goes; then each folder of the snapshot that is
+    empty then goes, deepest first, and one that holds anything else stays. A snapshot that stays is no longer listed, and a later release takes
+    no notice of it. Nothing is followed, and nothing outside the episode's `app-snapshot/` is named. `ctx.deps.rm` is how a file is removed. */
+function removeSnapshots(ctx, found, drop, listed) {
+  const rm = ctx.deps.rm ?? rmSync;
+  let base;
+  try {
+    base = realpathSync(found.folder);
+  } catch (e) {
+    return;
+  }
+  /** Whether `rel` (a path from the episode's folder) is where it was named, and a file, or a folder. */
+  const stands = (rel, type) => {
     try {
-      (ctx.deps.rm ?? rmSync)(join(found.folder, SNAPSHOT_DIR, time), { recursive: true, force: true });
+      if (realpathSync(dirname(join(found.folder, rel))) !== join(base, dirname(rel))) return false;
+      const there = lstatSync(join(found.folder, rel));
+      return type === "file" ? there.isFile() : there.isDirectory();
     } catch (e) {
-      // A snapshot that stays is no longer listed, and a later release takes no notice of it.
+      return false;
+    }
+  };
+  for (const time of drop) {
+    const root = `${SNAPSHOT_DIR}/${time}`;
+    const named = Object.keys(listed).filter((rel) => rel.startsWith(`${root}/`));
+    const folders = new Set([root]);
+    for (const rel of named) for (let at = dirname(rel); at.length > root.length; at = dirname(at)) folders.add(at);
+    for (const rel of named.filter((one) => stands(one, "file"))) {
+      try {
+        if (stands(rel, "file")) rm(join(found.folder, rel), { force: true });
+      } catch (e) {
+        // A file that stays is no longer listed.
+      }
+    }
+    for (const dir of [...folders].sort((a, b) => b.length - a.length)) {
+      try {
+        if (stands(dir, "folder")) rmdirSync(join(found.folder, dir));
+      } catch (e) {
+        // A folder that holds something else stays.
+      }
     }
   }
-  return 0;
 }
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */
