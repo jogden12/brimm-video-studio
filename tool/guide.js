@@ -272,7 +272,10 @@ function videoNext(facts, notes, now) {
     if (!facts.shownInFinalCut) return toDo("show", 'Ask for any changes in your own words, then say "show it in Final Cut".');
     return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
   }
-  return facts.v2 ? toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.') : toDo("waits-v2", WAITS_V2);
+  if (!facts.v2) return toDo("waits-v2", WAITS_V2);
+  // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
+  if (facts.kind === "short video") return toDo("clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.');
+  return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }
 
 /** Whether a session after all still owes the BRIMM Ops page its withdrawal: its empty revision is still to be written, or its

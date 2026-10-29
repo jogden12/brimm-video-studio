@@ -153,7 +153,8 @@ describe("finish of a video that is not edited in Final Cut (item 5)", () => {
   for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip she answered"]]) {
     it(`says of ${what} that its hand-off comes from its spellings, or is written already, or waits for version 2, and names no folder`, async () => {
       for (const [settings, over, said] of [
-        [{ handoffVersion: 2 }, {}, 'Pricing talk is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
+        // An iPhone clip is edited in HyperFrames if at all, so it is not said to be "not edited in Final Cut" (plan PR 7, item 4).
+        [{ handoffVersion: 2 }, {}, kind === "short video" ? 'Pricing talk\'s hand-off is written once its spellings are answered. Say "show me the spellings".' : 'Pricing talk is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
         [{ handoffVersion: 2 }, { finished: FINISHED }, "Pricing talk's hand-off is written already, as revision 2: a spelling changed writes its next revision."],
         [{ handoffVersion: 1 }, {}, "Pricing talk's hand-off is written from its spellings once this Mac hands off version 2: ask Jason."]
       ]) {

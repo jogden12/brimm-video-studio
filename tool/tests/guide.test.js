@@ -147,7 +147,11 @@ const STAGE_ROWS = [
   [{ reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
   [{ offersAnswered: false }, "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
   [{ v2: false }, "waits-v2", V1],
-  [{ kind: "short video" }, "handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.'],
+  // A finished video's hand-off is written when its spellings are answered; an iPhone clip's is not (plan PR 7, F5): it is edited in
+  // HyperFrames and exported, or handed off as it is, and on a Mac that hands off version 1 it waits for version 2.
+  [{ kind: "finished" }, "handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.'],
+  [{ kind: "short video" }, "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  [{ kind: "short video", v2: false }, "waits-v2", V1],
   [RAW({ finishRunning: true, placeholder: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [RAW({ placeholder: true }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
   [RAW(), "show", 'Ask for any changes in your own words, then say "show it in Final Cut".'],

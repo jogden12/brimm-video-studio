@@ -184,13 +184,14 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         show a picked Reel in Final Cut Pro, upright; with v<k>, its version k as it was
                                         stored
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--final "<part>"]
-                     [--no-hand-edits "<part>"] [--without "reel <n>"]
+                     [--no-hand-edits "<part>"] [--without "reel <n>"] [--as-it-is]
                                         find what HyperFrames exported of each part (in Downloads, or where the export's own
                                         record says it went), or for a video edited in Final Cut what Final Cut Shared and
                                         exported, and ask what it must. --final says an export is the final one though the
                                         project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
-                                        detached
+                                        detached. An iPhone clip she answered that was not opened in HyperFrames is asked
+                                        about once; --as-it-is writes its hand-off from the import's captions
   node edit.js show "<episode>" transcript|notes|plan
                                         print its transcript (a raw video's she has answered: its rough cut's), Claude's
                                         notes or its cut plan, whole. Of a video not yet answered, or a session, nothing
@@ -2014,14 +2015,16 @@ function listing(dir) {
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 
 /** Which way `finish` goes for a video, by its record (plan PR 7, item 1): "hyperframes" for a raw video that has a main project in
-    use, to be finished from the exports the app made of it (exports.js); "finished" for a video that is not edited here, a finished
-    video and an iPhone clip she answered; "unopened" for a raw video with neither a project nor a push, on a Mac whose settings turn
-    the app on, which has nothing to finish yet and is told so in HyperFrames' words; and "final cut" for the rest, which go as they
+    use, and for an iPhone clip whose main project in use the app has opened, to be finished from the exports the app made of it
+    (exports.js); "clip" for any other iPhone clip she answered, which is asked whether to hand it off as it is (finishClip); "finished"
+    for a finished video, which is not edited here; "unopened" for a raw video with neither a project nor a push, on a Mac whose settings
+    turn the app on, which has nothing to finish yet and is told so in HyperFrames' words; and "final cut" for the rest, which go as they
     always went. The Final Cut way stays for the episodes already under way in it, until the retirement's wave 4. */
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
   if (kind === "raw" && projects.some(inUse)) return "hyperframes";
+  if (isClip(record)) return projects.some((p) => inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) ? "hyperframes" : "clip";
   if (!hasFinalCut(record)) return "finished";
   // A Reel project (plan PR 5) can be made before the main video is opened: the main video still has nothing to finish.
   if (kind === "raw" && !partsOf(record)[0].pushes.length && (appOf(ctx.settings) || projects.length > 0)) return "unopened";
@@ -2056,11 +2059,12 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // claim is written.
   const notYet = cannotFinish(record);
   if (notYet) return refuse(ctx, notYet);
-  // A finished video, and an iPhone clip she answered, are not edited in Final Cut: their hand-off is written from their spellings
-  // (saveSpellings), as version 2, which a version 1 hand-off could not hold. Said at once too, before any part is looked for or
-  // transcribed, and with no folder named.
+  // A finished video is not edited in Final Cut: its hand-off is written from its spellings (saveSpellings), as version 2, which a
+  // version 1 hand-off could not hold. An iPhone clip she answered is edited in HyperFrames, if at all: not opened there, it is asked
+  // about once (finishClip). Said at once too, before any part is looked for or transcribed, and with no folder named.
   const way = finishWay(ctx, record);
   if (way === "finished") return refuse(ctx, notInFinalCut(ctx, found, record));
+  if (way === "clip") return finishClip(ctx, found, answers);
   if (way === "unopened") return refuse(ctx, NEVER_OPENED);
   const app = way === "hyperframes";
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
@@ -2185,7 +2189,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
 }
 
 /** `finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"]… [--final "<part>"]…
-    [--no-hand-edits "<part>"]… [--without "reel <n>"]…`, and the
+    [--no-hand-edits "<part>"]… [--without "reel <n>"]… [--as-it-is]`, and the
     detached part it starts, `finish --now "<episode folder>"`, which runs finishNow holding the episode's lock. */
 async function finish(ctx, rest) {
   const { words, flags } = flagsOf(rest, ["take", "no-hand-edits", "without", "final"]);
@@ -2222,7 +2226,7 @@ async function finish(ctx, rest) {
   // A session's finish is its own: the hand-off of what she approved of its teachings.
   if (taughtSession(got.record)) return finishSessionCommand(ctx, { ...got.found, record: got.record });
   const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
-  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [], final: flags.final || [] });
+  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [], final: flags.final || [], asItIs: Boolean(flags["as-it-is"]) });
 }
 
 /** Is a program running on this Mac, by its name, as pgrep finds it? */
@@ -3681,8 +3685,43 @@ function answerOf(record) {
   return answer && reading && answer.reading === reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
 }
 
-/** Is the hand-off of a finished video or an iPhone clip owed: its offers are answered, and it is not written yet? */
-const handoffOwed = (record) => !record.finished && !hasFinalCut(record) && answerOf(record) !== null;
+/** An iPhone clip she answered: a short video that holds her `answer`. Its hand-off is not written from the spellings card (plan PR 7,
+    item 4): `finish` makes it, from the export of its HyperFrames project or, asked, from the import's captions. */
+const isClip = (record) => recordKind(record) === "short video" && !hasFinalCut(record);
+
+/** Is the hand-off of a finished video written by the spellings card, and still owed: its offers are answered, and it is not written
+    yet? A finished video's is. An iPhone clip's is not, and the card writes nothing for it (finishClip). */
+const handoffOwed = (record) => !record.finished && recordKind(record) === "finished" && answerOf(record) !== null;
+
+/** Is a hand-off of a finished video or an iPhone clip not written yet, though its offers are answered: what `spell … offers` says
+    of a Mac that hands off version 1. */
+const handoffPending = (record) => !record.finished && !hasFinalCut(record) && answerOf(record) !== null;
+
+/** What is said of an iPhone clip whose spellings are answered and whose hand-off is not written: the two ways to go on. */
+const CLIP_NEXT = 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.';
+
+/** What `finish` does for an iPhone clip the app has not opened (plan PR 7, item 4; architecture 4.2): it checks, in this order, a Mac that
+    hands off version 1, a hand-off that is written already, and spellings not yet answered; then, with no hand-off yet, it asks once
+    whether to hand the clip off as it is, and starts nothing. `--as-it-is` writes the hand-off from the import's captions, which is what
+    the spellings card did before, in its words. A hand-off made already from the import is kept, with the revision the page holds: an
+    edited version needs HyperFrames first. */
+async function finishClip(ctx, found, answers) {
+  const { record } = found;
+  const name = shownName(record);
+  if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, handoffFromSpellingsWaits(name));
+  if (record.finished && Number.isInteger(record.finished.revision)) {
+    const how = madeFromImport(record) ? ", from the clip as it was filmed. To hand off an edited version, open it in HyperFrames first." : ": a spelling changed writes its next revision.";
+    return refuse(ctx, `${name}'s hand-off is written already, as revision ${record.finished.revision}${how}`);
+  }
+  if (answerOf(record) === null) return refuse(ctx, `${name}'s hand-off is written once its spellings are answered. Say "show me the spellings".`);
+  if (!answers.asItIs) {
+    ctx.say(`${name} was not opened in HyperFrames. Hand it off as it is, or open it in HyperFrames first?`);
+    return 0;
+  }
+  const running = runningCommand(ctx.home, found.name, ctx.alive);
+  if (running) return refuse(ctx, `${running} is running for this episode. Say "how far is it?"`);
+  return importHandoff(ctx, found, record, "Handed off as it is.");
+}
 
 /** Why an offer cannot be kept, in plain words, or "": the episode has a spelling of that word already, or it is not a spelling
     (spellingFault). */
@@ -3882,7 +3921,7 @@ function spellCard(ctx, found) {
   if (answer) {
     ctx.say(`Claude's spellings for ${name} were answered on ${shownAt(answer.at)}:`);
     offers.forEach((o, i) => ctx.say(`${i + 1}. "${o.heard}" as "${o.spelled}": ${answer.applied.includes(o.heard) ? "applied" : "left"}.`));
-    if (handoffOwed(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(HANDOFF_WAITS);
+    if (handoffPending(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(HANDOFF_WAITS);
     return 0;
   }
   if (!offers.length) {
@@ -3937,7 +3976,10 @@ async function answerOffers(ctx, found, words) {
   for (const o of applied) next = withSpelling(next, o.heard, o.spelled);
   const answer = { reading: currentReading(record).at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
   const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
-  return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later: recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : "" });
+  // No hand-off is written yet and none is due from the card: a raw video's is made when it is finished, and an iPhone clip's when she
+  // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
+  const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? (writesV2For(ctx.settings, found.folder, record) ? CLIP_NEXT : HANDOFF_WAITS) : "";
+  return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
 }
 
 /** `spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all|none|<n> <n>…]]`: the
