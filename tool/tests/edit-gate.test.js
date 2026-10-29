@@ -44,15 +44,15 @@ const LEFT_RECORD = { version: 3, kind: null, answer: { ...ANSWER, state: "not f
 /** This Mac's deps with the training gate turned on, as Jason's check of both accounts leaves it, a few days before the clock. */
 const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTeachings: { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: "sallie@example.com (BRIMM)", app: "sallie@example.com (BRIMM)" } } } });
 
-/** What each command is given to name the made-up episode, as Claude runs it. `free` names none: it says it is held back. */
+/** What each command is given to name the made-up episode, as Claude runs it. */
 const ASKED = {
   kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER], read: ["--now", FOLDER, "--kind", "finished", "--rev", "1"],
   workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
-  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER]
+  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER]
 };
-const NAMES_NO_EPISODE = ["free"];
+const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
 const SCOPED = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !NAMES_NO_EPISODE.includes(name));
 
@@ -178,7 +178,7 @@ describe("the gate walks every command that names an episode", () => {
       }
     }
   });
-  it("leaves the commands that name no episode, and free, alone", async () => {
+  it("leaves the commands that name no episode, and the old spelling of free, which says a Final Cut library is held back and names no episode, alone", async () => {
     const t = setup();
     episodeFor(t, { record: UNANSWERED_RECORD });
     const free = await on(t.ctx.deps, "free", FOLDER, "library");

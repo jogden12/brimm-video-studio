@@ -648,8 +648,10 @@ describe("app: a project that is on another Mac is not made again here (plan PR 
   });
   it("opens a project of the other Mac's whose folder is on this Mac, as it opens any whose folder is here", async () => {
     const { t, found, work } = world({ record: madeOn("Sallie's laptop") });
-    mkdirSync(join(work, PROJECT_NAME), { recursive: true });
+    mkdirSync(join(work, PROJECT_NAME, "media"), { recursive: true });
     writeFileSync(join(work, PROJECT_NAME, "index.html"), "<html></html>");
+    // The project is whole, its video in it: one without its video is the one `free` leaves, which app puts right (edit-free.test.js).
+    writeFileSync(join(work, PROJECT_NAME, "media", "recording.mp4"), WORKING_COPY);
     // The recording is as the project was made from it (its size and its time), so nothing is said of it.
     const made = Date.parse("2026-10-14T09:00:00-05:00") / 1000;
     utimesSync(join(found.folder, "Pricing talk.mp4"), made, made);

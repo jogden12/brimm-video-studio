@@ -207,6 +207,8 @@ describe("the help", () => {
     const help = lines.join("\n");
     for (const words of ["edit.js name", "edit.js title", 'reel drop "<episode>"', "reel <n>", "edit.js finish"]) assert.ok(help.includes(words), words);
     assert.ok(!help.includes("reel pick"), "a Reel is picked by making it: there is no reel pick");
-    assert.ok(!help.includes("edit.js free"), "free library is held back from this version");
+    // free takes an episode's working copy and renders away (plan PR 15); its old spelling, a Final Cut library, is held back, and is no usage.
+    assert.ok(help.includes('edit.js free "<episode>"'), "free is in the help");
+    assert.ok(!/edit\.js free "<episode>" library/.test(help), "free library is held back from this version, and is not offered");
   });
 });
