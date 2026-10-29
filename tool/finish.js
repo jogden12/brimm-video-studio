@@ -788,10 +788,16 @@ export async function finishNow(ctx, found, deps = {}) {
         const name = basename(was.file);
         part.name = name;
         part.seconds = was.seconds;
-        part.srt = readFileSync(join(finalDir, `${stem(name)}.srt`), "utf8");
-        const words = was.words ? readJson(join(found.folder, was.words)) : null;
-        part.words = words && Array.isArray(words.words) ? words.words : null;
         part.reused = true;
+        // The Reels a finished video's hand-off holds stay in it as it has them (nextHandoff), and nothing of them is made again: their
+        // captions and word times are not used, so they are not read, and a file of theirs in final/ that Dropbox has not brought down
+        // cannot stop a finish that adds another Reel (the review of PR 9, M2; plan PR 17). A raw video's hand-off is made from every
+        // part, a kept one too, so there they are read.
+        if (!base) {
+          part.srt = readFileSync(join(finalDir, `${stem(name)}.srt`), "utf8");
+          const words = was.words ? readJson(join(found.folder, was.words)) : null;
+          part.words = words && Array.isArray(words.words) ? words.words : null;
+        }
         continue;
       }
       part.name = part.video.name;
