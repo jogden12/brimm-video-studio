@@ -9,7 +9,7 @@
   - the code of `main` at c666508;
   - the HyperFrames command line, version 0.8.208, read and run in a scratch folder on a Linux machine: no Mac, no app, install scripts off, telemetry off. "Sources" at the end says exactly what was read.
 - **It does not reopen** a decision of the accepted design. Where a fact in the code or in the command line makes a sentence of that design unworkable as worded, "Findings" says so and proposes a rule that keeps its intent.
-- **Not covered, because only A0 can answer it:** what the app's Script panel does with `transcript.json`; where the app puts its exports and what it names them; where "make Reel 2" puts the new project; whether the app's assistant keeps a project's rules. Where this document needs one of those, it says so and gives the rule it will use until A0 answers. Section 15 lists what to add to A0 so that one sitting answers all of them.
+- **Only A0 could answer, and now has (2026-10-28):** what the app's Script panel does with `transcript.json`; where the app puts its exports and what it names them; where "make Reel 2" puts the new project; whether the app's assistant keeps a project's rules. Each is settled where it is used (5.6, 5.9, 8.1), and says where the fact comes from: **A0**, Jason's test of the app and what it left in the projects, or **the docs**, the app's own at hyperframes.heygen.com, read on 2026-10-28. Section 15 lists what A0 added and what each item answered.
 - **Companion:** the build plan, `docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md`: the pull requests in order, the failing tests of the first ones, the roll-out, and the baseline of the test suite.
 
 **Words used here.** Two ideas have near names, so they are kept apart:
@@ -177,7 +177,7 @@ Ids are `w0`, `w1` and so on; punctuation stays in `text`.
 
 ### F8. The app is called HyperFrames
 
-**Seen.** The command line looks for the bundle `dev.hyperframes.desktop` (and a Canary build) and the app `HyperFrames.app`, prints "the HyperFrames desktop app", and calls the assistant "Framey". "Studio" is the name of the download page (`hyperframes.dev/studio`), and the command line also uses it for its browser preview ("Start the studio for previewing compositions").
+**Seen.** The command line looks for the bundle `dev.hyperframes.desktop` (and a Canary build) and the app `HyperFrames.app`, prints "the HyperFrames desktop app", and calls the assistant "Framey". "Studio" is the name of the download page (`hyperframes.studio/studio`: this document had `hyperframes.dev/studio` until the docs were read on 2026-10-28), and the command line also uses it for its browser preview ("Start the studio for previewing compositions").
 
 **So.** The name clash the handoff leaves open (Sallie's folder `~/BRIMM Video Studio` against "HyperFrames Studio") goes away if everything Sallie reads says "HyperFrames", never "Studio". Her folder keeps its name (D10).
 
@@ -237,7 +237,7 @@ New commands live in their own module (`app.js`, `clips.js`), not in `edit.js`, 
 | The raw video, its record, words, `final/`, the hand-off | Dropbox, `Episodes/<episode>/` | Both Macs and BRIMM Ops see them |
 | The working copy and the project | `~/BRIMM Video Work/<episode folder>/`, on the Mac's own disk | The app writes a project all day: never in Dropbox or a watched folder (rule) |
 | The pinned command line | `~/BRIMM Video Work/.toolchain/hyperframes-0.8.208/` | One copy per Mac, run by absolute path |
-| The app's exports | `~/Downloads` (the app's choice; A0 confirms) | Studio takes copies and leaves the originals until the late check |
+| The app's exports | `~/Downloads` (the app's default, a link into Dropbox on the Mac Studio; the Export dialog has a folder dropdown, and each export's own record says where it went: 8.1) | Studio takes copies, and after the late check removes the original from Downloads only if it is unchanged since it was taken |
 | The app's history | Inside the project (`.hyperframes/`) and `~/.cache/hyperframes/history/<id>/` | The app's. Studio reads and never writes |
 | A project's snapshot for the other Mac | `Episodes/<episode>/app-snapshot/` | Text files only; written by `release` |
 
@@ -248,8 +248,8 @@ New commands live in their own module (`app.js`, `clips.js`), not in `edit.js`, 
 | The video and its sound, in Dropbox and on the Mac | Yes | Yes |
 | The same, in the HyperFrames app on the Mac | Yes | Only a clip, and only after Sallie's confirmation |
 | The audio, sent to HeyGen by the app's Script panel | Yes (decision 4) | Never, until HeyGen confirms the training opt-out (decision 6) |
-| Sharing an export through the app | Invited people only (decision 7) | Never, until HeyGen confirms |
-| Rendering in the cloud | Never | Never |
+| Sharing through the app | Invited people only (decision 7). The app's default is anyone in her HeyGen workspace with the link, and they can comment; "Only people you invite" has to be picked each time, and Share makes an export if there is none (the docs, 2026-10-28; 5.9) | Never, until HeyGen confirms |
+| Rendering in the cloud | Never. The app offers Cloud only when a HeyGen API key is saved in it, so none is saved. A cloud export lands in Downloads and looks the same as a local one, so Studio cannot tell it apart (the docs, 2026-10-28; 8.1) | Never |
 | Words with times, to Claude through Claude Code | Yes: the transcript and cut plan | The whole transcript with other speakers renamed, only on an account whose training setting is off (the gate) |
 | Words, to the app's assistant (Claude Code inside the app) | Yes, in the project | A clip's words only, in a project of that clip |
 | Higgsfield, OpenRouter, Zoom's AI features | Prompts only; footage after a yes for that video | Never |
@@ -494,6 +494,8 @@ node <toolchain>/node_modules/hyperframes/bin/hyperframes.mjs open <project fold
 - **The environment** is a list, not what Studio inherited: `PATH` (node's folder, `/usr/bin`, `/bin`), `HOME`, `LANG`, `HYPERFRAMES_NO_TELEMETRY=1`, `HYPERFRAMES_SKIP_SKILLS=1`, `HYPERFRAMES_NO_UPDATE_CHECK=1`, `HYPERFRAMES_NO_AUTO_INSTALL=1`, `HYPERFRAMES_NO_OPTIONAL_INSTALL=1` (the last three are explained in 5.5), and `CLAUDE_CODE_SESSION_ID` only when the handover is allowed. No key, no `ANTHROPIC_*`, no proxy setting. `app` runs the command line with a spawn of its own, since `run.js` takes no environment and is a copy from brimm-operations that does not change (8.8).
 - **The handover is allowed only when all of these hold:** this Mac's setting `appHandover` is on (`--app-handover on`; off unless set); the id is a chat's (`SESSION_ID` in `scan.js`); `chatHeld` says the chat holds no session's words; the episode is not a session whose mark is not cleared (one whose mark was cleared is an ordinary video, 6.2) and not unanswered; the project is not a session clip. Otherwise the variable is left out, and the answer says why (the table below).
 - **How `app` knows the chat is not held.** `app` runs inside the chat's own Bash call, so it has `CLAUDE_CODE_SESSION_ID`. It finds the chat's transcript with `transcriptOf` (exported from `loosened.js`) and the `claude` process above it as `markChat` does, and asks `chatHeld({ home, sessionId, transcriptPath, claude })`. `chatHeld` fails closed: with no readable transcript, on a Mac where any session has ever been marked, it answers "held". So when `app` cannot find the transcript the handover is refused, never guessed, and she is told that the chat could not be found.
+- **What the handover does, by the docs and by A0.** The docs say a handed-over chat continues the conversation in the app (2026-10-28). A0 saw the app's chat **blank** after a handover from Terminal (step 4), and a **new conversation** when the project was opened from Terminal with no handover, where the app followed the project's own notes (A0 additions, parts 1 and 6). So the app works without the handover, and `appHandover` stays off by default (D3); that the docs and A0 disagree is one more reason.
+- **Home.** `open` adds the project to the app's Home (the docs, 2026-10-28). On the Mac Studio the app keeps a link to each project it has opened, named for the project, in `~/.hyperframes-studio/`; the links point into `~/BRIMM Video Work` (seen after A0b). A project the app makes itself, such as a Reel asked of the app, is a real folder there under a name the app picks, with a copy of the whole original in its `assets/`, and it is **not in the record** (A0 additions, part 5). Studio never looks in that folder for a project: a Reel is made by `app … reel N`, and the project notes of plan PR 5 send her to her chat for Reels instead of asking the app. An export of a Reel the app made on its own is therefore matched to no project (8.1); she can name its file.
 - **What comes back** (`--json`): `{project, opened, app, handedOver?}` on success; `{project, opened: false, reason, downloadUrl}` and exit 1 otherwise. The reasons and the words Sallie reads:
 
 | `reason` | Words |
@@ -549,7 +551,13 @@ Whenever the app opened, a last line names the buttons Studio cannot control (3.
 
 ### 5.9 What Studio cannot control
 
-The app's buttons: Share, Render in the cloud, the Script panel's transcription, HeyGen avatars and voices, and whatever the app sends on its own. Studio's answers are three: the project's notes say what is allowed; `app` says it in a line when it opens a project (and three lines for a session clip); and A0 looks for settings that turn them off. A session clip's reminder stays until Jason records HeyGen's confirmation.
+The app's buttons: Share, Render in the cloud, the Script panel's transcription, HeyGen avatars and voices, and whatever the app sends on its own. Studio's answers are three: the project's notes say what is allowed; `app` says it in a line when it opens a project (and three lines for a session clip); and A0 looked for settings that turn them off. A session clip's reminder stays until Jason records HeyGen's confirmation.
+
+**What no app setting turns off,** as A0 and the docs leave it (2026-10-28). Studio cannot change any of them. It says the first in a line when it opens a project, and Jason asks HeyGen about the second (decision 6).
+
+- **Share's default.** The default access is anyone in her HeyGen workspace with the link, and they can comment. "Only people you invite" has to be picked each time, in the dialog (the docs). Share also makes an export if there is none (the docs), so it can leave an export that she did not ask for as one. The notes and the line `app` says name it; nothing else can.
+- **Transcription on open.** The app makes a transcript of every video it opens, whether or not the project has a `transcript.json`: A0 found one for each video in `.hyperframes/transcripts/`, made at the first open in the A0 project and again in the A0b sample, each by `scribe-v2` (A0). Scribe v2 is ElevenLabs' speech-to-text model, which runs in the cloud, so the sound most likely left the Mac each time; where it runs, and whether it uses credits, is for HeyGen to confirm (A0). The Script panel did read Studio's `transcript.json` for its script (A0 step 5), so the project's words are still Studio's, but the app's own transcript exists beside them, and the app's agent may cut from it (A0 additions, part 6). For a video meant for posting that is allowed (decision 4). For a session clip it is not, so a clip's project waits for the opt-out (decision 6); this is the largest reason to ask HeyGen for it.
+- **The app's usage recording.** The docs give it no off switch. The command line's telemetry is off with `HYPERFRAMES_NO_TELEMETRY=1`, set in Studio's environment (5.5 and 5.6), or with `hyperframes telemetry disable`, which persists. Neither reaches the app's own recording, whatever it holds.
 
 ---
 
@@ -667,17 +675,39 @@ Unchanged. `app` refuses while the other Mac holds the episode, in the words `op
 
 ### 8.1 Finding the exports
 
-`exports.js` replaces `parts.js` for app projects and keeps its manner:
+**What the app does.** Each fact says where it comes from: **A0**, Jason's test of 2026-10-28, with its notes and what it left in the projects; or **the docs**, the app's own at hyperframes.heygen.com, read on 2026-10-28.
 
-- It looks in the app's export folder (`~/Downloads`, to be confirmed by A0) and in what the other Mac released into the episode, for `.mp4` and `.mov` files whose name, up to the date and time the app adds, is the name of a project the record lists. Names are compared composed (NFC), since macOS writes them decomposed.
-- For each part it takes the newest export made after the project's last change in the app: its newest file change, skipping the folders the command line's own `catch-up` skips (names that start with a dot, `node_modules`, `renders` and `snapshots`, so that the agent's own `render`, `snapshot` and `check` do not look like edits), or its last turn in `app-history.jsonl`. If the newest export is older than that, it asks: export again, or say it is final.
-- It asks, as `lookFor` does, when two exports of one project are equally new ("which is the final one?"), when a Reel project has no export ("leave it out?"), and it stops when the main video has none.
-- A file in the project's own `renders/` folder is not an export. It is mentioned and never taken without her yes.
-- The date-and-time format of the app's names is not known. Until A0 gives it, the order is the file's modification time, and she can name a file (`answers.take`).
+- **Where an export goes.** `~/Downloads` (A0 step 11). The docs describe no other place. On the Mac Studio `~/Downloads` is a link into Dropbox, not a plain local folder (A0 step 11), so a file in it can also be a Dropbox placeholder. The Export dialog has a folder dropdown (A0 additions, part 1), so an export may go elsewhere, and the app remembers the folder it was given: the record below holds its identity (`folder`, as a device and an inode).
+- **Its name** (the docs; A0, all three exports): the project's name, a space, `YYYY-MM-DD`, a space, `HH.mm`, then the ending, as in "BRIMM Video Explainer Reel 2026-10-28 15.20.mp4". The time is the Mac's local time, to the minute only, and it is **when the export began**: A0's three exports were named 15.16, 15.20 and 16.08, and their files were last written at 15:19, 15:22 and 16:11.
+- **The choices** (the docs): the format, MP4 (the default), WebM or MOV; the quality, 1080p (the default), the project's size or 4K; the frame rate, 24 to 60, 30 by default.
+- **The record each export leaves** (A0; the docs never mention it): `renders/<project>_<YYYY-MM-DD>_<HH-MM-SS>.meta.json` in the project. A0's first, with the names changed:
+
+  ```json
+  {"status":"complete","durationMs":198047,"exportedTo":"/Users/sallie/Downloads/Pricing talk main 3fa9c1 2026-10-28 15.16.mp4","folder":"16777229:696935805","fingerprint":"9af39f88…","settings":{"format":"mp4","fps":{"num":30,"den":1},"quality":"standard","crf":null,"resolution":"landscape","proresProfile":null}}
+  ```
+
+  Its name gives the start to the second, in local time. `exportedTo` says where the file went. The fingerprint is not the file's SHA-256 (A0's first export was checked against it), so it says nothing about whether a file is whole, and Studio does not use it. Beside it, `.hyperframes/render-outputs.json` (`{"version":1,"paths":["renders/<the same name>.mp4"]}`) names the render the export was made from; the app moves that file out, and A0 found no MP4 left in `renders/`. The app updates itself, so Studio reads the record tolerantly (risk 14).
+- **When the file appears** (the docs): only at the export's last stage, and the export panel can be closed while the export runs. So `finish` can be said while an export is still going. It waits for the file to be whole before it reads it, as it does for any file (its size unchanged across looks, ffprobe able to read it), and a file that Dropbox holds only as a placeholder is brought over first, as `bring` does it.
+- **A cloud export** lands in Downloads and looks the same (the docs). The app offers Cloud only when a HeyGen API key is saved in it, so none is (3.3): Studio cannot tell a cloud export from a local one, and does not try.
+- **`renders/`** also holds what the command line's own `render` writes, `renders/<project>_<YYYY-MM-DD>_<HH-MM-SS>.<ext>`. That file is not an export.
+
+`exports.js` replaces `parts.js` for app projects and keeps its manner (plain data in; the parts, the asks and the stops out):
+
+- **The parts** are the main project in use and each Reel project of the record (7.1), by the names the record keeps, never by the episode's later name. A project kept for an earlier kind is none. A Reel picked that has no project is left out, and said.
+- **A file is matched to its project in this order, and a file found twice is one:**
+  1. **By the app's own record.** Each `renders/*.meta.json` of the project that does not say the export failed (a `status` other than "complete" passes it over; none counts as complete) and whose `exportedTo` is an absolute path to a file that is there, ending in .mp4, .mov or .m4v. This needs no name and no folder, so it holds when she chose another folder or the app names its files another way.
+  2. **By name,** for a file with no such record, in `~/Downloads` and in what the other Mac released into the episode (`edit/from-hyperframes/`, written by `release`, plan PR 11): the project's name, a space, a date, a space and a time as above, then .mp4, .mov or .m4v, with the number the system adds to a copy (" (1)") allowed. Names are compared composed (NFC), since macOS may write them decomposed.
+  3. **By her word** (`answers.take`): a file she names, in either place or in the project's `renders/`, whatever its name. The checks of 8.2 still apply.
+
+  A WebM is mentioned and never taken. A file in the project's own `renders/` that no record names is not an export: it is mentioned, and taken only if she names it.
+- **Which export.** For each part, the newest by when it began: the record's file name gives the second, a file's name alone the minute. It must have begun after the project's last change in the app: the later of its newest file change, skipping what the command line's own `catch-up` skips (names that start with a dot, `node_modules`, `renders` and `snapshots`, so that the agent's own `render`, `snapshot` and `check` do not look like edits), and its last turn in `app-history.jsonl`. If the newest began before that, it asks: export again, or say it is final. A start known only to the minute counts as after a change in the same minute.
+- It asks, as `lookFor` does, when two different files of one project began in the same minute (an MP4 and a MOV, say) ("which is the final one?") and when a Reel project has no export ("leave it out?"), and it stops when the main video has none. A part the last finish took is kept as that finish made it when its newest export is the one it took (the same size and time) or none is left, since Studio removes what it took (below).
+- A project that is not on this Mac (made on the other, 5.6) cannot be read for its last change: the newest released export is taken, and the answer says that it could not be checked against the project.
+- **The originals.** After the late check finds every copy whole, a file taken from `~/Downloads` is removed only if it is unchanged since it was taken (its size and its time). A file taken from another folder, from what the other Mac released, or from `renders/` is never removed, and nothing Studio did not take is touched.
 
 ### 8.2 The checks
 
-Before anything is transcribed: the file is whole (its size stopped changing, as `whole` waits for); ffprobe reads it; its shape is right (`shapeFault` compares the main video with the raw video's facts, so a wide video's main is wide and an upright clip's is upright; a Reel is upright); its length is more than nothing; it has sound. Its colour tags are read and reported, and a missing tag is mentioned and not refused. The check of the first words (`firstWordsMatch`) stays for a Reel made from a suggestion and goes for the main video, which she may start anywhere.
+Before anything is transcribed, on the copy `finish` took, so that a file which changes meanwhile is caught: the file is whole (its size stopped changing across looks, as `whole` waits for; a Dropbox placeholder is brought over); ffprobe reads it with a length of more than nothing; it has sound; its shape is right (`shapeFault` compares the main video with the raw video's facts, so a wide video's main is wide and an upright clip's is upright; a Reel is upright). Its colour tags are read (`colourOf`) and reported when they are not standard (BT.709), and a missing tag is mentioned and not refused. A0's exports read H.264, 1920×1080 or 1080×1920, 30 fps, yuv420p, BT.709, AAC. A WebM, and a file that is not a video, never get this far (8.1). The check of the first words (`firstWordsMatch`) stays for a Reel made from a suggestion, against that suggestion's own first words, and goes for the main video, which she may start anywhere; a mismatch is named for her to check by eye and stops nothing.
 
 ### 8.3 The final transcript
 
@@ -803,8 +833,8 @@ The build plan has the detail. The rules:
 | 1 | The app's assistant ignores a project's rules and settings | A0 step 10 and 15.5 | The app's own Settings, set by hand once per Mac; the Claude Code sandbox in the project's settings, if the app honours it |
 | 2 | The Script panel sends public-bound audio to HeyGen (allowed) and would for a session clip (not) | A0 step 5 | A session clip's `transcript.json` is supplied; the reminder lines; no clip until the opt-out is recorded |
 | 3 | HDR iPhone clips look wrong in the app | A real clip, by eye (plan, PR 3) | Refuse in words; Sallie records an SDR clip, or Jason converts it |
-| 4 | Export names and folder are not what 8.1 assumes | A0 step 11 and 15.3 | She names the file (`answers.take`) |
-| 5 | An app update changes `app-history.jsonl` or the project's files | The pin; a tolerant reader | `what-happened` says nothing rather than something wrong |
+| 4 | Export names and folder change (8.1 was settled by A0 and the docs on 2026-10-28; an app update can move it, row 14) | The export's own record first (`exportedTo`), then the name; A0 step 11 again after an update | `finish` stops and says what it looked for; she names the file (`answers.take`) |
+| 5 | An app update changes `app-history.jsonl` or the project's files | A tolerant reader. The pin cannot: it holds the command line, not the app (row 14) | `what-happened` says nothing rather than something wrong |
 | 6 | `history` is removed or changes (F7) | The pin | Versions are the app's own screen; nothing else depends on it |
 | 7 | HeyGen has not confirmed its training opt-out | Jason's email (decision 6) | Session clips stay out of its features |
 | 8 | A project stranded on one Mac (F12) | The snapshot | Rebuild from the snapshot; history lost |
@@ -813,6 +843,7 @@ The build plan has the detail. The rules:
 | 11 | The contract has no place for a clip without a client (F10) | D5 | No hand-off for such clips |
 | 12 | Text read out of the app's HTML is wrong (8.5) | A0's project fixtures | She types the words, as for a Reel title now |
 | 13 | The cloud box cannot run the suite cleanly | The plan's baseline: as a normal user four tests about signals and process groups fail on it, and twenty-six more fail as root | Run on the Mac or in CI, which pass |
+| 14 | The pin holds the command line and not the app. HyperFrames.app updates itself (A0 ran build b503), so what it writes and does can change under a pinned command line: an export's name and record (8.1), `app-history.jsonl`, the files it touches, what it sends (5.9) | Readers that are tolerant of what the app writes; the fixtures of its shapes, made from A0's files; A0 step 11 and the A0b checks run again after an app update, and the app's version noted in the pull request that depends on them | Studio asks and says what it looked for rather than guess; she can name a file; `what-happened` says nothing rather than something wrong |
 
 ---
 
@@ -837,26 +868,26 @@ Smaller questions, with the answer assumed until Jason says:
 
 - **Q1.** Does Sallie want 4K exports of raw videos? *Assumed no: 1080p working copies and exports; `--4k` is there.*
 - **Q2.** Are Story parts (a Reel over a minute cut into parts for Stories, by `finish`) still wanted? *Assumed yes, as an ffmpeg step on the exports.*
-- **Q3.** Where should the app save exports, if it lets a folder be chosen per project? *Assumed: a folder `exports/` in the episode's work folder, if A0 shows it can; otherwise Downloads.*
+- **Q3.** Where should the app save exports, if it lets a folder be chosen per project? *Answered by A0 and the docs, 2026-10-28: Downloads. The Export dialog has a folder dropdown, but the docs name no setting per project, so there is no `exports/` folder in the episode's work folder. `finish` follows the export's own record to wherever it went (8.1).*
 
 ---
 
 ## 15. Additions to A0
 
-A0 (`docs/phase-a0/checklist.md`, on the design branch) is one sitting by hand. These add little time and answer what this document needs. **Must have** are marked.
+A0 (`docs/phase-a0/checklist.md`, on the design branch) is one sitting by hand. These add little time and answer what this document needs. **Must have** are marked. A0 was run on 2026-10-28; its notes are `~/BRIMM Video Work/A0 app test/results.md`, whose "A0 additions" are numbered in parts (1 to 6, and Claude's part), which the Result column names.
 
-| # | Add | Answers |
-|---|---|---|
+| # | Add | Answers | Result, 2026-10-28 |
+|---|---|---|---|
 | 1 | **Must.** Open the project from a plain Terminal, not from Claude Code (`node …/hyperframes.mjs open <folder>`, no `CLAUDE_CODE_SESSION_ID`). Does the app open it and start a fresh chat? Is `.hyperframes/app-history.jsonl` written as you use it? | D3, 4.1 step 9 |
 | 2 | Open it again from a Claude Code session (A0 step 4). What does the app show of the earlier conversation? Does the assistant follow the project's `CLAUDE.md`, or the old chat's folder rules? | D3, F3 |
-| 3 | **Must.** Export a main video and a Reel. Write down the folder, the exact file names (with the date and time), whether the folder can be chosen per project, and whether `~/Downloads` is a plain local folder on this Mac (`~/Movies` there is a link into Dropbox) | 8.1, Q3 |
-| 4 | **Must.** Ask for "Make Reel 2 from … to …". Where does the new project go: inside this folder, beside it, or as a part of this project? | 4.1 step 10, 8.1 |
+| 3 | **Must.** Export a main video and a Reel. Write down the folder, the exact file names (with the date and time), whether the folder can be chosen per project, and whether `~/Downloads` is a plain local folder on this Mac (`~/Movies` there is a link into Dropbox) | 8.1, Q3 | **Answered** (A0 step 11, A0 additions part 1, and the docs). Exports go to `~/Downloads`, a link into Dropbox on the Mac Studio, not a plain local folder. The Export dialog has a folder dropdown, and the docs name no setting per project. Names are `<project> YYYY-MM-DD HH.mm.<ext>`, the time being when the export began. Each export leaves `renders/<project>_<date>_<time>.meta.json` in the project, with `exportedTo`. See 8.1 and Q3 |
+| 4 | **Must.** Ask for "Make Reel 2 from … to …". Where does the new project go: inside this folder, beside it, or as a part of this project? | 4.1 step 10, 8.1 | **Answered** (A0 additions, part 5). The app made a new project of its own, `~/.hyperframes-studio/BRIMM Video Explainer Reel/`, with a copy of the whole original in its `assets/`. It is not in the record. See 5.6 and plan PR 5 |
 | 5 | Ask the assistant to run `tts`, `capture`, `add` and `skills update`. Are they blocked? Does it honour `.claude/settings.json` `sandbox` settings if they are added? | F6, risk 1 |
-| 6 | Put `brimm/cut-suggestions.json` and `brimm/brand.md` in the project, without picking the brand kit. Ask: "cut the retakes", then "a title in the brand". Does it use them? | 5.8, D4 |
+| 6 | Put `brimm/cut-suggestions.json` and `brimm/brand.md` in the project, without picking the brand kit. Ask: "cut the retakes", then "a title in the brand". Does it use them? | 5.8, D4 | **Answered in part** (A0 additions, part 2). Asked to cut the retakes it cut nothing, since the project's rules say to propose cuts first; it marked 9 in the Script panel and said the list was the same as the one saved in `brimm/cut-suggestions.json`. The title card came out in Josefin Sans and the brand's colours; whether it read `brimm/brand.md` is not known |
 | 7 | With `HYPERFRAMES_SKIP_SKILLS=1`, are the graphics and captions good, or does the assistant need the skills? | D6 |
 | 8 | **Must (A0b, a short second sitting).** Open a project written by this repo's template (the project maker's first output) with no `init`. Does the app open it, show the Script panel from `transcript.json`, preview and export? | D1 |
 | 9 | After the test, how big is `~/.cache/hyperframes/history/`? Does it hold the video? (A six-second test held only the project's text files.) | 7.4, risk 10 |
-| 10 | Where does the app keep the HeyGen sign-in, and can the command line's `publish` use it? | F6 |
+| 10 | Where does the app keep the HeyGen sign-in, and can the command line's `publish` use it? | F6 | **Answered** (A0, Claude's part). The command line takes a HeyGen key or token only from `HEYGEN_API_KEY`, `HYPERFRAMES_API_KEY` or `HEYGEN_ACCESS_TOKEN`, or from its own file `~/.heygen/credentials`, which `hyperframes auth login` (denied) makes; it never reads the app's sign-in, and that file is not on this Mac. Whether the app hands its assistant a token in the environment is not known from the code, so the project's settings blank the three variables (5.5). The app offers Cloud only when a HeyGen API key is saved in it (the docs) |
 | 11 | A real iPhone HDR clip, converted by the working-copy rule: do its colours look right in the app and in the export? | risk 3 |
 | 12 | `hyperframes doctor` on each Mac | 5.3 |
 | 13 | While the app has the project open, from Terminal run `npx hyperframes history --json`, then `npx hyperframes history begin --who Test --label x`. Does the command line answer, or refuse because the project is open in another app? | 4.6, F7 |
@@ -867,7 +898,7 @@ A0 (`docs/phase-a0/checklist.md`, on the design branch) is one sitting by hand. 
 
 - **The design documents,** read with `git show` from `origin/claude/zealous-bell-esuqck` in brimm-video (the same files are on `claude/design-2026-10-27` in brimm-video-studio): the design of 2026-10-27, the architecture of 2026-10-26, `docs/requirements.md`, `docs/phase-a0/` (checklist, brief, settings).
 - **The repo at c666508:** the modules named in this document, the import graph of `tool/*.js` (a scratch script, run again in the plan), `tool/tests/contract.test.js`, `tool/studio/SKILL.md`, `README.md`. GitHub Actions run 488 (Ubuntu, Node 24) on that commit passed.
-- **HyperFrames 0.8.208,** from the npm registry (integrity in 5.3), installed with `--ignore-scripts` into a scratch folder, run with a scrubbed environment, telemetry and skills off, on Linux: `--help` (43 commands), `init`, `transcribe`, `history`, `catch-up`, `open` (`--json`, "not-installed" on Linux), and the package's own source for `open`, `catch-up`, the app-history reader and the shipped skills. **Not read:** the documentation site (`hyperframes.heygen.com` is not on this session's allowed network list; to read it, add it in the session's network settings) and the app, which cannot run here. Facts about the app's windows, Script panel, exports and brand kits are therefore those of the design document, taken from HyperFrames' docs on 2026-10-26, and A0 is what checks them.
+- **HyperFrames 0.8.208,** from the npm registry (integrity in 5.3), installed with `--ignore-scripts` into a scratch folder, run with a scrubbed environment, telemetry and skills off, on Linux: `--help` (43 commands), `init`, `transcribe`, `history`, `catch-up`, `open` (`--json`, "not-installed" on Linux), and the package's own source for `open`, `catch-up`, the app-history reader and the shipped skills. **Not read, by the session that wrote this:** the documentation site (`hyperframes.heygen.com` was not on its allowed network list) and the app, which cannot run there. The docs were read on 2026-10-28 by a session that could reach them, and A0 was run the same day: what the app does is now taken from those, and marked "the docs" or "A0" where it is used (3.3, 5.6, 5.9, 8.1, 15). What the design document took from the docs on 2026-10-26 is checked against them there.
 - **Test baseline,** run on this Linux box: see the plan.
 - **An independent check.** An earlier draft of this document and the plan was checked against the code by a separate reader, who was given the repo, the installed command line and questions but none of the conclusions. What it found wrong or misleading is corrected here, and said where it changed a rule (the gate and its tests, the retirement order, the iPhone clip's hand-off, `history begin`, `clean`).
 

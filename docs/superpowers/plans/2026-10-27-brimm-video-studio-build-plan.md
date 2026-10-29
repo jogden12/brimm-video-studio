@@ -32,7 +32,7 @@
 | 4 | `app` and `workcopy`: layout 4, settings, the commands, the skill, the README rows, `open` without its Final Cut lines, the installer's toolchain, Chrome and doctor steps (printed) | 1 to 3 | Items 1 and 2 (the handover's default): started before both were answered, on Jason's yes of 2026-10-28, with the handover off by default; A0 step 4 found the handed-over chat blank | Install the toolchain (Jason's yes); `app` on a recording of Jason's own |
 | 5 | `app … reel N`: Reel projects; `title`, `reels` and `reel drop` made to work for them | 4 | Item 4 (where a Reel project lands) | One Reel opened |
 | 6 | `app … what-happened`, `… versions` | 4 | Item 1 (the app writes its history without a handover) | After a few requests in the app |
-| 7 | `exports.js` and `finish` for a raw video and an iPhone clip (B2a); an iPhone clip's hand-off no longer written from the import; `show transcript` for a raw video | 4 | Item 3 (export names and folder) | One real hand-off into BRIMM Ops |
+| 7 | `exports.js` and `finish` for a raw video and an iPhone clip (B2a); an iPhone clip's hand-off no longer written from the import; `show transcript` for a raw video | 4 | Item 3 (export names and folder): answered on 2026-10-28 by A0 and the app's docs (spec 8.1) | One real hand-off into BRIMM Ops |
 | 8 | The words on the picture; suggestions by `inMain` (B2b) | 7 | A0b fixtures | Compare with what is on screen |
 | 9 | `finish … reels` for a finished video (B2c) | 5, 7 | No | One Reel of a finished video |
 | 10 | The guide's new states and progress steps; its Final Cut stages go | 4, 7 | No | Ask "what's next?" at each stage |
@@ -383,7 +383,7 @@ And the suite passes whole, with the tests of a deleted module deleted with it a
 - Sallie's laptop is not on the light import, which PR 12 waits for (`docs/setup/sallies-laptop.md`).
 - Whether the Mac's ffmpeg has the tone-mapping filter PR 3 needs (`ffmpeg -filters`). The installer's check should print it.
 - The pin's integrity string covers the `hyperframes` package alone. Its dependencies float at install, since it ships no shrinkwrap. A lock file of the toolchain's own, installed with `npm ci`, would pin them too. Jason's call.
-- The documentation site `hyperframes.heygen.com` could not be read from the session that wrote this (not on its allowed network list). Facts about the app's windows come from the design document's reading of 2026-10-26. A session on a machine that can reach it should read the app pages (`studio-app/`: `workspace`, `export`, `brand-kits`, `existing-project`) before PR 7 and compare them with the spec's section 8.1.
+- **Done on 2026-10-28.** The documentation site `hyperframes.heygen.com` could not be read from the session that wrote this (not on its allowed network list). It was read on 2026-10-28 by a session that could reach it, and compared with the spec's section 8.1: the spec now says what the docs said about exports (where, the name, the choices, when the file appears, Cloud), about Share's default, the handover, Home, the app's usage recording and the download page, each marked "the docs" or "A0" where it is used (spec 3.3, 5.6, 5.9, 8.1, 15 and F8). What the docs do not say, A0 found: the record each export leaves in `renders/`. Both are open to change, since the app updates itself (spec, risk 14).
 
 ---
 
