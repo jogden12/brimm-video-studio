@@ -90,10 +90,11 @@ export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames proje
 export const couldNotRebuild = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac. Ask Jason.`;
 export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 export const ASSETS_NOT_IN = "Its assets (pictures, music and fonts) were too big to hand over, so they are not in it.";
-/** That a project is rebuilt, from what, and that the app's history stays behind. The snapshot was handed over by the Mac the record's last
-    release names, when that is not this one (and is "the snapshot taken at …" otherwise, as a Mac gets its own project back from its own). */
-export function rebuiltWords(ctx, { record, snapshot, name }) {
-  const by = typeof record.released?.by === "string" ? record.released.by : "";
+/** That a project is rebuilt, from what, and that the app's history stays behind. The snapshot was handed over by `by`, the Mac that made it
+    (snapshot.js makerOf: who first listed it in the record), when that is a Mac and not this one; it is "the snapshot taken at …" when this
+    Mac made it, as a Mac gets its own project back from its own, and when the record does not say (the review of PR 11, M5: the Mac that
+    released last may have made no snapshot of this project). */
+export function rebuiltWords(ctx, { snapshot, name, by = "" }) {
   const when = momentText(snapshot.ms, ctx.deps?.zone);
   return by !== "" && by !== ctx.machine
     ? `The HyperFrames project for ${name} is rebuilt on this Mac from what ${by} handed over at ${when}. What HyperFrames kept of its history stays on ${by}.`
@@ -420,7 +421,8 @@ export function projectSnapshot(record, key = "main") {
     here, or the folder could not be made). `name` is how the project is named in her words ("Pricing talk", "Reel 2 of Pricing talk"),
     `dir` its folder and `cli` this Mac's own toolchain, which the project's link leads to. `deps.fs` is for a test to make a step fail. */
 export function rebuildHere(ctx, { found, record, snapshot, dir, name }, { cli, fs }) {
-  const built = rebuildProject({ folder: found.folder, snapshot, dir, cli, by: makerOf(found.folder, snapshot), now: ctx.now() }, { fs });
+  const by = makerOf(found.folder, snapshot);
+  const built = rebuildProject({ folder: found.folder, snapshot, dir, cli, by, now: ctx.now() }, { fs });
   if (built.why === "not whole") {
     ctx.say(snapshotNotWhole(name));
     return { code: 1 };
@@ -429,7 +431,7 @@ export function rebuildHere(ctx, { found, record, snapshot, dir, name }, { cli, 
     ctx.say(couldNotRebuild(name));
     return { code: 1 };
   }
-  ctx.say(rebuiltWords(ctx, { record, snapshot, name }));
+  ctx.say(rebuiltWords(ctx, { snapshot, name, by }));
   if (built.assetsLeft) ctx.say(ASSETS_NOT_IN);
   return {};
 }

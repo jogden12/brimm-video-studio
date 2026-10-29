@@ -18,7 +18,7 @@ const PROJECT = "Pricing talk main 3fa9c1";
 const CLI = "/Users/sallie/BRIMM Video Work/.toolchain/hyperframes-0.8.208/node_modules/hyperframes/bin/hyperframes.mjs";
 
 /** A temporary folder that goes when the test does, with the episode's folder in it and a project's folder beside it. */
-function world(c, { files = { "index.html": "<html>", "brimm/facts.json": "{}", "assets/fonts/a.woff2": "font" }, project = PROJECT } = {}) {
+function world(c, { files = { "index.html": "<html>", "brimm/facts.json": "{}", "assets/fonts/a.woff2": "font" }, project = PROJECT, maker = "Mac Studio" } = {}) {
   const base = mkdtempSync(join(tmpdir(), "brimm-rebuilt-"));
   c.after(() => {
     try {
@@ -35,6 +35,11 @@ function world(c, { files = { "index.html": "<html>", "brimm/facts.json": "{}", 
     writeFileSync(join(folder, "app-snapshot", T, project, rel), text);
     utimesSync(join(folder, "app-snapshot", T, project, rel), new Date("2026-10-20T14:00:00Z"), new Date("2026-10-20T14:00:00Z"));
     listed[`app-snapshot/${T}/${project}/${rel}`] = Buffer.byteLength(text);
+  }
+  // The record's own revisions say who listed the snapshot first (snapshot.js listedBy): `maker`, or nobody's when it is null.
+  if (maker !== null) {
+    mkdirSync(join(folder, "record"), { recursive: true });
+    for (const [n, files, by] of [[1, {}, "Mac Studio"], [2, listed, maker]]) writeFileSync(join(folder, "record", `000${n}.json`), JSON.stringify({ rev: n, files, writer: { commit: "c709b57", on: by } }));
   }
   const record = { name: { text: NAME }, files: listed, released: { by: "Mac Studio" }, app: { projects: [{ key: "main", name: project, state: "opened" }] } };
   const said = [];
@@ -80,11 +85,27 @@ describe("rebuildHere: the project is made and said", () => {
   it("names a Reel as the other lines name one, and no Mac for a snapshot this Mac took itself, or one the record names none for", (c) => {
     const w = world(c);
     const snapshot = projectSnapshot(w.record);
-    assert.equal(rebuiltWords(w.ctx, { record: w.record, snapshot, name: `Reel 2 of ${NAME}` }), `The HyperFrames project for Reel 2 of ${NAME} is rebuilt on this Mac from what Mac Studio handed over at ${WHEN}. What HyperFrames kept of its history stays on Mac Studio.`);
+    assert.equal(rebuiltWords(w.ctx, { snapshot, name: `Reel 2 of ${NAME}`, by: "Mac Studio" }), `The HyperFrames project for Reel 2 of ${NAME} is rebuilt on this Mac from what Mac Studio handed over at ${WHEN}. What HyperFrames kept of its history stays on Mac Studio.`);
     const own = `The HyperFrames project for ${NAME} is rebuilt on this Mac from the snapshot taken at ${WHEN}. What HyperFrames kept of its history stays behind.`;
-    assert.equal(rebuiltWords(w.ctx, { record: { ...w.record, released: { by: "Sallie's laptop" } }, snapshot, name: NAME }), own);
-    assert.equal(rebuiltWords(w.ctx, { record: { ...w.record, released: null }, snapshot, name: NAME }), own);
-    assert.equal(rebuiltWords(w.ctx, { record: { ...w.record, released: { by: "" } }, snapshot, name: NAME }), own);
+    assert.equal(rebuiltWords(w.ctx, { snapshot, name: NAME, by: "Sallie's laptop" }), own);
+    assert.equal(rebuiltWords(w.ctx, { snapshot, name: NAME, by: "" }), own);
+    assert.equal(rebuiltWords(w.ctx, { snapshot, name: NAME }), own);
+  });
+  it("names the Mac that made the snapshot, as the record's revisions give it, and not the Mac that released last (the review of PR 11, M5)", (c) => {
+    // Mac Studio made this project's snapshot; the record's last release was the laptop's, of other projects.
+    const w = world(c, { maker: "Mac Studio" });
+    const record = { ...w.record, released: { by: "Sallie's laptop" } };
+    rebuildHere(w.ctx, { found: w.found, record, snapshot: projectSnapshot(record), dir: w.dir, name: NAME }, { cli: CLI });
+    assert.deepEqual(w.said.slice(0, 1), [`The HyperFrames project for ${NAME} is rebuilt on this Mac from what Mac Studio handed over at ${WHEN}. What HyperFrames kept of its history stays on Mac Studio.`]);
+    // And the other way: this Mac made it, while the record's last release was the other Mac's.
+    const mine = world(c, { maker: "Sallie's laptop" });
+    const other = { ...mine.record, released: { by: "Mac Studio" } };
+    rebuildHere(mine.ctx, { found: mine.found, record: other, snapshot: projectSnapshot(other), dir: mine.dir, name: NAME }, { cli: CLI });
+    assert.deepEqual(mine.said.slice(0, 1), [`The HyperFrames project for ${NAME} is rebuilt on this Mac from the snapshot taken at ${WHEN}. What HyperFrames kept of its history stays behind.`]);
+    // The record's revisions are not there: no Mac is named.
+    const nobody = world(c, { maker: null });
+    rebuildHere(nobody.ctx, { found: nobody.found, record: nobody.record, snapshot: projectSnapshot(nobody.record), dir: nobody.dir, name: NAME }, { cli: CLI });
+    assert.deepEqual(nobody.said.slice(0, 1), [`The HyperFrames project for ${NAME} is rebuilt on this Mac from the snapshot taken at ${WHEN}. What HyperFrames kept of its history stays behind.`]);
   });
   it("says the assets are not in it when the snapshot holds none", (c) => {
     const w = world(c, { files: { "index.html": "<html>" } });

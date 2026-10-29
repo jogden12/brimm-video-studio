@@ -243,6 +243,19 @@ describe("app: the project is rebuilt from the snapshot (group K)", () => {
     assert.deepEqual(filesBelow(w.dirOf("main")), [...Object.keys(HELD), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
     w.t.done();
   });
+  it("names the Mac that made a Reel's snapshot, though the other Mac released last, of the main video alone (the review of PR 11, M5)", async () => {
+    const w = takeOverWorld();
+    assert.equal((await release(w.t.ctx.deps)).code, 0);
+    await app(w.b.deps, FOLDER);
+    madeCopy(w.b, w.found);
+    assert.equal((await app(w.b.deps, FOLDER)).code, 0);
+    await w.t.ctx.deps.wait(60000);
+    assert.equal((await release(w.b.deps)).code, 0);
+    assert.equal(reread(w.found).released.by, "Sallie's laptop");
+    const r = await app(w.b.deps, FOLDER, "reel", "2");
+    assert.equal(r.said[0], REBUILT("Reel 2 of ", "Mac Studio"));
+    w.t.done();
+  });
   it("makes the project again as before when a Mac's own folder is gone and nothing was handed over", async () => {
     const w = takeOverWorld({ projects: ["main"], over: { editing: null } });
     madeCopy({ home: w.t.home }, w.found);
