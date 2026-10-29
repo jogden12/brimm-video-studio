@@ -214,14 +214,19 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.started, []);
     plain(e.said);
   });
-  it("leaves the Reels out of the notes of a short video's project, which has none to ask for, and keeps them in a raw video's", async (c) => {
-    // `app … reel` answers that a short video has no Reels, so it is not told to send her to "Open Reel 2 in HyperFrames".
+  it("gives the notes of a short video's project one line in place of the Reels': no Reel and no new project from it; a raw video's keep the Reels'", async (c) => {
+    // `app … reel` answers that a short video has no Reels, so it is not told to send her to "Open Reel 2 in HyperFrames". But asked
+    // for a Reel, the app's agent would make a project of its own, outside Studio's reach: it is told never to, as a session clip is.
     const short = episode(c, { record: { kind: "short video" } });
     assert.equal(await run(short), 0);
-    assert.doesNotMatch(readFileSync(join(short.project, "CLAUDE.md"), "utf8"), /Open Reel \d in HyperFrames|Never make a Reel as a new project/);
+    const shortNotes = readFileSync(join(short.project, "CLAUDE.md"), "utf8");
+    assert.doesNotMatch(shortNotes, /Open Reel \d in HyperFrames|Never make a Reel as a new project/);
+    assert.match(shortNotes, /- \*\*No new projects\.\*\* Never make a Reel or any other new project from this video: .*a short video has no Reels\./);
     const raw = episode(c);
     assert.equal(await run(raw), 0);
-    assert.match(readFileSync(join(raw.project, "CLAUDE.md"), "utf8"), /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat/);
+    const rawNotes = readFileSync(join(raw.project, "CLAUDE.md"), "utf8");
+    assert.match(rawNotes, /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat/);
+    assert.doesNotMatch(rawNotes, /No new projects/);
   });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);

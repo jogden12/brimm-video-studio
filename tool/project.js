@@ -15,8 +15,9 @@
 // brimm/facts.json says where the stretch starts in the recording; it has no cut or Reel suggestions, and brimm/face-track.json
 // only when the face finder found a face in its video. The notes of a main and a Reel project carry the ruling of 2026-10-28: a Reel
 // is made by Studio only, so the agent never makes one as a new project, and tells her to say "Open Reel 2 in HyperFrames" in her
-// Claude chat when she asks it for one (a short video's main project has no Reels to ask for, and its notes leave the line out); a
-// session clip's own rules, first of all, forbid any new project from it.
+// Claude chat when she asks it for one (a short video's main project has no Reels to ask for, so its notes leave that line out, and
+// have one in its place: no Reel and no new project from it); a session clip's own rules, first of all, forbid any new project
+// from it.
 // A project holds only the files chosen here: projectFiles gives the whole set, and the tests hold each kind's list whole.
 //
 // writeProject puts a file set on disk whole or not at all. It is made in the run's own folder, the working copy is renamed into
@@ -354,9 +355,16 @@ This is a clip of a private client session. These rules come before everything e
     phrase of architecture 6.3 that runs `app "<episode>" reel 2`. */
 const REELS_ARE_STUDIOS = `Never make a Reel as a new project yourself: the app would put it outside BRIMM Video Work with a second copy of the whole recording, and Studio could not find its export. Studio makes every Reel. When she asks you for one, tell her to say "Open Reel 2 in HyperFrames" in her Claude chat, with the number of the Reel she wants.`;
 
+/** What a short video's main project has in place of the Reels' line. It has no Reels to ask for (`app … reel` answers that a short
+    video has none) and no suggestions, so it is not told to send her to "Open Reel 2 in HyperFrames". But the ruling matters as much
+    there as anywhere: asked for a Reel, the app's agent would make a project of its own, outside Studio's reach. So its one line says
+    no Reel and no new project from it, in the voice of a session clip's rule (CLIP_RULES). */
+const SHORT_VIDEO_NO_NEW_PROJECTS = "- **No new projects.** Never make a Reel or any other new project from this video: a new project holds a second copy of the recording outside Studio's care, and a short video has no Reels. Say a short video has no Reels.";
+
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
-    to send her to "Open Reel 2 in HyperFrames", and has no line about Reels at all. */
+    to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
+    (SHORT_VIDEO_NO_NEW_PROJECTS). */
 function brimmRules(kind, short = false) {
   const episode = kind !== "clip";
   return [
@@ -371,7 +379,7 @@ function brimmRules(kind, short = false) {
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
-    ...(kind === "main" && !short ? [`- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
+    ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
     ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, "- **This Reel.** It is exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker. `brimm/face-track.json`, when it is there, says where the faces are."] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,

@@ -336,6 +336,9 @@ describe("the ruling: a Reel is made by Studio only (Jason, 2026-10-28; plan PR 
     const notes = files.get("CLAUDE.md");
     return notes.slice(notes.indexOf("# The BRIMM: rules for this project"), notes.indexOf("\n# ", notes.indexOf("# The BRIMM: rules for this project") + 1));
   };
+  /** The one line a short video's main project has in place of the Reels': the same rule a session clip has (no Reel and no new
+      project from it), for the reason that a short video has no Reels to ask for. */
+  const SHORT_LINE = "- **No new projects.** Never make a Reel or any other new project from this video: a new project holds a second copy of the recording outside Studio's care, and a short video has no Reels. Say a short video has no Reels.";
   it("is in the BRIMM rules of a main project and of a Reel's: never make a Reel as a new project, and say \"Open Reel 2 in HyperFrames\" in her Claude chat", () => {
     for (const files of [projectFiles(main()), projectFiles(reel())]) {
       const rules = rulesOf(files);
@@ -347,19 +350,31 @@ describe("the ruling: a Reel is made by Studio only (Jason, 2026-10-28; plan PR 
     // The main project's line about the Reels Studio suggests stays, with the rule after it.
     assert.match(rulesOf(projectFiles(main())), /\*\*Reels\.\*\* The Reels Studio suggests are in `brimm\/reel-suggestions\.json`, by their word ids\. Never make a Reel as a new project yourself/);
   });
-  it("is not in the rules of a short video's main project: it has no Reels, and \"Open Reel 2 in HyperFrames\" would be answered that a short video has none", () => {
+  it("has one line of its own in the rules of a short video's main project, where the Reels' line is: no Reel and no new project from it, since a short video has no Reels", () => {
     const short = projectFiles(main({ short: true, reels: undefined, plan: undefined }));
+    // The Reels' line is out, both halves of it: "Open Reel 2 in HyperFrames" would be answered that a short video has none, and the
+    // rules do not send the agent to suggestions it has none of. (The file list of the notes is as it was: the project still holds
+    // brimm/reel-suggestions.json, an empty list.)
     for (const notes of [short.get("CLAUDE.md"), short.get("AGENTS.md")]) {
       assert.doesNotMatch(notes, /Open Reel \d in HyperFrames|Never make a Reel as a new project|\*\*Reels\.\*\*/);
+      // But the rule that matters most there stays, in the voice of a session clip's: asked for a Reel, the app's agent would make a
+      // project of its own, outside Studio's reach.
+      assert.ok(notes.includes(SHORT_LINE), notes);
     }
-    // The rest of the rules are the main project's own: the same notes with the Reels' line out.
+    assert.doesNotMatch(rulesOf(short), /reel-suggestions|Reels Studio suggests/);
+    // It stands where the Reels' line does, and the rest of the rules are the main project's own.
     const whole = rulesOf(projectFiles(main({ reels: undefined, plan: undefined })));
-    assert.equal(whole.split("\n").filter((line) => !line.startsWith("- **Reels.**")).join("\n"), rulesOf(short));
+    assert.equal(whole.split("\n").map((line) => (line.startsWith("- **Reels.**") ? SHORT_LINE : line)).join("\n"), rulesOf(short));
+    assert.equal(rulesOf(short).split("\n").filter((line) => line.startsWith("- **No new projects.**")).length, 1);
     // Only the main project's: a Reel's project is a Reel, and a flag a Reel or a clip is given changes nothing.
     assert.match(rulesOf(projectFiles(reel({ short: true }))), /Never make a Reel as a new project yourself/);
+    assert.doesNotMatch(rulesOf(projectFiles(reel({ short: true }))), /No new projects/);
     assert.equal(projectFiles(clip({ short: true })).get("CLAUDE.md"), projectFiles(clip()).get("CLAUDE.md"));
-    // A main project that is not told it is a short video's keeps the rule.
-    for (const over of [{}, { short: false }, { short: undefined }, { short: "yes" }]) assert.match(rulesOf(projectFiles(main(over))), /Open Reel 2 in HyperFrames/, JSON.stringify(over));
+    // A main project that is not told it is a short video's keeps the rule, and has no line of the short video's.
+    for (const over of [{}, { short: false }, { short: undefined }, { short: "yes" }]) {
+      assert.match(rulesOf(projectFiles(main(over))), /Open Reel 2 in HyperFrames/, JSON.stringify(over));
+      assert.doesNotMatch(rulesOf(projectFiles(main(over))), /No new projects/, JSON.stringify(over));
+    }
   });
   it("is in a session clip's own rules, above the BRIMM rules: no new projects, a Reel or any other, from a clip of a private client session", () => {
     const own = projectFiles(clip()).get("CLAUDE.md");
