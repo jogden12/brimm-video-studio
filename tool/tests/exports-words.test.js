@@ -15,7 +15,7 @@ import { LATE_CHECK_MS } from "../dropbox.js";
 import { PIN } from "../hyperframes.js";
 import { EDITED, FOLDER, NAME, NOT_YET, PROJECT, SRT, reread } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
-import { MAIN, REEL2, ZONE, changeAt, clipWorld, entry, exportOf, fw, namesFor, probeFor } from "./exports-world.js";
+import { CANDIDATES, MAIN, REEL2, REEL_FILES, ZONE, changeAt, clipWorld, entry, exportOf, fw, namesFor, probeFor, screen } from "./exports-world.js";
 
 const ACCENTED = 'Café "prix": quoi?';
 const NAMES = [NAME, ACCENTED];
@@ -145,6 +145,35 @@ const SCENARIOS = {
     exported(orphan, "main");
     exported(orphan, "reel 2");
     return { w: left, lines: [...(await quick(left)), ...(await quick(untitled)), ...(await quick(orphan, { yes: true }))] };
+  },
+  "the words on the picture, and a Reel's title proposed from them (plan PR 8)": async (name) => {
+    const w = W(name, { over: { reels: EPISODE.record.reels.map((r) => (r.n === 2 ? { ...r, title: "" } : r)) } });
+    exported(w, "main");
+    exported(w, "reel 2");
+    screen(w, "reel 2", REEL_FILES, { only: true });
+    const empty = W(name);
+    exported(empty, "main");
+    screen(empty, "main", { "index.html": "<html></html>" }, { only: true });
+    const away = W(name);
+    exported(away, "main");
+    rmSync(away.dirOf("main"), { recursive: true });
+    const lines = [
+      ...(await quick(w)), ...(await quick(w, { yes: true })), ...(await quick(w, { onScreen: ["Alex Rivera", "Head of Pricing", "A third line"] })), ...(await quick(w, { noOnScreen: true })),
+      ...(await quick(w, { onScreen: [""] })), ...(await quick(w, { onScreen: ["x"], noOnScreen: true })), ...(await quick(empty)), ...(await quick(empty, { yes: true })), ...(await quick(away))
+    ];
+    return { w, lines };
+  },
+  "the suggestions a hand-off leaves out, and a list that cannot be used (plan PR 8)": async (name) => {
+    const w = W(name, { candidates: [...CANDIDATES, { ...CANDIDATES[0], n: 5, point: "" }, { ...CANDIDATES[0], n: 6, ranges: [{ start: 40, end: 44 }] }] });
+    exported(w, "main");
+    exported(w, "reel 2");
+    const list = W(name, { candidates: CANDIDATES });
+    exported(list, "main");
+    exported(list, "reel 2");
+    await quick(list, { yes: true });
+    writeFileSync(join(list.found.folder, "reels.json"), "not json");
+    const result = await finishNow(list.t.ctx, { ...list.found, record: reread(list.found) });
+    return { w, lines: [...(await whole(w)), ...(result.next ? [result.next] : [])] };
   },
   "a project on the other Mac": async (name) => {
     const record = (names) => ({ reels: [], app: { toolchain: PIN.version, projects: [entry("main", { on: "Sallie's laptop" }, names)] } });

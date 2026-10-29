@@ -1,0 +1,19 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #end-card-bg { position: absolute; inset: 0; background: #E8E3DA; }
+    #end-card-logo-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    #end-card-logo { width: 880px; height: auto; }
+  </style>
+  <div data-hf-id="hf-m008" id="root" data-composition-id="end-card" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-m009" id="end-card-bg" class="clip" data-start="0" data-duration="4"></div>
+    <div data-hf-id="hf-m010" id="end-card-logo-wrap" class="clip" data-start="0" data-duration="4">
+      <img data-hf-id="hf-m011" id="end-card-logo" src="assets/logos/the-example-wordmark.svg" alt="The Example" />
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#end-card-logo", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.25);
+    window.__timelines["end-card"] = tl;
+  </script>
+</template>

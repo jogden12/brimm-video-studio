@@ -21,6 +21,7 @@ import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredt
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
+import { suggestionsFor } from "./suggestions-in-main.js";
 import { REEL_KEY, SAY_AGAIN, heldReelParts, lostReelsWords, missingWords, nextHandoff, noHandoffWords, otherKindWords, unusableWords } from "./finish-reels.js";
 import { respelledHeldReel } from "./spelling.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
@@ -856,6 +857,12 @@ export async function finishNow(ctx, found, deps = {}) {
     const timedMain = base ? Boolean(imported && imported.length) : Boolean(main.words);
     const mainWords = base ? (timedMain ? imported.map((word) => ({ ...word, w: spelled(word.w, record.spellings || []) })) : wordsOfCaptions(onFile.main.srt)) : main.words || wordsOfCaptions(main.srt);
     const mainSeconds = base ? onFile.main.seconds : main.seconds;
+    // The words drawn on the main picture (plan PR 8). A main video taken from HyperFrames' export has the words she confirmed: the quick part
+    // wrote them in finish.asked.json, or, for a main video kept as the last finish made it, they are the ones that finish kept in its part.
+    // A main video that went the Final Cut way has the record's titles (`record.main.texts`), which brimm-video drew there. The Reels of a
+    // finished video (plan PR 9) have no main part to read them from: the hand-off on file keeps its own (nextHandoff).
+    const linesOf = (list) => (Array.isArray(list) ? list.filter((line) => typeof line === "string" && line.trim() !== "").map((line) => line.replace(/\s+/g, " ").trim()) : null);
+    const drawn = base ? [] : main.app ? linesOf(main.onPicture) ?? linesOf(before.main && before.main.onPicture) ?? [] : onPictureOf(record);
     // The Reels of a finished video that are kept stay in its hand-off as it has them (nextHandoff): only those taken now are made here.
     const reels = parts.filter((p) => p.reel && !(base && (p.kept || p.reused))).sort((a, b) => a.reel - b.reel).map((p) => {
       const reel = (record.reels || []).find((r) => r.n === p.reel) || {};
@@ -868,13 +875,19 @@ export async function finishNow(ctx, found, deps = {}) {
       const fromSuggestion = p.app ? (Number.isInteger(p.fromSuggestion) ? p.fromSuggestion : null) : fromSuggestionOf({ ...reel, n: p.reel });
       return { n: p.reel, title, file: p.name, seconds: p.seconds, inMain: inMain(p.words || wordsOfCaptions(p.srt), mainWords, p.seconds, mainSeconds, { spacing: timed }), srt: p.srt, fromSuggestion };
     });
+    // The Reel suggestions that fall in the exported main video (plan PR 8; architecture 8.6): for a raw video's main taken from HyperFrames'
+    // export, in a version 2 hand-off. A Final Cut finish never gave a raw video its suggestions, and an iPhone clip's contract has none. A
+    // number is a Reel or a suggestion in a hand-off, never both: the record can still call unmade a suggestion whose Reel is in this hand-off.
+    const placed = !base && v2 && main.app && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, main: { words: mainWords, seconds: mainSeconds, timed: timedMain } }) : { list: [], left: [] };
+    placed.list = placed.list.filter((suggestion) => !reels.some((reel) => reel.n === suggestion.n));
+    next.push(...placed.left);
     if (failed.length) return result();
     const stamped = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit };
-    // A finished video's next revision is the hand-off on file, as it was, with these Reels taken now added to those it holds.
+    // A finished video's next revision is the hand-off on file, as it was, with these Reels taken now added to those it holds: its main
+    // video, its words on the picture and its suggestions are the ones it has (nextHandoff keeps its `main` and its `suggestions`), and the
+    // words and suggestions read from a HyperFrames export are not given to it.
     const given = base ? { ...stamped, ...nextHandoff({ onFile, reels }) } : { ...stamped, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
-    // The words drawn on the main picture are the record's titles (`record.main.texts`), which brimm-video drew in Final Cut: the picture
-    // of a main video taken from HyperFrames has none of them (the app draws its own, and PR 8 reads them), so none is handed off for it.
-    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: base || main.app ? [] : onPictureOf(record) }) : buildHandoff(given);
+    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: drawn, ...(base ? {} : { suggestions: placed.list }) }) : buildHandoff(given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);
@@ -978,6 +991,12 @@ export async function finishNow(ctx, found, deps = {}) {
         ...(words in files ? { words } : {}), ...(part.story && part.story.length ? { story: part.story.map((f) => `final/${basename(f)}`) } : {}),
         ...(part.app ? { project: part.project } : part.export ? { export: `final/${part.export.name}` } : { noHandEdits: true })
       };
+    }
+    // The words she confirmed for the main picture stay with its part (plan PR 8), so that a later finish that keeps the main video hands off the
+    // same; the key is left out when there are none.
+    if (!base && main.app && finishedParts.main) {
+      const { onPicture: was, ...rest } = finishedParts.main;
+      finishedParts.main = drawn.length ? { ...rest, onPicture: drawn } : rest;
     }
     const finishedReels = new Map(parts.filter((p) => p.reel).map((p) => [p.reel, p]));
     // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none). A part this finish
