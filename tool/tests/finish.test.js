@@ -2481,6 +2481,62 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     t.done();
   });
 
+  // The Reels of a finished video are added to its hand-off by `finish … reels` (plan PR 9): the hand-off made again keeps them, and now
+  // the parts of the finish that took them as well, so that the next `finish … reels` still knows what it took.
+  describe("after the Reels were added to the hand-off", () => {
+    const REL = "final/Talk.brimm-ops.json";
+    const HELLO = "1\n00:00:00,000 --> 00:00:02,000\n Welcome to the show.\n\n";
+    const REEL2 = { n: 2, title: "Know your costs", file: "reel 2.mp4", seconds: 10, srt: HELLO, fromSuggestion: 2 };
+    const part = (n) => ({ file: `final/reel ${n}.mp4`, bytes: 7, seconds: 10, source: { bytes: 7, mtimeMs: 1 }, project: `Talk reel ${n}` });
+    /** The made-up finished video with its first hand-off written, and then the hand-off and the record as `finish … reels` leaves them:
+        Reel 2 in the hand-off, a part for it in the record, and a part for Reel 5, which the hand-off does not hold. */
+    async function withReels(t) {
+      handoffVersion(t, 2);
+      const found = video(t);
+      assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
+      const onFile = JSON.parse(readFileSync(join(found.folder, REL), "utf8"));
+      const text = `${JSON.stringify({ ...onFile, reels: [REEL2] }, null, 2)}\n`;
+      writeFileSync(join(found.folder, REL), text);
+      const now = reread(found);
+      writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, files: { ...now.files, [REL]: Buffer.byteLength(text) }, finished: { ...now.finished, parts: { ...now.finished.parts, "reel 2": part(2), "reel 5": part(5) } } }));
+      return found;
+    }
+    it("keeps the Reels the hand-off holds, and the parts of the finish that took them, when a spelling makes it again as the next revision; and no part for a Reel it does not hold", async () => {
+      const t = setup();
+      const found = await withReels(t);
+      const now = reread(found);
+      const done = await finishFinished(t.ctx, { ...found, record: now }, { record: { ...now, spellings: [["Sallie", "Sally"]] } });
+      assert.deepEqual([done.ok, done.revision, done.same], [true, 2, false]);
+      const handoff = JSON.parse(readFileSync(join(found.folder, REL), "utf8"));
+      assert.deepEqual(handoff.reels, [REEL2]);
+      assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"]);
+      assert.deepEqual(reread(found).finished.parts["reel 2"], part(2));
+      assert.match(handoff.main.srt, /Thank you so much, Sally\./);
+      t.done();
+    });
+    it("keeps them too when the hand-off comes out as it was and only the record is written", async () => {
+      const t = setup();
+      const found = await withReels(t);
+      const now = reread(found);
+      const done = await finishFinished(t.ctx, { ...found, record: now }, { record: now });
+      assert.deepEqual([done.ok, done.same, done.revision], [true, true, 1]);
+      assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"]);
+      assert.deepEqual(reread(found).finished.parts["reel 2"], part(2));
+      t.done();
+    });
+    it("keeps no part for Reels the hand-off made again does not hold: one that is gone is made again whole, and the record says what it holds", async () => {
+      const t = setup();
+      const found = await withReels(t);
+      rmSync(join(found.folder, REL));
+      const now = reread(found);
+      const done = await finishFinished(t.ctx, { ...found, record: now }, { record: now });
+      assert.deepEqual([done.ok, done.revision], [true, 2]);
+      assert.deepEqual(JSON.parse(readFileSync(join(found.folder, REL), "utf8")).reels, []);
+      assert.deepEqual(Object.keys(reread(found).finished.parts), ["main"]);
+      t.done();
+    });
+  });
+
   it("writes nothing into final/ that the record could not then take: the files go out again, and the hand-off is not shown", async () => {
     const t = setup();
     handoffVersion(t, 2);
