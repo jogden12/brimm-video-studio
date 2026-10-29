@@ -37,6 +37,8 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "or two that began in one minute, which `finish` asks the final one of",
       'it says which Reels are exported and to say "hand off the Reels", ahead of the BRIMM Ops page\'s steps and of done',
       "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder this Mac will not let be read are no such stage",
+      // A Reel project on the other Mac: `finish` would take its export, and the guide does not look, for the reason it gives the main video (review F3).
+      "A Reel project that is not on this Mac is not looked at either, though `finish … reels` would take its export from Downloads or from what the other Mac released: as for the main video, the guide reads Downloads only for a project that is here, and `app` says what is on the other Mac.",
       // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
       "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish runs it says so instead",
       "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
@@ -77,6 +79,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "Two or more are named together",
       "or two that began in one minute",
       "none: a Reel open and not exported, one already in the hand-off",
+      "A Reel project that is not on this Mac is not looked at either, though that command would take its export from Downloads or from what the other Mac released: as for the main video (PR 10), Downloads is read only for a project that is here, and `app` says what is on the other Mac.",
       "Nor where that command would go no further and a look that costs no other read can tell: another run is at work on the episode (a bring, a read or an ask; a finish at work is the stage below), the other Mac has the episode open, the chain of the video's versions has a gap, Dropbox undid this Mac's last change to the record, the hand-off on file cannot be added to, or the record lacks the Reel.",
       "a hand-off that went to the page under another id, and a Reel number another version of the video gave under the same id (8.7). That command says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until Jason has settled it.",
       "Its finish is running. The panel shows how far it is.",

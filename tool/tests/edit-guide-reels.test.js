@@ -362,6 +362,17 @@ describe("B5. where finish would go no further, the guide says nothing new", () 
     assert.equal(await line(w), says(REEL_2));
     assert.equal((await on(depsOf(w), "finish", FOLDER, "reels")).code, 0);
   });
+  it("has the page's step for a Reel project that is only on the other Mac, though finish takes its export from Downloads: the guide reads Downloads only for a project that is here, as for the main video (review F3)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    rmSync(w.dirOf("reel 2"), { recursive: true });
+    const { looked, readdir } = spy();
+    assert.equal(await line(w, { readdir }), says(TAKE));
+    assert.deepEqual(looked, [], "Downloads is not listed");
+    const asked = await on(depsOf(w), "finish", FOLDER, "reels");
+    assert.equal(asked.code, 0, asked.said.join("\n"));
+    assert.match(asked.said.join("\n"), /Its project is on Mac Studio, so the export could not be checked against it\./);
+  });
   it("has the Reel line on a Mac whose settings say version 1 when the hand-off on file is version 2, as finish goes on there", async () => {
     const w = await W();
     exportOf(w, "reel 2");
