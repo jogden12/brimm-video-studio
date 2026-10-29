@@ -54,11 +54,25 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "\"Quit HyperFrames first, so that the older project can be set aside, then say it again. Nothing was changed.\"",
       "\"I can't tell whether HyperFrames is open. Quit it if it is, then say it again. Nothing was changed.\"",
       "so that a refusal claims nothing, brings nothing, asks for no video and leaves the record, its claim and both folders as they were; it is asked again where the folder is moved",
+      // The second look, once the episode is claimed: the review of PR 18, F5.
+      "\"Quit HyperFrames first, so that the older project can be set aside, then say it again. The older project was left where it was.\"",
+      "\"I can't tell whether HyperFrames is open. Quit it if it is, then say it again. The older project was left where it was.\"",
+      // A recording that has changed is looked at before anything is moved: F3.
+      "The recording must still be the one the project was made from, which is looked at before HyperFrames is asked about again (quitting it would not help) and before anything is moved",
+      "\"The recording of <name> has changed since its HyperFrames project was made, so the older project was left where it was. Ask Jason.\"",
       // The order and the place.
       "the new project is built beside the older folder, whole or not at all; the older folder is moved, whole and as it is, by one rename (which copies and deletes nothing) into `set aside/<project name> <moment>/` in the episode's own folder in `~/BRIMM Video Work`, a folder that no command takes for a project",
       "the new project is renamed into the place the older one had. If that last rename fails the older folder is renamed back; the one thing removed is the project Studio had just built",
       // What she is told, in order.
-      "\"The older HyperFrames project for <name> was set aside on this Mac, and nothing was deleted.\", the line that the project is rebuilt (above), the line about the assets when they were left out, and the video's.",
+      "\"The older HyperFrames project for <name> was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.\", the line that the project is rebuilt (above), the lines about the assets (below), and the video's.",
+      // The older folder's own assets that were too big to hand over: F1.
+      "**The older folder's own assets** that were too big to hand over come into the rebuilt project",
+      "When the older folder's own `assets/` (the brand kit apart) weigh more than that, each of those files the rebuilt project lacks is moved into it by rename, once the project is in its place",
+      "writing over nothing the snapshot brought: a file the other Mac put at the same path stays the other Mac's",
+      "\"Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: 2 files.\"",
+      "\"Assets of the older project (pictures, music and video) could not be moved into the project: 1 file. They are in the older project, set aside on this Mac. Ask Jason.\"",
+      "\"The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.\" in place of the one it always had",
+      "When the older folder's assets weigh 50 MB or less they were handed over, and a file the other Mac removed is not brought back.",
       // The video.
       "**The video** of the older folder is moved into the rebuilt project, not copied and not made again, when it passes the check every video put into a project passes",
       "the facts of the working copy are beside the others in the folder of copies and give the project's picture size and its length to a second, and the file is a plain file as large as they say",
@@ -68,12 +82,16 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "\"The snapshot of the HyperFrames project for <name> is not whole on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The HyperFrames project for <name> could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The older HyperFrames project for <name> was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.\"",
+      "or `set aside` is a link or a file (a move into a link would follow it out of the episode's work folder, into Dropbox perhaps), the older folder stays where it was:",
       // What is not set aside, and what takes no notice of it.
       "**A project with no marker is not set aside**, whatever the times of its files say (a clock that is behind, a file dated in the future or a file only deleted fool them)",
       "\"The HyperFrames project for <name> on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.\"",
       "`release` of an older folder is still refused (below).",
       "`free`, the guide, `episodes` and `status` find a project by its name in the record, and `plainName` refuses the folder's name to a record",
-      "Nothing takes one away; Jason deletes one by hand when he is sure it is not wanted."
+      "Nothing takes one away; Jason deletes one by hand when he is sure it is not wanted.",
+      // How to get something back from one, and that it is not always small: F7.
+      "To get something back from one, with HyperFrames quit, copy what is needed from the set-aside folder into the project in its place; renaming the folder back only sets it aside again, since its marker names an older snapshot.",
+      "A set-aside folder keeps the older project's renders, history and caches, and its video when that was not kept, so it is not always small, and `free` takes none of it."
     ]) assert.ok(app.includes(words), words);
     assert.doesNotMatch(app, /\(setting it aside is Jason's call\)/);
   });
@@ -104,8 +122,10 @@ describe("what pins the words about an older project being set aside (plan PR 18
       const app = row(skill, OPEN_HER);
       for (const words of [
         "if it then says its video is being made, tell her so, and when \"how far is it?\" says it is done, run it again.",
-        "If it says the older project was set aside, tell her so, and that nothing was deleted: the project is now the newest one that was handed over.",
+        "If it says the older project was set aside, tell her so, and that nothing was deleted: the project is now the newest one that was handed over, and any changes made on this Mac that were not handed over are in the older project (she asks Jason if she needs them).",
+        "If it says assets of the older project were kept, tell her so; if it says some could not be moved, tell her they are in the older project and to ask Jason.",
         "If it says to quit HyperFrames first, tell her so, and run `app \"<episode>\"` again when she has.",
+        "If it says the recording has changed and the older project was left where it was, tell her so, and to ask Jason.",
         "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason. |"
       ]) assert.ok(app.includes(words), `${which}: ${words}`);
       assert.ok(!app.includes("its video is then made again in the background"), `${which}: the video is made again only when it says so`);
@@ -136,6 +156,10 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "HyperFrames must be quit first, since a project the app holds open must not be moved from under it.",
       "The new project is built beside the older folder; the older folder is then moved, whole and as it is, by one rename (which copies and deletes nothing) into `set aside/<project name> <moment>/` in the episode's own work folder, a folder no command takes for a project; and the new project is renamed into the place the older one had, or the older folder is put back.",
       "Its video moves into the rebuilt project, and is not made again, when it passes the checks every working copy does (5.6).",
+      "So do the older folder's own assets that were too big to hand over: a snapshot leaves out all of a project's `assets/` but the brand kit when they weigh more than 50 MB",
+      "each such file it lacks is moved into it by rename once it is in its place, never over a path the snapshot brought (5.6)",
+      "The recording must be the one the project was made from: that is looked at before anything is moved, so the older project stays where it was and is not set aside to be refused after.",
+      "A set-aside folder that is a link or a file is not moved into, since a rename through a link would follow it out of the work folder.",
       "A project with no marker is not set aside, whatever the times of its files say: it is refused as it was. Nothing deletes a set-aside folder; Jason does, by hand, when he is sure."
     ]) assert.ok(four.includes(words), `${words} in 4.7`);
     assert.ok(!four.includes("is not built; Jason moves it away by hand"), "4.7 no longer says it is not built");
@@ -147,7 +171,14 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "\"Quit HyperFrames first, so that the older project can be set aside, then say it again. Nothing was changed.\" while it is open",
       "\"I can't tell whether HyperFrames is open. Quit it if it is, then say it again. Nothing was changed.\" when that cannot be told",
       "HyperFrames is asked about again where the folder is moved (the claim waits, and the record it leaves may list a newer snapshot)",
-      "\"The older HyperFrames project for `<name>` was set aside on this Mac, and nothing was deleted.\"",
+      "\"The older HyperFrames project for `<name>` was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.\"",
+      "\"Quit HyperFrames first, so that the older project can be set aside, then say it again. The older project was left where it was.\" or \"I can't tell whether HyperFrames is open. Quit it if it is, then say it again. The older project was left where it was.\"",
+      "| ... and the recording has changed since the project was made | Looked at before HyperFrames is asked about again and before anything is moved: \"The recording of `<name>` has changed since its HyperFrames project was made, so the older project was left where it was. Ask Jason.\"",
+      "| ... and the older folder's own `assets/` (the brand kit apart) weigh more than 50 MB, so a snapshot of it left them out | Once the rebuilt project is in its place each of those files it lacks is renamed into it from the set-aside folder, never over a path it has:",
+      "\"Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: 2 files.\"",
+      "\"Assets of the older project (pictures, music and video) could not be moved into the project: 1 file. They are in the older project, set aside on this Mac. Ask Jason.\"",
+      "\"The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.\"",
+      "When the snapshot is not whole here, a write fails, or `set aside` is a link or a file, the older folder stays where it was:",
       "\"The snapshot of the HyperFrames project for `<name>` is not whole on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The HyperFrames project for `<name>` could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The older HyperFrames project for `<name>` was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.\"",
@@ -161,6 +192,10 @@ describe("what pins the words about an older project being set aside (plan PR 18
     assert.ok(snapshot.includes("`release` does not hand it over again, and `app` sets its folder aside and rebuilds the project from the newest snapshot in its place (4.7, 5.6). A marker for a snapshot the record lists that is not the newest, or one it lists no more that was named before every one it lists (it keeps the two newest), is older; one that names a snapshot the record never listed, or one named after a snapshot it lists, may be newer work (Dropbox can undo the record of a hand-over this Mac made, and the snapshot's files stay), and is refused and not set aside. A project with no marker, made here and never handed over, is judged by the times of its files, its newest file more than 2 seconds older than the snapshot's, and is refused and not set aside, since those times can be fooled."), "7.3");
     const retention = section(spec, "### 7.4 Retention", "- Nobody runs the command line's `clean`");
     assert.ok(retention.includes("A folder set aside for an older project (4.7) stays where it is, whole, until Jason deletes it by hand: `free` names its paths from the record and finds none by a listing, a set-aside folder is not in the record"), "7.4");
+    // F7: it is not always small, `free` takes none of it, and how to get something back from one.
+    assert.ok(retention.includes("it keeps the older project's renders, history and caches, and its video when that was not kept, so a set-aside folder is not always small, and `free` takes none of it."), "7.4: not always small");
+    assert.ok(retention.includes("To get something back from one, with HyperFrames quit, copy what is needed into the project in its place; renaming the folder back only sets it aside again, since its marker names an older snapshot."), "7.4: getting something back");
+    assert.ok(!retention.includes("so a set-aside folder is small in the usual case"), "7.4 no longer says it is small");
   });
   it("says in the spec's Status line that PR 17 (#20) is merged and that main is 840e0fc", () => {
     const status = spec.split("\n").find((line) => line.startsWith("- **Status:**")) ?? "";

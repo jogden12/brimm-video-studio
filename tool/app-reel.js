@@ -50,8 +50,8 @@ import { REELS_FILE, readReels, reelEntries } from "./reels.js";
 import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
 import {
-  changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
-  openProjectInApp, plainName, quitWords, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn
+  asideWords, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
+  openProjectInApp, plainName, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -342,12 +342,13 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
     }
   }
   // A Reel project here whose marker says it is older than the newest snapshot, because the other Mac worked on it since, is set aside and
-  // rebuilt from the newest snapshot in its place, as the main project is (plan PR 18; app.js openInApp): HyperFrames must be quit, which
-  // edit.js asked before the claim and is asked again here. A project with no marker is not set aside: it is refused below.
+  // rebuilt from the newest snapshot in its place, as the main project is (plan PR 18; app.js openInApp): the recording must not have changed
+  // since (it is looked at before anything is moved), and HyperFrames must be quit, which edit.js asked before the claim and is asked again
+  // here (app.js asideWords). A project with no marker is not set aside: it is refused below.
   if (project && !rebuilt && olderMarked(found, { record, project, dir: join(work, project.name) })) {
-    const quit = await quitWords(deps.running);
-    if (quit) {
-      ctx.say(quit);
+    const stop = await asideWords(ctx, { found, record, project, running: deps.running });
+    if (stop) {
+      ctx.say(stop);
       return 1;
     }
     const built = rebuildHere(ctx, { found, record, snapshot: snapshotOf(record.files, project.name), dir: join(work, project.name), name: `Reel ${n} of ${record.name.text}`, older: true }, { cli, fs: deps.fs });

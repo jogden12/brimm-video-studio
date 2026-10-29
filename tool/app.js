@@ -12,7 +12,10 @@
 //     2026-10-29): HyperFrames must be quit (edit.js asks before the claim, olderWords, and openInApp asks again), the new project is built
 //     beside its place, the older folder is moved whole into `set aside/` in the episode's work folder, and the new project renamed into
 //     its place (rebuildHere with `older`, snapshot.js rebuildProject). Nothing is deleted. Its video is kept for the new project when it
-//     passes the check every working copy does (copyFits, putVideoBack's `kept`). A project with no marker, older only by the times of
+//     passes the check every working copy does (copyFits, putVideoBack's `kept`), and so are its own assets that were too big to hand over
+//     (a snapshot left them out, so the project built from what the other Mac handed over lacks them: snapshot.js keepAssets). A recording
+//     that has changed since is known before anything is moved, and the older project is left where it was (asideWords; the review of PR 18).
+//     A project with no marker, older only by the times of
 //     its files (olderHere), is neither opened nor set aside: those can be fooled by a clock or a deletion, so it says so and ends with 1,
 //     decided before the claim where the snapshot is whole already, so that the refusal leaves the record and its claim as they were; the
 //     same goes for a project whose folder is a session clip's on the volume, however the record spells its name (clipFolders, clipTrouble:
@@ -99,32 +102,50 @@ export const couldNotRebuild = (name) => `The HyperFrames project for ${name} co
 export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
 /** What is said when a project here whose marker says it is older is set aside and the project rebuilt in its place (plan PR 18), `name` being
-    as above. The first is said before the rebuild's own lines; the next three are why it was not done, each saying the older project is where
-    it was (the last, that it is in its set-aside place and nothing was deleted); the video's is said where a rebuilt project's video is. */
-export const setAsideWords = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted.`;
+    as above. The first is said before the rebuild's own lines, and its second sentence is true whatever was in the folder: what was not
+    handed over from this Mac is in it (the review of PR 18, F2); the next three are why it was not done, each saying the older project is
+    where it was (the last, that it is in its set-aside place and nothing was deleted); the video's is said where a rebuilt project's video is. */
+export const setAsideWords = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
 export const notWholeAside = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so the older project was left where it was. Ask Jason.`;
 export const couldNotAside = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`;
 export const stuckAside = (name) => `The older HyperFrames project for ${name} was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.`;
 export const videoKept = (name) => `The video for ${name} was kept from the older project, and it is in the project.`;
+/** What is said when the recording has changed since the older project was made, which is known before it is moved: it is left where it was
+    (the review of PR 18, F3). `name` is the episode's, as the other lines about the recording have it. */
+export const changedAside = (name) => `The recording of ${name} has changed since its HyperFrames project was made, so the older project was left where it was. Ask Jason.`;
+/** What is said of the older project's own assets, which a snapshot of it left out for weighing too much and so never reached the other Mac
+    (the review of PR 18, F1), when they are moved into the project built from what the other Mac handed over: how many went in; how many
+    could not (they stay in the older project); and, in place of ASSETS_NOT_IN when the snapshot said some of its own were left out and some of
+    these went in, what is still not in the project. */
+const filesText = (n) => (n === 1 ? "1 file" : `${n} files`);
+export const assetsKept = (n) => `Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: ${filesText(n)}.`;
+export const assetsNotKept = (n) => `Assets of the older project (pictures, music and video) could not be moved into the project: ${filesText(n)}. They are in the older project, set aside on this Mac. Ask Jason.`;
+export const ASSETS_REST_NOT_IN = "The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.";
 /** What is said when HyperFrames is open, or cannot be told to be closed, and an older project is to be set aside: in `release`'s and `free`'s
-    words (hand-over.js, free.js), ending as the others end, with what was done: nothing. */
+    words (hand-over.js, free.js), ending as the others end, with what was done: nothing. Asked again once the episode is claimed, the claim is
+    written, so "Nothing was changed." would not be true; what is, is that the older project was left where it was (the review of PR 18, F5). */
 const QUIT_TO_SET_ASIDE = "Quit HyperFrames first, so that the older project can be set aside, then say it again. Nothing was changed.";
 const CANT_TELL_TO_SET_ASIDE = "I can't tell whether HyperFrames is open. Quit it if it is, then say it again. Nothing was changed.";
+const QUIT_AFTER_CLAIM = "Quit HyperFrames first, so that the older project can be set aside, then say it again. The older project was left where it was.";
+const CANT_TELL_AFTER_CLAIM = "I can't tell whether HyperFrames is open. Quit it if it is, then say it again. The older project was left where it was.";
 /** The program the app runs as, which `running` is asked after (free.js hyperFramesRunning; the same name `release` and `free` ask for). */
 const APP_PROGRAM = "HyperFrames";
 
 /** Whether HyperFrames must be quit before an older project is set aside (a project the app holds open must not be moved from under it):
     "" when `running(name)` says it is not running (false, as a promise or not), else the words that refuse, in `release`'s and `free`'s: it is
-    running, or it cannot be told (a throw, a rejection, anything but a plain false or true, or no way to ask). Nothing is claimed or
-    changed by the refusal. */
-export async function quitWords(running) {
+    running, or it cannot be told (a throw, a rejection, anything but a plain false or true, or no way to ask). Before the episode is claimed
+    nothing is claimed or changed by the refusal; with `claimed` true (asked again, once it is) the words say the older project was left where
+    it was instead. */
+export async function quitWords(running, { claimed = false } = {}) {
   let open = null;
   try {
     if (typeof running === "function") open = await running(APP_PROGRAM);
   } catch (e) {
     open = null;
   }
-  return open === false ? "" : open === true ? QUIT_TO_SET_ASIDE : CANT_TELL_TO_SET_ASIDE;
+  if (open === false) return "";
+  if (claimed) return open === true ? QUIT_AFTER_CLAIM : CANT_TELL_AFTER_CLAIM;
+  return open === true ? QUIT_TO_SET_ASIDE : CANT_TELL_TO_SET_ASIDE;
 }
 /** That a project is rebuilt, from what, and that the app's history stays behind. The snapshot was handed over by `by`, the Mac that made it
     (snapshot.js makerOf: who first listed it in the record), when that is a Mac and not this one; it is "the snapshot taken at …" when this
@@ -478,7 +499,10 @@ export function projectSnapshot(record, key = "main") {
     With `older` true the folder at `dir` is an older project, and it is set aside first (plan PR 18): the new project is built beside it, the
     older folder moved, whole and as it is, to a place in the episode's own work folder (snapshot.js asidePlace), and the new project put in
     its place, or nothing is changed. She is told so before the rebuild's own lines, and it gives { aside }, where the older folder went. When
-    it cannot be, the words say the older project was left where it was (or, if even putting it back failed, where it is) and it gives { code }. */
+    it cannot be, the words say the older project was left where it was (or, if even putting it back failed, where it is) and it gives { code }.
+    A set-aside folder that is a link, or a file, is one it cannot be set aside into (snapshot.js asidePlace): the same words. The older folder's own
+    assets that a snapshot of it left out for weighing too much never reached the other Mac, so the files of them the new project lacks are moved
+    into it from the set-aside folder, and she is told how many, and how many could not be (they stay in the older project). */
 export function rebuildHere(ctx, { found, record, snapshot, dir, name, older = false }, { cli, fs }) {
   const by = makerOf(found.folder, snapshot);
   const aside = older ? asidePlace(dirname(dir), basename(dir), ctx.now()) : null;
@@ -501,7 +525,12 @@ export function rebuildHere(ctx, { found, record, snapshot, dir, name, older = f
   }
   if (older) ctx.say(setAsideWords(name));
   ctx.say(rebuiltWords(ctx, { snapshot, name, by }));
-  if (built.assetsLeft) ctx.say(ASSETS_NOT_IN);
+  // The older folder's own assets that were too big to hand over and were moved into the project (the review of PR 18, F1): what went in is
+  // said before the snapshot's own note about what is not in it, which then says "the rest" when some went in, so that the two lines agree.
+  const { kept = 0, failed = 0 } = built.assets ?? {};
+  if (kept > 0) ctx.say(assetsKept(kept));
+  if (built.assetsLeft) ctx.say(kept > 0 ? ASSETS_REST_NOT_IN : ASSETS_NOT_IN);
+  if (failed > 0) ctx.say(assetsNotKept(failed));
   return older ? { aside: built.aside } : {};
 }
 
@@ -511,6 +540,16 @@ export function rebuildHere(ctx, { found, record, snapshot, dir, name, older = f
     whole here, or when the project cannot be read: nothing says it is. */
 export function olderHere(found, { record, project, dir }) {
   return olderThan(snapshotOf(record.files, project.name), dir, { folder: found.folder });
+}
+
+/** What stops an older project from being set aside once the episode is claimed, in words, or "" (plan PR 18; the review's F3 and F5): the
+    recording it was made from has changed since (`changedSince`), which is known before anything is moved, so the older project stays where
+    it was and is not set aside to be refused after (the project rebuilt without its video could not be given one: putVideoBack); else
+    HyperFrames is open or cannot be told (quitWords, in the words for after the claim). Asking changes nothing. `running(name)` is as
+    quitWords has it. The recording is looked at first: quitting the app would not help. */
+export async function asideWords(ctx, { found, record, project, running }) {
+  if (changedSince(project, { found, record })) return changedAside(record.name.text);
+  return quitWords(running, { claimed: true });
 }
 
 /** Whether the project in `dir` on this Mac is older than the newest snapshot the record lists of it by its marker's word alone (snapshot.js
@@ -632,9 +671,11 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
     claim (projectOnAnotherMac) unless the record lists a snapshot of it. With a snapshot listed, a project whose folder is not here, whichever
     Mac made it, is rebuilt from it (rebuildHere; plan PR 11) before anything else: the folder is then here without its video, and what
     follows is what follows for a project `free` took the video from. A project here whose marker says it is older than the newest snapshot
-    (olderMarked) is set aside and rebuilt in its place (plan PR 18): HyperFrames must be quit (`deps.running`), the older folder is moved
-    whole into the episode's set-aside folder and the project built from the snapshot put where it was (rebuildHere with `older`), and its
-    video is kept for the new project when it passes the check every working copy does (putVideoBack's `kept`). A project here that is
+    (olderMarked) is set aside and rebuilt in its place (plan PR 18): the recording must be the one it was made from, or it is left where it
+    was (asideWords; changedAside), HyperFrames must be quit (`deps.running`), the older folder is moved whole into the episode's set-aside
+    folder and the project built from the snapshot put where it was (rebuildHere with `older`), its own assets that were too big to hand over
+    are moved into the new project, and its video is kept for the new project when it passes the check every working copy does
+    (putVideoBack's `kept`). A project here that is
     older by the times of its files and has no marker is not opened (olderHere; it says so and ends with 1). A new project is not made
     while Claude's reading of the episode is at work (`read` holds its
     lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
@@ -686,13 +727,15 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     }
   }
   // A project here whose marker says it is older than the newest snapshot, because the other Mac worked on it since, is set aside and the
-  // project rebuilt from the newest snapshot in its place (plan PR 18). HyperFrames must be quit, which edit.js asked before the claim and
-  // is asked again here, since the claim waits and the record it leaves may list a newer snapshot than the one first read. A project with
-  // no marker is not set aside: it is refused below, by the times of its files.
+  // project rebuilt from the newest snapshot in its place (plan PR 18). The recording must not have changed since the older project was made
+  // (asideWords looks before anything is moved: a changed recording is refused later, by putVideoBack, and the older folder would already
+  // be moved), and HyperFrames must be quit, which edit.js asked before the claim and is asked again here, since the claim waits and the
+  // record it leaves may list a newer snapshot than the one first read. A project with no marker is not set aside: it is refused below,
+  // by the times of its files.
   if (project && !rebuilt && olderMarked(found, { record, project, dir: join(work, project.name) })) {
-    const quit = await quitWords(deps.running);
-    if (quit) {
-      ctx.say(quit);
+    const stop = await asideWords(ctx, { found, record, project, running: deps.running });
+    if (stop) {
+      ctx.say(stop);
       return 1;
     }
     const built = rebuildHere(ctx, { found, record, snapshot: snapshotOf(record.files, project.name), dir: join(work, project.name), name: record.name.text, older: true }, { cli, fs: deps.fs });

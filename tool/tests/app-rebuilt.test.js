@@ -5,10 +5,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as nodeFs from "node:fs";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ASSETS_NOT_IN, KEPT, copyFits, olderHere, olderMarked, olderThanSnapshot, plainName, projectSnapshot, quitWords, rebuildHere, rebuiltWords, snapshotNotWhole } from "../app.js";
+import { ASSETS_NOT_IN, ASSETS_REST_NOT_IN, KEPT, assetsKept, assetsNotKept, changedAside, copyFits, olderHere, olderMarked, olderThanSnapshot, plainName, projectSnapshot, quitWords, rebuildHere, rebuiltWords, setAsideWords, snapshotNotWhole } from "../app.js";
 import { fixedZone } from "../exports.js";
 import { ASIDE_DIR, timeName, writeMarker } from "../snapshot.js";
 
@@ -195,7 +195,8 @@ const askFor = (w, name = NAME, deps = { cli: CLI }) => rebuildHere(w.ctx, { fou
 const STUCK_FS = (w) => ({ ...nodeFs, renameSync: (from, to) => (to === w.dir ? (() => { throw new Error("EACCES: permission denied"); })() : nodeFs.renameSync(from, to)) });
 
 describe("rebuildHere, given an older folder to set aside (plan PR 18)", () => {
-  const SET_ASIDE = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted.`;
+  // The second sentence is true whatever was in the folder (the review of PR 18, F2): what was not handed over from this Mac is in it.
+  const SET_ASIDE = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
   const REBUILT = (name, by = "Mac Studio") => `The HyperFrames project for ${name} is rebuilt on this Mac from what ${by} handed over at ${WHEN}. What HyperFrames kept of its history stays on ${by}.`;
   it("sets the older folder aside, rebuilds the project in its place, and says that first and then what it says of any rebuild, giving where the older folder went", (c) => {
     const w = olderWorld(c);
@@ -268,6 +269,120 @@ describe("rebuildHere, given an older folder to set aside (plan PR 18)", () => {
     assert.deepEqual(w.said, [REBUILT(NAME)]);
     assert.equal(existsSync(join(w.base, "work", ASIDE_DIR)), false);
   });
+  it("says what it says of the set-aside folder in words that hold no path, and that the changes that were not handed over are in the older project (the review of PR 18, F2)", () => {
+    assert.equal(setAsideWords(NAME), SET_ASIDE(NAME));
+    assert.equal(setAsideWords(`Reel 2 of ${NAME}`), `The older HyperFrames project for Reel 2 of ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
+    assert.equal(changedAside(NAME), `The recording of ${NAME} has changed since its HyperFrames project was made, so the older project was left where it was. Ask Jason.`);
+  });
+  it("leaves the older folder where it was, and says so, when the set-aside folder is a link: nothing is moved through it, and nothing is built (the review of PR 18, F8)", (c) => {
+    const w = olderWorld(c);
+    const elsewhere = join(w.base, "elsewhere");
+    mkdirSync(elsewhere);
+    symlinkSync(elsewhere, join(w.base, "work", ASIDE_DIR));
+    assert.deepEqual(askFor(w), { code: 1 });
+    assert.deepEqual(w.said, [`The HyperFrames project for ${NAME} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`]);
+    assert.equal(lstatSync(w.dir).ino, w.ino);
+    assert.equal(readFileSync(join(w.dir, "compositions", "second.html"), "utf8"), "<div>mine");
+    assert.deepEqual(readdirSync(elsewhere), [], "nothing went through the link");
+    assert.deepEqual(readdirSync(join(w.base, "work")).sort(), [ASIDE_DIR, PROJECT].sort(), "and no project was built beside the older one");
+  });
+
+  describe("the older folder's own assets that were too big to hand over (the review of PR 18, F1)", () => {
+    /** A file of the older project's `assets/` that weighs more than a snapshot takes (50 MB), made sparse so that it costs nothing: the file's inode. */
+    const clip = (w, rel = "assets/broll/clip.mp4") => {
+      mkdirSync(dirname(join(w.dir, rel)), { recursive: true });
+      writeFileSync(join(w.dir, rel), "");
+      truncateSync(join(w.dir, rel), 51 * 1024 * 1024);
+      return lstatSync(join(w.dir, rel)).ino;
+    };
+    const KEPT = (n) => `Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: ${n === 1 ? "1 file" : `${n} files`}.`;
+    const NOT_KEPT = (n) => `Assets of the older project (pictures, music and video) could not be moved into the project: ${n === 1 ? "1 file" : `${n} files`}. They are in the older project, set aside on this Mac. Ask Jason.`;
+    const REST = "The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.";
+    /** The moves out of the set-aside folder fail for the files `which` says. */
+    const failing = (w, which) => ({ ...nodeFs, renameSync: (from, to) => (from.startsWith(join(w.aside, "assets")) && which(from) ? (() => { throw new Error("EXDEV: cross-device link not permitted"); })() : nodeFs.renameSync(from, to)) });
+    it("says what it says of them in words that hold no path, a file or files by their number", () => {
+      assert.equal(assetsKept(1), KEPT(1));
+      assert.equal(assetsKept(3), KEPT(3));
+      assert.equal(assetsNotKept(1), NOT_KEPT(1));
+      assert.equal(assetsNotKept(2), NOT_KEPT(2));
+      assert.equal(ASSETS_REST_NOT_IN, REST);
+      assert.equal(KEPT(3), "Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: 3 files.");
+      assert.equal(NOT_KEPT(1), "Assets of the older project (pictures, music and video) could not be moved into the project: 1 file. They are in the older project, set aside on this Mac. Ask Jason.");
+    });
+    it("moves each of them into the rebuilt project by rename, so that the very file is there, and says how many, after the rebuilt line", (c) => {
+      const w = olderWorld(c);
+      const ino = clip(w);
+      const second = clip(w, "assets/pictures/deep/cover.png");
+      assert.deepEqual(askFor(w), { aside: w.aside });
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME), KEPT(2)]);
+      assert.equal(lstatSync(join(w.dir, "assets/broll/clip.mp4")).ino, ino);
+      assert.equal(lstatSync(join(w.dir, "assets/pictures/deep/cover.png")).ino, second);
+      assert.equal(existsSync(join(w.aside, "assets/broll/clip.mp4")), false);
+      assert.equal(readFileSync(join(w.dir, "assets/fonts/a.woff2"), "utf8"), "font", "what the snapshot brought is as it was");
+      assert.equal(readFileSync(join(w.aside, "compositions/second.html"), "utf8"), "<div>mine", "and the rest of the older folder is where it was");
+    });
+    it("says that the rest of its assets are not in it, and not that all of them are, when the snapshot's own note says it left some out and some of the older project's were kept", (c) => {
+      const w = olderWorld(c, { files: { "index.html": "<html>", "assets/left-out.txt": "left out" } });
+      clip(w);
+      askFor(w);
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME), KEPT(1), REST]);
+      assert.equal(existsSync(join(w.dir, "assets/broll/clip.mp4")), true);
+      assert.equal(existsSync(join(w.dir, "assets/left-out.txt")), false, "the note is not a file of the project");
+    });
+    it("says the assets are not in it as it did when none was kept, and moves nothing, when the older folder's assets are small: they were handed over", (c) => {
+      const w = olderWorld(c, { files: { "index.html": "<html>", "assets/left-out.txt": "left out" } });
+      mkdirSync(join(w.dir, "assets", "music"), { recursive: true });
+      writeFileSync(join(w.dir, "assets", "music", "theme.mp3"), "music");
+      askFor(w);
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME), ASSETS_NOT_IN]);
+      assert.equal(existsSync(join(w.dir, "assets/music")), false);
+      assert.equal(readFileSync(join(w.aside, "assets/music/theme.mp3"), "utf8"), "music");
+    });
+    it("says nothing of them when none was too big, and leaves the file the other Mac removed where it is", (c) => {
+      const w = olderWorld(c);
+      mkdirSync(join(w.dir, "assets", "music"), { recursive: true });
+      writeFileSync(join(w.dir, "assets", "music", "theme.mp3"), "music");
+      askFor(w);
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME)]);
+      assert.equal(existsSync(join(w.dir, "assets/music")), false);
+    });
+    it("never writes over a file of the same path that the rebuilt project has: the snapshot's stays, and the older one stays in the set-aside folder", (c) => {
+      const w = olderWorld(c, { files: { "index.html": "<html>", "assets/broll/clip.mp4": "the laptop's clip" } });
+      clip(w);
+      askFor(w);
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME)]);
+      assert.equal(readFileSync(join(w.dir, "assets/broll/clip.mp4"), "utf8"), "the laptop's clip");
+      assert.equal(lstatSync(join(w.aside, "assets/broll/clip.mp4")).size, 51 * 1024 * 1024);
+    });
+    it("says which could not be moved, where they are and to ask Jason, and keeps the others: nothing is lost", (c) => {
+      const w = olderWorld(c);
+      const kept = clip(w, "assets/broll/a.mp4");
+      const stuck = clip(w, "assets/broll/b.mp4");
+      assert.deepEqual(askFor(w, NAME, { cli: CLI, fs: failing(w, (from) => from.endsWith("b.mp4")) }), { aside: w.aside });
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME), KEPT(1), NOT_KEPT(1)]);
+      assert.equal(lstatSync(join(w.dir, "assets/broll/a.mp4")).ino, kept);
+      assert.equal(lstatSync(join(w.aside, "assets/broll/b.mp4")).ino, stuck);
+      assert.equal(existsSync(join(w.dir, "assets/broll/b.mp4")), false);
+    });
+    it("says only that they could not be moved when none could be, and says it after the assets line the snapshot's note gives", (c) => {
+      const w = olderWorld(c, { files: { "index.html": "<html>", "assets/left-out.txt": "left out" } });
+      clip(w);
+      clip(w, "assets/broll/b.mp4");
+      askFor(w, NAME, { cli: CLI, fs: failing(w, () => true) });
+      assert.deepEqual(w.said, [SET_ASIDE(NAME), REBUILT(NAME), ASSETS_NOT_IN, NOT_KEPT(2)]);
+    });
+    it("names a Reel as its other lines do, and moves them the same", (c) => {
+      const w = olderWorld(c);
+      clip(w);
+      assert.deepEqual(askFor(w, `Reel 2 of ${NAME}`), { aside: w.aside });
+      assert.deepEqual(w.said, [SET_ASIDE(`Reel 2 of ${NAME}`), REBUILT(`Reel 2 of ${NAME}`), KEPT(1)]);
+    });
+    it("says nothing of them, and moves none, when the older folder is not set aside, as a rebuild always did", (c) => {
+      const w = world(c);
+      rebuildHere(w.ctx, { found: w.found, record: w.record, snapshot: projectSnapshot(w.record), dir: w.dir, name: NAME }, { cli: CLI });
+      assert.deepEqual(w.said, [REBUILT(NAME)]);
+    });
+  });
 });
 
 describe("olderMarked: an older project by its marker's word alone (plan PR 18)", () => {
@@ -327,6 +442,23 @@ describe("quitWords: whether HyperFrames must be quit before an older folder is 
   });
   it("says it cannot tell for anything that is not a plain no or yes: a throw, a rejection, null, nothing, text, and no way to ask", async () => {
     for (const running of [() => { throw new Error("pgrep is not here"); }, async () => { throw new Error("stopped"); }, async () => null, async () => undefined, async () => "no", async () => 0, undefined, null]) assert.equal(await quitWords(running), CANT_TELL, String(running));
+  });
+  describe("asked again once the episode is claimed (the review of PR 18, F5)", () => {
+    // The claim is written by then, so "Nothing was changed." would be untrue: what is true is that the older project was left where it was.
+    const QUIT_AFTER = "Quit HyperFrames first, so that the older project can be set aside, then say it again. The older project was left where it was.";
+    const CANT_TELL_AFTER = "I can't tell whether HyperFrames is open. Quit it if it is, then say it again. The older project was left where it was.";
+    it("says the older project was left where it was, and not that nothing was changed, when HyperFrames is running or cannot be told", async () => {
+      assert.equal(await quitWords(async () => true, { claimed: true }), QUIT_AFTER);
+      assert.equal(await quitWords(() => true, { claimed: true }), QUIT_AFTER);
+      for (const running of [() => { throw new Error("pgrep is not here"); }, async () => null, async () => "no", undefined]) assert.equal(await quitWords(running, { claimed: true }), CANT_TELL_AFTER, String(running));
+      assert.ok(!QUIT_AFTER.includes("Nothing was changed") && !CANT_TELL_AFTER.includes("Nothing was changed"));
+    });
+    it("is nothing when HyperFrames is not running, claimed or not, and says the same words before the claim as it always did", async () => {
+      assert.equal(await quitWords(async () => false, { claimed: true }), "");
+      assert.equal(await quitWords(async () => true, { claimed: false }), QUIT);
+      assert.equal(await quitWords(async () => true, {}), QUIT);
+      assert.equal(await quitWords(async () => null, { claimed: false }), CANT_TELL);
+    });
   });
 });
 

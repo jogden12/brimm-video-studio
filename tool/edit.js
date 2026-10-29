@@ -1261,6 +1261,11 @@ const projectIsElsewhere = (name, on, of = "", holder = "") => `The HyperFrames 
 /** Who has the episode open, as projectIsElsewhere has it: "" when nobody does. */
 const holderOf = (ctx, record) => (record.editing ? (record.editing.by === ctx.machine ? "this Mac" : String(record.editing.by)) : "");
 
+/** How `app` asks whether HyperFrames is running, before it sets an older project aside (and again where the folder is moved): `ctx.deps.running`
+    when a test says (as `release` and `free` have it), else pgrep (free.js hyperFramesRunning), for which `ctx.deps.pgrep` is a test's stand-in
+    for spawnSync. The one place that default is, so that a test can tell it from no way to ask at all (the review of PR 18, F9). */
+const hyperFramesAsked = (ctx) => ctx.deps.running ?? (() => hyperFramesRunning(ctx.deps.pgrep));
+
 /** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it, or "": decided before anything is
     claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2). `key` says which project
     ("main" or "reel 2"), and `of` how its words name it.
@@ -1276,7 +1281,7 @@ async function olderWords(ctx, { found, record }, key, of) {
   if (!project || !plainName(project.name)) return "";
   const dir = join(episodeWork(ctx.home, found.name), project.name);
   if (!existsSync(dir)) return "";
-  if (olderMarked(found, { record, project, dir })) return quitWords(ctx.deps.running ?? (() => hyperFramesRunning()));
+  if (olderMarked(found, { record, project, dir })) return quitWords(hyperFramesAsked(ctx));
   return olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
 }
 
@@ -1361,7 +1366,7 @@ export async function app(ctx, rest) {
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: ctx.deps.running ?? (() => hyperFramesRunning()), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** `app "<episode>" reel <n> [--take-over]`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
@@ -1410,7 +1415,7 @@ async function appReel(ctx, asked, flags) {
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: ctx.deps.running ?? (() => hyperFramesRunning()), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. Throws,

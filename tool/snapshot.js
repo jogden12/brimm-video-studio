@@ -28,6 +28,9 @@
 // deleting nothing, and rebuild from the newer snapshot"): rebuildProject, given a place to set it aside to (asidePlace), builds the new project
 // beside its place first, then moves the older folder there with one rename, whole and as it is, then renames the new project into its place, and
 // puts the older folder back if that last step fails. A project with no marker is not set aside: its file times are not a word to act on.
+// The older folder's own `assets/` that a snapshot of it left out for weighing too much (ownAssets) never reached the other Mac, so the project
+// built from what it handed over lacks them: once that project is in its place they are renamed into it from the set-aside folder (keepAssets),
+// never over a path it has (the review of PR 18, F1).
 //
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
 import { randomUUID } from "node:crypto";
@@ -89,10 +92,17 @@ export function timeOf(name) {
 
 /** Where the older folder of the project called `name` is set aside to, in the episode's own work folder `work`: `set aside/<name> <moment>`,
     the moment as a snapshot's folder is named (timeName), taken a second later while that name is there (a link that leads nowhere is
-    there too, and so is anything that cannot be looked at), and null when none of a hundred seconds is free or `ms` is not a moment. Nothing
-    is written. */
+    there too, and so is anything that cannot be looked at), and null when none of a hundred seconds is free or `ms` is not a moment.
+    It is null too when `set aside` is there and is not a folder of its own: a link (to a folder in Dropbox, say) would have the rename
+    follow it out of the work folder, and a file would make it fail (the review of PR 18, F8). The work folder itself may be a link: the
+    project is in it too, so a rename into it goes where the project's own folder is. Nothing is written. */
 export function asidePlace(work, name, ms) {
   if (!Number.isFinite(ms)) return null;
+  try {
+    if (!lstatSync(join(work, ASIDE_DIR)).isDirectory()) return null;
+  } catch (e) {
+    // Not there (it is made when the older folder is moved), or not to be looked at: below, no name in it is found free either.
+  }
   for (let second = 0; second < ASIDE_TRIES; second++) {
     const place = join(work, ASIDE_DIR, `${name} ${timeName(ms + second * 1000)}`);
     try {
@@ -113,15 +123,15 @@ export function holds(rel) {
   return !LEFT_OUT.has(names[0]);
 }
 
-/** The files of a project's folder `dir` that go in its snapshot: { files, bytes, assets }, each file { rel, bytes, mtimeMs } in path order
-    (rel with "/"), `bytes` what they weigh together, and `assets` { any, bytes, left }: whether `assets/` holds a file, what it weighs, and
-    whether it was left out for weighing more than `assetsMost`. { unreadable: true } when the folder is not there, is not a folder (a link
-    is not one), or it or any folder in it cannot be read: a snapshot is never made of part of a project. Nothing is written. */
-export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
+/** Every file of a project's folder `dir` that a snapshot could hold, { rel, bytes, mtimeMs } in path order (rel with "/"): all but the
+    project's own top-level `media/`, `node_modules/`, `renders/` and `snapshots/`, every name that starts with a dot, at any depth (Dropbox
+    does not sync those), and any link, which is neither followed nor listed. null when the folder is not there, is not a folder (a link is
+    not one), or it or any folder in it cannot be read: a project is never taken for the part of it that could be read. Nothing is written. */
+function walkProject(dir) {
   try {
-    if (!lstatSync(dir).isDirectory()) return { unreadable: true };
+    if (!lstatSync(dir).isDirectory()) return null;
   } catch (e) {
-    return { unreadable: true };
+    return null;
   }
   const found = [];
   let unreadable = false;
@@ -149,17 +159,75 @@ export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
     }
   };
   walk(dir, "");
-  if (unreadable) return { unreadable: true };
-  // What the app was given: `assets/` but for Studio's own fonts and logos (the brand kit), which always go (the review of PR 11, M4). Over the
-  // limit, all of the rest is left out (never a part of it), and a note in the snapshot says so, so that the other Mac can tell it from a
-  // project that had no assets of its own.
+  return unreadable ? null : found;
+}
+
+/** What the app was given, of the files `found` (walkProject): `assets/` but for Studio's own fonts and logos (the brand kit), which always go
+    in a snapshot (the review of PR 11, M4). { inAssets, weighs, left }: those files, what they weigh, and whether a snapshot leaves them out:
+    over the limit all of them are left out (never a part of them). One rule for snapshotFiles, which leaves them out, and ownAssets, which
+    finds the files that were left out. */
+function assetsOf(found, assetsMost) {
   const inAssets = found.filter((file) => file.rel.startsWith("assets/") && !isBrandKit(file.rel));
   const weighs = inAssets.reduce((sum, file) => sum + file.bytes, 0);
-  const left = inAssets.length > 0 && weighs > assetsMost;
+  return { inAssets, weighs, left: inAssets.length > 0 && weighs > assetsMost };
+}
+
+/** The files of a project's folder `dir` that go in its snapshot: { files, bytes, assets }, each file { rel, bytes, mtimeMs } in path order
+    (rel with "/"), `bytes` what they weigh together, and `assets` { any, bytes, left }: whether `assets/` holds a file, what it weighs, and
+    whether it was left out for weighing more than `assetsMost`; over the limit none of it goes, and a note in the snapshot says so, so that the
+    other Mac can tell it from a project that had no assets of its own. { unreadable: true } when the folder is not there, is not a folder (a
+    link is not one), or it or any folder in it cannot be read: a snapshot is never made of part of a project. Nothing is written. */
+export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
+  const found = walkProject(dir);
+  if (found === null) return { unreadable: true };
+  const { inAssets, weighs, left } = assetsOf(found, assetsMost);
   const files = left
     ? [...found.filter((file) => !inAssets.includes(file)), { rel: LEFT_OUT_NOTE, bytes: Buffer.byteLength(LEFT_OUT_TEXT), text: LEFT_OUT_TEXT }].sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
     : found;
   return { files, bytes: files.reduce((sum, file) => sum + file.bytes, 0), assets: { any: inAssets.length > 0, bytes: weighs, left } };
+}
+
+/** The files of a project's folder `dir` that a snapshot of it leaves out for being too big, { rel, bytes }: its own `assets/`, but for the brand
+    kit, when they weigh more than `assetsMost` (the very rule snapshotFiles has), else none. These never reached the other Mac, so a project
+    rebuilt from what it handed over lacks them (plan PR 18, the review's F1). null when the folder cannot be read (walkProject): nothing can
+    be said of its assets. Nothing is written. */
+export function ownAssets(dir, { assetsMost = ASSETS_MOST } = {}) {
+  const found = walkProject(dir);
+  if (found === null) return null;
+  const { inAssets, left } = assetsOf(found, assetsMost);
+  return left ? inAssets.map(({ rel, bytes }) => ({ rel, bytes })) : [];
+}
+
+/** Move the older project's own assets `files` (ownAssets, listed from the folder `aside` it was set aside to) into the project at `dir`, the
+    one built from the newer snapshot: each by rename, on the one disk, making the folders it needs, so that the very file is there and nothing
+    is copied or deleted. A path the project already has (a file, a link or a folder: what the snapshot brought, or the other Mac's own) is
+    never written over, and its older file stays in the older folder. { kept, failed }: how many were moved, and how many could not be (a folder
+    in the way that is a file, a rename that fails, a path that is not a plain one of `assets/`), which stay where they were. `fs` is node:fs,
+    which a test replaces to make a step fail. */
+export function keepAssets({ aside, dir, files, fs = nodeFs }) {
+  let kept = 0;
+  let failed = 0;
+  for (const { rel } of files) {
+    if (typeof rel !== "string" || !rel.startsWith("assets/") || !holds(rel)) {
+      failed++;
+      continue;
+    }
+    const to = join(dir, rel);
+    try {
+      try {
+        fs.lstatSync(to);
+        continue;
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+      }
+      fs.mkdirSync(dirname(to), { recursive: true });
+      fs.renameSync(join(aside, rel), to);
+      kept++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  return { kept, failed };
 }
 
 /** The snapshots an episode's record lists, newest first, from its `files` (paths from the episode's folder, to their sizes):
@@ -299,9 +367,15 @@ export function momentText(ms, zone) {
     `aside` with one rename, whole and as it is, a rename of a folder on one volume copying and deleting nothing; then the new project is
     renamed into `dir`. A step that fails leaves the older folder where it was: one that fails before the move leaves nothing of its own; one
     that fails after it puts the older folder back with a rename, and then takes away the project it built (the one thing removed, which is
-    Studio's own and can be built again). Gives { assetsLeft, aside } when it was set aside, or { why }: those two, and "stuck" when even the
-    older folder could not be put back, which leaves it whole in its set-aside place and the new project built beside `dir`, nothing removed. */
-export function rebuildProject({ folder, snapshot, dir, cli, by = "", now, aside = null }, deps = {}) {
+    Studio's own and can be built again). Gives { assetsLeft, aside, assets } when it was set aside, or { why }: those two, and "stuck" when
+    even the older folder could not be put back, which leaves it whole in its set-aside place and the new project built beside `dir`, nothing
+    removed.
+    `assets` { kept, failed } is the review's F1 (PR 18): when the older folder's own `assets/` (the brand kit apart) weighed more than
+    `assetsMost`, a snapshot of it left them out, so they never reached the other Mac and the project built from what it handed over lacks
+    them. Once that project is in its place, each of those files it lacks is moved into it from the set-aside folder (keepAssets), never over
+    a path it has; `kept` is how many were moved and `failed` how many could not be, which stay in the set-aside folder. When they weighed the
+    limit or less they were handed over, and a file the other Mac removed is not brought back. */
+export function rebuildProject({ folder, snapshot, dir, cli, by = "", now, aside = null, assetsMost = ASSETS_MOST }, deps = {}) {
   const stats = snapshotStats(folder, { ...snapshot, files: snapshot.files.filter(({ rel }) => holds(rel)) });
   if (stats === null || stats.length === 0) return { why: "not whole" };
   // A file keeps the time it had, but not one in the future: the project's last change (exports.js projectChange) is read from these
@@ -320,8 +394,14 @@ export function rebuildProject({ folder, snapshot, dir, cli, by = "", now, aside
     }
     return { assetsLeft };
   }
-  const placed = replaceOlder({ dir, aside, files, fs: deps.fs ?? nodeFs });
-  return placed.why ? placed : { assetsLeft, aside };
+  const fs = deps.fs ?? nodeFs;
+  const placed = replaceOlder({ dir, aside, files, fs });
+  if (placed.why) return placed;
+  // The older folder is where `aside` says now, whole, and the new project is in its place: what the older folder had that never reached the
+  // other Mac is moved in last, so that a step before this one that fails leaves the older folder as it was. A folder that cannot be read
+  // says nothing of its assets, and is set aside whole all the same.
+  const own = ownAssets(aside, { assetsMost }) ?? [];
+  return { assetsLeft, aside, assets: keepAssets({ aside, dir, files: own, fs }) };
 }
 
 /** Put the project that `files` make (project.js) in place of the older folder at `dir`, which goes to `aside`: the order, and what a step that

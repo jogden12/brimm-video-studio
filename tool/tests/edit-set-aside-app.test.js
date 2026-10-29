@@ -10,8 +10,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as nodeFs from "node:fs";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { reelStretch } from "../app-reel.js";
 import { settingsText } from "../project.js";
@@ -42,21 +42,31 @@ function runsOf(mac) {
   return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
 }
 
-/** Every file, folder and link under `dir`, as { <path from it>: "dir" | "file:<its text>" | "link:<where it leads>" }: two folders are the same
-    byte for byte when these are. A link is not followed. */
+/** Every file, folder and link under `dir`, as { <path from it>: "dir" | "file:<its text>" | "big:<its size>" | "link:<where it leads>" }: two
+    folders are the same byte for byte when these are (a file over a megabyte, which is a sparse one here, by its size). A link is not followed. */
 function treeOf(dir) {
   const out = {};
   for (const rel of readdirSync(dir, { recursive: true }).sort()) {
     const here = lstatSync(join(dir, rel));
-    out[rel] = here.isSymbolicLink() ? `link:${readlinkSync(join(dir, rel))}` : here.isDirectory() ? "dir" : `file:${readFileSync(join(dir, rel), "utf8")}`;
+    out[rel] = here.isSymbolicLink() ? `link:${readlinkSync(join(dir, rel))}` : here.isDirectory() ? "dir" : here.size > 1024 * 1024 ? `big:${here.size}` : `file:${readFileSync(join(dir, rel), "utf8")}`;
   }
   return out;
 }
 const without = (tree, rel) => Object.fromEntries(Object.entries(tree).filter(([path]) => path !== rel));
+/** A file of `rel` in `dir` that weighs more than a snapshot takes of a project's assets (50 MB), made sparse so that it costs nothing. */
+const BIG = 51 * 1024 * 1024;
+function bigFile(dir, rel, size = BIG) {
+  mkdirSync(dirname(join(dir, rel)), { recursive: true });
+  writeFileSync(join(dir, rel), "");
+  truncateSync(join(dir, rel), size);
+  utimesSync(join(dir, rel), new Date(ms(13, 40)), new Date(ms(13, 40)));
+}
+/** `comeBack`'s `prepare`: a clip too big to hand over in the project of `key` on Mac Studio. */
+const withClip = (key = "main") => (w) => bigFile(w.dirOf(key), "assets/broll/clip.mp4");
 
 const OPEN = "It's open in HyperFrames.";
 const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
-const SET_ASIDE = (of = "") => `The older HyperFrames project for ${of}${NAME} was set aside on this Mac, and nothing was deleted.`;
+const SET_ASIDE = (of = "") => `The older HyperFrames project for ${of}${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
 const REBUILT = (when, of = "", by = "Sallie's laptop") => `The HyperFrames project for ${of}${NAME} is rebuilt on this Mac from what ${by} handed over at ${when}. What HyperFrames kept of its history stays on ${by}.`;
 const KEPT = (of = "") => `The video for ${of}${NAME} was kept from the older project, and it is in the project.`;
 const MAKING = `The video for HyperFrames is being made. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
@@ -65,6 +75,17 @@ const MAKING_REEL = `The video for Reel 2 is being made. Say "${AGAIN_REEL}" aga
 const BACK = `The video for ${NAME} was made again, and it is in the project.`;
 const QUIT = "Quit HyperFrames first, so that the older project can be set aside, then say it again. Nothing was changed.";
 const CANT_TELL = "I can't tell whether HyperFrames is open. Quit it if it is, then say it again. Nothing was changed.";
+// Asked again where the folder is moved, the episode is claimed, so "Nothing was changed." would not be true (the review of PR 18, F5).
+const QUIT_AFTER = "Quit HyperFrames first, so that the older project can be set aside, then say it again. The older project was left where it was.";
+const CANT_TELL_AFTER = "I can't tell whether HyperFrames is open. Quit it if it is, then say it again. The older project was left where it was.";
+// A recording that has changed is known before anything is moved, so the older project is left where it was (F3).
+const RECORDING_CHANGED = `The recording of ${NAME} has changed since its HyperFrames project was made, so the older project was left where it was. Ask Jason.`;
+// The older folder's own assets that were too big to hand over (F1).
+const files = (n) => (n === 1 ? "1 file" : `${n} files`);
+const ASSETS_KEPT = (n) => `Assets of the older project (pictures, music and video) that were too big to hand over were kept, and they are in the project: ${files(n)}.`;
+const ASSETS_NOT_KEPT = (n) => `Assets of the older project (pictures, music and video) could not be moved into the project: ${files(n)}. They are in the older project, set aside on this Mac. Ask Jason.`;
+const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
+const ASSETS_REST_NOT_IN = "The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.";
 const OLDER = (of = "") => `The HyperFrames project for ${of}${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 const COULD_NOT = (of = "") => `The HyperFrames project for ${of}${NAME} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`;
 const NOT_WHOLE = (of = "") => `The snapshot of the HyperFrames project for ${of}${NAME} is not whole on this Mac, so the older project was left where it was. Ask Jason.`;
@@ -78,10 +99,12 @@ const SECOND = "<div>A second card</div>";
     one and hands it over (T2). Mac Studio's folder is then older than the newest snapshot, by its marker, which names T1. For a Reel (`reel`) it is
     Reel 2's project. Mac Studio's working copy was moved into its project when the project was made, and what stays beside the others is its
     facts, which are put there as they stand on a Mac that made the project (`facts: false` leaves them out; `facts` may also be the facts' own
-    changes). Gives the world and: `key` and `words` (the project's and the arguments that name it), `project` its folder's name and `dirOf` its
-    folder on Mac Studio, `T2` the laptop's snapshot's name, and `when` its moment as she is told it. */
-async function comeBack({ reel = false, facts = true, ...options } = {}) {
+    changes). `prepare(w)` changes Mac Studio's project before it hands it over, and `laptop(w, project)` the laptop's before it does (the folder's
+    name is `project`). Gives the world and: `key` and `words` (the project's and the arguments that name it), `project` its folder's name and
+    `dirOf` its folder on Mac Studio, `T2` the laptop's snapshot's name, and `when` its moment as she is told it. */
+async function comeBack({ reel = false, facts = true, prepare = null, laptop = null, ...options } = {}) {
   const w = takeOverWorld({ projects: reel ? ["main", "reel 2"] : ["main"], ...options });
+  if (prepare) prepare(w);
   assert.equal((await release(w.t.ctx.deps)).code, 0);
   const words = reel ? ["reel", "2"] : [];
   const project = w.names[reel ? "reel 2" : "main"];
@@ -93,6 +116,7 @@ async function comeBack({ reel = false, facts = true, ...options } = {}) {
     writeFileSync(join(w.b.work, project, rel), text);
     utimesSync(join(w.b.work, project, rel), new Date(ms(16, 0)), new Date(ms(16, 0)));
   }
+  if (laptop) laptop(w, project);
   await w.t.ctx.deps.wait(60000);
   const handed = await release(w.b.deps);
   assert.equal(handed.code, 0, handed.text);
@@ -284,24 +308,27 @@ describe("app: HyperFrames must be quit before an older project is set aside (pl
     }
   }
   for (const reel of [false, true]) {
-    it(`is asked again where ${reel ? "Reel 2's" : "the main video's"} folder is moved, after the claim, which waits and may bring a record that lists a newer snapshot: open then, it refuses in the same words and moves nothing`, async () => {
-      const w = await comeBack({ reel });
-      const was = olderOf(w);
-      let asked = 0;
-      w.t.ctx.deps.running = async (name) => {
-        assert.equal(name, "HyperFrames");
-        return ++asked > 1;
-      };
-      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
-      assert.deepEqual([r.code, r.said], [1, [QUIT]]);
-      assert.equal(asked, 2, "before the claim and where the folder would move");
-      assert.equal(reread(w.found).editing.by, "Mac Studio", "the claim was made, as it is for any app that stops after it");
-      assert.equal(lstatSync(w.dir).ino, was.ino);
-      assert.deepEqual(treeOf(w.dir), was.tree);
-      assert.equal(existsSync(join(w.work, ASIDE_DIR)), false);
-      assert.deepEqual(runsOf({ home: w.t.home }), []);
-      w.t.done();
-    });
+    for (const [what, second, words] of [["open", async () => true, QUIT_AFTER], ["not to be told", async () => null, CANT_TELL_AFTER], ["not to be told (a throw)", async () => { throw new Error("pgrep is not here"); }, CANT_TELL_AFTER]]) {
+      it(`is asked again where ${reel ? "Reel 2's" : "the main video's"} folder is moved, after the claim, which waits and may bring a record that lists a newer snapshot: ${what} then, it refuses in words that say the older project was left where it was, and not that nothing was changed, since the claim was made (the review of PR 18, F5)`, async () => {
+        const w = await comeBack({ reel });
+        const was = olderOf(w);
+        let asked = 0;
+        w.t.ctx.deps.running = async (name) => {
+          assert.equal(name, "HyperFrames");
+          return ++asked > 1 ? second() : false;
+        };
+        const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+        assert.deepEqual([r.code, r.said], [1, [words]]);
+        assert.doesNotMatch(r.text, /Nothing was changed/);
+        assert.equal(asked, 2, "before the claim and where the folder would move");
+        assert.equal(reread(w.found).editing.by, "Mac Studio", "the claim was made, as it is for any app that stops after it");
+        assert.equal(lstatSync(w.dir).ino, was.ino);
+        assert.deepEqual(treeOf(w.dir), was.tree);
+        assert.equal(existsSync(join(w.work, ASIDE_DIR)), false);
+        assert.deepEqual(runsOf({ home: w.t.home }), []);
+        w.t.done();
+      });
+    }
   }
   it("is asked of no project that is not older: a current project, a project never handed over and a project with no marker are opened or refused as before, and HyperFrames is not asked about", async () => {
     // A project this Mac handed over itself is current.
@@ -715,9 +742,275 @@ describe("every line of an older project's return is plain, for an episode named
       await run(lost.t.ctx.deps, FOLDER, ...lost.words);
       lost.t.done();
     }
+    // The lines of the review of PR 18: assets kept and not kept, a recording that changed, the second look at HyperFrames, and a set-aside link.
+    for (const reel of [false, true]) {
+      const big = await comeBack({ reel, name, prepare: withClip(reel ? "reel 2" : "main"), laptop: (w, project) => bigFile(join(w.b.work, project), "assets/laptop/b-roll.mp4") });
+      const real = big.t.ctx.deps.app;
+      big.t.ctx.deps.app = { ...real, fs: { ...nodeFs, renameSync: (from, to) => (from.endsWith("clip.mp4") && from.includes(`${ASIDE_DIR}/`) ? (() => { throw new Error("EXDEV: cross-device link not permitted"); })() : nodeFs.renameSync(from, to)) } };
+      await run(big.t.ctx.deps, FOLDER, ...big.words);
+      big.t.done();
+      const changed = await comeBack({ reel, name });
+      utimesSync(join(changed.found.folder, "Pricing talk.mp4"), 1, 1);
+      await run(changed.t.ctx.deps, FOLDER, ...changed.words);
+      changed.t.done();
+      const second = await comeBack({ reel, name });
+      let asked = 0;
+      second.t.ctx.deps.running = async () => ++asked > 1;
+      await run(second.t.ctx.deps, FOLDER, ...second.words);
+      second.t.done();
+      const linked = await comeBack({ reel, name });
+      mkdirSync(join(linked.t.dir, "elsewhere"));
+      symlinkSync(join(linked.t.dir, "elsewhere"), join(linked.work, ASIDE_DIR));
+      await run(linked.t.ctx.deps, FOLDER, ...linked.words);
+      linked.t.done();
+    }
     assert.ok(lines.some((line) => line.includes(name)), "the name is said");
     assert.ok(lines.some((line) => line.startsWith("The older HyperFrames project for ")));
     assert.ok(lines.some((line) => line.startsWith("Quit HyperFrames first")));
+    for (const text of ["Assets of the older project (pictures, music and video) that were too big", "The rest of its assets", "Assets of the older project (pictures, music and video) could not be moved", "has changed since its HyperFrames project was made, so the older project was left where it was", "The older project was left where it was."]) {
+      assert.ok(lines.some((line) => line.includes(text)), text);
+    }
     for (const line of lines) assert.doesNotMatch(line, PLAIN, line);
   });
+});
+
+describe("app: the older folder's own assets that were too big to hand over come into the rebuilt project (the review of PR 18, F1)", () => {
+  const CLIP = "assets/broll/clip.mp4";
+  const MUSIC = "assets/music/theme.mp3";
+  const DOWN = "EXDEV: cross-device link not permitted";
+  /** A rename out of the set-aside folder that fails for the paths `which` gives. */
+  const failing = (w, which) => ({ ...w.t.ctx.deps.app, fs: { ...nodeFs, renameSync: (from, to) => (from.includes(`${ASIDE_DIR}/`) && which(from) ? (() => { throw new Error(DOWN); })() : nodeFs.renameSync(from, to)) } });
+  for (const reel of [false, true]) {
+    it(`moves ${reel ? "Reel 2's" : "the main project's"} big assets into the rebuilt project, the very files, and says how many: the snapshot left them out, so the laptop never had them and a return would have left them only in the set-aside folder`, async () => {
+      const w = await comeBack({ reel, prepare: withClip(reel ? "reel 2" : "main") });
+      // T1 left all of the project's assets but the brand kit out, with the note that says so; the laptop's project lacks them, and T2 has no note.
+      const [t1] = readdirSync(join(w.found.folder, "app-snapshot")).sort();
+      assert.equal(existsSync(join(w.found.folder, "app-snapshot", t1, w.project, "assets", "left-out.txt")), true);
+      assert.equal(existsSync(join(w.found.folder, "app-snapshot", w.T2, w.project, "assets", "left-out.txt")), false);
+      assert.equal(existsSync(join(w.b.work, w.project, CLIP)), false, "the laptop never had the clip");
+      const was = olderOf(w);
+      const inos = [CLIP, MUSIC].map((rel) => lstatSync(join(w.dir, rel)).ino);
+      const outside = outsideRecord(w);
+      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(w.of), REBUILT(w.when, w.of), ASSETS_KEPT(2), KEPT(w.of), OPEN, BUTTONS]]);
+      assert.deepEqual([CLIP, MUSIC].map((rel) => lstatSync(join(w.dir, rel)).ino), inos, "moved and not copied");
+      assert.equal(lstatSync(join(w.dir, CLIP)).size, BIG);
+      const [aside] = asidesOf(w);
+      assert.deepEqual(treeOf(aside), without(without(without(was.tree, "media/recording.mp4"), CLIP), MUSIC), "the older folder is whole but for its video and its assets, which are in the project");
+      assert.deepEqual(outsideRecord(w), outside, "nothing was put into the episode's folder in Dropbox");
+      assert.equal(readFileSync(join(w.dir, "assets", "fonts", "Allison-Regular.ttf"), "utf8"), "a font", "and the brand kit the snapshot brought is as it was");
+      const again = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([again.code, again.said], [0, [OPEN, BUTTONS]], "the next ask is an ordinary open");
+      w.t.done();
+    });
+  }
+  it("does not bring back a small asset the other Mac removed: it was handed over, so it is in the older folder only because the other Mac took it away", async () => {
+    const w = await comeBack({ laptop: (w, project) => rmSync(join(w.b.work, project, MUSIC)) });
+    assert.equal(existsSync(join(w.found.folder, "app-snapshot", w.T2, w.project, MUSIC)), false, "the other Mac's snapshot does not have it");
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), KEPT(), OPEN, BUTTONS]]);
+    assert.equal(existsSync(join(w.dir, MUSIC)), false);
+    const [aside] = asidesOf(w);
+    assert.equal(readFileSync(join(aside, MUSIC), "utf8"), "some music", "it stays in the set-aside folder");
+    w.t.done();
+  });
+  it("leaves a file the other Mac replaced at the same path the other Mac's, and says one file was moved: the older one stays in the set-aside folder", async () => {
+    const w = await comeBack({ prepare: withClip(), laptop: (w, project) => (mkdirSync(join(w.b.work, project, "assets/broll"), { recursive: true }), writeFileSync(join(w.b.work, project, CLIP), "the laptop's clip")) });
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), ASSETS_KEPT(1), KEPT(), OPEN, BUTTONS]]);
+    assert.equal(readFileSync(join(w.dir, CLIP), "utf8"), "the laptop's clip");
+    const [aside] = asidesOf(w);
+    assert.equal(lstatSync(join(aside, CLIP)).size, BIG, "the older clip stays where it was set aside");
+    assert.equal(existsSync(join(aside, MUSIC)), false);
+    assert.equal(readFileSync(join(w.dir, MUSIC), "utf8"), "some music");
+    w.t.done();
+  });
+  it("says the rest of its assets are not in it, and not that they all are not, when the other Mac's snapshot has its own note: what was kept is in, what it left out is not, and the lines do not contradict each other", async () => {
+    const w = await comeBack({ prepare: withClip(), laptop: (w, project) => bigFile(join(w.b.work, project), "assets/laptop/b-roll.mp4") });
+    assert.equal(existsSync(join(w.found.folder, "app-snapshot", w.T2, w.project, "assets", "left-out.txt")), true, "the laptop's own assets were too big to hand over");
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), ASSETS_KEPT(2), ASSETS_REST_NOT_IN, KEPT(), OPEN, BUTTONS]]);
+    assert.equal(existsSync(join(w.dir, CLIP)), true);
+    assert.equal(existsSync(join(w.dir, "assets", "laptop")), false, "what the laptop left out is not here");
+    assert.equal(existsSync(join(w.dir, "assets", "left-out.txt")), false, "and the note is no file of the project");
+    w.t.done();
+  });
+  it("keeps saying the snapshot's own line, as it did, when the other Mac's snapshot has a note and nothing of the older folder's was too big: its small assets were handed over, so none is moved, and they stay in the set-aside folder as the line says", async () => {
+    const w = await comeBack({ laptop: (w, project) => bigFile(join(w.b.work, project), "assets/laptop/b-roll.mp4") });
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), ASSETS_NOT_IN, KEPT(), OPEN, BUTTONS]]);
+    assert.equal(existsSync(join(w.dir, MUSIC)), false, "the other Mac's snapshot left every asset out, the music it was handed with them");
+    const [aside] = asidesOf(w);
+    assert.equal(readFileSync(join(aside, MUSIC), "utf8"), "some music");
+    w.t.done();
+  });
+  for (const reel of [false, true]) {
+    it(`loses nothing when ${reel ? "Reel 2's" : "the main project's"} clip cannot be moved: it stays in the set-aside folder, the other asset is moved, the line says which and where, and the app opens`, async () => {
+      const w = await comeBack({ reel, prepare: withClip(reel ? "reel 2" : "main") });
+      const was = olderOf(w);
+      const clip = lstatSync(join(w.dir, CLIP)).ino;
+      w.t.ctx.deps.app = failing(w, (from) => from.endsWith("clip.mp4"));
+      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(w.of), REBUILT(w.when, w.of), ASSETS_KEPT(1), ASSETS_NOT_KEPT(1), KEPT(w.of), OPEN, BUTTONS]]);
+      const [aside] = asidesOf(w);
+      assert.equal(lstatSync(join(aside, CLIP)).ino, clip, "the clip is whole where it was set aside");
+      assert.equal(existsSync(join(w.dir, CLIP)), false);
+      assert.deepEqual(treeOf(aside), without(without(was.tree, "media/recording.mp4"), MUSIC));
+      assert.equal(readFileSync(join(w.dir, MUSIC), "utf8"), "some music");
+      w.t.done();
+    });
+  }
+  it("says only that they could not be moved, in the words for none moved, when none could be", async () => {
+    const w = await comeBack({ prepare: withClip() });
+    w.t.ctx.deps.app = failing(w, () => true);
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), ASSETS_NOT_KEPT(2), KEPT(), OPEN, BUTTONS]]);
+    w.t.done();
+  });
+  it("moves nothing, and says nothing of assets, when the older folder's are small: they were handed over, and the project it is rebuilt from has them", async () => {
+    const w = await comeBack();
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [SET_ASIDE(), REBUILT(w.when), KEPT(), OPEN, BUTTONS]]);
+    assert.equal(readFileSync(join(w.dir, MUSIC), "utf8"), "some music");
+    const [aside] = asidesOf(w);
+    assert.equal(readFileSync(join(aside, MUSIC), "utf8"), "some music", "and the older folder keeps its own");
+    w.t.done();
+  });
+});
+
+describe("app: the set-aside line says where the changes that were not handed over are (the review of PR 18, F2)", () => {
+  it("says it whatever the older folder held, and they are there: an edit made after the hand-over, and a card made after it, are in the set-aside folder and not in the project", async () => {
+    // Mac Studio went on after its hand-over and never said it was done; the laptop took over and handed over; Mac Studio comes back.
+    const w = await comeBack();
+    writeFileSync(join(w.dir, "compositions", "late-card.html"), "<div>Made after the hand-over</div>");
+    writeFileSync(join(w.dir, "compositions", "title-card.html"), "<div>Edited after the hand-over</div>");
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
+    const [aside] = asidesOf(w);
+    assert.equal(readFileSync(join(aside, "compositions", "late-card.html"), "utf8"), "<div>Made after the hand-over</div>");
+    assert.equal(readFileSync(join(aside, "compositions", "title-card.html"), "utf8"), "<div>Edited after the hand-over</div>");
+    assert.equal(existsSync(join(w.dir, "compositions", "late-card.html")), false);
+    assert.equal(readFileSync(join(w.dir, "compositions", "title-card.html"), "utf8"), CHANGED, "and the project in its place has the other Mac's");
+    w.t.done();
+  });
+  it("says it of a Reel's project in the same words, naming the Reel", async () => {
+    const w = await comeBack({ reel: true });
+    const r = await app(w.t.ctx.deps, FOLDER, "reel", "2");
+    assert.equal(r.said[0], `The older HyperFrames project for Reel 2 of ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
+    w.t.done();
+  });
+});
+
+describe("app: a recording that has changed is known before the older folder is moved (the review of PR 18, F3)", () => {
+  for (const reel of [false, true]) {
+    it(`leaves ${reel ? "Reel 2's" : "the main"} older project where it was and says why, when the recording has changed since it was made: nothing is set aside, built, asked for or opened`, async () => {
+      const w = await comeBack({ reel });
+      utimesSync(join(w.found.folder, "Pricing talk.mp4"), 1, 1);
+      const was = olderOf(w);
+      let asked = 0;
+      const running = w.t.ctx.deps.running;
+      w.t.ctx.deps.running = async (name) => (asked++, running(name));
+      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([r.code, r.said], [1, [RECORDING_CHANGED]]);
+      assert.equal(asked, 1, "HyperFrames was asked about before the claim and not again: the recording is looked at first, since quitting would not help");
+      assert.equal(lstatSync(w.dir).ino, was.ino);
+      assert.deepEqual(treeOf(w.dir), was.tree);
+      assert.deepEqual(asidesOf(w), []);
+      assert.equal(existsSync(join(w.work, ASIDE_DIR)), false);
+      assert.deepEqual(readdirSync(w.work).filter((name) => name.endsWith(".new") || name.endsWith(".part")), [], "no project was built");
+      assert.deepEqual(w.t.started, [], "no video was asked for");
+      assert.deepEqual(runsOf({ home: w.t.home }), [], "the app was not asked");
+      assert.equal(reread(w.found).editing.by, "Mac Studio", "the claim was made, as it is for any app that stops after it");
+      w.t.done();
+    });
+  }
+  it("is not what stops a recording that has not changed: the older project is set aside as before", async () => {
+    const w = await comeBack();
+    const r = await app(w.t.ctx.deps, FOLDER);
+    assert.equal(r.said[0], SET_ASIDE());
+    w.t.done();
+  });
+});
+
+describe("app: a set-aside folder that is a link is not moved through (the review of PR 18, F8)", () => {
+  for (const reel of [false, true]) {
+    it(`leaves ${reel ? "Reel 2's" : "the main"} older project where it was and says it could not be rebuilt, when the set-aside folder is a link to a folder elsewhere: nothing goes through the link, and nothing is built`, async () => {
+      const w = await comeBack({ reel });
+      const elsewhere = join(w.t.dir, "elsewhere");
+      mkdirSync(elsewhere);
+      symlinkSync(elsewhere, join(w.work, ASIDE_DIR));
+      const was = olderOf(w);
+      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([r.code, r.said], [1, [COULD_NOT(w.of)]]);
+      assert.deepEqual(readdirSync(elsewhere), [], "nothing went through the link");
+      assert.equal(readlinkSync(join(w.work, ASIDE_DIR)), elsewhere, "and the link is as it was");
+      assert.equal(lstatSync(w.dir).ino, was.ino);
+      assert.deepEqual(treeOf(w.dir), was.tree);
+      assert.deepEqual(readdirSync(w.work).filter((name) => name.endsWith(".new") || name.endsWith(".part")), []);
+      assert.deepEqual(w.t.started, []);
+      // The link taken away by hand, the next ask sets it aside, as it does after any failure.
+      rmSync(join(w.work, ASIDE_DIR));
+      const again = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.equal(again.code, 0, again.text);
+      assert.equal(again.said[0], SET_ASIDE(w.of));
+      assert.equal(asidesOf(w).length, 1);
+      w.t.done();
+    });
+  }
+});
+
+describe("app: HyperFrames is asked about with pgrep when no one says whether it is running (the review of PR 18, F9)", () => {
+  /** A stand-in for spawnSync that answers as pgrep does, remembering how it was asked: the last status is the answer for any later ask. */
+  function pgrepAnswering(...statuses) {
+    const calls = [];
+    return { calls, pgrep: (program, args) => (calls.push([program, args]), { status: statuses[Math.min(calls.length - 1, statuses.length - 1)] }) };
+  }
+  /** No one tells the command whether HyperFrames is running: it asks pgrep. */
+  const unaware = (w, answers) => {
+    delete w.t.ctx.deps.running;
+    w.t.ctx.deps.pgrep = answers.pgrep;
+  };
+  for (const reel of [false, true]) {
+    it(`asks pgrep for HyperFrames by its name before ${reel ? "Reel 2" : "the main video"} is claimed: running, it refuses in the words for the quit and changes nothing; not running, it sets the older project aside and asks again where it is moved`, async () => {
+      const w = await comeBack({ reel });
+      const running = pgrepAnswering(0);
+      unaware(w, running);
+      const before = stateOf(w);
+      const refused = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([refused.code, refused.said], [1, [QUIT]]);
+      assert.deepEqual(running.calls, [["/usr/bin/pgrep", ["-x", "HyperFrames"]]]);
+      assert.deepEqual(stateOf(w), before);
+      const quiet = pgrepAnswering(1);
+      w.t.ctx.deps.pgrep = quiet.pgrep;
+      const done = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.equal(done.code, 0, done.text);
+      assert.equal(done.said[0], SET_ASIDE(w.of));
+      assert.equal(quiet.calls.length, 2, "before the claim and where the folder is moved");
+      w.t.done();
+    });
+    it(`asks pgrep again where ${reel ? "Reel 2's" : "the main video's"} folder is moved: started in between, it refuses in the words for after the claim and moves nothing`, async () => {
+      const w = await comeBack({ reel });
+      const answers = pgrepAnswering(1, 0);
+      unaware(w, answers);
+      const was = olderOf(w);
+      const r = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([r.code, r.said], [1, [QUIT_AFTER]]);
+      assert.equal(answers.calls.length, 2);
+      assert.equal(lstatSync(w.dir).ino, was.ino);
+      assert.deepEqual(asidesOf(w), []);
+      w.t.done();
+    });
+    it(`says it cannot tell when pgrep says nothing it can use, before and after the claim, for ${reel ? "Reel 2" : "the main video"}`, async () => {
+      const w = await comeBack({ reel });
+      unaware(w, pgrepAnswering(2));
+      const before = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([before.code, before.said], [1, [CANT_TELL]]);
+      unaware(w, pgrepAnswering(1, null));
+      const after = await app(w.t.ctx.deps, FOLDER, ...w.words);
+      assert.deepEqual([after.code, after.said], [1, [CANT_TELL_AFTER]]);
+      assert.deepEqual(asidesOf(w), []);
+      w.t.done();
+    });
+  }
 });

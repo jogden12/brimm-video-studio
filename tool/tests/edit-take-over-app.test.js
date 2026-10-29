@@ -546,7 +546,7 @@ describe("app and release: which project is older goes by the marker, not by the
     assert.equal(`app-snapshot/${second}/${MAIN}/compositions/title-card.html` in reread(w.found).files, false);
     const opened = await app(w.t.ctx.deps, FOLDER);
     assert.equal(opened.code, 0, opened.text);
-    assert.equal(opened.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted.`);
+    assert.equal(opened.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
     assert.equal(existsSync(join(w.dirOf("main"), "compositions", "title-card.html")), false, "what the laptop deleted stays deleted");
     const [aside] = readdirSync(join(w.work, "set aside"));
     assert.equal(existsSync(join(w.work, "set aside", aside, "compositions", "title-card.html")), true, "and is in the folder that was set aside");
@@ -564,7 +564,7 @@ describe("app and release: which project is older goes by the marker, not by the
     // Set aside and rebuilt from the newest, Mac Studio has what the laptop changed, though its snapshot is named before the first.
     const rebuilt = await app(w.t.ctx.deps, FOLDER);
     assert.equal(rebuilt.code, 0, rebuilt.text);
-    assert.equal(rebuilt.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted.`);
+    assert.equal(rebuilt.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
     assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
     w.t.done();
   });

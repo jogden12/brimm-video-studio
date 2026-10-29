@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASIDE_DIR, ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, asidePlace, behindSnapshot, holds, keptSnapshots, listedBy, markedOlder, markerText, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf,
+  ASIDE_DIR, ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, asidePlace, behindSnapshot, holds, keepAssets, keptSnapshots, listedBy, markedOlder, markerText, momentText, notSynced, olderThan, ownAssets, readMarker, rebuildProject, snapshotFiles, snapshotOf,
   snapshotStats, snapshotsOf, timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
@@ -623,6 +623,184 @@ describe("asidePlace: where an older project folder is set aside to (PR 18)", ()
   it("is none for a moment that is not one", () => {
     for (const ms of [Number.NaN, undefined, null, "now"]) assert.equal(asidePlace("/work", MAIN, ms), null, String(ms));
   });
+  it("is none when the set-aside folder is a link, whatever it leads to, or a file: a rename into it would follow the link out of the work folder, into Dropbox perhaps (the review of PR 18, F8)", (c) => {
+    const base = scratch(c);
+    const work = join(base, "work");
+    const elsewhere = join(base, "elsewhere");
+    mkdirSync(work);
+    mkdirSync(elsewhere);
+    const ms = Date.parse("2026-10-29T19:20:41Z");
+    symlinkSync(elsewhere, join(work, ASIDE_DIR));
+    assert.equal(asidePlace(work, MAIN, ms), null, "a link to a folder");
+    rmSync(join(work, ASIDE_DIR));
+    symlinkSync(join(base, "nowhere"), join(work, ASIDE_DIR));
+    assert.equal(asidePlace(work, MAIN, ms), null, "a link that leads nowhere");
+    rmSync(join(work, ASIDE_DIR));
+    writeFileSync(join(work, ASIDE_DIR), "a file");
+    assert.equal(asidePlace(work, MAIN, ms), null, "a file");
+    rmSync(join(work, ASIDE_DIR));
+    mkdirSync(join(work, ASIDE_DIR));
+    assert.equal(asidePlace(work, MAIN, ms), join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.41Z`), "a folder of its own is the place");
+    assert.deepEqual(readdirSync(elsewhere), [], "and nothing was written behind the link");
+  });
+  it("is none when a folder on the way to the set-aside folder is a link that takes it elsewhere, and is its place when the work folder is itself a link and the set-aside folder is in the folder it leads to", (c) => {
+    const base = scratch(c);
+    const real = join(base, "real");
+    const elsewhere = join(base, "elsewhere");
+    mkdirSync(real);
+    mkdirSync(elsewhere);
+    symlinkSync(elsewhere, join(real, ASIDE_DIR));
+    const work = join(base, "work-link");
+    symlinkSync(real, work);
+    const ms = Date.parse("2026-10-29T19:20:41Z");
+    assert.equal(asidePlace(work, MAIN, ms), null);
+    rmSync(join(real, ASIDE_DIR));
+    mkdirSync(join(real, ASIDE_DIR));
+    assert.equal(asidePlace(work, MAIN, ms), join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.41Z`), "the project is in that very folder, wherever it leads");
+  });
+  it("is none when the work folder is a file, so that `set aside` cannot be looked at: nothing can be said of what is in it", (c) => {
+    const base = scratch(c);
+    writeFileSync(join(base, "afile"), "x");
+    assert.equal(asidePlace(join(base, "afile"), MAIN, Date.parse("2026-10-29T19:20:41Z")), null);
+  });
+});
+
+describe("ownAssets: the files of an older project's assets that never reached the other Mac (plan PR 18, the review's F1)", () => {
+  const folderWith = (c, files) => {
+    const dir = join(scratch(c), "project");
+    for (const [rel, bytes] of Object.entries(files)) put(dir, rel, "x".repeat(bytes));
+    return dir;
+  };
+  const ASSETS = { "index.html": 3, "assets/fonts/a.woff2": 9, "assets/logos/m.png": 9, "assets/broll/b.mp4": 6, "assets/broll/a.mp4": 6, "assets/.hidden": 9, "assets/x/.cache/y": 9, "media/recording.mp4": 9, "renders/r.mp4": 9 };
+  it("is the files of assets/ but the brand kit, in path order with their sizes, when they weigh more than the limit: those a snapshot leaves out, and a note says so", (c) => {
+    const dir = folderWith(c, ASSETS);
+    assert.deepEqual(ownAssets(dir, { assetsMost: 11 }), [{ rel: "assets/broll/a.mp4", bytes: 6 }, { rel: "assets/broll/b.mp4", bytes: 6 }]);
+    const snapshot = snapshotFiles(dir, { assetsMost: 11 });
+    assert.equal(snapshot.assets.left, true);
+    assert.deepEqual(relsOf(snapshot).filter((rel) => rel.startsWith("assets/")), ["assets/fonts/a.woff2", "assets/left-out.txt", "assets/logos/m.png"]);
+  });
+  it("is none when they weigh the limit or less: they were handed over, and a file the other Mac removed was removed there", (c) => {
+    const dir = folderWith(c, ASSETS);
+    assert.deepEqual(ownAssets(dir, { assetsMost: 12 }), []);
+    assert.deepEqual(ownAssets(dir), [], "and by the real limit, 50 MB");
+    assert.equal(snapshotFiles(dir, { assetsMost: 12 }).assets.left, false);
+  });
+  it("is the rule snapshotFiles has, at every limit: assets are listed exactly when a snapshot leaves them out", (c) => {
+    const dir = folderWith(c, ASSETS);
+    for (let most = 0; most <= 14; most++) assert.equal(ownAssets(dir, { assetsMost: most }).length > 0, snapshotFiles(dir, { assetsMost: most }).assets.left, String(most));
+  });
+  it("is none for a folder with no assets of the app's, or only the brand kit, however small the limit", (c) => {
+    assert.deepEqual(ownAssets(folderWith(c, { "index.html": 3 }), { assetsMost: 0 }), []);
+    assert.deepEqual(ownAssets(folderWith(c, { "index.html": 3, "assets/fonts/a.woff2": 99, "assets/logos/m.png": 99 }), { assetsMost: 0 }), []);
+  });
+  it("leaves out a link, and follows none: what is not a file of the project is not the project's to keep", (c) => {
+    const dir = folderWith(c, { "index.html": 3, "assets/b.mp4": 20 });
+    const elsewhere = join(scratch(c), "elsewhere.mp4");
+    writeFileSync(elsewhere, "x".repeat(40));
+    symlinkSync(elsewhere, join(dir, "assets", "linked.mp4"));
+    symlinkSync(dirname(elsewhere), join(dir, "assets", "linked-folder"));
+    assert.deepEqual(ownAssets(dir, { assetsMost: 10 }), [{ rel: "assets/b.mp4", bytes: 20 }]);
+  });
+  it("is null when the folder cannot be read, is not a folder or is not there: nothing can be said of its assets", (c) => {
+    const base = scratch(c);
+    assert.equal(ownAssets(join(base, "nowhere")), null);
+    writeFileSync(join(base, "afile"), "x");
+    assert.equal(ownAssets(join(base, "afile")), null);
+    symlinkSync(base, join(base, "alink"));
+    assert.equal(ownAssets(join(base, "alink")), null, "a link is not a folder");
+    if (process.getuid && process.getuid() !== 0) {
+      const dir = folderWith(c, { "index.html": 3, "assets/b.mp4": 20 });
+      put(dir, "unreadable/x", "x");
+      chmodSync(join(dir, "unreadable"), 0o000);
+      assert.equal(ownAssets(dir, { assetsMost: 10 }), null);
+      chmodSync(join(dir, "unreadable"), 0o755);
+    }
+  });
+  it("writes nothing", (c) => {
+    const dir = folderWith(c, ASSETS);
+    const before = treeOf(dir);
+    ownAssets(dir, { assetsMost: 11 });
+    assert.deepEqual(treeOf(dir), before);
+  });
+});
+
+describe("keepAssets: the older project's own assets moved into the project in its place (plan PR 18, the review's F1)", () => {
+  /** The older folder, as it stands in its set-aside place, and the project in its place, each with `files` (path: text). */
+  function folders(c, older, newer = {}) {
+    const base = scratch(c);
+    const aside = join(base, "aside");
+    const dir = join(base, "project");
+    mkdirSync(dir, { recursive: true });
+    for (const [rel, text] of Object.entries(older)) put(aside, rel, text);
+    for (const [rel, text] of Object.entries(newer)) put(dir, rel, text);
+    return { base, aside, dir };
+  }
+  const OLDER = { "assets/broll/a.mp4": "clip a", "assets/broll/b.mp4": "clip b", "assets/pictures/deep/c.png": "picture c" };
+  const FILES = Object.entries(OLDER).map(([rel, text]) => ({ rel, bytes: text.length }));
+  it("renames each file into the project, making the folders it needs, so that it is the very file and not a copy", (c) => {
+    const w = folders(c, OLDER, { "assets/fonts/a.woff2": "font" });
+    const inos = Object.fromEntries(Object.keys(OLDER).map((rel) => [rel, lstatSync(join(w.aside, rel)).ino]));
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: FILES }), { kept: 3, failed: 0 });
+    for (const [rel, text] of Object.entries(OLDER)) {
+      assert.equal(readFileSync(join(w.dir, rel), "utf8"), text, rel);
+      assert.equal(lstatSync(join(w.dir, rel)).ino, inos[rel], `${rel} is the very file`);
+      assert.equal(existsSync(join(w.aside, rel)), false, `${rel} is not left in the older folder`);
+    }
+    assert.equal(readFileSync(join(w.dir, "assets/fonts/a.woff2"), "utf8"), "font", "what the project had stays");
+  });
+  it("never writes over what the project has at the path, a file, a link or a folder: the other Mac's stays, and the older file stays where it is, and neither is counted as failed", (c) => {
+    const w = folders(c, OLDER, { "assets/broll/a.mp4": "the other Mac's clip", "assets/broll/b.mp4/inside": "a folder where the file would go" });
+    symlinkSync("/nowhere", join(w.dir, "assets", "dangling"));
+    put(w.aside, "assets/dangling", "an older file where the project has a link");
+    const files = [...FILES, { rel: "assets/dangling", bytes: 3 }];
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files }), { kept: 1, failed: 0 });
+    assert.equal(readFileSync(join(w.dir, "assets/broll/a.mp4"), "utf8"), "the other Mac's clip");
+    assert.equal(readFileSync(join(w.aside, "assets/broll/a.mp4"), "utf8"), "clip a");
+    assert.equal(readFileSync(join(w.dir, "assets/broll/b.mp4/inside"), "utf8"), "a folder where the file would go");
+    assert.equal(readFileSync(join(w.aside, "assets/broll/b.mp4"), "utf8"), "clip b");
+    assert.equal(readlinkSync(join(w.dir, "assets", "dangling")), "/nowhere");
+    assert.equal(readFileSync(join(w.aside, "assets", "dangling"), "utf8"), "an older file where the project has a link");
+    assert.equal(readFileSync(join(w.dir, "assets/pictures/deep/c.png"), "utf8"), "picture c", "and the one nothing stands in the way of is moved");
+  });
+  it("counts a file it cannot move as failed, leaves it where it is, and goes on with the others: nothing is lost", (c) => {
+    const w = folders(c, OLDER);
+    const fs = { ...fsModule, renameSync: (from, to) => (from.endsWith("b.mp4") ? (() => { throw new Error("EXDEV: cross-device link not permitted"); })() : fsModule.renameSync(from, to)) };
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: FILES, fs }), { kept: 2, failed: 1 });
+    assert.equal(readFileSync(join(w.aside, "assets/broll/b.mp4"), "utf8"), "clip b");
+    assert.equal(existsSync(join(w.dir, "assets/broll/b.mp4")), false);
+    assert.equal(readFileSync(join(w.dir, "assets/broll/a.mp4"), "utf8"), "clip a");
+    assert.equal(readFileSync(join(w.dir, "assets/pictures/deep/c.png"), "utf8"), "picture c");
+  });
+  it("counts a file as failed when a folder it needs is a file in the project, and moves the others", (c) => {
+    const w = folders(c, OLDER, { "assets/broll": "a file where the folder would be" });
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: FILES }), { kept: 1, failed: 2 });
+    assert.equal(readFileSync(join(w.aside, "assets/broll/a.mp4"), "utf8"), "clip a");
+    assert.equal(readFileSync(join(w.aside, "assets/broll/b.mp4"), "utf8"), "clip b");
+    assert.equal(readFileSync(join(w.dir, "assets/broll"), "utf8"), "a file where the folder would be");
+  });
+  it("moves what it is given and nothing else, and nothing for no files", (c) => {
+    const w = folders(c, { ...OLDER, "assets/other.mp4": "not given" });
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: FILES }), { kept: 3, failed: 0 });
+    assert.equal(readFileSync(join(w.aside, "assets/other.mp4"), "utf8"), "not given");
+    assert.equal(existsSync(join(w.dir, "assets/other.mp4")), false);
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: [] }), { kept: 0, failed: 0 });
+  });
+  it("follows no path out of the project: a path with .. or an absolute path in it is failed, not moved", (c) => {
+    const w = folders(c, { "assets/a.mp4": "clip" });
+    put(w.base, "outside.txt", "outside");
+    const bad = [{ rel: "../outside.txt", bytes: 7 }, { rel: "/etc/hosts", bytes: 1 }, { rel: "assets/../../outside.txt", bytes: 7 }, { rel: "", bytes: 0 }];
+    assert.deepEqual(keepAssets({ aside: w.aside, dir: w.dir, files: bad }), { kept: 0, failed: 4 });
+    assert.equal(readFileSync(join(w.base, "outside.txt"), "utf8"), "outside");
+  });
+  it("moves only assets: a plain path to any other file of the older folder is failed, not moved, and the file stays where it is", (c) => {
+    const w = folders(c, { "index.html": "page", "compositions/title.html": "card", "assets/broll/a.mp4": "clip a" });
+    const got = keepAssets({ aside: w.aside, dir: w.dir, files: [{ rel: "index.html", bytes: 4 }, { rel: "compositions/title.html", bytes: 4 }, { rel: "assets/broll/a.mp4", bytes: 6 }] });
+    assert.deepEqual(got, { kept: 1, failed: 2 });
+    assert.equal(readFileSync(join(w.aside, "index.html"), "utf8"), "page");
+    assert.equal(readFileSync(join(w.aside, "compositions/title.html"), "utf8"), "card");
+    assert.equal(existsSync(join(w.dir, "index.html")), false);
+    assert.equal(readFileSync(join(w.dir, "assets/broll/a.mp4"), "utf8"), "clip a");
+  });
 });
 
 describe("markedOlder: a project whose marker names another snapshot than the newest (PR 18)", () => {
@@ -755,7 +933,7 @@ describe("a project rebuilt in the place of an older folder, which is set aside 
 
   it("moves the older folder to its place whole, with its history, its renders, its video and its link, and puts the rebuilt project where it was", (c) => {
     const w = olderWorld(c);
-    assert.deepEqual(ask(w), { assetsLeft: false, aside: w.aside });
+    assert.deepEqual(ask(w), { assetsLeft: false, aside: w.aside, assets: { kept: 0, failed: 0 } });
     asItWas(w, w.aside);
     isRebuilt(w);
     only(w, [ASIDE_DIR, MAIN].sort());
@@ -844,8 +1022,63 @@ describe("a project rebuilt in the place of an older folder, which is set aside 
   });
   it("says the assets were left out when the snapshot holds the note that says so, as the rebuild does", (c) => {
     const w = olderWorld(c, { "index.html": "<html>", "assets/fonts/a.woff2": "font", [LEFT_OUT_NOTE]: "some assets were left out" });
-    assert.deepEqual(ask(w), { assetsLeft: true, aside: w.aside });
+    assert.deepEqual(ask(w), { assetsLeft: true, aside: w.aside, assets: { kept: 0, failed: 0 } });
     asItWas(w, w.aside);
+  });
+  describe("the older folder's own assets that were too big to hand over (the review of PR 18, F1)", () => {
+    /** `assetsMost` of 4 makes the older folder's `assets/music/theme.mp3` ("music", 5 bytes) too big to hand over. */
+    const askBig = (w, deps, more = {}) => rebuildProject({ folder: w.folder, snapshot: w.snapshot, dir: w.dir, cli: CLI, by: "Sallie's laptop", aside: w.aside, assetsMost: 4, ...more }, deps);
+    it("moves each of them the rebuilt project lacks into it, by rename, once the project is in its place, and reports how many", (c) => {
+      const w = olderWorld(c);
+      const ino = lstatSync(join(w.dir, "assets/music/theme.mp3")).ino;
+      const calls = [];
+      const fs = { ...fsModule, renameSync: (from, to) => (calls.push([from, to, existsSync(join(w.dir, MARKER))]), fsModule.renameSync(from, to)) };
+      assert.deepEqual(askBig(w, { fs }), { assetsLeft: false, aside: w.aside, assets: { kept: 1, failed: 0 } });
+      assert.equal(calls.length, 4, JSON.stringify(calls));
+      assert.deepEqual(calls[3], [join(w.aside, "assets/music/theme.mp3"), join(w.dir, "assets/music/theme.mp3"), true], "the last move, after the project is in its place, into the project and not into the one beside it");
+      assert.equal(lstatSync(join(w.dir, "assets/music/theme.mp3")).ino, ino, "the very file");
+      assert.equal(existsSync(join(w.aside, "assets/music/theme.mp3")), false);
+      assert.equal(readFileSync(join(w.dir, "assets/fonts/a.woff2"), "utf8"), "font", "what the snapshot brought is as it was");
+      assert.deepEqual(treeOf(w.aside), Object.fromEntries(Object.entries(w.before).filter(([rel]) => rel !== "assets/music/theme.mp3")), "the older folder is whole but for what was moved");
+    });
+    it("moves nothing when they weigh the limit or less: they were handed over, and a file the other Mac removed is not brought back", (c) => {
+      const w = olderWorld(c);
+      assert.deepEqual(askBig(w, undefined, { assetsMost: 5 }), { assetsLeft: false, aside: w.aside, assets: { kept: 0, failed: 0 } });
+      assert.equal(existsSync(join(w.dir, "assets/music")), false);
+      asItWas(w, w.aside);
+    });
+    it("never writes over what the snapshot brought at the same path: that file stays the other Mac's, and the older one stays in the older folder", (c) => {
+      const w = olderWorld(c, { ...FILES, "assets/music/theme.mp3": "the other Mac's" });
+      assert.deepEqual(askBig(w), { assetsLeft: false, aside: w.aside, assets: { kept: 0, failed: 0 } });
+      assert.equal(readFileSync(join(w.dir, "assets/music/theme.mp3"), "utf8"), "the other Mac's");
+      asItWas(w, w.aside);
+    });
+    it("moves nothing into the project when it could not be put in its place: the older folder is put back as it was, assets and all", (c) => {
+      const w = olderWorld(c);
+      const fs = { ...fsModule, renameSync: (from, to) => (to === w.dir && from !== w.aside ? (() => { throw new Error("EACCES: permission denied"); })() : fsModule.renameSync(from, to)) };
+      assert.deepEqual(askBig(w, { fs }), { why: "could not" });
+      asItWas(w);
+      assert.equal(existsSync(join(w.aside, "assets")), false);
+    });
+    it("loses nothing when a move fails: the file stays in the older folder, and the answer counts it", (c) => {
+      const w = olderWorld(c);
+      const fs = { ...fsModule, renameSync: (from, to) => (from === join(w.aside, "assets/music/theme.mp3") ? (() => { throw new Error("EXDEV: cross-device link not permitted"); })() : fsModule.renameSync(from, to)) };
+      assert.deepEqual(askBig(w, { fs }), { assetsLeft: false, aside: w.aside, assets: { kept: 0, failed: 1 } });
+      asItWas(w, w.aside);
+      isRebuilt(w);
+    });
+    it("says nothing of them when the older folder cannot be read, and still sets it aside whole", (c) => {
+      if (process.getuid && process.getuid() === 0) return;
+      const w = olderWorld(c);
+      put(w.dir, "unreadable/x", "x");
+      chmodSync(join(w.dir, "unreadable"), 0o000);
+      try {
+        assert.deepEqual(askBig(w), { assetsLeft: false, aside: w.aside, assets: { kept: 0, failed: 0 } });
+        assert.equal(lstatSync(w.aside).ino, w.ino);
+      } finally {
+        chmodSync(join(w.aside, "unreadable"), 0o755);
+      }
+    });
   });
   it("is the rebuild it was when it is given no place to set anything aside: a folder that is there is left alone", (c) => {
     const w = olderWorld(c);
