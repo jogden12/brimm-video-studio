@@ -6,7 +6,7 @@
 // BRIMM Video Work.
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { episodeWork } from "../settings.js";
@@ -14,7 +14,7 @@ import { finishFinished } from "../finish.js";
 import { HELD, LEFT } from "../gate.js";
 import { DOWNLOADS_UNREADABLE } from "../exports.js";
 import { recordFile, recordText } from "../episode.js";
-import { BRINGING, START, noHandoffWords, noReelWords, nothingNewWords, otherKindWords, rawWords, unusableWords } from "../finish-reels.js";
+import { BRINGING, START, missingWords, noHandoffWords, noReelWords, nothingNewWords, otherKindWords, rawWords, unusableWords } from "../finish-reels.js";
 import { FOLDER, NAME, episodeAs, episodeFor, listAll, reread, setup } from "./episodes.js";
 import { PIN } from "../hyperframes.js";
 import { REEL1, REEL2, changeAt, entry, exportOf, named } from "./exports-world.js";
@@ -178,6 +178,14 @@ describe("3. the refusals: each ends with 1 and claims, writes and starts nothin
       writeFileSync(join(w.found.folder, HANDOFF_REL), text);
       await refused(w, [unusableWords(NAME)]);
     }
+  });
+  it("says the hand-off is not there, and to ask Jason, when it is gone from the folder, and starts no bring: there is nothing to bring over (the review's I2)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    rmSync(join(w.found.folder, HANDOFF_REL));
+    // As the Mac's own check has it, a file that is not there is not whole: it used to be taken for one Dropbox was bringing.
+    w.t.ctx.isWhole = (path) => existsSync(path);
+    await refused(w, [missingWords(NAME)]);
   });
   it("asks Dropbox to bring the hand-off over when it is not whole here, once, and says to say it again", async () => {
     const w = await W();

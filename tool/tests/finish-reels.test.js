@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, unusableWords } from "../finish-reels.js";
+import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, unusableWords } from "../finish-reels.js";
 import { reelsBase } from "../finish.js";
 
 const NAME = "Pricing: what to charge?";
@@ -102,6 +102,8 @@ describe("the words she reads", () => {
       [noHandoffWords(NAME), `${NAME}'s hand-off is written once its spellings are answered, and its Reels go into it after that. Say "show me the spellings".`],
       [otherKindWords(NAME), `${NAME}'s hand-off was made as another kind than it is now: it waits for its new reading.`],
       [unusableWords(NAME), `${NAME}'s hand-off cannot be used as it stands, so its Reels cannot be added to it. Ask Jason.`],
+      [missingWords(NAME), `${NAME}'s hand-off is not there, so its Reels cannot be added to it. Ask Jason.`],
+      [lostReelsWords(NAME), `${NAME}'s hand-off is not there or cannot be read, so a new one would leave out the Reels it holds. Nothing was written. Ask Jason.`],
       [noReelWords(NAME), `${NAME} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`],
       [nothingNewWords(NAME, 3), `${NAME} has no Reel exported since its hand-off was made, as revision 3, so there is nothing new to hand off. Export one from HyperFrames on This Mac, then say "hand off the Reels".`],
       [START, 'Say "yes, hand off the Reels" to start.'],
@@ -156,13 +158,16 @@ describe("the hand-off on file, which the next revision is made from (reelsBase)
   });
   it("says it cannot be used when it cannot be read, is not version 2, is not a finished video's, has no main video or no revision", () => {
     const why = { why: unusableWords("Talk") };
-    for (const text of [null, "", "not json", "[]", "7", "null", JSON.stringify({ ...HANDOFF, version: 1 }), JSON.stringify({ ...HANDOFF, video: { ...HANDOFF.video, kind: "raw" } }), JSON.stringify({ ...HANDOFF, video: undefined }), JSON.stringify({ ...HANDOFF, main: undefined }), JSON.stringify({ ...HANDOFF, main: "Talk.mp4" }), JSON.stringify({ ...HANDOFF, revision: undefined }), JSON.stringify({ ...HANDOFF, revision: 0 }), JSON.stringify({ ...HANDOFF, revision: 1.5 })]) {
+    for (const text of ["", "not json", "[]", "7", "null", JSON.stringify({ ...HANDOFF, version: 1 }), JSON.stringify({ ...HANDOFF, video: { ...HANDOFF.video, kind: "raw" } }), JSON.stringify({ ...HANDOFF, video: undefined }), JSON.stringify({ ...HANDOFF, main: undefined }), JSON.stringify({ ...HANDOFF, main: "Talk.mp4" }), JSON.stringify({ ...HANDOFF, revision: undefined }), JSON.stringify({ ...HANDOFF, revision: 0 }), JSON.stringify({ ...HANDOFF, revision: 1.5 })]) {
       assert.deepEqual(look(record(), { text }), why, String(text));
     }
   });
-  it("asks for it to be brought over when it is not whole on this Mac, and reads nothing", () => {
+  it("asks for it to be brought over when it is there but not whole on this Mac (a placeholder Dropbox has not filled), and reads nothing", () => {
     assert.deepEqual(look(record(), { whole: false }), { coming: REL });
-    assert.deepEqual(look(record(), { whole: false, text: null }), { coming: REL });
+    assert.deepEqual(look(record(), { whole: false, text: "not even json" }), { coming: REL }, "it is not read before it is whole");
+  });
+  it("says it is not there, and to ask Jason, when the file is not in the folder at all: there is nothing for Dropbox to bring over (the review's I2)", () => {
+    for (const whole of [true, false]) assert.deepEqual(look(record(), { whole, text: null }), { why: missingWords("Talk") }, `whole: ${whole}`);
   });
   it("names the video as edit.js names it, never by its file", () => {
     assert.deepEqual(look(record({ name: { text: NAME, placeholder: false }, finished: undefined })), { why: noHandoffWords(NAME) });

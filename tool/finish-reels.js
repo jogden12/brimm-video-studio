@@ -31,6 +31,10 @@ export const noHandoffWords = (name) => `${name}'s hand-off is written once its 
 export const otherKindWords = (name) => `${name}'s hand-off was made as another kind than it is now: it waits for its new reading.`;
 /** The hand-off on file is not one that Reels can be added to. */
 export const unusableWords = (name) => `${name}'s hand-off cannot be used as it stands, so its Reels cannot be added to it. Ask Jason.`;
+/** The hand-off the record points at is not in the folder at all, so there is nothing for Dropbox to bring over. */
+export const missingWords = (name) => `${name}'s hand-off is not there, so its Reels cannot be added to it. Ask Jason.`;
+/** A hand-off that holds Reels is gone or cannot be read, and the spellings would make it again without them. */
+export const lostReelsWords = (name) => `${name}'s hand-off is not there or cannot be read, so a new one would leave out the Reels it holds. Nothing was written. Ask Jason.`;
 /** No Reel project is in the record. */
 export const noReelWords = (name) => `${name} has no Reel made in HyperFrames yet. Say "show me the Reels" to see Claude's suggestions.`;
 /** No Reel is taken from an export: every one is kept as the hand-off has it, or there is none. */

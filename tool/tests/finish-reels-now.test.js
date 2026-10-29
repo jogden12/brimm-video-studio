@@ -6,11 +6,12 @@
 // Downloads folder, Dropbox or BRIMM Video Work.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { finishFinished, finishNow } from "../finish.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
+import { lostReelsWords, missingWords } from "../finish-reels.js";
 import { recordFile, recordText } from "../episode.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { PIN } from "../hyperframes.js";
@@ -367,6 +368,70 @@ describe("10. a spelling after the Reels", () => {
     const four = handoffIn((await finished(w)).found);
     assert.deepEqual([four.revision, four.reels.map((r) => r.n)], [4, [1, 2]]);
     assert.deepEqual(four.reels[1], two.reels[0]);
+  });
+});
+
+describe("I2. a hand-off that is gone is not made again without its Reels (the review)", () => {
+  /** The finish of Reel 2 done, then the hand-off `damage`d: what a spelling then says, and what it left. */
+  async function spelledAfter(damage) {
+    const w = await W();
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    damage(join(found.folder, HANDOFF_REL));
+    // As the Mac's own check has it, a file that is not there is not whole.
+    w.t.ctx.isWhole = (path) => existsSync(path);
+    const before = filesOf(found);
+    const rev = reread(found).rev;
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
+    return { w, found, r, before, rev };
+  }
+  it("refuses a spelling, and writes nothing, when the hand-off is gone from the folder and the record holds a Reel's part", async () => {
+    const { found, r, before, rev } = await spelledAfter((path) => rmSync(path));
+    assert.deepEqual([r.code, r.said], [1, [lostReelsWords(NAME)]]);
+    assert.match(r.said[0], / Ask Jason\.$/);
+    assert.deepEqual([filesOf(found), reread(found).rev, reread(found).spellings ?? []], [before, rev, []]);
+    assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"], "the Reel's part is still in the record");
+    assert.equal(existsSync(join(found.folder, HANDOFF_REL)), false, "no hand-off without the Reel is written");
+  });
+  it("refuses it likewise when the hand-off cannot be read", async () => {
+    // (Of the size the record lists, as a copy that is not what it should be but is whole is: a different size is a copy Dropbox is bringing.)
+    const garbage = (path) => writeFileSync(path, "x".repeat(statSync(path).size));
+    const { found, r, before, rev } = await spelledAfter(garbage);
+    assert.deepEqual([r.code, r.said], [1, [lostReelsWords(NAME)]]);
+    assert.deepEqual([filesOf(found), reread(found).rev, /^x+$/.test(readFileSync(join(found.folder, HANDOFF_REL), "utf8"))], [before, rev, true]);
+    assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"]);
+  });
+  it("still makes a hand-off again that is gone when the record holds no part of a Reel: only a first hand-off was written", async () => {
+    const w = await W();
+    rmSync(join(w.found.folder, HANDOFF_REL));
+    w.t.ctx.isWhole = (path) => existsSync(path);
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.deepEqual([handoffIn(w.found).reels, handoffIn(w.found).suggestions.length], [[], 2]);
+  });
+  it("is what a copy of the hand-off that failed leaves: finishing the Reels says it is not there instead of bringing it over for ever, and a spelling is refused", async () => {
+    const w = await W({ projects: ["reel 1", "reel 2"] });
+    exportOf(w, "reel 2");
+    await finished(w, { without: ["reel 1"] });
+    exportOf(w, "reel 1");
+    const found = await asked(w);
+    const clone = w.t.ctx.deps.clone;
+    w.t.ctx.deps.clone = (from, to) => {
+      if (to.endsWith(".brimm-ops.json")) throw new Error("the disk is full");
+      return clone(from, to);
+    };
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, false);
+    assert.equal(existsSync(join(found.folder, HANDOFF_REL)), false, "the rule deleted the old hand-off before its copy failed");
+    w.t.ctx.deps.clone = clone;
+    w.t.ctx.isWhole = (path) => existsSync(path);
+    const started = w.t.started.length;
+    assert.deepEqual(await lines(w, { yes: true }), [missingWords(NAME)]);
+    assert.equal(w.t.started.length, started, "there is nothing to bring over, so none is started");
+    const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
+    assert.deepEqual([r.code, r.said], [1, [lostReelsWords(NAME)]]);
+    assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"], "the part of Reel 2 is not lost");
+    assert.equal(existsSync(join(found.folder, HANDOFF_REL)), false);
   });
 });
 

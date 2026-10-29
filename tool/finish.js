@@ -21,7 +21,7 @@ import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredt
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
-import { SAY_AGAIN, heldReelParts, nextHandoff, noHandoffWords, otherKindWords, unusableWords } from "./finish-reels.js";
+import { REEL_KEY, SAY_AGAIN, heldReelParts, lostReelsWords, missingWords, nextHandoff, noHandoffWords, otherKindWords, unusableWords } from "./finish-reels.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
@@ -1117,11 +1117,11 @@ export const importKind = (record) => (madeFromImport(record) ? String(record.fi
 
 /** The hand-off on file that the next revision of a finished video's hand-off is made from, for `finish "<episode>" reels` (plan PR 9;
     architecture 8.7): { onFile, base: { handoff, revision } }, the hand-off as it is read and the place and revision it was read at; or
-    { coming }, its path in the episode when it is not whole on this Mac (`isWhole`), for Dropbox to bring over; or { why }, in plain
-    words, when Reels cannot be added to it: the record has no hand-off yet (the spellings card writes the first, and this never
+    { coming }, its path in the episode when it is there but not whole on this Mac (`isWhole`), for Dropbox to bring over; or { why }, in
+    plain words, when Reels cannot be added to it: the record has no hand-off yet (the spellings card writes the first, and this never
     does), it was not made from the import's captions, it was made as another kind than the video is now, it is not one file directly
-    in final/, or it cannot be read, is not version 2, is not a finished video's, or has no main video or no revision. The video is
-    named as edit.js names it. This only reads. */
+    in final/, it is not there at all (nothing for Dropbox to bring), or it cannot be read, is not version 2, is not a finished video's,
+    or has no main video or no revision. The video is named as edit.js names it. This only reads. */
 export function reelsBase(folder, record, { isWhole = () => true } = {}) {
   const name = shownName(record);
   if (!record.finished) return { why: noHandoffWords(name) };
@@ -1129,6 +1129,8 @@ export function reelsBase(folder, record, { isWhole = () => true } = {}) {
   if (importKind(record) !== "finished") return { why: otherKindWords(name) };
   const rel = record.finished.handoff;
   if (typeof rel !== "string" || !/^final\/[^/\\]+\.brimm-ops\.json$/.test(rel)) return { why: unusableWords(name) };
+  // A file that is not in the folder at all is not one Dropbox is bringing over: nothing would ever come (the review's I2).
+  if (!existsSync(join(folder, rel))) return { why: missingWords(name) };
   if (!isWhole(join(folder, rel))) return { coming: rel };
   const onFile = readJson(join(folder, rel));
   const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -1256,6 +1258,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
       // It cannot be read as a hand-off: it is made again whole.
     }
   }
+  // The Reels a hand-off holds are in it alone (their titles, places and captions): made again whole, without it, it would hold none and the
+  // record would forget their parts. So a hand-off that holds Reels, and is gone or cannot be read, is not made again (the review's I2).
+  if (prior && !onFile && Object.keys(prior.parts || {}).some((key) => REEL_KEY.test(key))) return { why: lostReelsWords(who) };
 
   const spellings = Array.isArray(record.spellings) ? record.spellings : [];
   const shows = spelledCaptions(imported, []);

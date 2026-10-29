@@ -2524,9 +2524,29 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
       assert.deepEqual(reread(found).finished.parts["reel 2"], part(2));
       t.done();
     });
-    it("keeps no part for Reels the hand-off made again does not hold: one that is gone is made again whole, and the record says what it holds", async () => {
+    it("does not make a hand-off again without the Reels it held: one that is gone, or cannot be read, writes nothing, and the record keeps their parts (the review's I2)", async () => {
+      const damages = [
+        [(path) => rmSync(path), (path) => assert.equal(existsSync(path), false, "no hand-off is written")],
+        [(path) => writeFileSync(path, "x".repeat(statSync(path).size)), (path) => assert.match(readFileSync(path, "utf8"), /^x+$/, "it is as it was")]
+      ];
+      for (const [damage, after] of damages) {
+        const t = setup();
+        const found = await withReels(t);
+        damage(join(found.folder, REL));
+        const now = reread(found);
+        const done = await finishFinished(t.ctx, { ...found, record: now }, { record: { ...now, spellings: [["Sallie", "Sally"]] } });
+        assert.equal(done.ok, undefined);
+        assert.match(done.why, /'s hand-off is not there or cannot be read, so a new one would leave out the Reels it holds\. Nothing was written\. Ask Jason\.$/);
+        assert.deepEqual([reread(found).rev, Object.keys(reread(found).finished.parts)], [now.rev, ["main", "reel 2", "reel 5"]], "the record is as it was");
+        after(join(found.folder, REL));
+        t.done();
+      }
+    });
+    it("makes a hand-off again that is gone when the record holds no part of a Reel: the Reels of none are lost", async () => {
       const t = setup();
-      const found = await withReels(t);
+      handoffVersion(t, 2);
+      const found = video(t);
+      assert.equal((await finishFinished(t.ctx, found, { record: found.record })).ok, true);
       rmSync(join(found.folder, REL));
       const now = reread(found);
       const done = await finishFinished(t.ctx, { ...found, record: now }, { record: now });

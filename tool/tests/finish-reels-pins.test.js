@@ -31,6 +31,8 @@ describe("14. what pins them: the help, the README and the spec", () => {
       "never writes a finished video's first hand-off",
       "a Reel number is never given twice",
       "puts nothing back over a record written above its own that no longer says this finish",
+      "one that is not in the folder at all is not, and she is told to ask Jason",
+      "is not made again without them",
       "`--take`, `--final` and `--without`",
       'say "hand off the Reels"'
     ]) assert.ok(paragraph.includes(words), `${words} in the README's paragraph`);
@@ -39,6 +41,8 @@ describe("14. what pins them: the help, the README and the spec", () => {
     const spec = readFileSync(new URL("../../docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md", import.meta.url), "utf8");
     const section = (from, to) => spec.slice(spec.indexOf(from), spec.indexOf(to));
     const reels = section("### 8.7 Reels of a finished video", "### 8.8 What must not change");
+    assert.ok(reels.includes("it says it is not there, and to ask Jason"), "8.7 says a hand-off that is not there is not brought");
+    assert.ok(reels.includes("is not made again, since the new one would hold none"), "8.7 says a spelling does not make a hand-off again without its Reels");
     for (const words of ["The hand-off on file is its base, and it never writes the first", "`nextHandoff`", "Numbers.", "`expectRev`", "The late check puts nothing back over a later write.", "A spelling later"]) assert.ok(reels.includes(words), `${words} in 8.7`);
     assert.ok(section("### 4.3 ", "### 4.4 ").includes("never writes the first one"), "4.3");
     assert.ok(section("### 6.1 Commands", "### 6.2 ").includes('`finish "<episode>" reels` hands off the Reels of a video her editor finished'), "6.1");
