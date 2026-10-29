@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
-import { recordFile, recordText } from "../episode.js";
+import { acceptRev, recordFile, recordText } from "../episode.js";
 import { finishEpisode } from "../edit.js";
 import { finishNow } from "../finish.js";
 import { NOTHING_UNDER_WAY } from "../guide.js";
@@ -334,6 +334,33 @@ describe("B5. where finish would go no further, the guide says nothing new", () 
     assert.equal(takeEpisodeLock(lockOf(w.t.home, FOLDER), "bring", () => true).taken, true);
     w.t.ctx.deps.alive = (pid) => pid === process.pid;
     assert.equal(await line(w, notWhole), says(TAKE));
+  });
+  it("has the page's step when the video says it is a version of one that is not on this Mac yet: finish stops at once, and the Reel line is back when it is (review F2a)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    rewrite(w, { versionOf: "e-20261001-aaaaaa" });
+    const { looked, readdir } = spy();
+    assert.equal(await line(w, { readdir }), says(TAKE));
+    assert.deepEqual(looked, [], "Downloads is not listed");
+    const asked = await on(depsOf(w), "finish", FOLDER, "reels");
+    assert.equal(asked.code, 1, asked.said.join("\n"));
+    assert.match(asked.said.join("\n"), /is a new version of a video that is not on this Mac yet \(e-20261001-aaaaaa\)/);
+    rewrite(w, { versionOf: undefined });
+    assert.equal(await line(w), says(REEL_2));
+  });
+  it("has the page's step when Dropbox undid this Mac's last change to the record: finish stops once and says it again, and the Reel line is back once it has (review F2c)", async () => {
+    const w = await W();
+    exportOf(w, "reel 2");
+    acceptRev(w.t.home, ID, reread(w.found).rev + 5);
+    const { looked, readdir } = spy();
+    assert.equal(await line(w, { readdir }), says(TAKE));
+    assert.deepEqual(looked, [], "Downloads is not listed");
+    const first = await on(depsOf(w), "finish", FOLDER, "reels");
+    assert.equal(first.code, 1, first.said.join("\n"));
+    assert.ok(first.said.includes("Dropbox undid this Mac's last change to Pricing: what to charge?. Say it again."), first.said.join("\n"));
+    // `finish` took the rev it found: the second time goes on, and so does the guide.
+    assert.equal(await line(w), says(REEL_2));
+    assert.equal((await on(depsOf(w), "finish", FOLDER, "reels")).code, 0);
   });
   it("has the Reel line on a Mac whose settings say version 1 when the hand-off on file is version 2, as finish goes on there", async () => {
     const w = await W();
