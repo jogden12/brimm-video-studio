@@ -93,7 +93,10 @@ describe("push reel", () => {
     const t = setup();
     const found = episodeFor(t, { record: PICKED });
     assert.equal(await pushReel(t.ctx, found, 3, {}), 1);
-    assert.match(t.said(), /Reel 3 is not picked\. Pick it first\./);
+    // `reel pick` is gone (plan PR 5): nothing on a Mac not set up for HyperFrames picks a Reel, and on one that is, opening it does.
+    assert.equal(t.said(), "Reel 3 is not picked. Nothing on this Mac picks a Reel any more: ask Jason.");
+    assert.equal(await pushReel({ ...t.ctx, settings: { ...t.ctx.settings, app: "hyperframes" } }, found, 3, {}), 1);
+    assert.ok(t.said().endsWith(`\nReel 3 is not picked. Opening it in HyperFrames picks it: say "open Reel 3 of ${NAME} in HyperFrames".`), t.said());
     assert.equal(await pushReel(t.ctx, found, 9, {}), 1);
     assert.match(t.said(), /There is no Reel 9\./);
     const short = setup();
@@ -159,6 +162,11 @@ const phase3 = (programs = {}, { only } = {}) => {
   const files = { ...PHASE_3.files, "reels.json": JSON.stringify({ ...reels, candidates: keep(reels.candidates) }, null, 2) + "\n" };
   return { t, found: episodeFor(t, { record: { ...PHASE_3.record, reels: keep(PHASE_3.record.reels) }, files }) };
 };
+/** What `reel pick` did, before plan PR 5 took the command away: Reels `ns` of the episode `p.found` picked, on the record as it is on
+    disk now, as the command read it. Nothing picks a Reel by a command any more (`app … reel <n>` picks the Reel it opens, in its own
+    write); `pickReels` stays for the Final Cut Reel path until the retirement's wave 5, and the tests of its project, its refusals and
+    its list keep it so. Gives the exit code. */
+const pick = (p, ...ns) => pickReels(p.t.ctx, { ...p.found, record: reread(p.found) }, ns);
 
 describe("reelTimeline, a Reel's own project (phase 3)", () => {
   it("is the Reel's stretches as clips, upright, each filled and moved onto the face, its video named from edit/", async () => {
@@ -288,9 +296,10 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     t.done();
   });
   it("sends her to OpusClip for none of an episode imported before the switch, whose Reels brimm-video still makes", async () => {
-    const { t } = phase3();
+    const p = phase3();
+    const { t } = p;
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 0);
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick(p, 1), 0, t.said());
     assert.equal(await editMain(["captions", "Pricing", "reel", "1", "off"], t.ctx.deps), 0, t.said());
     assert.doesNotMatch(t.said(), /OpusClip|cannot make Reels/);
     t.done();
@@ -704,7 +713,7 @@ describe("ask and pick, pinned (PR 19's review)", () => {
   });
   it("pushes a picked Reel from the project written at its pick, though reels.json can be read and its crop changed since", async () => {
     const { t, found } = phase3();
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick({ t, found }, 1), 0, t.said());
     const v0 = readFileSync(join(found.folder, "edit", "reel-1.v0.fcpxml"), "utf8");
     // The other Mac's brimm-video, or a hand, moves Reel 1's crop in a list this one can read.
     const at = join(found.folder, "reels.json");
@@ -1055,10 +1064,10 @@ describe("a list this Mac's own put-back kept, and picks that need no list (PR 1
   });
   it("picks a Reel whose project is written and listed, though the listed reels.json is gone", async () => {
     const { t, found } = phase3();
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick({ t, found }, 1), 0, t.said());
     rmSync(join(found.folder, "reels.json"));
     assert.equal(await editMain(["reel", "drop", "Pricing", "1"], t.ctx.deps), 0, t.said());
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick({ t, found }, 1), 0, t.said());
     t.done();
   });
   it("picks a clip Reel of an episode imported before phase 3, after ask added a list that is now gone", async () => {
@@ -1068,7 +1077,7 @@ describe("a list this Mac's own put-back kept, and picks that need no list (PR 1
     const found = episodeFor(t, { record: { ...PICKED, reels: [{ ...PICKED.reels[0], status: "candidate" }] }, files: { "Pricing talk.mp4": "the raw video", "Pricing talk.cut-plan.json": PHASE_3.files["Pricing talk.cut-plan.json"], "Pricing talk.reel-1.mp4": "clip one", "Pricing talk.reel-1.srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n" } });
     assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0);
     rmSync(join(found.folder, "reels.json"));
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick({ t, found }, 1), 0, t.said());
     t.done();
   });
   it("says the episode changed, not that the list is stale, when the other Mac's ask lands while Claude answers", async () => {
@@ -1262,7 +1271,7 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
     assert.ok(!r.result.failed.includes("Nothing was changed in the episode."), r.result.failed.join(" | "));
     r.t.done();
   });
-  it("names the kept list in reels and reel pick too, after this Mac's own put-back lost it (F7, F11)", async () => {
+  it("names the kept list in reels and in picking a Reel too, after this Mac's own put-back lost it (F7, F11)", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
     p.t.ctx.deps.clone = ((clone) => (from, to) => {
@@ -1274,17 +1283,17 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
     const said = () => p.t.said().split("\n").pop();
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
     assert.equal(said(), `reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. The one its record lists is kept at ${kept}: ask Jason to put it back.`);
-    assert.equal(await editMain(["reel", "pick", "Pricing", "2"], p.t.ctx.deps), 1);
+    assert.equal(await pick(p, 2), 1);
     assert.equal(said(), `reels.json is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. The one its record lists is kept at ${kept}: ask Jason to put it back.`);
     p.t.done();
   });
   it("needs the list to pick a Reel whose listed project is gone (F11)", async () => {
     const { t, found } = phase3();
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 0, t.said());
+    assert.equal(await pick({ t, found }, 1), 0, t.said());
     assert.equal(await editMain(["reel", "drop", "Pricing", "1"], t.ctx.deps), 0, t.said());
     rmSync(join(found.folder, "edit", "reel-1.v0.fcpxml"));
     rmSync(join(found.folder, "reels.json"));
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], t.ctx.deps), 1);
+    assert.equal(await pick({ t, found }, 1), 1);
     t.done();
   });
 });
@@ -1438,14 +1447,14 @@ describe("reels, pick and push of an episode whose listed reels.json is gone (PR
     rmSync(join(found.folder, "reels.json"));
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 1);
     assert.equal(t.said(), "reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. Say this again once Dropbox has it back.");
-    const pick = phase3();
-    rmSync(join(pick.found.folder, "reels.json"));
-    assert.equal(await editMain(["reel", "pick", "Pricing", "1"], pick.t.ctx.deps), 1);
-    assert.equal(pick.t.said(), "reels.json is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. Say this again once Dropbox has it back.");
-    assert.equal(reread(pick.found).rev, 1);
+    const picking = phase3();
+    rmSync(join(picking.found.folder, "reels.json"));
+    assert.equal(await pick(picking, 1), 1);
+    assert.equal(picking.t.said(), "reels.json is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. Say this again once Dropbox has it back.");
+    assert.equal(reread(picking.found).rev, 1);
     assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "reels.json is missing from this episode, though its record lists it." });
     t.done();
-    pick.t.done();
+    picking.t.done();
   });
 });
 

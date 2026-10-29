@@ -388,7 +388,7 @@ describe("captions", () => {
     // Its title on screen stays: only the captions were turned off.
     assert.ok(tags(handed(t, "reel-2"), "title").some((x) => x.name === "brimm hook 3fa9c1"));
     assert.equal((await on(t.ctx.deps, "captions", FOLDER, "main", "on")).text, "The main video's captions follow its caption style: say which (preset --captions).");
-    assert.equal((await on(t.ctx.deps, "captions", FOLDER, "reel", "1", "on")).text, "Reel 1 is not picked. Pick it first.");
+    assert.equal((await on(t.ctx.deps, "captions", FOLDER, "reel", "1", "on")).text, "Reel 1 is not picked. Nothing on this Mac picks a Reel any more: ask Jason.");
     t.done();
   });
 });

@@ -479,12 +479,12 @@ describe("the claim", () => {
     assert.equal(reread(found).editing.by, "Mac Studio");
     t.done();
   });
-  it("name, title, a Reel's title, reel pick and drop, push and finish refuse while the other Mac has it, and write nothing", async () => {
+  it("name, title, a Reel's title, reel drop, push and finish refuse while the other Mac has it, and write nothing", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { ...EDITED, editing: HERS } });
     const held = `Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`;
     for (const argv of [["name", FOLDER, "Pricing"], ["title", FOLDER, "--words", "Price it right", "--approve", "--change"], ["title", FOLDER, "reel", "1", "--words", "Costs first"],
-      ["reel", "pick", FOLDER, "3"], ["reel", "drop", FOLDER, "2"], ["push", FOLDER], ["push", FOLDER, "reel", "1", "--no-hand-edits"], ["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
+      ["reel", "drop", FOLDER, "2"], ["push", FOLDER], ["push", FOLDER, "reel", "1", "--no-hand-edits"], ["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
       const r = await on(t.ctx.deps, ...argv);
       assert.deepEqual([r.code, r.text.split("\n").pop()], [1, held], argv.join(" "));
     }

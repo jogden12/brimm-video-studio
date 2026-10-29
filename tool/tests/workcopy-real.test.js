@@ -1,7 +1,8 @@
 // The working copy of an HDR video, made for real (workcopy.js). workcopy.test.js pins what ffmpeg is asked to do, with no video.
 // These tests run the job itself, with the real ffmpeg and ffprobe and the real watchdog, on short made-up HDR clips, and look at
 // what comes out: the colour tags, the size, whether the picture is the right way up, whether a turn is left in the file, whether
-// its length is kept, and whether a smooth gradient is banded. VideoToolbox decodes the clip and makes its colour standard, which
+// its length is kept, and whether a smooth gradient is banded. The last tests make a Reel's video of such a clip (plan PR 5): they
+// look at whether the Reel begins where its stretch does, picture and sound together. VideoToolbox decodes the clip and makes its colour standard, which
 // is a Mac's own hardware, so they need a Mac whose ffmpeg lists the videotoolbox hwaccel and the scale_vt filter, that has
 // libx265 to make a made-up HEVC clip with, and on which VideoToolbox does decode one. Anywhere else (CI runs on Linux) they skip
 // themselves and say why, as the face finder's tests do. The clips are made in a folder made for the test, outside Dropbox and
@@ -32,13 +33,14 @@ const RAMP = "color=c=black:s=640x360:r=30:d=1,format=yuv420p10le,geq=lum='300+1
 
 /** A made-up HDR clip in `dir`, a second of HEVC at `bits` bits (10 as an iPhone writes it, or 8) with the colour tags of an iPhone's
     HDR video and a tone for its sound, from the lavfi picture `picture`. `matrix` is the display matrix the clip is stored with, as
-    ffprobe says it (-90 for a phone's upright clip), or null for none. Gives the clip's path. */
-function clip(name, { picture, bits = 10, matrix = null }) {
+    ffprobe says it (-90 for a phone's upright clip), or null for none. `audio` is the lavfi source of its sound, a tone of a second
+    unless it is told otherwise. Gives the clip's path. */
+function clip(name, { picture, bits = 10, matrix = null, audio = "sine=frequency=440:duration=1" }) {
   const base = join(dir, `${name}.mp4`);
   const made = spawnSync(ffmpeg, [
     "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
     "-f", "lavfi", "-i", `${picture},format=${bits === 10 ? "yuv420p10le" : "yuv420p"},${HLG_TAGS}`,
-    "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+    "-f", "lavfi", "-i", audio,
     "-c:v", "libx265", "-preset", "ultrafast", "-crf", "10", "-tag:v", "hvc1", "-x265-params", "log-level=error", "-c:a", "aac", "-shortest", base
   ], { encoding: "utf8" });
   assert.equal(made.status, 0, made.stderr);
@@ -87,10 +89,11 @@ function halves(file, width, height) {
 }
 
 let homes = 0;
-/** Make the working copy of a made-up clip, the real job with the real programs, on a home folder of its own in the test's folder. */
-async function made(video) {
+/** Make the working copy of a made-up clip, the real job with the real programs, on a home folder of its own in the test's folder.
+    `more` is more for the job to be given: a Reel's stretch of the clip (`reel`), for the copy of one Reel. */
+async function made(video, more = {}) {
   const logs = [];
-  const result = await makeWorkCopy({ home: join(dir, `home-${(homes += 1)}`), folder: "2026-10-28 Made-up HDR", video, name: "a made-up HDR clip" }, { tools: { ffmpeg, ffprobe }, log: (line) => logs.push(line) });
+  const result = await makeWorkCopy({ home: join(dir, `home-${(homes += 1)}`), folder: "2026-10-28 Made-up HDR", video, name: "a made-up HDR clip", ...more }, { tools: { ffmpeg, ffprobe }, log: (line) => logs.push(line) });
   assert.deepEqual([result.ok, result.failed], [true, []], logs.join("\n"));
   return result;
 }
@@ -173,5 +176,91 @@ describe("the working copy of an HDR video, made with the real ffmpeg", { skip }
     const changes = (y) => row(y).reduce((n, v, x) => n + (x > 0 && v !== row(y)[x - 1] ? 1 : 0), 0);
     assert.ok(new Set(row(100)).size >= 3, [...new Set(row(100))].join(","));
     assert.ok(changes(100) > 40 && changes(101) > 40, `${changes(100)} and ${changes(101)} changes along a row`);
+  });
+});
+
+// --- A Reel's video of an HDR recording (plan PR 5; architecture 4.3 and 5.7) ---
+
+/** The luma of every picture of a video, made `width` by `height` samples: one array of samples for each picture, in order. */
+function pictures(file, width, height) {
+  const r = spawnSync(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", file, "-vf", `scale=${width}:${height},format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1 << 26 });
+  assert.equal(r.status, 0, String(r.stderr));
+  const size = width * height;
+  assert.equal(r.stdout.length % size, 0, "the pictures are not the size ffprobe says");
+  return Array.from({ length: r.stdout.length / size }, (_, i) => r.stdout.subarray(i * size, (i + 1) * size));
+}
+/** The mean of `region` of a picture `width` by `height`: its top half, or its left half. */
+function regionMean(picture, width, height, region) {
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (region === "top" ? y < height / 2 : x < width / 2) {
+        sum += picture[y * width + x];
+        n += 1;
+      }
+    }
+  }
+  return sum / n;
+}
+/** The time in seconds at which the sound of a video first rises above silence: its first sample of more than a tenth of the loudest
+    a sound can be, read as 48 kHz mono. */
+function soundStartsAt(file) {
+  const r = spawnSync(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", file, "-vn", "-ac", "1", "-ar", "48000", "-f", "s16le", "-"], { maxBuffer: 1 << 27 });
+  assert.equal(r.status, 0, String(r.stderr));
+  for (let i = 0; i + 1 < r.stdout.length; i += 2) if (Math.abs(r.stdout.readInt16LE(i)) > 3277) return i / 2 / 48000;
+  return Infinity;
+}
+
+describe("a Reel's video of an HDR recording, made with the real ffmpeg", { skip }, () => {
+  // Four seconds, 30 pictures a second. The left half of the stored picture is bright for the first two seconds and dark after; its
+  // right half stays as it is. The sound is silence for two seconds and then a tone. So where the picture goes dark, and where the
+  // sound starts, say which moment of the recording a Reel's first picture and first sound are: a stretch that begins at 1.5 seconds
+  // has them half a second in, and it has them at the same time.
+  const TIMED = "color=c=black:s=640x360:r=30:d=4,format=yuv420p,geq=lum='if(lt(X,W/2),if(lt(T,2),200,40),120)':cb=128:cr=128";
+  const TONE_FROM_TWO = "aevalsrc=exprs='if(gte(t,2),0.5*sin(2*PI*440*t),0)':s=48000:d=4";
+  const CHANGE = 2;
+  const cases = [
+    // A phone's upright clip, stored on its side: shown 360 by 640, and the stored left half is the top.
+    ["stored on its side, as a phone stores an upright clip", -90, 360, 640, "top"],
+    ["stored upright", null, 640, 360, "left"]
+  ];
+  for (const [what, matrix, width, height, region] of cases) {
+    for (const start of [1.5, 1.55]) {
+      it(`starts a Reel at its stretch's start, picture and sound together, of a clip ${what}, for a stretch from ${start} seconds`, async () => {
+        const video = clip(`timed-${matrix}-${start}`, { picture: TIMED, matrix, audio: TONE_FROM_TWO });
+        const result = await made(video, { reel: { n: 2, start, end: 3 } });
+        assert.deepEqual(result.made.slice(0, 1).concat(result.made.slice(-1)), ["the video for Reel 2", "its HDR colours made standard"], result.made.join(", "));
+        const copy = probe(result.paths.video);
+        const picture = copy.streams.find((s) => s.codec_type === "video");
+        const sound = copy.streams.find((s) => s.codec_type === "audio");
+        // The way up, the colour tags and the length are the working copy's, and the length is the stretch's.
+        assert.deepEqual([picture.width, picture.height, picture.pix_fmt, picture.color_space, picture.color_transfer, picture.color_primaries], [width, height, "yuv420p", "bt709", "bt709", "bt709"]);
+        assert.equal(turnLeft(picture), false, JSON.stringify(picture.side_data_list));
+        assert.ok(Math.abs(Number(copy.format.duration) - (3 - start)) < 0.12, `${copy.format.duration} seconds for a stretch of ${3 - start}`);
+        // Both streams begin at 0: the Reel's own clock starts at its first moment.
+        assert.ok(Math.abs(Number(picture.start_time)) < 0.1 && Math.abs(Number(sound.start_time)) < 0.1, `picture ${picture.start_time}, sound ${sound.start_time}`);
+        // The picture goes dark where the recording does, counted from the stretch's start.
+        const means = pictures(result.paths.video, width / 40, height / 40).map((p) => regionMean(p, width / 40, height / 40, region));
+        const light = means[0];
+        const dark = means[means.length - 1];
+        assert.ok(light - dark > 80, `${light} then ${dark}`);
+        const wentDark = means.findIndex((m) => m < (light + dark) / 2);
+        assert.ok(Math.abs(wentDark / 30 - (CHANGE - start)) < 0.06, `the picture went dark at picture ${wentDark}, which is ${wentDark / 30} seconds in; it should be ${CHANGE - start}`);
+        // The sound starts where the recording's does, and with the picture.
+        const toneAt = soundStartsAt(result.paths.video);
+        assert.ok(Math.abs(toneAt - (CHANGE - start)) < 0.08, `the sound started ${toneAt} seconds in; it should be ${CHANGE - start}`);
+        assert.ok(Math.abs(toneAt - wentDark / 30) < 0.1, `the picture changed at ${wentDark / 30} and the sound at ${toneAt}`);
+      });
+    }
+  }
+  it("cuts the stretch of a Reel from a recording of 8 bits too, the same way up and at the same moment", async () => {
+    const video = clip("timed-eight", { picture: TIMED, bits: 8, matrix: -90, audio: TONE_FROM_TWO });
+    const result = await made(video, { reel: { n: 3, start: 1.5, end: 3 } });
+    const copy = pictureOf(result.paths.video);
+    assert.deepEqual([copy.width, copy.height, copy.pix_fmt, turnLeft(copy)], [360, 640, "yuv420p", false]);
+    const means = pictures(result.paths.video, 9, 16).map((p) => regionMean(p, 9, 16, "top"));
+    const wentDark = means.findIndex((m) => m < (means[0] + means[means.length - 1]) / 2);
+    assert.ok(Math.abs(wentDark / 30 - (CHANGE - 1.5)) < 0.06, `the picture went dark at ${wentDark / 30} seconds in`);
   });
 });
