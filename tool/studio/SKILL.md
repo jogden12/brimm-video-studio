@@ -151,7 +151,7 @@ When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut 
 ## In HyperFrames, to hand it off
 
 1. She exports each part in HyperFrames with Export: on This Mac, never in the cloud, as MP4, the main video and each Reel. HyperFrames saves it in her Downloads folder.
-2. She says "hand it off". Run `finish "<episode>"` and tell her in plain words what it found for each part: the file, and when it was exported. It never takes a WebM or a render: tell her to export it again as MP4.
+2. She says "hand it off". Run `finish "<episode>"` and tell her in plain words what it found for each part: the file, and when it was exported. It does not take a WebM, nor a render the project made itself, unless she names that file: otherwise tell her to export it again as MP4.
 3. Its questions go back to `finish "<episode>" --yes` with one flag each: `--take "<part>=<file>"` for which export is final, or for one she exported under another name (a part is main or reel 2; the file is its name, or this Mac, or the other Mac; ask her for the name); `--final "<part>"` when the newest export was made before she last changed the project and she says it is final (or she exports it again); `--without "reel 2"` for a Reel she leaves out; `title "<episode>" reel 2 --words "<words>"` for a Reel's title on screen.
 4. If it says this Mac does not let it look in the Downloads folder, tell her what it says: she allows it once, in System Settings.
 5. When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page.

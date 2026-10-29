@@ -25,7 +25,7 @@ import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindO
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
 import { fileSafe } from "./names.js";
-import { episodeWork, episodesFolder, runsFolder } from "./settings.js";
+import { downloadsFolder, episodeWork, episodesFolder, runsFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
 import { cantOpen, revealed } from "./reveal.js";
@@ -707,8 +707,9 @@ export async function finishNow(ctx, found, deps = {}) {
     const news = parts.filter((p) => !p.kept);
     const asking = news.length ? news : parts;
     const waiting = asking.every((p) => p.app) ? "hyperframes" : asking.some((p) => p.app) ? "both" : "final cut";
-    // What to say again when it must be said again, in the words of the way the finish went.
-    const sayAgain = parts.every((p) => p.app) ? 'Say "hand it off" again.' : "Say finish again.";
+    // What to say again when it must be said again, in the words of the way the finish went: the way of the parts taken now, and not of a
+    // Reel kept from Final Cut beside them.
+    const sayAgain = asking.every((p) => p.app) ? 'Say "hand it off" again.' : "Say finish again.";
     progress.begin(shownName(record));
     progress.steps(stepsFor(waiting));
 
@@ -845,7 +846,9 @@ export async function finishNow(ctx, found, deps = {}) {
     });
     if (failed.length) return result();
     const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
-    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: onPictureOf(record) }) : buildHandoff(given);
+    // The words drawn on the main picture are the record's titles (`record.main.texts`), which brimm-video drew in Final Cut: the picture
+    // of a main video taken from HyperFrames has none of them (the app draws its own, and PR 8 reads them), so none is handed off for it.
+    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: main.app ? [] : onPictureOf(record) }) : buildHandoff(given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);
@@ -899,7 +902,8 @@ export async function finishNow(ctx, found, deps = {}) {
         // originals): the app's own record, which can be written in a project by the app's agent, or her word, may have led to a file
         // with another name, and that is left where it is. An export from another folder, from what the other Mac released, or from the
         // project's renders is never removed.
-        else if (part.app && part.video.where === "Downloads" && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });
+        // What finish.asked.json says of the place is not taken on trust for a removal: the file must be in this Mac's Downloads folder.
+        else if (part.app && part.video.where === "Downloads" && resolve(part.video.dir) === resolve(downloadsFolder(ctx.home)) && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });
         for (const ending of [".srt", ".transcript.txt", ".words.json"]) {
           const from = join(part.dir, stem(part.name) + ending);
           if (existsSync(from)) put(from, stem(part.name) + ending);
@@ -949,8 +953,10 @@ export async function finishNow(ctx, found, deps = {}) {
       };
     }
     const finishedReels = new Map(parts.filter((p) => p.reel).map((p) => [p.reel, p]));
-    // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none).
-    const projectsDone = new Set(parts.filter((p) => p.app).map((p) => p.key));
+    // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none). A part this finish
+    // keeps as the last one made it is not taken from its project now: a Reel the last finish took from Final Cut, left out by --without,
+    // stays the Final Cut one in the hand-off, and its project is not finished.
+    const projectsDone = new Set(parts.filter((p) => p.app && !p.kept).map((p) => p.key));
     const apps = record.app && Array.isArray(record.app.projects) && projectsDone.size ? { app: { ...record.app, projects: record.app.projects.map((p) => (projectsDone.has(p.key) && p.state !== PROJECT_KEPT ? { ...p, state: "finished" } : p)) } } : {};
     const nextRecord = {
       ...record,

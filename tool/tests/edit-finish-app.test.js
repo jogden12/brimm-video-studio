@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { localStamp, recordFile, recordText } from "../episode.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED } from "../exports.js";
+import { finishNow } from "../finish.js";
 import { reelsFile } from "../reels.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
@@ -290,6 +291,84 @@ describe("D4. a Reel's place in the record", () => {
     exportOf(w, "main");
     assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
     assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, START]);
+    w.t.done();
+  });
+  // Review I3: a Reel dropped after its project was made (`reel drop 2`) is no part of a finish: it is not asked for, and an export of
+  // it left in Downloads is not handed off, which would flip the Reel from dropped to finished.
+  const DROPPED = EPISODE.record.reels.map((r) => (r.n === 2 ? { ...r, status: "dropped" } : r));
+  it("asks nothing of a Reel that has a project and was dropped, with or without an export of it", async () => {
+    const without = world({ over: { reels: DROPPED } });
+    exportOf(without, "main");
+    assert.equal(await finishEpisode(without.t.ctx, without.found, {}), 0);
+    assert.deepEqual(without.t.said().split("\n"), [MAIN_LINE, START]);
+    without.t.done();
+    const w = world({ over: { reels: DROPPED } });
+    exportOf(w, "main");
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
+    assert.deepEqual(w.t.said().split("\n").slice(0, 1), [MAIN_LINE]);
+    assert.deepEqual(w.asked().parts.map((p) => p.key), ["main"]);
+    w.t.done();
+  });
+  it("leaves a dropped Reel dropped in the record when the episode is finished, and hands off the main video alone", async () => {
+    const w = world({ over: { reels: DROPPED } });
+    exportOf(w, "main");
+    const reel = exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
+    const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const record = reread(w.found);
+    assert.deepEqual(record.reels.map((r) => [r.n, r.status]), [[1, "candidate"], [2, "dropped"]]);
+    assert.deepEqual(Object.keys(record.finished.parts), ["main"]);
+    assert.deepEqual(record.app.projects.map((p) => [p.key, p.state]), [["main", "finished"], ["reel 2", "opened"]]);
+    assert.equal(existsSync(reel.path), true, "its export in Downloads is not touched");
+    w.t.done();
+  });
+  it("still refuses a Reel project the record holds no Reel for at all, dropped or not", async () => {
+    const w = world({ over: { reels: EPISODE.record.reels.filter((r) => r.n !== 2) } });
+    exportOf(w, "main");
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
+    assert.match(w.t.said(), /The record has no Reel 2 for its HyperFrames project: ask Jason\./);
+    w.t.done();
+  });
+  // Review, minor 4: in an episode whose main video went the Final Cut way, a Reel with a project is still a Reel of HyperFrames': the stop for
+  // a Reel the record does not hold, and the words a Reel with no title is expected to start with, are decided by the part, not the episode.
+  const FC_MAIN = { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }] };
+  const sharedMain = (w) => {
+    w.t.shared(`${PROJECT.main}.mp4`, 2000);
+    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+  };
+  it("refuses a Reel project the record holds no Reel for, in an episode whose main video went the Final Cut way too", async () => {
+    const w = world({ projects: ["reel 2"], over: { main: FC_MAIN, reels: EPISODE.record.reels.filter((r) => r.n !== 2) } });
+    sharedMain(w);
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
+    assert.match(w.t.said(), /The record has no Reel 2 for its HyperFrames project: ask Jason\./);
+    assert.deepEqual(w.t.started, []);
+    w.t.done();
+  });
+  it("asks the title of such a Reel with the suggestion's first words, as for a raw video, and not the cut plan's", async () => {
+    const candidate = { n: 2, start: 13.38, end: 21.287, ranges: [{ start: 13.38, end: 21.287 }], seconds: 7.907, title: "", reason: "It makes one point.", point: "Know your costs.", first: "So the first thing you need", last: "know your costs", words: "So the first thing you need to do is know your costs.", phrases: ["p7"], preview: null };
+    const w = world({ projects: ["reel 2"], over: { main: FC_MAIN, reels: reelsWith("") } });
+    const list = JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "read", made: "2026-10-20T12:00:00-05:00", candidates: [candidate] }));
+    writeFileSync(join(w.found.folder, "reels.json"), list);
+    const base = reread(w.found);
+    writeFileSync(recordFile(w.found.folder, base.rev + 1), recordText({ ...base, rev: base.rev + 1, files: { ...base.files, "reels.json": Buffer.byteLength(list) } }));
+    sharedMain(w);
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, {}), 0);
+    assert.equal(w.t.said().split("\n").at(-1), 'Reel 2 has no title on screen. Say what it says: it starts "So the first thing you need".');
+    w.t.done();
+  });
+  it("leaves a dropped Reel with a project out of a Final Cut episode's finish too, beside the Reels made in HyperFrames", async () => {
+    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
+    const w = world({ projects: ["reel 2"], over: { reels: DROPPED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: pushes } } });
+    w.t.shared(`${PROJECT.main}.mp4`, 2000);
+    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
+    assert.deepEqual(w.asked().parts.map((p) => p.key), ["main"]);
     w.t.done();
   });
 });

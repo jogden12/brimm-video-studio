@@ -148,6 +148,14 @@ describe("B1. the project's last change", () => {
     assert.equal(lastChangeOf({ files: [{ path: "index.html", mtimeMs: at(5) }], turns: [] }), at(5));
     assert.equal(lastChangeOf({ files: [{ path: "compositions/title.html", mtimeMs: at(7) }], turns: [] }), at(7));
   });
+  // Review, minor 1: `free` takes the recording out of the project and `app` puts it back with a time of its own. That is no edit.
+  it("does not count the project's recording, which `app` puts back after `free` with a new time, but counts the other files of media/", () => {
+    const files = [{ path: "index.html", mtimeMs: at(10) }, { path: "media/recording.mp4", mtimeMs: at(900) }];
+    assert.equal(lastChangeOf({ files, turns: [] }), at(10));
+    assert.equal(lastChangeOf({ files: [files[1]], turns: [] }), null);
+    assert.equal(lastChangeOf({ files: [...files, { path: "media/logo.png", mtimeMs: at(50) }], turns: [] }), at(50));
+    assert.equal(lastChangeOf({ files: [...files, { path: "assets/media/recording.mp4", mtimeMs: at(60) }], turns: [] }), at(60), "only the project's own recording");
+  });
   it("counts the last turn of app-history.jsonl when it is later than the files", () => {
     const turns = turnsOf(fixture("../app-history.jsonl"));
     const last = Date.parse("2026-10-27T20:05:02.000Z");
@@ -185,6 +193,13 @@ describe("B1. the project's last change", () => {
       assert.equal(projectChange(dir), at(40));
       put(".hyperframes/app-history.jsonl", 800, `{"at":${JSON.stringify(new Date(at(120)).toISOString())},"engine":"claude","asked":"a","did":"b","files":[]}\n`);
       assert.equal(projectChange(dir), at(120));
+      rmSync(dir, { recursive: true, force: true });
+    });
+    it("does not count the recording put back into the project, though its time is the newest in the folder", () => {
+      const { dir, put } = made();
+      put("index.html", 10);
+      put("media/recording.mp4", 900);
+      assert.equal(projectChange(dir), at(10));
       rmSync(dir, { recursive: true, force: true });
     });
     it("is null for a folder that is not on this Mac, and for one with nothing that counts", () => {
@@ -467,6 +482,39 @@ describe("C7. a part the last finish took", () => {
     const got = lookForExports(found([main({ changed: ms(14, 20) })], [file(named(P_MAIN, "13.56"))], [], BEFORE("main")), NONE);
     assert.match(got.asks[0], /^The main video's newest export, .*, began at 2026-10-20 13:56, before you last changed it in HyperFrames, at 2026-10-20 14:20\./);
   });
+  // Review I2: finish removes the export it took and no other, so an earlier try (exported at 13:10, before she edited more) stays in
+  // Downloads. It is older than the one the last finish took by the time the file ended, and it is passed over: the part is kept.
+  it("passes over an export older than the one the last finish took, so that the part is kept, and an answer that it is final keeps it too", () => {
+    const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
+    const got = lookForExports(found([main()], [leftover], [], BEFORE("main")), NONE);
+    assert.deepEqual([got.asks, got.stops, got.parts.map((p) => [p.kept, p.video, p.line])], [[], [], [[true, null, "The main video: kept as the last finish made it."]]]);
+    const final = lookForExports(found([main()], [leftover], [], BEFORE("main")), { final: ["main"] });
+    assert.deepEqual([final.asks, final.parts.map((p) => [p.kept, p.video])], [[], [[true, null]]]);
+  });
+  it("passes over such a leftover that the app's own record names, and one in what the other Mac released", () => {
+    const old = recorded(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12), began: { ms: ms(13, 10, 0), exact: true } });
+    assert.deepEqual(lookForExports(found([main({ recorded: [old] })], [], [], BEFORE("main")), NONE).parts.map((p) => p.kept), [true]);
+    assert.deepEqual(lookForExports(found([main()], [], [file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) })], BEFORE("main")), NONE).parts.map((p) => p.kept), [true]);
+  });
+  it("takes the same file the last finish took, beside such a leftover, as the part kept all the same", () => {
+    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) }), file(named(P_MAIN, "13.56"))], [], BEFORE("main")), NONE);
+    assert.deepEqual([got.asks, got.parts.map((p) => p.kept)], [[], [true]]);
+  });
+  it("takes a leftover she names herself, whatever its age, and an export that ended later than the one the last finish took", () => {
+    const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
+    const named_ = lookForExports(found([main()], [leftover], [], BEFORE("main")), { take: { main: named(P_MAIN, "13.10") } });
+    assert.deepEqual(named_.parts.map((p) => [p.kept, p.video.name]), [[false, named(P_MAIN, "13.10")]]);
+    const later = lookForExports(found([main()], [leftover, file(named(P_MAIN, "14.05"), { mtimeMs: ms(14, 7), bytes: 6000 })], [], BEFORE("main")), NONE);
+    assert.deepEqual(later.parts.map((p) => [p.kept, p.video.name]), [[false, named(P_MAIN, "14.05")]]);
+  });
+  it("applies only to a part the last finish took from the same project, and only when it recorded the time of what it took", () => {
+    const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
+    const older = /began at 2026-10-20 13:10, before you last changed it/;
+    const other = lookForExports(found([main()], [leftover], [], finishedWith("main", { project: "Pricing- what to charge- main 2 3fa9c1" })), NONE);
+    assert.match(other.asks[0], older, "the last finish took another project of the episode");
+    const unknown = lookForExports(found([main()], [leftover], [], finishedWith("main", { source: undefined })), NONE);
+    assert.match(unknown.asks[0], older, "the last finish did not record the time of what it took");
+  });
   it("keeps a Reel the last finish finished that has no project in the record, so that it stays in the hand-off", () => {
     const before = BEFORE("main");
     const finished = { ...before, parts: { ...before.parts, "reel 3": { file: "final/r3.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, export: "final/r3.fcpxmld" }, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
@@ -494,6 +542,13 @@ describe("C8. a project that is on the other Mac", () => {
     const got = lookForExports(found([main({ here: false, changed: null, mac: "Sallie's laptop" })], [], [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.20"))]), NONE);
     assert.deepEqual(got.asks, []);
     assert.equal(got.parts[0].line, `The main video: ${named(P_MAIN, "13.56")}, from what the other Mac released. Its project is on Sallie's laptop, so the export could not be checked against it.`);
+  });
+  // Review, minor 7: Downloads is read for such a project too (an export made on this Mac of a project that came over from the other).
+  it("reads Downloads too, and takes the newest export wherever it is", () => {
+    const other = { here: false, changed: null, mac: "Sallie's laptop" };
+    const got = lookForExports(found([main(other)], [file(named(P_MAIN, "14.05"))], [file(named(P_MAIN, "13.56"))]), NONE);
+    assert.deepEqual([got.asks, got.parts.map((p) => p.video.where)], [[], ["Downloads"]]);
+    assert.equal(got.parts[0].line, `The main video: ${named(P_MAIN, "14.05")}, from Downloads. Its project is on Sallie's laptop, so the export could not be checked against it.`);
   });
 });
 
@@ -533,6 +588,15 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
       ["main", "the main video", undefined, P_MAIN, null], ["reel 2", "Reel 2", 2, P_REEL2, 2], ["reel 10", "Reel 10", 10, "P reel 10 3fa9c1", 2]
     ]);
     assert.equal(got.unreadable, false);
+    w.done();
+  });
+  // Review I3: a Reel dropped after its project was made is no part of a finish; a project whose Reel the record does not hold is, so that
+  // finish can stop on it.
+  it("leaves out a Reel project whose Reel the record says is dropped, and keeps one whose Reel it holds as picked or does not hold at all", () => {
+    const w = made();
+    const record = { ...recordOf(entry("main", P_MAIN), entry("reel 2", P_REEL2), entry("reel 3", "P reel 3 3fa9c1"), entry("reel 4", "P reel 4 3fa9c1")), reels: [{ n: 2, status: "dropped" }, { n: 3, status: "picked" }] };
+    assert.deepEqual(w.asked(record).input.parts.map((p) => p.key), ["main", "reel 3", "reel 4"]);
+    assert.deepEqual(w.asked({ ...record, reels: undefined }).input.parts.map((p) => p.key), ["main", "reel 2", "reel 3", "reel 4"]);
     w.done();
   });
   it("gives nothing for a record with no projects, and passes the last finish on", () => {

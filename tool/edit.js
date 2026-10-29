@@ -2157,11 +2157,13 @@ export async function finishEpisode(ctx, found, answers = {}) {
     const reel = (record.reels || []).find((r) => r.n === part.reel);
     if (reel && String(reel.title || "").trim()) continue;
     // A Reel project must have its Reel in the record, whose title and numbers the hand-off takes; one finished another way is kept as it is.
-    if (app && !reel) {
+    // Whether a Reel is HyperFrames' is the part's to say (it has a project), also in an episode whose main video went the Final Cut way.
+    const mine = app || Boolean(part.project);
+    if (mine && !reel) {
       if (part.project) stops.push(`The record has no Reel ${part.reel} for its HyperFrames project: ask Jason.`);
       continue;
     }
-    const opening = app ? suggestionOpening(found.folder, part.fromSuggestion) : expectedWords(part, record, plan);
+    const opening = mine ? suggestionOpening(found.folder, part.fromSuggestion) : expectedWords(part, record, plan);
     looked.asks.push(`Reel ${part.reel} has no title on screen. Say what it says${opening ? `: it starts "${opening}"` : ""}.`);
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);

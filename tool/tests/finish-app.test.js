@@ -5,7 +5,7 @@
 // disk for each part and a Downloads folder in the test's own home), with stand-ins for ffprobe, ffmpeg, the transcriber and open.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { finishEpisode } from "../edit.js";
 import { finishNow } from "../finish.js";
@@ -128,6 +128,29 @@ describe("E1. finish from HyperFrames' exports: what final/ holds, and the hand-
     assert.deepEqual(["suggestions" in handoff, "onPicture" in handoff.main], [false, false]);
     w.t.done();
   });
+  // Review I1: the words drawn on a picture are Final Cut's (`record.main.texts`), and a HyperFrames export has none of them.
+  const TITLED = { preset: null, cuts: [], texts: [{ id: "t1", kind: "lower-third", lines: ["Three pricing mistakes"], at: 3, for: 5 }], graphics: [], logo: false, base: null, pushed: [] };
+  it("hands off no words on the picture of a main video taken from HyperFrames, though the record holds titles drawn for it in Final Cut", async () => {
+    const w = fw({ over: { main: TITLED } });
+    exportOf(w, "main");
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    const handoff = handoffOf(found);
+    assert.equal(handoffFaultV2(handoff), "");
+    assert.equal("onPicture" in handoff.main, false);
+    assert.deepEqual(reread(found).main.texts, TITLED.texts, "the record keeps the titles all the same");
+    w.t.done();
+  });
+  it("keeps the titles of a main video that went the Final Cut way beside a Reel from HyperFrames", async () => {
+    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
+    const w = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, texts: TITLED.texts, pushed: pushes } } });
+    w.t.shared(`${PROJECT.main}.mp4`, 2000);
+    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    assert.deepEqual(handoffOf(found).main.onPicture, ["Three pricing mistakes"]);
+    w.t.done();
+  });
   it("leaves the original exports in Downloads untouched while it works, and touches nothing else there", async () => {
     const w = fw();
     const main = exportOf(w, "main");
@@ -204,6 +227,24 @@ describe("E2. the record of a finish from HyperFrames' exports", () => {
     const { found } = await finished(w);
     const record = reread(found);
     assert.deepEqual([record.finished.handoff, record.finished.on, record.finished.revision, handoffOf(found).revision], [`final/${HANDOFF}`, "Mac Studio", 1, 1]);
+    w.t.done();
+  });
+  // Review, minor 5: a Reel the last finish took from Final Cut, which this finish keeps (she left it out), is not taken from its project: the
+  // project is not finished, since the Reel in the hand-off is still the one from Final Cut.
+  const FROM_FINAL_CUT = () => ({
+    finished: { revision: 1, at: "2026-10-20T14:10:00-05:00", on: "Mac Studio", handoff: `final/${HANDOFF}`, parts: { "reel 2": { v: 1, file: "final/Reel two from Final Cut.mov", bytes: 5, seconds: 75, source: { bytes: 5, mtimeMs: 1 }, export: "final/Reel two from Final Cut.fcpxmld" } } },
+    reels: [EPISODE.record.reels[0], { ...EPISODE.record.reels[1], status: "finished", final: { file: "final/Reel two from Final Cut.mov", seconds: 75 } }]
+  });
+  it("does not mark finished the project of a Reel that this finish keeps as the last one took it from Final Cut", async () => {
+    const w = fw({ over: FROM_FINAL_CUT() });
+    mkdirSync(join(w.found.folder, "final"), { recursive: true });
+    writeFileSync(join(w.found.folder, "final", "Reel two from Final Cut.srt"), SRT["reel 2"]);
+    exportOf(w, "main");
+    const { found } = await finished(w, { without: ["reel 2"] });
+    const record = reread(found);
+    assert.deepEqual(record.app.projects.map((p) => [p.key, p.state]), [["main", "finished"], ["reel 2", "opened"]]);
+    assert.deepEqual([record.finished.parts["reel 2"].export, "project" in record.finished.parts["reel 2"]], ["final/Reel two from Final Cut.fcpxmld", false]);
+    assert.equal(handoffOf(found).reels[0].file, "Reel two from Final Cut.mov");
     w.t.done();
   });
 });
@@ -443,6 +484,29 @@ describe("E5. spellings, and a file that changes", () => {
     assert.deepEqual(readdirSync(w.downloads).sort(), [MAIN_FILE, REEL_FILE].sort());
     w.t.done();
   });
+  // Review, minor 7: what to say again is the way of the parts taken now, not of a Reel kept from Final Cut beside them.
+  it("says to hand it off again, and not to finish again, when a Reel the last finish took from Final Cut is kept beside the exports taken", async () => {
+    let wrote = false;
+    let w = null;
+    let found = null;
+    const finishedBefore = { revision: 1, at: "2026-10-20T14:10:00-05:00", on: "Mac Studio", handoff: `final/${HANDOFF}`, parts: { "reel 1": { v: 1, file: "final/Reel one from Final Cut.mov", bytes: 5, seconds: 7.7, source: { bytes: 5, mtimeMs: 1 }, export: "final/Reel one from Final Cut.fcpxmld" } } };
+    w = fw({ projects: ["main"], over: { finished: finishedBefore, reels: [{ ...EPISODE.record.reels[0], status: "finished", final: { file: "final/Reel one from Final Cut.mov", seconds: 7.7 } }, EPISODE.record.reels[1]] }, programs: { WHISPER: (args) => {
+      if (!wrote && found) {
+        wrote = true;
+        writeFileSync(recordFile(found.folder, found.record.rev + 1), JSON.stringify({ ...found.record, rev: found.record.rev + 1 }));
+      }
+      return whisper()(args);
+    } } });
+    mkdirSync(join(w.found.folder, "final"), { recursive: true });
+    writeFileSync(join(w.found.folder, "final", "Reel one from Final Cut.srt"), SRT["reel 1"]);
+    exportOf(w, "main");
+    found = await asked(w);
+    assert.deepEqual(found.record && w.asked().parts.map((p) => [p.key, p.kept, Boolean(p.project)]), [["main", false, true], ["reel 1", true, false]]);
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, false);
+    assert.match(result.failed.join(" "), /The episode changed while finish was working, so nothing was copied into final\/\. Say "hand it off" again\./);
+    w.t.done();
+  });
   it("refuses to start when the episode changed since finish was asked", async () => {
     const w = fw();
     exportOf(w, "main");
@@ -517,6 +581,22 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     assert.equal(existsSync(join(found.folder, "final", REEL_FILE)), true);
     w.t.done();
   });
+  // Review, minor 6: what finish.asked.json says of where a file came from is not taken on trust when a file is removed: it must be in the
+  // Downloads folder of this Mac.
+  it("removes nothing from a folder that is not this Mac's Downloads, though what it was told says the file came from there", async () => {
+    const w = fw();
+    const main = exportOf(w, "main", { folder: join(w.t.home, "Movies", "exports") });
+    const reel = exportOf(w, "reel 2");
+    const found = await asked(w);
+    const told = w.asked();
+    assert.equal(told.parts[0].video.where, "another folder");
+    told.parts[0].video.where = "Downloads";
+    writeFileSync(join(w.work, "finish.asked.json"), JSON.stringify(told));
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [true, false]);
+    w.t.done();
+  });
   it("leaves in Downloads a file a person named, or a record named, under a name that is no export's", async () => {
     const w = fw();
     const named_ = exportOf(w, "main", { name: "final.mp4", record: false });
@@ -580,6 +660,29 @@ describe("E7. again, and the run", () => {
     assert.deepEqual([second.revision, second.video.id, second.main.srt, second.main.file], [2, first.video.id, first.main.srt, first.main.file]);
     assert.equal(reread(found).finished.revision, 2);
     assert.deepEqual(Object.keys(reread(found).finished.parts), ["main", "reel 2"]);
+    w.t.done();
+  });
+  // Review I2: she exports at 13:10, edits, exports at 13:56 and hands off. The 13:56 file is taken and removed; the 13:10 file is not
+  // taken and stays in Downloads, and must not stand in the way of a second hand-off, nor be handed off in place of the good one.
+  it("keeps a part on a second finish though an earlier export of it is left in Downloads, and an answer that it is final does not hand that one off", async () => {
+    const w = fw();
+    const earlier = exportOf(w, "main", { start: [13, 10, 0] });
+    exportOf(w, "main", { start: [13, 56, 40] });
+    exportOf(w, "reel 2");
+    const { found } = await finished(w);
+    assert.deepEqual(readdirSync(w.downloads), [earlier.name], "only the export finish took was removed");
+    const first = handoffOf(found);
+    const had = w.t.said().split("\n").length;
+    const again = { ...found, record: reread(found) };
+    assert.equal(await finishEpisode(w.t.ctx, again, {}), 0);
+    assert.deepEqual(w.t.said().split("\n").slice(had), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", 'Say "yes, hand it off" to start.']);
+    assert.equal(await finishEpisode(w.t.ctx, again, { final: ["main"], yes: true }), 0);
+    const result = await finishNow(w.t.ctx, { ...found, record: reread(found) });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const second = handoffOf(found);
+    assert.deepEqual([second.revision, second.main.file, second.main.srt], [2, first.main.file, first.main.srt]);
+    assert.equal(first.main.file, MAIN_FILE);
+    assert.deepEqual(readdirSync(w.downloads), [earlier.name], "and the earlier export is not touched");
     w.t.done();
   });
   it("makes only the main video again for a new export of it, keeps the Reel, and leaves the earlier export in final/, listed", async () => {

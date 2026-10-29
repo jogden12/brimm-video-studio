@@ -104,16 +104,19 @@ export function beganAt({ date, time }, zone = LOCAL_ZONE) {
     node_modules, renders and snapshots, so that the agent's own render, snapshot and check do not look like edits (8.1). */
 const NOT_CHANGES = new Set(["node_modules", "renders", "snapshots"]);
 const notAChange = (part) => part.startsWith(".") || NOT_CHANGES.has(part);
+/** The project's own recording: `free` takes it out and `app` puts it back, with a time of its own. That is no edit. */
+const RECORDING = "media/recording.mp4";
 
 /** When a project last changed in the app, in milliseconds, or null when that is not known: the later of its newest file change, outside
-    the folders above at any depth, and its last turn in app-history.jsonl. `files` are { path, mtimeMs }, a path from the project's folder
-    with "/", and `turns` are the app's turns (hyperframes.js turnsOf). A turn whose date is not a date is passed over. */
+    the folders above at any depth and but for the project's own recording (media/recording.mp4), and its last turn in app-history.jsonl.
+    `files` are { path, mtimeMs }, a path from the project's folder with "/", and `turns` are the app's turns (hyperframes.js turnsOf). A
+    turn whose date is not a date is passed over. */
 export function lastChangeOf({ files = [], turns = [] } = {}) {
   let latest = null;
   const see = (ms) => {
     if (Number.isFinite(ms) && (latest === null || ms > latest)) latest = ms;
   };
-  for (const file of files) if (file && typeof file.path === "string" && !file.path.split("/").some(notAChange)) see(file.mtimeMs);
+  for (const file of files) if (file && typeof file.path === "string" && file.path !== RECORDING && !file.path.split("/").some(notAChange)) see(file.mtimeMs);
   for (const turn of turns) see(typeof (turn && turn.at) === "string" ? Date.parse(turn.at) : NaN);
   return latest;
 }
@@ -252,7 +255,11 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
       continue;
     }
     const candidates = candidatesOf(part, input, zone);
-    const exports = once(candidates.filter(taking));
+    // An export that ended before the one the last finish took is a leftover of an earlier try: finish removes the export it took, and no
+    // other. It is passed over, so that the part is kept as that finish made it, and an answer that it is final cannot hand it off in place
+    // of the good one. The file the last finish took (the same time) is not older, and a file she names is taken whatever its age.
+    const tookAt = prior && prior.source && Number.isFinite(prior.source.mtimeMs) ? prior.source.mtimeMs : null;
+    const exports = once(candidates.filter(taking)).filter((file) => tookAt === null || !(file.mtimeMs < tookAt));
     const webms = candidates.filter((candidate) => candidate.ending === "webm");
     const renders = (part.renders || []).filter((file) => file.bytes > 0).map((file) => ({ ...file, where: "renders", ending: endingOf(file.name) }));
     /** What was passed over, said when a part has no export taken, or (a WebM) when one began after the export that is. */
@@ -445,7 +452,7 @@ function recordsIn(dir, downloads, zone) {
 }
 
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
-    the record (not a project kept for an earlier kind), whether its folder is on this Mac, when it last changed (projectChange), the
+    the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
     files its records name and the renders in its renders/ that none does; and the videos in Downloads and in what the other Mac
     released into the episode (`edit/from-hyperframes/`). `home` is this Mac's home, `name` the episode's folder name and `folder` its
     folder in Episodes. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
@@ -455,7 +462,11 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
   const work = episodeWork(home, name);
   const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
   const main = projects.find(isMain);
-  const reels = projects.filter((p) => p.state !== KEPT && /^reel [1-9]\d*$/.test(p.key)).sort((a, b) => Number(a.key.slice(5)) - Number(b.key.slice(5)));
+  // A Reel dropped after its project was made (`reel drop`) is no part of a finish: it is not asked for, and an export of it left in
+  // Downloads is not handed off, which would make the Reel finished again. A project whose Reel the record does not hold at all stays
+  // a part, so that finish can stop on it.
+  const dropped = new Set((Array.isArray(record.reels) ? record.reels : []).filter((r) => r && r.status === "dropped").map((r) => `reel ${r.n}`));
+  const reels = projects.filter((p) => p.state !== KEPT && /^reel [1-9]\d*$/.test(p.key) && !dropped.has(p.key)).sort((a, b) => Number(a.key.slice(5)) - Number(b.key.slice(5)));
   const parts = [...(main ? [{ project: main, key: "main", label: "the main video" }] : []), ...reels.map((p) => ({ project: p, key: p.key, label: `Reel ${p.key.slice(5)}`, reel: Number(p.key.slice(5)) }))].map(({ project, key, label, reel }) => {
     const dir = plainName(project.name) ? join(work, project.name) : "";
     const here = dir !== "" && isFolder(dir);
