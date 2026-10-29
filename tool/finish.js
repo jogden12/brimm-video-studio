@@ -1141,8 +1141,10 @@ export const importKind = (record) => (madeFromImport(record) ? String(record.fi
     plain words, when Reels cannot be added to it: the record has no hand-off yet (the spellings card writes the first, and this never
     does), it was not made from the import's captions, it was made as another kind than the video is now, it is not one file directly
     in final/, it is not there at all (nothing for Dropbox to bring), or it cannot be read, is not version 2, is not a finished video's,
-    or has no main video or no revision. The video is named as edit.js names it. This only reads. */
-export function reelsBase(folder, record, { isWhole = () => true } = {}) {
+    or has no main video or no revision. The video is named as edit.js names it. `read` reads the hand-off's file as JSON (null when it cannot
+    be); the guide gives one that opens a regular file alone, so that a pipe where the file should be is never waited for (plan PR 16). This
+    only reads. */
+export function reelsBase(folder, record, { isWhole = () => true, read = readJson } = {}) {
   const name = shownName(record);
   if (!record.finished) return { why: noHandoffWords(name) };
   if (!madeFromImport(record)) return { why: unusableWords(name) };
@@ -1152,7 +1154,7 @@ export function reelsBase(folder, record, { isWhole = () => true } = {}) {
   // A file that is not in the folder at all is not one Dropbox is bringing over: nothing would ever come (the review's I2).
   if (!existsSync(join(folder, rel))) return { why: missingWords(name) };
   if (!isWhole(join(folder, rel))) return { coming: rel };
-  const onFile = readJson(join(folder, rel));
+  const onFile = read(join(folder, rel));
   const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
   const usable = isObject(onFile) && onFile.version === VERSION_2 && isObject(onFile.video) && onFile.video.kind === "finished" && isObject(onFile.main) && Number.isInteger(onFile.revision) && onFile.revision >= 1;
   return usable ? { onFile, base: { handoff: rel, revision: onFile.revision } } : { why: unusableWords(name) };

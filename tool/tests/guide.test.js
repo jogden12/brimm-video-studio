@@ -235,6 +235,12 @@ const STAGE_ROWS = [
   [RAW({ gated: true, reading: "failed" }), "session-mark", MARK],
   [RAW({ gated: true, offersAnswered: false }), "session-mark", MARK],
   [RAW({ gated: true, placeholder: true }), "session-mark", MARK],
+  // A finished video whose hand-off is written, with a Reel exported from HyperFrames that the hand-off does not hold (plan PR 16): it comes ahead
+  // of the BRIMM Ops page's steps, names the Reels together, and is a finish at work's when one runs.
+  [{ handoff: HANDOFF(), reelsExported: [2] }, "reels-exported", 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.'],
+  [{ handoff: HANDOFF(), reelsExported: [1, 3] }, "reels-exported", 'You have exported Reel 1 and Reel 3 from HyperFrames. Say "hand off the Reels" to add them to the hand-off.'],
+  [{ handoff: HANDOFF(), reelsExported: [1, 2, 3] }, "reels-exported", 'You have exported Reel 1, Reel 2 and Reel 3 from HyperFrames. Say "hand off the Reels" to add them to the hand-off.'],
+  [{ handoff: HANDOFF(), reelsExported: [2], finishRunning: true }, "finish-running", "Its finish is running. The panel shows how far it is."],
   // The Final Cut way keeps its stages, whatever else the facts hold.
   [RAW({ way: "final cut", copy: { left: 90, usual: null } }), "show", 'Ask for any changes in your own words, then say "show it in Final Cut".'],
   [RAW({ way: "final cut", shownInFinalCut: true }), "finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".'],
@@ -376,6 +382,83 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
   });
   it("is the same for a Reel's project: a project here is the main video's, and a copy at work beside it is not said", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT(), copy: { left: 90, usual: null } }) }, NONE, NOW).stage, "in-app");
+  });
+});
+
+describe("the next step for a finished video's Reels (plan PR 16)", () => {
+  const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';
+  const FINISHED_BY_HER = { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } };
+  const noted = (step, revision = 1) => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step, revision, at: "2026-10-24T09:00:00-05:00" } } });
+  /** A finished video with its hand-off written and a Reel exported from HyperFrames that the hand-off does not hold. */
+  const waiting = (over = {}) => ({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], ...over });
+  it("comes ahead of every step on the BRIMM Ops page, of the step that comes back for a newer revision, and of done", () => {
+    const sixty = OPS_HANDOFF.at + 60 * 86400000;
+    for (const [what, facts, notes, now] of [
+      ["no step noted", waiting(), NONE, NOW],
+      ["taken", waiting(), noted("taken"), NOW],
+      ["kit", waiting(), noted("kit"), NOW],
+      ["posted", waiting(), noted("posted"), NOW],
+      ["live", waiting(), noted("live"), NOW],
+      ["every step noted", waiting(), noted("cascade"), NOW],
+      ["a newer revision, taken again", waiting({ handoff: { ...OPS_HANDOFF, revision: 2 } }), noted("kit"), NOW],
+      ["a hand-off 61 days old", waiting(), NONE, sixty + 1],
+      ["a hand-off 61 days old with every step noted", waiting(), noted("cascade"), sixty + 1]
+    ]) assert.deepEqual(shown(nextFor(facts, notes, now)), { stage: "reels-exported", text: REEL_2 }, what);
+    // Its words are not a step of the page's: they note none, and show nothing.
+    const n = nextFor(waiting(), NONE, NOW);
+    assert.deepEqual([n.done, n.step, n.after], [false, "", ""]);
+  });
+  it("has the page's steps back once the Reels are in the hand-off, or when none is exported", () => {
+    for (const over of [{ reelsExported: [] }, { reelsExported: undefined }, { reelsExported: null }]) {
+      const n = nextFor(waiting(over), NONE, NOW);
+      assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
+    }
+    const again = nextFor(waiting({ reelsExported: [], handoff: { ...OPS_HANDOFF, revision: 2 } }), noted("kit"), NOW);
+    assert.deepEqual([again.stage, again.step, again.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain}`]);
+  });
+  it("comes after a drop folder, a conflict, her answer and a version held as a session, as every stage of a video does", () => {
+    for (const [over, stage] of [[{ conflicted: true }, "conflicted"], [{ kind: null, waiting: true }, "waiting"], [{ heldAsSession: true }, "held-session"]]) {
+      assert.equal(nextFor(waiting(over), NONE, NOW).stage, stage, JSON.stringify(over));
+    }
+    assert.equal(nextFor({ ...waiting(), ...DROP(), handoff: null }, NONE, NOW).stage, "arriving");
+  });
+  it("is not ahead of her word that the video is finished: it stays done, and she can set the video aside (ruling 1)", () => {
+    assert.deepEqual(nextFor(waiting(), FINISHED_BY_HER, NOW), { done: true });
+    assert.deepEqual(nextFor(waiting({ reelsExported: [1, 2] }), { ...FINISHED_BY_HER, handoffs: noted("kit").handoffs }, NOW), { done: true });
+    // The stage is not one that nothing noted can skip: her word is taken while a Reel waits.
+    assert.equal(nextFor(waiting(), NONE, NOW).done, false);
+  });
+  it("is not said when the gate holds the video, when the other Mac has it open, or when no hand-off is written", () => {
+    // A video the gate holds as a session keeps the page's step of a hand-off that is written, as it did, and is told nothing of Reels.
+    const held = nextFor(waiting({ gated: true }), NONE, NOW);
+    assert.deepEqual([held.stage, held.step], ["ops", "taken"]);
+    const away = nextFor(waiting({ elsewhere: true, mac: "Mac Studio" }), NONE, NOW);
+    assert.deepEqual([away.stage, away.step], ["ops", "taken"]);
+    const none = nextFor(waiting({ handoff: null }), NONE, NOW);
+    assert.equal(none.stage, "handoff-owed");
+    assert.equal(nextFor(waiting({ handoff: null, offersAnswered: false }), NONE, NOW).stage, "spellings");
+  });
+  it("is a finished video's alone: a raw video, an iPhone clip and a session ignore it", () => {
+    for (const over of [
+      APP({ way: "hyperframes", project: PROJECT(), handoff: { ...OPS_HANDOFF, kind: "raw" } }),
+      CLIP({ way: "hyperframes", project: PROJECT(), handoff: { ...OPS_HANDOFF, kind: "short video" } }),
+      { ...SESSION(), handoff: { ...OPS_HANDOFF, kind: "session" } }
+    ]) {
+      const n = nextFor({ ...BASE, ...over, reelsExported: [2] }, NONE, NOW);
+      assert.notEqual(n.stage, "reels-exported", JSON.stringify(over));
+    }
+  });
+  it("is a finish at work's stage while one runs, where a Reel waits, and the page's step where none does (ruling 4)", () => {
+    const running = nextFor(waiting({ finishRunning: true }), NONE, NOW);
+    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const quiet = nextFor(waiting({ finishRunning: true, reelsExported: [] }), NONE, NOW);
+    assert.deepEqual([quiet.stage, quiet.step], ["ops", "taken"]);
+  });
+  it("needs nothing of the guide's waits: it is not among the stages something is on its way at, and a video passing from it to the page's step is a change", () => {
+    assert.ok(!COMING.includes("reels-exported"));
+    const at = (over) => ({ facts: waiting(over), next: nextFor(waiting(over), NONE, NOW), folder: null, record: null });
+    assert.notEqual(signatureOf([at({})]), signatureOf([at({ reelsExported: [] })]));
+    assert.equal(signatureOf([at({})]), signatureOf([at({ reelsExported: [1, 2] })]));
   });
 });
 
