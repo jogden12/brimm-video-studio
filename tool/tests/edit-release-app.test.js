@@ -12,7 +12,7 @@ import { editMain } from "../edit.js";
 import { PIN } from "../hyperframes.js";
 import { NAME } from "./episodes.js";
 import { reasonOf } from "../hand-over.js";
-import { MARKER, markerAsItIs, readMarker } from "../snapshot.js";
+import { LEFT_OUT_NOTE, MARKER, markerAsItIs, readMarker } from "../snapshot.js";
 import { FOLDER, HELD, HERS, MAIN, REEL2, T1, entry, exportOf, fillProject, filesBelow, listAll, ms, releaseWorld, reread, snapshotListing, textOf } from "./snapshot-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -358,8 +358,12 @@ describe("release: assets that are too big (group F)", () => {
     writeFileSync(join(w.dirOf("main"), "assets", "interview.mov"), "x");
     truncateSync(join(w.dirOf("main"), "assets", "interview.mov"), 50 * 1024 * 1024 + 1);
     const r = await release(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [`${NAME} is handed over. Copied for the other Mac: its HyperFrames project (the main video). The assets of the main video (their pictures, music and fonts) are too big to hand over, so they stay on this Mac. ${KEEP}`]]);
-    assert.deepEqual(snapshotListing(w, T1, MAIN), HELD_RELS.filter((rel) => !rel.startsWith("assets/")));
+    assert.deepEqual([r.code, r.said], [0, [`${NAME} is handed over. Copied for the other Mac: its HyperFrames project (the main video). The assets of the main video (their pictures, music and video) are too big to hand over, so they stay on this Mac. ${KEEP}`]]);
+    // Studio's own fonts and logos go all the same, and a note says that the rest was left out (the review of PR 11, M4).
+    assert.deepEqual(snapshotListing(w, T1, MAIN), [...HELD_RELS.filter((rel) => !rel.startsWith("assets/") || rel.startsWith("assets/fonts/") || rel.startsWith("assets/logos/")), LEFT_OUT_NOTE].sort());
+    assert.match(textOf(join(w.found.folder, "app-snapshot", T1, MAIN, LEFT_OUT_NOTE)), /too big to hand over/);
+    assert.equal(reread(w.found).files[`app-snapshot/${T1}/${MAIN}/${LEFT_OUT_NOTE}`], statSync(join(w.found.folder, "app-snapshot", T1, MAIN, LEFT_OUT_NOTE)).size);
+    assert.equal(existsSync(join(w.dirOf("main"), LEFT_OUT_NOTE)), false, "the project on this Mac is as it was");
     w.t.done();
   });
   it("names the parts, two of them, in one sentence", async () => {
@@ -369,7 +373,7 @@ describe("release: assets that are too big (group F)", () => {
       truncateSync(join(w.dirOf(key), "assets", "interview.mov"), 60 * 1024 * 1024);
     }
     const r = await release(w.t.ctx.deps, FOLDER);
-    assert.equal(r.said[0], `${NAME} is handed over. Copied for the other Mac: ${BOTH}. The assets of the main video and Reel 2 (their pictures, music and fonts) are too big to hand over, so they stay on this Mac. ${KEEP}`);
+    assert.equal(r.said[0], `${NAME} is handed over. Copied for the other Mac: ${BOTH}. The assets of the main video and Reel 2 (their pictures, music and video) are too big to hand over, so they stay on this Mac. ${KEEP}`);
     w.t.done();
   });
 });

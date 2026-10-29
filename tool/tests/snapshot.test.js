@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
+  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
   timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
@@ -118,18 +118,31 @@ describe("a snapshot's files (7.3)", () => {
     assert.equal(got.bytes, 6);
     assert.deepEqual(got.assets, { any: false, bytes: 0, left: false });
   });
-  it("carries assets while they are small: at the limit they go, one byte over they are left out whole, fonts and all, and the rest goes on", (c) => {
+  it("carries assets while they are small: at the limit they go, one byte over the rest are left out whole, with a note that says so, and Studio's own fonts and logos go on (the review of PR 11, M4)", (c) => {
     const dir = scratch(c);
     put(dir, "index.html", "<html>");
     put(dir, "assets/fonts/a.woff2", "12345");
+    put(dir, "assets/logos/mark.svg", "123");
     put(dir, "assets/music.mp3", "123456");
-    const at = snapshotFiles(dir, { assetsMost: 11 });
-    assert.deepEqual(relsOf(at), ["assets/fonts/a.woff2", "assets/music.mp3", "index.html"]);
-    assert.deepEqual(at.assets, { any: true, bytes: 11, left: false });
-    const over = snapshotFiles(dir, { assetsMost: 10 });
-    assert.deepEqual(relsOf(over), ["index.html"]);
-    assert.deepEqual(over.assets, { any: true, bytes: 11, left: true });
-    assert.equal(over.bytes, 6, "the total counts what is listed");
+    put(dir, "assets/pictures/a.png", "1234");
+    const at = snapshotFiles(dir, { assetsMost: 10 });
+    assert.deepEqual(relsOf(at), ["assets/fonts/a.woff2", "assets/logos/mark.svg", "assets/music.mp3", "assets/pictures/a.png", "index.html"]);
+    assert.deepEqual(at.assets, { any: true, bytes: 10, left: false }, "the limit is of what the app was given: the brand kit is not counted");
+    const over = snapshotFiles(dir, { assetsMost: 9 });
+    assert.deepEqual(relsOf(over), ["assets/fonts/a.woff2", "assets/logos/mark.svg", LEFT_OUT_NOTE, "index.html"].sort());
+    assert.deepEqual(over.assets, { any: true, bytes: 10, left: true });
+    const note = over.files.find((f) => f.rel === LEFT_OUT_NOTE);
+    assert.equal(typeof note.text, "string", "the note is made, not read from the project");
+    assert.equal(note.bytes, Buffer.byteLength(note.text));
+    assert.equal(over.bytes, 6 + 5 + 3 + note.bytes, "the total counts what is listed");
+  });
+  it("makes no note, and counts nothing, for a project whose assets are only Studio's own", (c) => {
+    const dir = scratch(c);
+    put(dir, "assets/fonts/a.woff2", "12345");
+    put(dir, "assets/logos/mark.svg", "123");
+    const got = snapshotFiles(dir, { assetsMost: 0 });
+    assert.deepEqual(relsOf(got), ["assets/fonts/a.woff2", "assets/logos/mark.svg"]);
+    assert.deepEqual(got.assets, { any: false, bytes: 0, left: false });
   });
   it("sets its limits at 50 MB for assets and 100 MB for the whole, two snapshots kept, and 2 seconds for a project to be older", (c) => {
     assert.deepEqual([ASSETS_MOST, SNAPSHOT_MOST, SNAPSHOTS_KEPT, BEHIND_MS, SNAPSHOT_DIR], [50 * 1024 * 1024, 100 * 1024 * 1024, 2, 2000, "app-snapshot"]);
@@ -358,9 +371,13 @@ describe("a project rebuilt from a snapshot (4.7, F12)", () => {
     rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI });
     assert.deepEqual(readdirSync(e.folder, { recursive: true }).sort(), before);
   });
-  it("says the assets were left out when the snapshot holds none of them", (c) => {
-    const e = episodeWith(c, { "index.html": "<html>" });
+  it("says the assets were left out when the snapshot holds the note that says so, and makes no file of the note (the review of PR 11, M4)", (c) => {
+    const e = episodeWith(c, { "index.html": "<html>", "assets/fonts/a.woff2": "font", [LEFT_OUT_NOTE]: "some assets were left out" });
     assert.deepEqual(rebuildProject({ folder: e.folder, snapshot: e.snapshot, dir: e.dir, cli: CLI }), { assetsLeft: true });
+    assert.equal(existsSync(join(e.dir, LEFT_OUT_NOTE)), false);
+    assert.equal(existsSync(join(e.dir, "assets", "fonts", "a.woff2")), true, "the brand kit is there");
+    const none = episodeWith(c, { "index.html": "<html>" });
+    assert.deepEqual(rebuildProject({ folder: none.folder, snapshot: none.snapshot, dir: none.dir, cli: CLI }), { assetsLeft: false }, "a project with no assets lost none");
   });
   it("takes none of what a snapshot does not hold, however the record lists it, and makes its own settings file whatever the snapshot's says", (c) => {
     const foreign = { ".env": "SECRET=1", ".claude/settings.json": '{"permissions":{"allow":["Bash(*)"]}}', "media/recording.mp4": "v", "node_modules/x/index.js": "x", ".hyperframes/history-id": "i", "renders/r.mp4": "r", "snapshots/s.png": "s" };

@@ -36,6 +36,14 @@ export const SNAPSHOT_MOST = 100 * 1024 * 1024;
     the whole second, so a copy may be up to a second either way. */
 export const BEHIND_MS = 2000;
 
+/** The files of Studio's own brand kit in a project's `assets/`: its fonts and its logos. A snapshot always holds them, the limit on `assets/`
+    never taking them (they are small, and the project's page cannot draw without them). */
+const isBrandKit = (rel) => rel.startsWith("assets/fonts/") || rel.startsWith("assets/logos/");
+/** The file a snapshot holds, in place of the assets that were left out for weighing too much (snapshotFiles; the review of PR 11, M4): made
+    by `release`, not read from the project, and never made into a file of the project by a rebuild, which says the assets are not in it. */
+export const LEFT_OUT_NOTE = "assets/left-out.txt";
+const LEFT_OUT_TEXT = "Some of this project's assets (pictures, music and video) were too big to hand over, so they are not in this snapshot. They stay on the Mac that made it.\n";
+
 /** The folders at a project's top level that a snapshot leaves out. */
 const LEFT_OUT = new Set(["media", "node_modules", "renders", "snapshots"]);
 
@@ -107,10 +115,15 @@ export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
   };
   walk(dir, "");
   if (unreadable) return { unreadable: true };
-  const inAssets = found.filter((file) => file.rel.startsWith("assets/"));
+  // What the app was given: `assets/` but for Studio's own fonts and logos (the brand kit), which always go (the review of PR 11, M4). Over the
+  // limit, all of the rest is left out (never a part of it), and a note in the snapshot says so, so that the other Mac can tell it from a
+  // project that had no assets of its own.
+  const inAssets = found.filter((file) => file.rel.startsWith("assets/") && !isBrandKit(file.rel));
   const weighs = inAssets.reduce((sum, file) => sum + file.bytes, 0);
   const left = inAssets.length > 0 && weighs > assetsMost;
-  const files = left ? found.filter((file) => !file.rel.startsWith("assets/")) : found;
+  const files = left
+    ? [...found.filter((file) => !inAssets.includes(file)), { rel: LEFT_OUT_NOTE, bytes: Buffer.byteLength(LEFT_OUT_TEXT), text: LEFT_OUT_TEXT }].sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+    : found;
   return { files, bytes: files.reduce((sum, file) => sum + file.bytes, 0), assets: { any: inAssets.length > 0, bytes: weighs, left } };
 }
 
@@ -251,7 +264,7 @@ export function rebuildProject({ folder, snapshot, dir, cli, by = "", now }, dep
   // A file keeps the time it had, but not one in the future: the project's last change (exports.js projectChange) is read from these
   // times, and one file dated after the moment of the rebuild would stand for it, and make every export look older.
   const timed = (mtimeMs) => (Number.isFinite(now) ? Math.min(mtimeMs, now) : mtimeMs);
-  const files = new Map(stats.map(({ rel, mtimeMs }) => [rel, { copy: join(folder, snapshot.dir, rel), mtimeMs: timed(mtimeMs) }]));
+  const files = new Map(stats.filter(({ rel }) => rel !== LEFT_OUT_NOTE).map(({ rel, mtimeMs }) => [rel, { copy: join(folder, snapshot.dir, rel), mtimeMs: timed(mtimeMs) }]));
   files.set(".claude/settings.json", settingsText("main"));
   files.set(MARKER, markerText(snapshot.time, by));
   files.set("node_modules/.bin/hyperframes", { link: cli });
@@ -260,7 +273,7 @@ export function rebuildProject({ folder, snapshot, dir, cli, by = "", now }, dep
   } catch (e) {
     return { why: "could not" };
   }
-  return { assetsLeft: !stats.some(({ rel }) => rel.startsWith("assets/")) };
+  return { assetsLeft: stats.some(({ rel }) => rel === LEFT_OUT_NOTE) };
 }
 
 /** Whether a project's files `local` are older than a snapshot's `there`: the newest of them is more than BEHIND_MS older than the snapshot's.

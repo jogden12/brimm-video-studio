@@ -17,7 +17,7 @@
 // is edit.js's, written last, and lists what was put in. When the record cannot be written, `undo` removes it again.
 //
 // What it says goes into her chat, so it holds no path, no flag and no name of a command.
-import { existsSync, lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { KEPT, clipFolders, clipTrouble, folded, isMain, plainName } from "./app.js";
 import { cloneIn, replaceIn } from "./dropbox.js";
@@ -172,12 +172,19 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
   };
   const notYet = [];
   const names = [];
+  /** Where the note that says the assets were left out is made, beside the projects and not in any: a dot-name nothing reads. */
+  const note = join(episodeWork(ctx.home, found.name), ".left-out-note.txt");
   try {
     for (const project of planned) {
       for (const file of project.files) {
         const rel = `${SNAPSHOT_DIR}/${time}/${project.name}/${file.rel}`;
         mkdirSync(dirname(at(rel)), { recursive: true });
-        cloneIn(join(project.dir, file.rel), at(rel), opts);
+        // The note that says the assets were left out is not in the project: it is made on this Mac's own disk, then cloned in like the rest.
+        if (typeof file.text === "string") {
+          mkdirSync(dirname(note), { recursive: true });
+          writeFileSync(note, file.text);
+        }
+        cloneIn(typeof file.text === "string" ? note : join(project.dir, file.rel), at(rel), opts);
         copies[rel] = statSync(at(rel)).size;
       }
     }
@@ -213,9 +220,11 @@ export async function handOver(ctx, { found, record, own = projectsToHand(ctx, {
     const lost = replaced.filter((rel) => !existsSync(at(rel)));
     const resized = Object.fromEntries(replaced.filter((rel) => existsSync(at(rel))).map((rel) => [rel, statSync(at(rel)).size]));
     return { refused: `${name} could not be handed over: ${reasonOf(e)}. Nothing was handed over: say hand it over again.`, ...(lost.length ? { lost } : {}), ...(Object.keys(resized).length ? { resized } : {}) };
+  } finally {
+    rmSync(note, { force: true });
   }
   return { copies, names, notYet, assetsLeft: planned.filter((p) => p.assets.left).map((p) => p.label), time, undo };
 }
 
 /** The sentence that says which assets were left out for weighing too much, with the space that joins it to the sentence before, or "". */
-export const assetsWords = (labels) => (labels.length ? ` The assets of ${listed(labels)} (their pictures, music and fonts) are too big to hand over, so they stay on this Mac.` : "");
+export const assetsWords = (labels) => (labels.length ? ` The assets of ${listed(labels)} (their pictures, music and video) are too big to hand over, so they stay on this Mac.` : "");

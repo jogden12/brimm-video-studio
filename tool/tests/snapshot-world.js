@@ -25,7 +25,7 @@ export const T1 = "2026-10-20 20.00.00Z";
 /** What a project `app` made holds that a snapshot takes, with what the app and its assistant added, each file with its text. */
 export const HELD = {
   "index.html": "<html>the timeline</html>", "meta.json": '{"id":"p"}', "hyperframes.json": "{}", "package.json": '{"name":"p"}', "transcript.json": "[]",
-  "CLAUDE.md": "the rules", "AGENTS.md": "the rules", "vendor/gsap.min.js": "gsap", "assets/fonts/Allison-Regular.ttf": "a font", "assets/brand-kit/mark.png": "a picture",
+  "CLAUDE.md": "the rules", "AGENTS.md": "the rules", "vendor/gsap.min.js": "gsap", "assets/fonts/Allison-Regular.ttf": "a font", "assets/logos/mark.png": "a logo", "assets/music/theme.mp3": "some music",
   "brimm/facts.json": '{"seconds":23.423,"width":1280,"height":720}', "brimm/brand.md": "the brand", "brimm/spellings.json": "{}", "compositions/title-card.html": "<div>Pricing</div>"
 };
 /** What a project holds that a snapshot leaves out. */

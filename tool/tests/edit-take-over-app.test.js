@@ -230,8 +230,9 @@ describe("app: the project is rebuilt from the snapshot (group K)", () => {
     truncateSync(join(w.dirOf("main"), "assets", "interview.mov"), 60 * 1024 * 1024);
     assert.equal((await release(w.t.ctx.deps)).code, 0);
     const r = await app(w.b.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [REBUILT(), "Its assets (pictures, music and fonts) were too big to hand over, so they are not in it.", MAKING]]);
-    assert.equal(existsSync(join(w.b.work, MAIN, "assets")), false);
+    assert.deepEqual([r.code, r.said], [0, [REBUILT(), "Its assets (pictures, music and video) were too big to hand over, so they are not in it.", MAKING]]);
+    // Studio's own fonts and logos came, and what the app was given did not, nor the note that says it was left out.
+    assert.deepEqual(filesBelow(join(w.b.work, MAIN, "assets")), ["fonts/Allison-Regular.ttf", "logos/mark.png"]);
     w.t.done();
   });
   it("names no Mac for a snapshot this Mac took itself: a project of its own whose folder is gone is rebuilt too, and what HyperFrames kept stays behind", async () => {

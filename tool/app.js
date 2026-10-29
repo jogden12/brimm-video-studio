@@ -89,7 +89,7 @@ export const notPutBack = (name) => `The video for ${name} was made again, but i
 export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Ask Jason.`;
 export const couldNotRebuild = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac. Ask Jason.`;
 export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
-export const ASSETS_NOT_IN = "Its assets (pictures, music and fonts) were too big to hand over, so they are not in it.";
+export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
 /** That a project is rebuilt, from what, and that the app's history stays behind. The snapshot was handed over by `by`, the Mac that made it
     (snapshot.js makerOf: who first listed it in the record), when that is a Mac and not this one; it is "the snapshot taken at …" when this
     Mac made it, as a Mac gets its own project back from its own, and when the record does not say (the review of PR 11, M5: the Mac that

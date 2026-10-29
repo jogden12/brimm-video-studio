@@ -107,11 +107,14 @@ describe("rebuildHere: the project is made and said", () => {
     rebuildHere(nobody.ctx, { found: nobody.found, record: nobody.record, snapshot: projectSnapshot(nobody.record), dir: nobody.dir, name: NAME }, { cli: CLI });
     assert.deepEqual(nobody.said.slice(0, 1), [`The HyperFrames project for ${NAME} is rebuilt on this Mac from the snapshot taken at ${WHEN}. What HyperFrames kept of its history stays behind.`]);
   });
-  it("says the assets are not in it when the snapshot holds none", (c) => {
-    const w = world(c, { files: { "index.html": "<html>" } });
+  it("says the assets are not in it when the snapshot holds the note that says they were left out, and says nothing of them otherwise", (c) => {
+    const w = world(c, { files: { "index.html": "<html>", "assets/left-out.txt": "left out" } });
     rebuildHere(w.ctx, { found: w.found, record: w.record, snapshot: projectSnapshot(w.record), dir: w.dir, name: NAME }, { cli: CLI });
     assert.deepEqual(w.said.slice(1), [ASSETS_NOT_IN]);
-    assert.equal(ASSETS_NOT_IN, "Its assets (pictures, music and fonts) were too big to hand over, so they are not in it.");
+    assert.equal(ASSETS_NOT_IN, "Its assets (pictures, music and video) were too big to hand over, so they are not in it.");
+    const none = world(c, { files: { "index.html": "<html>" } });
+    rebuildHere(none.ctx, { found: none.found, record: none.record, snapshot: projectSnapshot(none.record), dir: none.dir, name: NAME }, { cli: CLI });
+    assert.deepEqual(none.said.slice(1), []);
   });
   it("says the snapshot is not whole, and makes nothing, when a file the record lists is gone or short", (c) => {
     for (const spoil of [(f) => rmSync(f), (f) => writeFileSync(f, "<ht")]) {
