@@ -167,6 +167,17 @@ describe("release: the projects of an episode edited in HyperFrames (group C)", 
     assert.deepEqual(readdirSync(join(w.found.folder, "app-snapshot", T1)).sort(), [MAIN, REEL2].sort());
     w.t.done();
   });
+  it("hands over no later main project when the first one's folder is gone: `app` opens the first, so it is the one that counts (the review of PR 11, M7)", async () => {
+    const later = "Pricing- what to charge- main 2 3fa9c1";
+    const projects = [entry("main"), entry("main", { name: later })];
+    const w = releaseWorld({ projects: ["main"], over: { app: { toolchain: PIN.version, projects } } });
+    fillProject(join(w.work, later));
+    rmSync(w.dirOf("main"), { recursive: true });
+    const r = await release(w.t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`${NAME} is handed over. Copied for the other Mac: nothing. ${KEEP}`]]);
+    assert.equal(existsSync(join(w.found.folder, "app-snapshot")), false, "nothing of the later main project is in the episode");
+    w.t.done();
+  });
   it("hands over none of a Reel project kept for an earlier kind", async () => {
     const projects = [entry("main"), entry("reel 3", { name: "Pricing reel 3 kept", state: "kept for an earlier kind" })];
     const w = releaseWorld({ projects: ["main"], over: { app: { toolchain: PIN.version, projects } } });

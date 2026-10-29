@@ -75,10 +75,13 @@ export function projectsToHand(ctx, { found, record }) {
   const mains = [];
   const reels = [];
   const seen = new Set();
+  // The main project in use is the first of the record that `app` would open (isMain), as app.js openInApp takes it: when its folder is not
+  // on this Mac, no later "main" takes its place here.
+  const inUse = listedProjects.find((project) => Boolean(project) && isMain(project));
   for (const project of listedProjects) {
     const reel = /^reel ([1-9]\d*)$/.exec(typeof project?.key === "string" ? project.key : "");
-    const main = project?.key === "main" && isMain(project);
-    if ((!main && !(reel && project.state !== KEPT)) || (main && mains.length > 0) || !plainName(project.name) || seen.has(folded(project.name))) continue;
+    const main = project === inUse;
+    if ((!main && !(reel && project.state !== KEPT)) || !plainName(project.name) || seen.has(folded(project.name))) continue;
     const trouble = clipTrouble(work, clips, project.name);
     if (trouble === "bad") return { projects: [], bad: true };
     if (trouble === "clip") continue;
