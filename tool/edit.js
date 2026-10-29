@@ -161,14 +161,19 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         does; another Mac's claim refuses it, unless it is taken over. A project the
                                         other Mac made is rebuilt here from the snapshot it handed over, and its video
                                         made again; what HyperFrames kept of its history stays on that Mac. One it has
-                                        not handed over is refused. Only on a Mac that Jason has set up for HyperFrames
+                                        not handed over is refused. A project here that the other Mac has worked on
+                                        since, which its marker and the newest snapshot show, is set aside with
+                                        nothing deleted and rebuilt in its place from that snapshot, its video kept
+                                        when it fits; HyperFrames must be quit, which is asked before anything is
+                                        claimed. Only on a Mac that Jason has set up for HyperFrames
   node edit.js app "<episode>" reel <n> [--take-over]
                                         make Reel <n>, one of Claude's suggestions, a project of its own in HyperFrames,
                                         open it, and pick it. Its video, the suggestion's stretch of the recording, is
                                         made first: it is asked for, and the Reel is opened when it is said again. Its
                                         files are checked and brought over, and it is claimed for this Mac, as above.
-                                        A Reel project the other Mac made is rebuilt from its snapshot, as above. For a
-                                        finished video too. Reels are made here, never by HyperFrames itself
+                                        A Reel project the other Mac made is rebuilt from its snapshot, as above, and
+                                        one here that the other Mac has worked on since is set aside and rebuilt, as
+                                        above. For a finished video too. Reels are made here, never by HyperFrames itself
   node edit.js app "<episode>" what-happened
                                         what was done in HyperFrames on the episode's main video, newest first, under
                                         the day it happened: what she asked, what the app said, and the files it

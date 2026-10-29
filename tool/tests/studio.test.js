@@ -260,12 +260,15 @@ describe("her folder's settings", () => {
     const takeOver = open.slice(open.indexOf("If it says another Mac has it"), open.lastIndexOf(" |"));
     assert.ok(takeOver.includes("Never take an episode over unasked otherwise."), takeOver);
     const twin = takeOver.replaceAll('`open "<episode>"', '`app "<episode>"');
-    // After the twin, what `app` alone can say (plan PR 11): a project the other Mac has not handed over, one rebuilt from its snapshot (its
-    // video is made again, so she is told to ask again), and one here that is older than the snapshot. The row from open's take-over to its
-    // end is the twin and those three, in that order, and nothing else (the review of PR 11, M10: pinned whole, not by its start).
+    // After the twin, what `app` alone can say (plan PR 11, and PR 18 for the next two): a project the other Mac has not handed over, one
+    // rebuilt from its snapshot (its video is made again, unless it is kept, so she is told to ask again when it is being made), an older
+    // project set aside, HyperFrames to be quit first, and one here that is older than the snapshot with no marker to set it aside on. The row
+    // from open's take-over to its end is the twin and those five, in that order, and nothing else (the review of PR 11, M10: pinned whole).
     const ALONE = [
       'If it says the project is on another Mac and that Mac has not handed it over, tell her so in its words, which are either to say "I\'m done with it for now" there and then ask again here, or, when that Mac cannot hand it over while this one has the episode open, to ask Jason; nothing was claimed.',
-      "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; its video is then made again in the background, so tell her so, and when \"how far is it?\" says it is done, run it again.",
+      "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; if it then says its video is being made, tell her so, and when \"how far is it?\" says it is done, run it again.",
+      "If it says the older project was set aside, tell her so, and that nothing was deleted: the project is now the newest one that was handed over.",
+      'If it says to quit HyperFrames first, tell her so, and run `app "<episode>"` again when she has.',
       "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
     ];
     assert.equal(app.slice(app.indexOf("If it says another Mac has it")), `${twin} ${ALONE.join(" ")} |`);

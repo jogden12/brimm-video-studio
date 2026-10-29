@@ -815,7 +815,7 @@ describe("what pins the words (group S)", () => {
     const app = usage('  node edit.js app "<episode>" [--take-over]').join(" ");
     for (const words of ["A project the other Mac made is rebuilt here from the snapshot it handed over, and its video made again; what HyperFrames kept of its history stays on that Mac. One it has not handed over is refused."]) assert.ok(app.includes(words), words);
     const reel = usage('  node edit.js app "<episode>" reel <n> [--take-over]').join(" ");
-    assert.ok(reel.includes("A Reel project the other Mac made is rebuilt from its snapshot, as above."), reel);
+    assert.ok(reel.includes("A Reel project the other Mac made is rebuilt from its snapshot, as above,"), reel);
   });
   it("has the README say it in the rows of release, app and app … reel, and in a paragraph of its own on handing a project over", () => {
     const [release] = rowOf("| `release \"<episode>\"");
