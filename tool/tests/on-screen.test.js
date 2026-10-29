@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { closeSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -564,6 +564,33 @@ describe("A6. from a folder", () => {
     mkdirSync(join(inner, "compositions"));
     symlinkSync(outside, join(inner, "compositions", "sub"));
     assert.deepEqual(projectWords(inner).words, []);
+    done();
+  });
+  it("does not follow a link to a folder inside compositions/ either: never through a link, wherever it leads (review M9)", () => {
+    const card = composition("card", '<div class="clip" data-start="0" data-duration="2">Through a link</div>');
+    const inside = folder({ "index.html": projectOf(`<div id="card" data-composition-id="card" data-composition-src="compositions/sub/card.html" data-start="3" data-duration="5"></div>`)["index.html"], "compositions/real/card.html": card });
+    symlinkSync(join(inside, "compositions", "real"), join(inside, "compositions", "sub"));
+    assert.deepEqual(projectWords(inside).words, [], "a folder of compositions/ that is a link to another folder of compositions/");
+    const elsewhere = folder({ "index.html": projectOf(host("card", 3, 5))["index.html"], "assets/comps/card.html": card });
+    symlinkSync(join(elsewhere, "assets", "comps"), join(elsewhere, "compositions"));
+    assert.deepEqual(projectWords(elsewhere).words, [], "compositions/ that is a link to another folder of the project");
+    // The folders themselves, with no link on the way, are read; and so is a project whose own folder is reached through a link.
+    const plain = folder({ "index.html": projectOf(`<div id="card" data-composition-id="card" data-composition-src="compositions/sub/card.html" data-start="3" data-duration="5"></div>`)["index.html"], "compositions/sub/card.html": card });
+    assert.deepEqual(projectWords(plain).words, [{ text: "Through a link", at: 3 }]);
+    const through = join(plain, "..", `brimm-on-screen-link-${process.pid}`);
+    symlinkSync(plain, through);
+    try {
+      assert.deepEqual(projectWords(through).words, [{ text: "Through a link", at: 3 }]);
+    } finally {
+      rmSync(through, { force: true });
+    }
+    done();
+  });
+  it("reads a composition by a spelling of its name that the disk takes for the same, as the disk reads it: the real path is the name as written", () => {
+    // On a disk that does not tell Card.html from card.html (this Mac's), the name as the host writes it is the name the real path gives back.
+    const dir = folder({ "index.html": projectOf(host("Card", 3, 5))["index.html"], "compositions/card.html": composition("card", '<div class="clip" data-start="0" data-duration="2">Either case</div>') });
+    const blind = existsSync(join(dir, "compositions", "Card.html"));
+    assert.deepEqual(projectWords(dir).words, blind ? [{ text: "Either case", at: 3 }] : []);
     done();
   });
   it("does not read a file of more than 2 MB", () => {

@@ -13,7 +13,7 @@
 // Below the reader are the words `finish` says and asks of what it found (`mainWordsSaid` for the main video's picture, `reelTitleAsk` for
 // a Reel's title): plain sentences, with no path, no flag and no command name, since they go into Sallie's chat.
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
-import { join, posix, sep } from "node:path";
+import { join, posix } from "node:path";
 import { clockText } from "./clock.js";
 
 /** The most a file may hold for it to be read: a composition is a few kilobytes, and an agent can write anything in the project. */
@@ -380,9 +380,9 @@ export function projectWords(dir, io = {}) {
       if (!texts.has(id)) texts.set(id, textOf(fd));
       const text = texts.get(id);
       if (text === null) return null;
-      // The file is where its name says, under the project's own folder or its own compositions/: through no link on the way.
-      const own = rel === "index.html" ? base : join(base, "compositions");
-      return realpath(file).startsWith(join(own, sep)) ? { text, id } : null;
+      // The file is where its name says, through no link on the way (the project's folder is `base`, already settled): a folder that is a
+      // link, to a folder outside the project or to another inside it, makes the real path another than the name's (review M9).
+      return realpath(file) === file ? { text, id } : null;
     } catch (e) {
       return null;
     } finally {
