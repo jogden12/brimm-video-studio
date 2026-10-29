@@ -427,7 +427,7 @@ A finished video is not finished in Final Cut: its hand-off is written from the 
 
 **Known limits.** Story parts and word times of an earlier cut stay in `final/` after a part is Shared again: the record no longer lists them, and nothing reads them back. A Share replaced by a file of the same size whose time was set back is taken for the one finish took. Without word times (when the transcriber's word pass died), where a Reel falls in the main video can be a second or so off when its parts lie apart there. When the other Mac takes the episode over while a finish copies into `final/`, the finish is not written into the record, but the record in force is written to list `final/`'s files at the sizes they have, with no finish in it: `final/` then mixes two finishes, so the next finish makes every part again.
 
-**Not tried yet.** No real episode has been finished. Every part of `finish` has met stand-ins for ffprobe, ffmpeg and the transcriber only, on a made-up recording.
+**Not tried yet.** No real episode has been finished. Every part of `finish` has met stand-ins for ffprobe, ffmpeg and the transcriber only, on a made-up recording. The HyperFrames way has met no real export either: the app's names and records are A0's, of one test on 2026-10-28; nobody has yet seen macOS ask whether Claude may look in Downloads, a Dropbox placeholder brought over there, or an iPhone clip opened in the app and exported. The pull request names the app's build these were seen on, once someone has.
 
 ## Where this came from
 
