@@ -574,7 +574,7 @@ The app's buttons: Share, Render in the cloud, the Script panel's transcription,
 | `finish` | From the app's exports (section 8). Accepts an iPhone clip (4.2) |
 | `title` | Kept and changed. Today `title <episode> reel N` refuses a Reel nobody made in Final Cut (`notMade`, `notMadeWords`), so it must accept a Reel that `app … reel N` made |
 | `reels` | The candidates as text, with no previews. It stops using `clockFor`, and stops ending with "cut it in OpusClip" (`notMadeWords`) for a candidate `app` can make |
-| `show` | Kept. `show transcript` of a raw video prints `<stem>.rough-cut.transcript.txt`, which a reading with no rough cut does not make: it prints the transcript the reading kept |
+| `show` | Kept. `show transcript` of a raw video follows the record: with a main HyperFrames project in use it prints `<stem>.transcript.txt`, the recording's own, whose times are the app timeline's (5.7); any other raw video keeps `<stem>.rough-cut.transcript.txt`, which the reading makes until retirement wave 2, and from then on prints the recording's own too |
 | `teachings`, `principles`, `ideas` | `teachings` runs at the drop for a session (S1); the others are kept |
 | `reel` | Reduced to `reel drop N`. `reel pick` becomes `app … reel N`, which also marks the candidate picked (`parts.js` and the hand-off read "picked" and "dropped"). The client's agreement moves to `clips … send` |
 | `free` | Today a stub: it says deleting a library "comes in a later version", and `freeLibrary` and `unkeptParts` are unreachable. Studio builds it (plan, PR 15) to take a project's working copy and `renders/` away |
