@@ -59,7 +59,7 @@ import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
-import { SNAPSHOT_DIR, keptSnapshots, listedBy } from "./snapshot.js";
+import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -2444,7 +2444,7 @@ const projectOf = (name) => basename(name, extname(name)).normalize("NFC");
 /** Every file in a folder, at any depth, as paths from it, but for those Dropbox never syncs: a name starting with a dot, as
     Finder's .DS_Store, or Icon\r. Listed, the other Mac would wait for them for ever. */
 const filesUnder = (dir) => readdirSync(dir, { recursive: true })
-  .filter((rel) => !String(rel).split("/").some((part) => part.startsWith(".") || part === "Icon\r") && statSync(join(dir, rel)).isFile()).sort();
+  .filter((rel) => !String(rel).split("/").some(notSynced) && statSync(join(dir, rel)).isFile()).sort();
 
 /** Hand an episode this Mac has open over to the other Mac (spec section 1, "Picking an episode up"). In order:
     - only the Mac that has it open hands it over;

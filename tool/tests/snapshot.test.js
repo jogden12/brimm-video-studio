@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
+  ASSETS_MOST, BEHIND_MS, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
   timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
@@ -161,6 +161,17 @@ describe("holds: the paths a snapshot has, and a rebuild takes", () => {
   it("takes a relative path of plain names that is not under a left-out folder at the top and starts no name with a dot", () => {
     for (const rel of ["index.html", "brimm/facts.json", "compositions/media/x.html", "assets/fonts/a.woff2"]) assert.equal(holds(rel), true, rel);
     for (const rel of ["", "/index.html", "../index.html", "a/../b", "a//b", "a/./b", ".env", ".claude/settings.json", "a/.hidden", "media/recording.mp4", "node_modules/.bin/hyperframes", "renders/a.mp4", "snapshots/s.png", "media", 5, null, undefined]) assert.equal(holds(rel), false, String(rel));
+  });
+  it("leaves out the names Dropbox never syncs: Finder's Icon\r with the names that start with a dot, one list for the snapshot and the Final Cut copies (the review of PR 11, M2)", (c) => {
+    for (const name of [".DS_Store", ".env", ".hyperframes", "Icon\r"]) assert.equal(notSynced(name), true, JSON.stringify(name));
+    for (const name of ["Icon", "icon\r", "Icon\r.png", "index.html", "a.b"]) assert.equal(notSynced(name), false, JSON.stringify(name));
+    for (const rel of ["Icon\r", "assets/Icon\r", "assets/Icon\r/x.png"]) assert.equal(holds(rel), false, JSON.stringify(rel));
+    const dir = scratch(c);
+    put(dir, "index.html");
+    put(dir, "Icon\r");
+    put(dir, "assets/Icon\r");
+    put(dir, "assets/fonts/a.woff2");
+    assert.deepEqual(relsOf(snapshotFiles(dir)), ["assets/fonts/a.woff2", "index.html"]);
   });
 });
 

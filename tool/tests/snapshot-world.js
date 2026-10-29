@@ -31,7 +31,7 @@ export const HELD = {
 /** What a project holds that a snapshot leaves out. */
 export const NOT_HELD = {
   "media/recording.mp4": "the working copy", ".claude/settings.json": "{}", ".hyperframes/app-history.jsonl": "{}", ".hyperframes/history-id": "an id", "renders/old.mp4": "a render",
-  "snapshots/frame.png": "a frame", ".thumbnails/t.jpg": "a thumbnail", ".DS_Store": ""
+  "snapshots/frame.png": "a frame", ".thumbnails/t.jpg": "a thumbnail", ".DS_Store": "", "Icon\r": "a folder's icon", "assets/Icon\r": "a folder's icon"
 };
 
 const setTime = (path, at) => utimesSync(path, new Date(at), new Date(at));

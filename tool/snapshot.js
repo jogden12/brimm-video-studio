@@ -39,6 +39,11 @@ export const BEHIND_MS = 2000;
 /** The folders at a project's top level that a snapshot leaves out. */
 const LEFT_OUT = new Set(["media", "node_modules", "renders", "snapshots"]);
 
+/** Whether Dropbox never syncs a file or folder of this name: one that starts with a dot (Finder's .DS_Store, the app's .hyperframes, a .env) and
+    Finder's Icon\r. A file the record lists that never arrives stops the other Mac's `open` for good, so a snapshot holds none, and neither
+    do the Final Cut copies (edit.js filesUnder, which uses this too: the review of PR 11, M2). */
+export const notSynced = (name) => name.startsWith(".") || name === "Icon\r";
+
 const pad = (n, width = 2) => String(n).padStart(width, "0");
 
 /** A snapshot's folder name for the moment `ms`: UTC, to the second, "2026-10-20 20.00.00Z". */
@@ -61,7 +66,7 @@ export function timeOf(name) {
 export function holds(rel) {
   if (typeof rel !== "string" || rel === "") return false;
   const names = rel.split("/");
-  if (names.some((name) => name === "" || name === "." || name === ".." || name.startsWith("."))) return false;
+  if (names.some((name) => name === "" || name === "." || name === ".." || notSynced(name))) return false;
   return !LEFT_OUT.has(names[0]);
 }
 
@@ -87,7 +92,7 @@ export function snapshotFiles(dir, { assetsMost = ASSETS_MOST } = {}) {
     }
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const path = rel === "" ? entry.name : `${rel}/${entry.name}`;
-      if (entry.name.startsWith(".") || (rel === "" && LEFT_OUT.has(entry.name)) || entry.isSymbolicLink()) continue;
+      if (notSynced(entry.name) || (rel === "" && LEFT_OUT.has(entry.name)) || entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         walk(join(folder, entry.name), path);
       } else if (entry.isFile()) {
