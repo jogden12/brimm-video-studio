@@ -12,7 +12,7 @@ import { handoffFaultV2 } from "../handoff-v2.js";
 import { finishFinished, finishNow, madeFromImport } from "../finish.js";
 import { episodeWork } from "../settings.js";
 import { FOLDER, ID, episodeFor, reread, setup, listAll } from "./episodes.js";
-import { AT, MAIN, READING, SPELLINGS, VIDEO, clipWorld as clip, entry, exportOf, world } from "./exports-world.js";
+import { AT, FOUND, MAIN, MAIN_WORDS, READING, SPELLINGS, TAKEN, VIDEO, clipWorld as clip, entry, exportOf, world } from "./exports-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -249,6 +249,23 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
     assert.deepEqual([Object.keys(handoff), Object.keys(handoff.video)], [Object.keys(contract), Object.keys(contract.video)]);
     assert.equal(reread(found).finished.parts.main.project, MAIN);
     assert.equal(reread(found).finished.parts.main.import, undefined);
+    w.t.done();
+  });
+  it("asks the words on its picture as a raw video's main video is asked, and its hand-off holds the ones she confirms (plan PR 8)", async () => {
+    const w = edited();
+    exportOf(w, "main");
+    const asked = await on(w.t.ctx.deps, "finish", FOLDER);
+    assert.deepEqual(asked.said.slice(-2), [FOUND, 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(w.t.started, []);
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.equal(r.code, 0, r.text);
+    assert.equal(r.said.at(-2), TAKEN);
+    const found = { ...w.found, record: reread(w.found) };
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    const handoff = handoffIn(found, WORLD_HANDOFF);
+    assert.equal(handoffFaultV2(handoff), "");
+    assert.deepEqual([handoff.main.onPicture, "suggestions" in handoff, "reels" in handoff], [MAIN_WORDS, false, false]);
     w.t.done();
   });
   it("writes a version 1 short-video hand-off from the export on a Mac that hands off version 1, as a Final Cut finish of a short video did", async () => {

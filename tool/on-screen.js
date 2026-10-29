@@ -9,8 +9,12 @@
 // `data-variable-values` for the words of its `data-var-text` elements (A0 and A0b wrote both). `wordsOnScreen` is pure over a `read`;
 // `projectWords` is the one function here that reads the disk, and it only reads: a regular file of the project, of at most 2 MB, that is
 // `index.html` or a `.html` file under `compositions/`, and never through a link.
+//
+// Below the reader are the words `finish` says and asks of what it found (`mainWordsSaid` for the main video's picture, `reelTitleAsk` for
+// a Reel's title): plain sentences, with no path, no flag and no command name, since they go into Sallie's chat.
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix, sep } from "node:path";
+import { clockText } from "./clock.js";
 
 /** The most a file may hold for it to be read: a composition is a few kilobytes, and an agent can write anything in the project. */
 const BYTES_MOST = 2 * 1024 * 1024;
@@ -281,4 +285,55 @@ export function projectWords(dir) {
     }
   };
   return { here: true, words: wordsOnScreen(read) };
+}
+
+/** The words on the picture of the project called `name` in the work folder `work`: projectWords of its folder. A name that does not
+    lead to a folder of the work folder (it is a path, or empty) is a project that is not here. */
+export function projectWordsIn(work, name) {
+  return typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name) ? projectWords(join(work, name)) : { here: false, words: [] };
+}
+
+// --- What finish says and asks of them (plan PR 8; architecture 8.5). Every sentence is plain: no path, no flag, no command name. ---
+
+const oneLine = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
+const timed = (word) => `"${word.text}" at ${clockText(word.at)}`;
+/** What a Reel's title may be, in words, as `title` takes it: a longer first line is not proposed. */
+const TITLE_WORDS_MOST = 12;
+
+export const BOTH_SAID = "Say what is on screen, or that nothing is, but not both.";
+export const EMPTY_LINE = "A line on the screen needs words. Say what it says.";
+const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
+const NOT_HERE = "I could not look at the main video's project on this Mac, so I do not know what is on its picture. Say what is on screen, or say that nothing is.";
+const NOTHING_SAID = "Nothing is on the main video's picture, as you said.";
+
+/** What `finish` says and asks of the words on the main video's picture, as { words, line, ask } or { refusal }:
+    - `found` are the words read out of the project (wordsOnScreen) and `here` whether the project is on this Mac; `given` the lines she
+      gave (a list, empty when she gave none), `none` whether she said there are none, `yes` whether she has said yes, and `taking`
+      whether the main video is taken from an export in this finish (a main video kept as the last finish made it is not asked).
+    - What she says is what goes on: her lines, in her order, or an empty list. Both at once, or a line with no words, is refused.
+    - Otherwise, for a main video that is taken, the words found are said with their times and "Right?", and with her yes said again
+      as taken: her yes is her yes to them. Nothing found, or a project that is not here, is an ask: nothing starts until she has said.
+    `words` are the lines that go on, or null when none is decided; `line` is what is said, and `ask` what is asked, or "". */
+export function mainWordsSaid({ found = [], here = true, given = [], none = false, yes = false, taking = true } = {}) {
+  const lines = (Array.isArray(given) ? given : []).map(oneLine);
+  if (none && lines.length) return { refusal: BOTH_SAID };
+  if (lines.some((line) => line === "")) return { refusal: EMPTY_LINE };
+  if (none) return { words: [], line: NOTHING_SAID, ask: "" };
+  if (lines.length) return { words: lines, line: `On screen in the main video, as you said: ${listed(lines.map((line) => `"${line}"`))}.`, ask: "" };
+  if (!taking) return { words: null, line: "", ask: "" };
+  if (!here) return { words: null, line: "", ask: NOT_HERE };
+  if (!found.length) return { words: null, line: "", ask: NONE_FOUND };
+  const told = listed(found.map(timed));
+  return { words: found.map((word) => word.text), line: yes ? `On screen in the main video: ${told}.` : `On screen in the main video I found ${told}. Right?`, ask: "" };
+}
+
+/** What `finish` asks of a Reel that has no title on screen: today's ask, which names the suggestion's opening when it has one, and,
+    when the Reel's picture holds words, the first of them as a proposal (at most 12 words, the most a title may have). She confirms it
+    as she gives any title. `found` are the words read out of the Reel's project. */
+export function reelTitleAsk({ n, found = [], opening = "" }) {
+  const tail = opening ? `: it starts "${opening}"` : "";
+  const [first] = found;
+  if (first && first.text.split(" ").length <= TITLE_WORDS_MOST) return `Reel ${n} has no title on screen. On screen in it I found "${first.text}" at ${clockText(first.at)}. Is that its title? If not, say what it says${tail}.`;
+  return `Reel ${n} has no title on screen. Say what it says${tail}.`;
 }

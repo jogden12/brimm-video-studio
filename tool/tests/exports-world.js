@@ -3,7 +3,7 @@
 // main video and for Reel 2, a Downloads folder in the test's own home, and the app's records of the exports a test makes. Stand-ins
 // answer for ffprobe, ffmpeg and the transcriber (episodes.js), so that no test runs a program, and nothing here touches the real
 // Downloads folder, Dropbox or BRIMM Video Work: the home is a temporary folder.
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixedZone } from "../exports.js";
 import { PIN } from "../hyperframes.js";
@@ -11,7 +11,8 @@ import { projectName } from "../project.js";
 import { downloadsFolder, episodeWork, writeSettings } from "../settings.js";
 import { FOLDER, ID, NAME, SRT, episodeFor, partOf, setup, toldOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
-import { episode, rawProbe } from "./phase4.js";
+import { reelsFile } from "../reels.js";
+import { EPISODE, episode, rawProbe } from "./phase4.js";
 
 /** The zone the made-up records are in (UTC-5), so that no test depends on the Mac it runs on. */
 export const ZONE = fixedZone(-300);
@@ -45,14 +46,50 @@ export const probeFor = (over = () => ({})) => (args) => {
 
 const setTime = (path, at) => utimesSync(path, new Date(at), new Date(at));
 
+// --- The words on a project's picture (plan PR 8): made-up files in the shape of the ones A0 and A0b left ---
+
+const onScreenFixture = (rel) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/on-screen/${rel}`, import.meta.url), "utf8");
+/** The made-up main project's files: its video, and a lower third (a composition a host names, from 0:03): "Alex Rivera" over "Head of Pricing". */
+export const LOWER_THIRD = {
+  "index.html": '<div id="root" data-composition-id="main" data-start="0" data-duration="180" data-width="1920" data-height="1080">\n  <video id="a-roll" class="clip" src="media/recording.mp4" playsinline data-start="0" data-duration="180" data-track-index="0" data-has-audio="true"></video>\n  <div id="lower-third" data-composition-id="lower-third" data-composition-src="compositions/lower-third.html" data-start="3" data-duration="6" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>\n</div>\n',
+  "compositions/lower-third.html": onScreenFixture("compositions/lower-third.html")
+};
+/** The fixtures' whole main project: the lower third, a title card whose host sets its words, a note, an end card and the captions. */
+export const FIXTURE_MAIN = {
+  "index.html": onScreenFixture("index.html"),
+  ...Object.fromEntries(["lower-third", "title-card", "title", "captions", "end-card"].map((name) => [`compositions/${name}.html`, onScreenFixture(`compositions/${name}.html`)]))
+};
+/** A Reel's project in the fixtures: a title, "Mistake one", from 0:00, and the captions beside it. */
+export const REEL_FILES = { ...FIXTURE_MAIN, "index.html": onScreenFixture("reel-index.html") };
+/** The words of the lower third, and what finish says of them: shown with a question, and said again as taken once she has said yes. */
+export const MAIN_WORDS = ["Alex Rivera", "Head of Pricing"];
+export const FOUND = 'On screen in the main video I found "Alex Rivera" at 0:03 and "Head of Pricing" at 0:03. Right?';
+export const TAKEN = 'On screen in the main video: "Alex Rivera" at 0:03 and "Head of Pricing" at 0:03.';
+/** Files written into the project of `key`, each with the time its index.html has (13:40), so that the project's last change stays where
+    the exports' tests have it. Every file of the project is replaced by `files` when `only` is true. */
+export function screen(w, key, files, { only = false } = {}) {
+  const dir = w.dirOf(key);
+  if (only) {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "renders"), { recursive: true });
+  }
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(dir, rel, ".."), { recursive: true });
+    writeFileSync(join(dir, rel), text);
+    setTime(join(dir, rel), ms(13, 40));
+  }
+}
+
 /** The made-up recording (phase4.js), answered as `kind` says, with a project on disk for each of `projects` ("main" and "reel 2"), this
     Mac set up for the app (`set`), its hand-off in version 2 (`handoffVersion`), and the app's index.html of each project last changed
     at 13:40. `projects: null` gives a record with no `app` at all. `over` changes the record, `programs` the stand-ins. `name` is another
     name for the episode, whose projects are named for it (namesFor), as one with an accent and a quote in it. */
-export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null } = {}) {
+export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, programs = {}, set = true, handoffVersion = 2, name = null, candidates = null } = {}) {
   const names = name ? namesFor(name) : PROJECT_OF;
   const record = { version: projects ? 4 : 3, kind, answer: ANSWERED, ...(name ? { name: { text: name, placeholder: false } } : {}), ...(projects ? { app: { toolchain: PIN.version, projects: projects.map((key) => entry(key, {}, names)) } } : {}), ...over };
-  const { t, found } = episode(record, { FFPROBE: probeFor(), ...programs });
+  // `candidates` are the Reel suggestions of the episode's reels.json in place of the made-up two: a reading's, with an opening and a closing, a reason and a point.
+  const made = candidates ? { ...EPISODE, files: { ...EPISODE.files, "reels.json": JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "read", made: AT, candidates }), null, 2) + "\n" } } : EPISODE;
+  const { t, found } = episode(record, { FFPROBE: probeFor(), ...programs }, made);
   const patch = { ...(set ? { app: "hyperframes" } : {}), handoffVersion };
   writeSettings(t.home, patch);
   t.ctx.settings = { ...t.ctx.settings, ...patch };
@@ -61,12 +98,13 @@ export function world({ kind = "raw", projects = ["main", "reel 2"], over = {}, 
   mkdirSync(downloads, { recursive: true });
   const work = episodeWork(t.home, FOLDER);
   const dirOf = (key) => join(work, names[key]);
+  const w = { t, found, work, downloads, dirOf, names, asked: () => JSON.parse(readFileSync(join(work, "finish.asked.json"), "utf8")) };
   for (const key of projects || []) {
     mkdirSync(join(dirOf(key), "renders"), { recursive: true });
-    writeFileSync(join(dirOf(key), "index.html"), "<html></html>");
-    setTime(join(dirOf(key), "index.html"), ms(13, 40));
+    // The main video's picture holds a lower third (plan PR 8); a Reel's holds nothing unless a test says so.
+    screen(w, key, key === "main" ? LOWER_THIRD : { "index.html": "<html></html>" });
   }
-  return { t, found, work, downloads, dirOf, names, asked: () => JSON.parse(readFileSync(join(work, "finish.asked.json"), "utf8")) };
+  return w;
 }
 
 /** An export of `key`'s project that began at `start` ([hours, minutes, seconds]), saved in Downloads under the name the app gives
@@ -103,6 +141,16 @@ export const whisper = (over = {}) => (args) => {
 };
 /** The made-up world with that stand-in (or `captions` over its parts, or `programs`). */
 export const fw = ({ captions = {}, programs = {}, ...rest } = {}) => world({ ...rest, programs: { WHISPER: whisper(captions), ...programs } });
+
+/** Reel suggestions as a reading makes them: a stretch of the recording each, with its opening and closing, why and the point. 1 and 3 are
+    said in the made-up main video; 2 is picked in the made-up record (and is Reel 2); 4 is the retake the recording starts with, which the
+    main video does not say. */
+export const suggestion = (n, ranges, over) => ({ n, start: ranges[0].start, end: ranges.at(-1).end, ranges, seconds: ranges.reduce((sum, r) => sum + r.end - r.start, 0), title: "", preview: null, ...over });
+export const ONE = suggestion(1, [{ start: 5.872, end: 9.843 }], { reason: "It says what the talk is about.", point: "Pricing is the subject.", first: "Welcome to the show", last: "talk about pricing" });
+export const TWO = suggestion(2, [{ start: 13.38, end: 16.516 }, { start: 19.219, end: 21.287 }], { reason: "It makes one point and stands alone.", point: "Know your costs.", first: "So the first thing you need", last: "Thank you so much, Sallie" });
+export const THREE = suggestion(3, [{ start: 16.2, end: 21.287 }], { reason: "It says why costs matter.", point: "Costs are what to know first.", first: "It is very, very important", last: "Thank you so much, Sallie" });
+export const FOUR = suggestion(4, [{ start: 0, end: 4.76 }], { reason: "It is the first take.", point: "It starts the talk.", first: "Welcome to the show", last: "Let me do that again" });
+export const CANDIDATES = [ONE, TWO, THREE, FOUR];
 
 // --- An iPhone clip she answered (plan PR 7, group F): read by Claude, in a made-up episode of its own, with no project ---
 

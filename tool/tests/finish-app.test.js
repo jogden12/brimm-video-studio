@@ -16,7 +16,7 @@ import { PIN } from "../hyperframes.js";
 import { tidyTranscript } from "../shared/transcript.js";
 import { EDITED, ID, PROJECT, SRT, partOf, reread } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
-import { MAIN, REEL1, REEL2, entry, exportOf, fw, named, probeFor, whisper } from "./exports-world.js";
+import { MAIN, MAIN_WORDS, REEL1, REEL2, entry, exportOf, fw, named, probeFor, whisper } from "./exports-world.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const stem = (file) => file.replace(/\.[^.]+$/, "");
@@ -96,11 +96,11 @@ describe("E1. finish from HyperFrames' exports: what final/ holds, and the hand-
     const handoff = handoffOf(found);
     assert.equal(handoffFaultV2(handoff), "");
     assert.deepEqual([handoff.version, handoff.revision, handoff.video.id, handoff.video.kind], [2, 1, ID, "raw"]);
-    // Its keys are the raw fixture's, in order, but for `suggestions` and `main.onPicture`, which a finish writes only from plan PR 8 on, as a
-    // Final Cut finish never did.
+    // Its keys are the raw fixture's, in order, but for `suggestions`, which are written when a suggestion falls in the main video (plan PR 8's
+    // groups E and F); `main.onPicture` is the words on the main video's picture.
     assert.deepEqual(Object.keys(handoff), Object.keys(RAW_FIXTURE).filter((key) => key !== "suggestions"));
     assert.deepEqual(Object.keys(handoff.video), Object.keys(RAW_FIXTURE.video));
-    assert.deepEqual(Object.keys(handoff.main), Object.keys(RAW_FIXTURE.main).filter((key) => key !== "onPicture"));
+    assert.deepEqual(Object.keys(handoff.main), Object.keys(RAW_FIXTURE.main));
     for (const reel of handoff.reels) assert.deepEqual(Object.keys(reel).filter((key) => key !== "inMain"), Object.keys(RAW_FIXTURE.reels[0]));
     for (const srt of [handoff.main.srt, ...handoff.reels.map((r) => r.srt)]) assert.match(tidyTranscript(srt), /^\[0:00\] /);
     w.t.done();
@@ -116,7 +116,7 @@ describe("E1. finish from HyperFrames' exports: what final/ holds, and the hand-
     assert.deepEqual(handoff.reels.map((r) => [r.n, r.title, r.file, r.seconds, r.fromSuggestion]), [[1, "The opening", REEL1_FILE, 7.7, null], [2, "Know your costs", REEL_FILE, 75, 2]]);
     w.t.done();
   });
-  it("finds a Reel that falls in the main video (inMain), and none for a Reel whose words are not in it; it holds no suggestions and nothing drawn on the picture", async () => {
+  it("finds a Reel that falls in the main video (inMain), and none for a Reel whose words are not in it; it holds no suggestions, though the words on the picture", async () => {
     const w = fw({ projects: ["main", "reel 1", "reel 2"], over: THREE(), captions: { "reel 2": SRT["reel 2"] } });
     exportOf(w, "main");
     exportOf(w, "reel 1");
@@ -125,19 +125,20 @@ describe("E1. finish from HyperFrames' exports: what final/ holds, and the hand-
     const handoff = handoffOf(found);
     assert.deepEqual(handoff.reels[0].inMain, { start: 4.1, end: 11.8 });
     assert.equal("inMain" in handoff.reels[1], false);
-    assert.deepEqual(["suggestions" in handoff, "onPicture" in handoff.main], [false, false]);
+    assert.deepEqual(["suggestions" in handoff, handoff.main.onPicture], [false, MAIN_WORDS]);
     w.t.done();
   });
-  // Review I1: the words drawn on a picture are Final Cut's (`record.main.texts`), and a HyperFrames export has none of them.
+  // Review I1: the titles drawn in Final Cut (`record.main.texts`) are not the words on a HyperFrames export's picture: those are read out of the
+  // project (plan PR 8).
   const TITLED = { preset: null, cuts: [], texts: [{ id: "t1", kind: "lower-third", lines: ["Three pricing mistakes"], at: 3, for: 5 }], graphics: [], logo: false, base: null, pushed: [] };
-  it("hands off no words on the picture of a main video taken from HyperFrames, though the record holds titles drawn for it in Final Cut", async () => {
+  it("hands off the words on the picture of a main video taken from HyperFrames, and not the titles the record holds that were drawn in Final Cut", async () => {
     const w = fw({ over: { main: TITLED } });
     exportOf(w, "main");
     exportOf(w, "reel 2");
     const { found } = await finished(w);
     const handoff = handoffOf(found);
     assert.equal(handoffFaultV2(handoff), "");
-    assert.equal("onPicture" in handoff.main, false);
+    assert.deepEqual(handoff.main.onPicture, MAIN_WORDS);
     assert.deepEqual(reread(found).main.texts, TITLED.texts, "the record keeps the titles all the same");
     w.t.done();
   });
@@ -184,7 +185,7 @@ describe("E2. the record of a finish from HyperFrames' exports", () => {
     assert.equal(record.finished.revision, 1);
     assert.deepEqual(Object.keys(record.finished.parts), ["main", "reel 2"]);
     const part = record.finished.parts.main;
-    assert.deepEqual(Object.keys(part).sort(), ["bytes", "file", "project", "seconds", "source", "words"]);
+    assert.deepEqual(Object.keys(part).sort(), ["bytes", "file", "onPicture", "project", "seconds", "source", "words"]);
     assert.deepEqual([part.file, part.project, part.seconds, part.bytes], [`final/${MAIN_FILE}`, MAIN, 11.878, sizes.main.size]);
     assert.deepEqual(part.source, { bytes: sizes.main.size, mtimeMs: sizes.main.mtimeMs });
     assert.equal(part.words, `final/${stem(MAIN_FILE)}.words.json`);

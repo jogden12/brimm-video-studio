@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projectWords, wordsOnScreen } from "../on-screen.js";
+import { projectWords, projectWordsIn, wordsOnScreen } from "../on-screen.js";
 
 const FIXTURES = new URL("./fixtures/hyperframes-0.8.208/on-screen/", import.meta.url);
 const fixture = (rel) => readFileSync(new URL(rel, FIXTURES), "utf8");
@@ -326,6 +326,14 @@ describe("A6. from a folder", () => {
     assert.deepEqual(projectWords(undefined), { here: false, words: [] });
     const file = folder({ "x.txt": "a file, not a folder" });
     assert.deepEqual(projectWords(join(file, "x.txt")), { here: false, words: [] });
+    done();
+  });
+  it("reads a project by its name in the work folder, and a name that leads out of it is a project that is not here", () => {
+    const work = folder({ "Pricing main/index.html": projectOf("")["index.html"].replace("</div>", '<div class="clip" data-start="3" data-duration="2">Seen</div></div>'), "elsewhere/index.html": '<div class="clip" data-start="1" data-duration="2">Outside</div>' });
+    assert.deepEqual(projectWordsIn(work, "Pricing main"), { here: true, words: [{ text: "Seen", at: 3 }] });
+    mkdirSync(join(work, "inside"));
+    for (const name of ["..", ".", "", "../elsewhere", "Pricing main/../../elsewhere", "a/b", "x\0y", undefined, null, 7, ["Pricing main"]]) assert.deepEqual(projectWordsIn(join(work, "inside"), name), { here: false, words: [] }, JSON.stringify(name));
+    assert.deepEqual(projectWordsIn(join(work, "inside"), "nothing here"), { here: false, words: [] });
     done();
   });
   it("says a folder without an index.html is here, with no words", () => {

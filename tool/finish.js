@@ -21,6 +21,7 @@ import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredt
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
 import { KEPT as PROJECT_KEPT } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
+import { suggestionsFor } from "./suggestions-in-main.js";
 import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindOf, shownName, conflictedCopies, conflictedOf, recordCopies, undone, acceptRev } from "./episode.js";
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reels.js";
@@ -833,6 +834,15 @@ export async function finishNow(ctx, found, deps = {}) {
     const { v2, revision } = target;
     const main = parts.find((p) => p.key === "main");
     const mainWords = main.words || wordsOfCaptions(main.srt);
+    // The words drawn on the main picture (plan PR 8). A main video taken from HyperFrames' export has the words she confirmed: the quick part
+    // wrote them in finish.asked.json, or, for a main video kept as the last finish made it, they are the ones that finish kept in its part.
+    // A main video that went the Final Cut way has the record's titles (`record.main.texts`), which brimm-video drew there.
+    const linesOf = (list) => (Array.isArray(list) ? list.filter((line) => typeof line === "string" && line.trim() !== "").map((line) => line.replace(/\s+/g, " ").trim()) : null);
+    const drawn = main.app ? linesOf(main.onPicture) ?? linesOf(before.main && before.main.onPicture) ?? [] : onPictureOf(record);
+    // The Reel suggestions that fall in the exported main video (plan PR 8; architecture 8.6): for a raw video's main taken from HyperFrames'
+    // export, in a version 2 hand-off. A Final Cut finish never gave a raw video its suggestions, and an iPhone clip's contract has none.
+    const placed = v2 && main.app && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, main: { words: mainWords, seconds: main.seconds, timed: Boolean(main.words) } }) : { list: [], left: [] };
+    next.push(...placed.left);
     const reels = parts.filter((p) => p.reel).sort((a, b) => a.reel - b.reel).map((p) => {
       const reel = (record.reels || []).find((r) => r.n === p.reel) || {};
       const title = String(reel.title || "").trim();
@@ -846,9 +856,7 @@ export async function finishNow(ctx, found, deps = {}) {
     });
     if (failed.length) return result();
     const given = { record, revision, made: localStamp(new Date(ctx.now())), madeOn: ctx.machine, commit: writer.commit, main: { file: main.name, seconds: main.seconds, srt: main.srt }, reels };
-    // The words drawn on the main picture are the record's titles (`record.main.texts`), which brimm-video drew in Final Cut: the picture
-    // of a main video taken from HyperFrames has none of them (the app draws its own, and PR 8 reads them), so none is handed off for it.
-    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: main.app ? [] : onPictureOf(record) }) : buildHandoff(given);
+    const handoff = v2 ? buildHandoffV2({ ...given, id: target.id, onPicture: drawn, suggestions: placed.list }) : buildHandoff(given);
     const fault = v2 ? handoffFaultV2(handoff) : handoffFault(handoff);
     if (fault) {
       failed.push(`The hand-off could not be written: ${fault}`);
@@ -951,6 +959,12 @@ export async function finishNow(ctx, found, deps = {}) {
         ...(words in files ? { words } : {}), ...(part.story && part.story.length ? { story: part.story.map((f) => `final/${basename(f)}`) } : {}),
         ...(part.app ? { project: part.project } : part.export ? { export: `final/${part.export.name}` } : { noHandEdits: true })
       };
+    }
+    // The words she confirmed for the main picture stay with its part (plan PR 8), so that a later finish that keeps the main video hands off the
+    // same; the key is left out when there are none.
+    if (main.app && finishedParts.main) {
+      const { onPicture: was, ...rest } = finishedParts.main;
+      finishedParts.main = drawn.length ? { ...rest, onPicture: drawn } : rest;
     }
     const finishedReels = new Map(parts.filter((p) => p.reel).map((p) => [p.reel, p]));
     // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none). A part this finish

@@ -14,7 +14,7 @@ import { reelsFile } from "../reels.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
-import { MAIN, REEL2, changeAt, entry, exportOf, ms, named, world } from "./exports-world.js";
+import { FOUND, MAIN, REEL2, TAKEN, changeAt, entry, exportOf, ms, named, world } from "./exports-world.js";
 
 /** Nothing she reads holds a path, a flag, or the name of a command. */
 const PLAIN = /\/|--|~|\bedit\.js\b|\bnode\b|\bnpx\b/;
@@ -40,7 +40,7 @@ describe("D1. finish goes the way the record says", () => {
     exportOf(w, "main");
     exportOf(w, "reel 2");
     assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, START]);
+    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, FOUND, START]);
     plain(w.t.said().split("\n"));
     w.t.done();
   });
@@ -87,7 +87,7 @@ describe("D2. what finish says of a part, and what it starts", () => {
     exportOf(w, "reel 2");
     exportOf(w, "main", { start: [13, 50, 0], ending: "webm", record: false });
     assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, START]);
+    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, FOUND, START]);
     assert.deepEqual([w.t.started, reread(w.found).rev, existsSync(join(w.work, "finish.asked.json"))], [[], 1, false]);
     w.t.done();
   });
@@ -168,7 +168,7 @@ describe("D2. the answers: take, final and without", () => {
     exportOf(w, "main");
     const asked = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
     assert.equal(asked.code, 0);
-    assert.deepEqual(asked.said, [MAIN_LINE, "Reel 2 has no export. Export it from HyperFrames on This Mac, or say to leave it out of this hand-off. If you exported it under another name, tell me its file name."]);
+    assert.deepEqual(asked.said, [MAIN_LINE, TAKEN, "Reel 2 has no export. Export it from HyperFrames on This Mac, or say to leave it out of this hand-off. If you exported it under another name, tell me its file name."]);
     assert.deepEqual(w.t.started, []);
     const told = await on(w.t.ctx.deps, "finish", FOLDER, "--without", "reel 2", "--yes");
     assert.equal(told.code, 0, told.text);
@@ -290,7 +290,7 @@ describe("D4. a Reel's place in the record", () => {
     const w = world({ projects: ["main"], over: { reels: EPISODE.record.reels.map((r) => ({ ...r, status: "candidate" })) } });
     exportOf(w, "main");
     assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, START]);
+    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, FOUND, START]);
     w.t.done();
   });
   // Review I3: a Reel dropped after its project was made (`reel drop 2`) is no part of a finish: it is not asked for, and an export of
@@ -300,7 +300,7 @@ describe("D4. a Reel's place in the record", () => {
     const without = world({ over: { reels: DROPPED } });
     exportOf(without, "main");
     assert.equal(await finishEpisode(without.t.ctx, without.found, {}), 0);
-    assert.deepEqual(without.t.said().split("\n"), [MAIN_LINE, START]);
+    assert.deepEqual(without.t.said().split("\n"), [MAIN_LINE, FOUND, START]);
     without.t.done();
     const w = world({ over: { reels: DROPPED } });
     exportOf(w, "main");
@@ -412,7 +412,7 @@ describe("D5. a Reel made by `app … reel N`, in the record as plan PR 5 writes
     exportOf(w, "main");
     exportOf(w, "reel 2");
     assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, START]);
+    assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, FOUND, START]);
     w.t.done();
   });
   it("asks the title of a Reel that `app … reel 2` added to the record from a reading's suggestion, which has none: it starts with the suggestion's first words", async () => {
