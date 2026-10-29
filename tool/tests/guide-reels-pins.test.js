@@ -37,8 +37,9 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "or two that began in one minute, which `finish` asks the final one of",
       'it says which Reels are exported and to say "hand off the Reels", ahead of the BRIMM Ops page\'s steps and of done',
       "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder this Mac will not let be read are no such stage",
-      "would go no further (the other Mac has the episode open, or the hand-off on file cannot be added to)",
-      "while a finish runs it says so instead",
+      // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
+      "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish runs it says so instead",
+      "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
       'A video she has set aside ("that one is all done") stays set aside',
       "only when the video has a hand-off and a Reel project on this Mac"
     ]) assert.ok(first.includes(words), words);
@@ -76,7 +77,8 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       "Two or more are named together",
       "or two that began in one minute",
       "none: a Reel open and not exported, one already in the hand-off",
-      "Nor where that command would go no further",
+      "Nor where that command would go no further and a look that costs no other read can tell: another run is at work on the episode (a bring, a read or an ask; a finish at work is the stage below), the other Mac has the episode open, the chain of the video's versions has a gap, Dropbox undid this Mac's last change to the record, the hand-off on file cannot be added to, or the record lacks the Reel.",
+      "a hand-off that went to the page under another id, and a Reel number another version of the video gave under the same id (8.7). That command says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until Jason has settled it.",
       "Its finish is running. The panel shows how far it is.",
       "before the BRIMM Ops page's steps and before done",
       "after her word that the video is finished: that stands"
@@ -86,6 +88,11 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     const gate = section(spec, "### 6.2 The gate, and what a new command needs", "### 6.3 ");
     assert.ok(gate.includes("**`guide`** goes in no list") && gate.includes("nothing of their projects or Downloads is read"), "6.2 says what the guide reads for a video the gate holds");
     const reels = section(spec, "### 8.7 Reels of a finished video", "### 8.8 What must not change");
-    for (const words of ["**The guide says it** (4.5; plan PR 16)", "as a regular file alone", "a pipe or a link where a file should be is never waited for", "a Reel number another version gave under the same id"]) assert.ok(reels.includes(words), `${words} in 8.7`);
+    for (const words of [
+      "**The guide says it** (4.5; plan PR 16)", "as a regular file alone", "a pipe or a link where a file should be is never waited for",
+      "It says nothing where `finish … reels` would go no further and a look that costs no other read can tell (4.5).",
+      "a hand-off that went to the page under another id and a Reel number another version gave under the same id (each ends \"Ask Jason\", and the guide goes on saying the stage until Jason has settled it)",
+      "a file of the episode not whole in Dropbox (it comes right as Dropbox syncs), and the shape and sound of the exported file"
+    ]) assert.ok(reels.includes(words), `${words} in 8.7`);
   });
 });
