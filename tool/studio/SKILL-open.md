@@ -130,7 +130,7 @@ When a push answers that the timeline was shown before, ask her, in these words:
 
 ## The release question
 
-When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut since it was last shown?" No: run it again with `--no-hand-edits`. Yes: run it again with `--hand-edits-stay`, and tell her the changes stay in this Mac's library. If it says an export is out of date, read her what to do in Final Cut, then try again. Afterwards tell her to keep the laptop open and online until Dropbox shows the folder is up to date.
+When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut since it was last shown?" No: run it again with `--no-hand-edits`. Yes: run it again with `--hand-edits-stay`, and tell her the changes stay in this Mac's library. If it says an export is out of date, read her what to do in Final Cut, then try again. Afterwards tell her to keep the laptop open and online until Dropbox shows the folder is up to date. An episode she edited in HyperFrames asks no such question: `release` hands over a copy of what she made there and her newest exports. If it says to quit HyperFrames first, tell her so, and run `release "<episode>"` again when she has. If it says a HyperFrames project is too big to hand over, can't be read, or is older than the one the other Mac handed over, tell her so in plain words and that nothing was handed over, and to ask Jason. If it says some assets are too big, tell her those stay on this Mac.
 
 ## Not ready yet: say so, and what to do by hand
 

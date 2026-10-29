@@ -57,7 +57,9 @@ import { heldBy, commitOf, episodeHolding, holdingEpisode, readSeen, seenKey, re
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn } from "./finish.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED, exportsFound, lookForExports } from "./exports.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, exportsFound, lookForExports } from "./exports.js";
+import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
+import { SNAPSHOT_DIR, keptSnapshots } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -88,7 +90,7 @@ import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { versionsOf, whatHappened } from "./app-history.js";
-import { freeEpisode } from "./free.js";
+import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -222,7 +224,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         hand the episode over to the other Mac: copy this Mac's Shares and exports of it
                                         into its folder, and let it go. When this Mac pushed a part last, it asks first
                                         whether it was changed in Final Cut since: --no-hand-edits says it was not,
-                                        --hand-edits-stay that the changes stay in this Mac's library
+                                        --hand-edits-stay that the changes stay in this Mac's library. For its
+                                        HyperFrames projects it also copies a snapshot of each one's files, so that the
+                                        other Mac can rebuild it (not its video, renders or history), and the newest export
+                                        of each; HyperFrames must be quit, and a project too big for that is refused
   node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode's main
                                         project and what it rendered for every project, to give the room back. Their projects
                                         and everything done in them stay, and app makes the main video again; a Reel's video
@@ -2407,6 +2412,11 @@ const filesUnder = (dir) => readdirSync(dir, { recursive: true })
     - the record is let go, with the files it lists now (its own and the copies) and the answers, each earlier answer
       carried on while its version is still the part's newest. A copy made here at an earlier hand-over that Dropbox has
       taken away, and that this release has not made again, is listed no more, and named.
+    The HyperFrames side (hand-over.js; plan PR 11) comes after those refusals and before the Final Cut copies: when the record has
+    projects whose folders are on this Mac, HyperFrames must be quit, and a snapshot of each project and the newest export of each go
+    into the episode by the rule (a failure removes what it put in, and hands nothing over). The record lists them, and lists no
+    snapshot but the two newest that are whole: the others, and a copy of its own that Dropbox has taken away, are listed no more, and
+    the older snapshots' folders are removed after the record is written.
     Resolves 0 when it was handed over, and 1 when it refused, having said why. */
 export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   const { record } = found;
@@ -2416,8 +2426,10 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   // The parts this Mac pushed last: a part whose newest version was rendered was never in Final Cut, and is neither asked about
   // nor copied (spec 3, "One version model").
   const mine = newest.filter((p) => p.last && p.last.on === ctx.machine && p.last.how !== "render");
-  // An episode nobody has open may be changed without opening it, so one this Mac pushed last is handed over as well.
-  if (record.editing ? record.editing.by !== ctx.machine : !mine.length) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
+  // The HyperFrames projects of the record that are on this Mac (hand-over.js): none for an episode that went the Final Cut way.
+  const inHyperFrames = projectsToHand(ctx, { found, record });
+  // An episode nobody has open may be changed without opening it, so one this Mac pushed last, or has a project of, is handed over as well.
+  if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
@@ -2457,7 +2469,10 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   /** The name in From Final Cut that a copy in edit/from-final-cut/ was made from: its Share's, or its export bundle's. */
   const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
   const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
-  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel))) });
+  // A snapshot's or an export's copy made here that Dropbox has taken away is no more waited for than a Final Cut one: it is listed no more.
+  const carried = (rel) => rel.startsWith(`${SNAPSHOT_DIR}/`) || rel.startsWith(`${RELEASED_FOLDER}/`);
+  const goneCarried = Object.keys(record.files).filter((rel) => carried(rel) && !existsSync(at(rel)));
+  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel) && !goneCarried.includes(rel))) });
   if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
   if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
   // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
@@ -2486,6 +2501,15 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
     if (exported && exported.mtimeMs < video.mtimeMs) return refuse(ctx, `${label}'s export is older than its Shared video. Once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut.${tail}`);
     if (!exported && answer !== "no changes") return refuse(ctx, `${label} was never exported. If you changed it by hand in Final Cut, then once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut. If you made no hand edits since it was shown, say so.${tail}`);
   }
+  // HyperFrames' side (hand-over.js): a snapshot of each project of this Mac and its newest export, put in by the rule, or nothing and why.
+  // A copy it deleted to replace and could not make again is listed no more.
+  const hf = inHyperFrames.length
+    ? await handOver(ctx, { found, record, own: inHyperFrames }, { running: ctx.deps.running ?? (() => hyperFramesRunning()), opts: ruleOpts(ctx), rm: ctx.deps.rm })
+    : { copies: {}, names: [], notYet: [], assetsLeft: [], time: "", undo() {} };
+  if (hf.refused) {
+    if (hf.lost) await save(ctx, found, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !hf.lost.includes(rel))) }, "");
+    return refuse(ctx, hf.refused);
+  }
   // The copies, by the rule: each file of each Share and export (a bundle file by file), the Shares first. A copy already
   // there at the size the record lists, and no older than what it copies, is kept as it is: cp -c keeps a file's time, so
   // only a Share or an export made again is copied again. Its time may be put to the whole second, as Dropbox keeps it, so
@@ -2501,8 +2525,8 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   };
   const fresh = wanted.filter((c) => !existsSync(at(c.rel)));
   const again = wanted.filter((c) => existsSync(at(c.rel)) && !kept(c));
-  const copies = {};
-  const copied = [];
+  const copies = { ...hf.copies };
+  const copied = [...hf.names];
   for (const c of [...fresh, ...again]) {
     try {
       mkdirSync(dirname(at(c.rel)), { recursive: true });
@@ -2532,10 +2556,28 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   for (const part of mine) answers[part.key] = { v: part.last.v, said: answer === "no changes" ? "no changes" : `changes stay on ${ctx.machine}` };
   // The copies made here that are still gone, now that this release has made its own, are listed no more (see above).
   const unlisted = Object.keys(record.files).filter(goneCopy);
-  const files = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
-  const later = notYet.length ? ` Not copied yet, still being written: ${listed(notYet)}.` : "";
+  const listedNow = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
+  // Only the two newest snapshots that are whole are kept: the record lists no other, and their folders go once the record is written. A
+  // snapshot with a file gone is not whole, so it is judged before the copies Dropbox took away are left out of the list; a copy of an
+  // export that is gone is listed no more, and one this release made again is there.
+  const { drop } = keptSnapshots(listedNow, (rel, bytes) => ctx.stat(at(rel))?.size === bytes);
+  const files = Object.fromEntries(Object.entries(listedNow).filter(([rel]) => !(rel.startsWith(`${SNAPSHOT_DIR}/`) && drop.includes(rel.split("/")[1])) && !(carried(rel) && !existsSync(at(rel)))));
+  const stillWriting = [...notYet, ...hf.notYet];
+  const later = stillWriting.length ? ` Not copied yet, still being written: ${listed(stillWriting)}.` : "";
   const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
-  return save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  const code = await save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost}${assetsWords(hf.assetsLeft)} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
+  if (code !== 0) {
+    hf.undo();
+    return code;
+  }
+  for (const time of drop) {
+    try {
+      (ctx.deps.rm ?? rmSync)(join(found.folder, SNAPSHOT_DIR, time), { recursive: true, force: true });
+    } catch (e) {
+      // A snapshot that stays is no longer listed, and a later release takes no notice of it.
+    }
+  }
+  return 0;
 }
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */

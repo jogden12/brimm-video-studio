@@ -483,6 +483,23 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
   };
 }
 
+/** The exports `release` carries to the other Mac (architecture 4.7 and 7.3; plan PR 11): of each part whose project is on this Mac, the
+    newest export of this Mac's own, in Downloads and wherever the project's records say it went, and not what the other Mac released: those
+    that began in the newest minute (an MP4 and a MOV of one minute are both carried, as `finish` asks which is final). A WebM is none, nor is
+    an empty file. `input` is what `exportsFound` gives. Each is { key, name, dir, bytes, mtimeMs }, the main video's first. */
+export function exportsToCarry(input) {
+  const zone = input.zone || LOCAL_ZONE;
+  const out = [];
+  for (const part of input.parts) {
+    if (!part.here) continue;
+    const exports = once(candidatesOf(part, { ...input, released: { dir: "", files: [] } }, zone).filter(taking));
+    if (!exports.length) continue;
+    const newest = Math.max(...exports.map((file) => minuteOf(file.began.ms)));
+    for (const file of exports.filter((f) => minuteOf(f.began.ms) === newest)) out.push({ key: part.key, name: file.name, dir: file.dir, bytes: file.bytes, mtimeMs: file.mtimeMs });
+  }
+  return out;
+}
+
 // --- The checks of an export (architecture 8.2), and the rule for what may be removed from Downloads (8.1) ---
 
 /** Whether a file's name is an export's name for the project: the name the app gives what it exports (exportNameOf), of that project,
