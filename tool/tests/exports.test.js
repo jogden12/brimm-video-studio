@@ -4,12 +4,12 @@
 // on a folder made in the test's own temporary directory. No time here depends on the Mac the test runs on: a zone is given.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { lutimesSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { downloadsFolder } from "../settings.js";
+import { downloadsFolder, episodeWork } from "../settings.js";
 import { turnsOf } from "../hyperframes.js";
-import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports } from "../exports.js";
+import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound } from "../exports.js";
 
 const MAIN = "Pricing- what to charge- main 3fa9c1";
 const fixture = (name) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/exports/${name}`, import.meta.url), "utf8");
@@ -467,6 +467,21 @@ describe("C7. a part the last finish took", () => {
     const got = lookForExports(found([main({ changed: ms(14, 20) })], [file(named(P_MAIN, "13.56"))], [], BEFORE("main")), NONE);
     assert.match(got.asks[0], /^The main video's newest export, .*, began at 2026-10-20 13:56, before you last changed it in HyperFrames, at 2026-10-20 14:20\./);
   });
+  it("keeps a Reel the last finish finished that has no project in the record, so that it stays in the hand-off", () => {
+    const before = BEFORE("main");
+    const finished = { ...before, parts: { ...before.parts, "reel 3": { file: "final/r3.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, export: "final/r3.fcpxmld" }, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
+    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56"))], [], finished), { without: ["reel 3"] });
+    assert.deepEqual(got.parts.map((p) => [p.key, p.label, p.reel, p.kept]), [["main", "the main video", undefined, true], ["reel 1", "Reel 1", 1, true], ["reel 3", "Reel 3", 3, true]]);
+    assert.deepEqual(got.parts.slice(1).map((p) => p.line), ["Reel 1: kept as the last finish made it.", "Reel 3: kept as the last finish made it."]);
+    assert.deepEqual([got.asks, got.stops], [[], []]);
+  });
+  it("leaves a Reel the last finish finished to the Final Cut look when it is told so: the main video went that way, and keeps it once", () => {
+    const before = BEFORE("main");
+    const finished = { ...before, parts: { ...before.parts, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
+    const got = lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], [], finished), NONE, { rest: false });
+    assert.deepEqual(got.parts.map((p) => p.key), ["reel 2"]);
+    assert.deepEqual(lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], [], finished), NONE).parts.map((p) => p.key), ["reel 2", "reel 1"]);
+  });
   it("is not kept when it was taken from Final Cut (its record has no project), or from another project of the same episode", () => {
     const fromFinalCut = { revision: 1, at: FINISHED_AT, on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: { main: { file: "final/x.mp4", bytes: 5000, seconds: 10, source: { bytes: 5000, mtimeMs: ms(14, 0) }, export: "final/x.fcpxmld" } } };
     assert.equal(lookForExports(found([main()], [], [], fromFinalCut), NONE).stops.length, 1);
@@ -479,5 +494,184 @@ describe("C8. a project that is on the other Mac", () => {
     const got = lookForExports(found([main({ here: false, changed: null, mac: "Sallie's laptop" })], [], [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.20"))]), NONE);
     assert.deepEqual(got.asks, []);
     assert.equal(got.parts[0].line, `The main video: ${named(P_MAIN, "13.56")}, from what the other Mac released. Its project is on Sallie's laptop, so the export could not be checked against it.`);
+  });
+});
+
+// --- exportsFound: what the folders and the app's records hold, read from the disk ---
+
+describe("C2 (on a disk). exportsFound: the projects of the record, their records, and the folders an export can be in", () => {
+  const EPISODE = "2026-10-20 Pricing talk (Mac Studio)";
+  /** A home with the episode's folders in it, the way the tool lays them out. */
+  const made = () => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-exports-home-"));
+    const folder = join(home, "Episodes", EPISODE);
+    const downloads = downloadsFolder(home);
+    mkdirSync(downloads, { recursive: true });
+    mkdirSync(join(folder, "edit", "from-hyperframes"), { recursive: true });
+    const work = episodeWork(home, EPISODE);
+    const project = (name) => {
+      const dir = join(work, name);
+      mkdirSync(join(dir, "renders"), { recursive: true });
+      return dir;
+    };
+    const put = (path, seconds, text = "an export") => {
+      writeFileSync(path, text);
+      utimesSync(path, new Date(ms(14, 0, seconds)), new Date(ms(14, 0, seconds)));
+    };
+    const asked = (record, over = {}) => exportsFound({ home, name: EPISODE, folder, record, zone, ...over });
+    return { home, folder, downloads, work, project, put, asked, done: () => rmSync(home, { recursive: true, force: true }) };
+  };
+  const entry = (key, name, over = {}) => ({ key, name, state: "opened", on: "Mac Studio", fromSuggestion: key === "main" ? null : 2, ...over });
+  const recordOf = (...projects) => ({ app: { toolchain: "0.8.208", projects }, finished: null });
+  /** A record of the app's, A0's fixture with the file it names filled in. */
+  const meta = (fixtureName, where) => filled(fixtureName).replace("/Users/sallie/Downloads", where);
+
+  it("gives the main project in use first and the Reel projects by number, and leaves out a project kept for an earlier kind", () => {
+    const w = made();
+    const got = w.asked(recordOf(entry("reel 10", "P reel 10 3fa9c1"), entry("reel 2", P_REEL2), entry("main", "P main 2 3fa9c1", { state: "kept for an earlier kind" }), entry("main", P_MAIN, { state: "made" })));
+    assert.deepEqual(got.input.parts.map((p) => [p.key, p.label, p.reel, p.project, p.fromSuggestion]), [
+      ["main", "the main video", undefined, P_MAIN, null], ["reel 2", "Reel 2", 2, P_REEL2, 2], ["reel 10", "Reel 10", 10, "P reel 10 3fa9c1", 2]
+    ]);
+    assert.equal(got.unreadable, false);
+    w.done();
+  });
+  it("gives nothing for a record with no projects, and passes the last finish on", () => {
+    const w = made();
+    assert.deepEqual(w.asked({}).input.parts, []);
+    const finished = { revision: 1, at: FINISHED_AT, on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: {} };
+    assert.equal(w.asked({ app: { toolchain: "0.8.208", projects: [] }, finished }).input.finished, finished);
+    w.done();
+  });
+  it("says whether a project's folder is on this Mac, who made it, and when it last changed", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    w.put(join(dir, "index.html"), 30);
+    const got = w.asked(recordOf(entry("main", P_MAIN, { on: "Sallie's laptop" }), entry("reel 2", P_REEL2)));
+    assert.deepEqual(got.input.parts.map((p) => [p.here, p.mac, p.changed]), [[true, "Sallie's laptop", ms(14, 0, 30)], [false, "Mac Studio", null]]);
+    w.done();
+  });
+  it("takes a project name that leads nowhere a folder is for a folder that is not here", () => {
+    const w = made();
+    mkdirSync(join(w.work, "..", "elsewhere"), { recursive: true });
+    const got = w.asked(recordOf(entry("main", "../elsewhere"), entry("reel 2", "a/b")));
+    assert.deepEqual(got.input.parts.map((p) => p.here), [false, false]);
+    w.done();
+  });
+  it("finds an export by its record: the file it names, at the second its name gives, in Downloads", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    const export_ = join(w.downloads, `${P_MAIN} 2026-10-20 13.56.mp4`);
+    w.put(export_, 200, "twelve bytes");
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", w.downloads));
+    const [part] = w.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(part.recorded, [{ name: `${P_MAIN} 2026-10-20 13.56.mp4`, dir: w.downloads, where: "Downloads", bytes: 12, mtimeMs: ms(14, 0, 200), began: { ms: ms(13, 56, 40), exact: true } }]);
+    assert.deepEqual(part.renders, []);
+    w.done();
+  });
+  it("names the folder an export went to when it is not Downloads, and when Downloads is a link, the link's own path", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    const desktop = join(w.home, "Desktop");
+    mkdirSync(desktop);
+    w.put(join(desktop, "final.mp4"), 10);
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", desktop).replace(/[^/"]+2026-10-20 13\.56\.mp4/, "final.mp4"));
+    const [part] = w.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(part.recorded.map((r) => [r.name, r.dir, r.where]), [["final.mp4", desktop, "another folder"]]);
+    w.done();
+    // Downloads as a link into Dropbox, as on the Mac Studio, and the record naming the folder behind the link.
+    const link = made();
+    rmSync(link.downloads, { recursive: true });
+    const real = join(link.home, "Dropbox", "Mac", "Downloads");
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, link.downloads);
+    const linked = link.project(P_MAIN);
+    link.put(join(real, `${P_MAIN} 2026-10-20 13.56.mp4`), 10);
+    writeFileSync(join(linked, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", real));
+    const [seen] = link.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(seen.recorded.map((r) => [r.dir, r.where]), [[link.downloads, "Downloads"]]);
+    link.done();
+  });
+  it("passes over a record that says it failed, one whose file is gone, one that names no file, one whose file is no video, and a name it cannot read", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    const meta_ = (name, text) => writeFileSync(join(dir, "renders", name), text);
+    meta_(`${P_MAIN}_2026-10-20_13-01-00.meta.json`, fixture("failed.meta.json"));
+    meta_(`${P_MAIN}_2026-10-20_13-02-00.meta.json`, meta("main.meta.json", w.downloads).replace("13.56.mp4", "13.02.mp4"));
+    meta_(`${P_MAIN}_2026-10-20_13-03-00.meta.json`, JSON.stringify({ status: "complete" }));
+    w.put(join(w.downloads, "notes.txt"), 5);
+    meta_(`${P_MAIN}_2026-10-20_13-04-00.meta.json`, JSON.stringify({ status: "complete", exportedTo: join(w.downloads, "notes.txt") }));
+    w.put(join(w.downloads, `${P_MAIN} 2026-10-20 13.05.mp4`), 5);
+    meta_(`${P_MAIN}_13-05.meta.json`, JSON.stringify({ status: "complete", exportedTo: join(w.downloads, `${P_MAIN} 2026-10-20 13.05.mp4`) }));
+    meta_(`${P_MAIN}_2026-10-20_13-06-00.meta.json`, "not json at all");
+    const [part] = w.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(part.recorded, []);
+    w.done();
+  });
+  it("passes over a record's file that is a folder, and counts a WebM it names for what it is", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    mkdirSync(join(w.downloads, "folder.mp4"));
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-01-00.meta.json`), JSON.stringify({ status: "complete", exportedTo: join(w.downloads, "folder.mp4") }));
+    w.put(join(w.downloads, `${P_MAIN} 2026-10-20 13.02.webm`), 5);
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-02-00.meta.json`), JSON.stringify({ status: "complete", exportedTo: join(w.downloads, `${P_MAIN} 2026-10-20 13.02.webm`) }));
+    const [part] = w.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(part.recorded.map((r) => r.name), [`${P_MAIN} 2026-10-20 13.02.webm`]);
+    w.done();
+  });
+  it("lists the videos in the project's renders/ that no record names, and not the ones a record names, nor the records", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    const exported = join(dir, "renders", "kept-here.mp4");
+    w.put(exported, 5);
+    w.put(join(dir, "renders", `${P_MAIN}_2026-10-20_13-58-02.mp4`), 6);
+    w.put(join(dir, "renders", "notes.txt"), 7);
+    w.put(join(dir, "renders", ".hidden.mp4"), 7);
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), JSON.stringify({ status: "complete", exportedTo: exported }));
+    const [part] = w.asked(recordOf(entry("main", P_MAIN))).input.parts;
+    assert.deepEqual(part.renders.map((r) => [r.name, r.dir]), [[`${P_MAIN}_2026-10-20_13-58-02.mp4`, join(dir, "renders")]]);
+    assert.deepEqual(part.recorded.map((r) => [r.name, r.where]), [["kept-here.mp4", "another folder"]]);
+    w.done();
+  });
+  it("reads no render-outputs.json: with or without it, the same is found", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    w.put(join(w.downloads, `${P_MAIN} 2026-10-20 13.56.mp4`), 5);
+    const without = w.asked(recordOf(entry("main", P_MAIN)));
+    mkdirSync(join(dir, ".hyperframes"));
+    writeFileSync(join(dir, ".hyperframes", "render-outputs.json"), fixture("render-outputs.json"));
+    assert.deepEqual(w.asked(recordOf(entry("main", P_MAIN))).input.parts, without.input.parts);
+    w.done();
+  });
+  it("lists the videos in Downloads and in what the other Mac released, with their sizes and times, and no other file", () => {
+    const w = made();
+    for (const name of ["a.mp4", "b.MOV", "c.m4v", "d.webm", "e.txt", ".f.mp4", "g.mp4.partial", "h"]) w.put(join(w.downloads, name), 5, "12345");
+    mkdirSync(join(w.downloads, "i.mp4"));
+    w.put(join(w.folder, "edit", "from-hyperframes", `${P_MAIN} 2026-10-20 13.56.mp4`), 9, "123456");
+    const got = w.asked(recordOf(entry("main", P_MAIN))).input;
+    assert.deepEqual(got.downloads.files.map((f) => f.name).sort(), ["a.mp4", "b.MOV", "c.m4v", "d.webm"]);
+    assert.deepEqual(got.downloads.files.find((f) => f.name === "a.mp4"), { name: "a.mp4", bytes: 5, mtimeMs: ms(14, 0, 5) });
+    assert.deepEqual([got.downloads.dir, got.released.dir], [w.downloads, join(w.folder, "edit", "from-hyperframes")]);
+    assert.deepEqual(got.released.files, [{ name: `${P_MAIN} 2026-10-20 13.56.mp4`, bytes: 6, mtimeMs: ms(14, 0, 9) }]);
+    w.done();
+  });
+  it("takes a Downloads folder that is not there, and a folder of released exports that is not there, for empty", () => {
+    const w = made();
+    rmSync(w.downloads, { recursive: true });
+    rmSync(join(w.folder, "edit"), { recursive: true });
+    const got = w.asked(recordOf(entry("main", P_MAIN)));
+    assert.deepEqual([got.unreadable, got.input.downloads.files, got.input.released.files], [false, [], []]);
+    w.done();
+  });
+  it("says so when this Mac will not let the tool look in Downloads", () => {
+    const w = made();
+    for (const code of ["EPERM", "EACCES"]) {
+      const readdir = (dir, ...more) => {
+        if (dir === w.downloads) throw Object.assign(new Error(`${code}: operation not permitted`), { code });
+        return readdirSync(dir, ...more);
+      };
+      const got = w.asked(recordOf(entry("main", P_MAIN)), { readdir });
+      assert.deepEqual([got.unreadable, got.input.downloads.files], [true, []], code);
+    }
+    w.done();
   });
 });

@@ -91,7 +91,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Make it Bright" / "Bold captions on Reel 2" / "It's a teaching clip" | `preset "<episode>" --look bright` / `preset "<episode>" reel 2 --captions bold` / `preset "<episode>" reel 2 --job "teaching clip"`. "What styles are there?": `preset "<episode>"`, and tell her the lists in plain words |
 | "Cut the bit where I say …" / "Keep the Hormozi story at 12:30" | `cut "<episode>" remove --words "<her words>"` (or `--at` and `--to`, times on that timeline) / `cut "<episode>" keep --at 12:30` (the cut nearest that time on that timeline) or `cut "<episode>" keep --words "<words>"`. Say a cut on the main video does not change a Reel |
 | "Show me the transcript / Claude's notes / the cut plan" | `show "<episode>" transcript` / `show "<episode>" notes` / `show "<episode>" plan`. Of a session or a video not yet answered it prints nothing: it opens a read-only copy in TextEdit on her Mac, or says why not, which tell her. Never read, quote or ask her to paste such a file, and run nothing else that would print it |
-| "Finish the episode" | `finish "<episode>"`; answer its questions with her, then `finish "<episode>" --yes` and the answers it asks for |
+| "Hand it off" / "Finish the episode" | `finish "<episode>"`; answer its questions with her, then `finish "<episode>" --yes` and the answers it asks for. An episode she edited in HyperFrames is finished from what she exported there, which `finish` finds in her Downloads folder: see "In HyperFrames, to hand it off", below |
 | "How far is it?" | `status` |
 | "Try it again" (an import that stopped) | `retry "<video>"` |
 | "Hand it to Jason" / "I'm done with it for now" | `release "<episode>"`, with the release question below |
@@ -145,3 +145,11 @@ When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut 
 2. To finish: for each part, Share it with Command-E (check the save dialog says From Final Cut), wait for Final Cut's notice that it is done, then click in that project's timeline and choose File > Export XML…, into From Final Cut, keeping the version it offers. Then say "finish".
 3. When the finish is done: drop the hand-off file it shows in Finder onto the BRIMM Ops page.
 4. Once the hand-off is on the page and Dropbox shows the folder is up to date: in Finder, Control-click the episode's folder and choose Make online-only, to free space on her laptop.
+
+## In HyperFrames, to hand it off
+
+1. She exports each part in HyperFrames with Export: on This Mac, never in the cloud, as MP4, the main video and each Reel. HyperFrames saves it in her Downloads folder.
+2. She says "hand it off". Run `finish "<episode>"` and tell her in plain words what it found for each part: the file, and when it was exported. It never takes a WebM or a render: tell her to export it again as MP4.
+3. Its questions go back to `finish "<episode>" --yes` with one flag each: `--take "<part>=<file>"` for which export is final, or for one she exported under another name (a part is main or reel 2; the file is its name, or this Mac, or the other Mac; ask her for the name); `--final "<part>"` when the newest export was made before she last changed the project and she says it is final (or she exports it again); `--without "reel 2"` for a Reel she leaves out; `title "<episode>" reel 2 --words "<words>"` for a Reel's title on screen.
+4. If it says this Mac does not let it look in the Downloads folder, tell her what it says: she allows it once, in System Settings.
+5. When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page.

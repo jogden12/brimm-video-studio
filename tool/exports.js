@@ -8,10 +8,12 @@
 // in the project, which says where the file went. The app updates itself, so everything here reads what it writes tolerantly.
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
-import { closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { KEPT, isMain } from "./app.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
+import { downloadsFolder, episodeWork } from "./settings.js";
 
 /** The endings of a video that is taken as an export. A WebM is read and mentioned, and never taken (8.1). */
 export const TAKEN_ENDINGS = ["mp4", "mov", "m4v"];
@@ -124,8 +126,9 @@ function tailOf(path, bytes) {
   let fd;
   try {
     fd = openSync(path, "r");
-    const start = Math.max(0, fstatSync(fd).size - bytes);
-    const buffer = Buffer.alloc(fstatSync(fd).size - start);
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - bytes);
+    const buffer = Buffer.alloc(size - start);
     readSync(fd, buffer, 0, buffer.length, start);
     return buffer.toString("utf8");
   } catch (e) {
@@ -221,11 +224,12 @@ function candidatesOf(part, input, zone) {
     was made from, whether the project is on this Mac and the Mac it was made on, when it last changed (projectChange, null when not known),
     the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` and
     `released` are { dir, files }, their video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
-    `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }.
+    `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }. `rest` is false when
+    the main video is finished another way, in which case a Reel the last finish finished that has no project here is left to that way.
     Gives { parts, asks, stops, mentions, looked }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video, export:
     null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is to
     answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); and where it looked. Nothing is touched. */
-export function lookForExports(input, answers = {}) {
+export function lookForExports(input, answers = {}, { rest = true } = {}) {
   const { take = {}, final = [], without = [] } = answers || {};
   const zone = input.zone || LOCAL_ZONE;
   const finished = input.finished && input.finished.parts ? input.finished : null;
@@ -330,6 +334,139 @@ export function lookForExports(input, answers = {}) {
       : `${Cap}: ${export_.name}, ${where}, exported ${zone.text(export_.began.ms)}.${older ? " HyperFrames changed after it, and you said it is final." : ""}`);
     passedOver(export_);
   }
+  // A Reel the last finish finished that has no project in the record (it was finished another way) stays in the hand-off as that
+  // finish made it: leaving it out would take it off the page. When the main video went the Final Cut way (`rest` false), that look
+  // keeps such a Reel itself, and keeping it here as well would keep it twice.
+  if (finished && rest) {
+    const known = new Set(input.parts.map((part) => part.key));
+    const number = (key) => Number(key.slice(5));
+    for (const key of Object.keys(finished.parts).filter((k) => /^reel [1-9]\d*$/.test(k) && !known.has(k)).sort((a, b) => number(a) - number(b))) {
+      out.push({ key, label: `Reel ${number(key)}`, reel: number(key), project: "", projects: [], fromSuggestion: undefined, video: null, export: null, kept: true, noHandEdits: false, line: `Reel ${number(key)}: kept as the last finish made it.` });
+    }
+  }
   const names = input.parts.map((part) => part.project);
   return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.` };
+}
+
+// --- What is read from the disk ---
+
+/** What finish says of a raw video that was never opened in HyperFrames, on a Mac set up for the app (architecture 4.1, plan PR 7). */
+export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
+/** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
+export const DOWNLOADS_UNREADABLE = 'This Mac does not let brimm-video look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
+/** Where `release` puts the exports it copies into the episode for the other Mac (plan PR 11 writes it; this reads it): the way
+    `edit/from-final-cut/` holds Final Cut's Shares. */
+export const RELEASED_FOLDER = join("edit", "from-hyperframes");
+
+/** Whether a name leads nowhere but a folder of its own: a project's name comes from the record, which Dropbox and the other Mac write. */
+const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
+const isFolder = (path) => {
+  try {
+    return statSync(path).isDirectory();
+  } catch (e) {
+    return false;
+  }
+};
+const isFile = (path) => {
+  try {
+    return statSync(path).isFile();
+  } catch (e) {
+    return false;
+  }
+};
+/** Whether two paths are one folder, however a link names it. */
+function sameFolder(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch (e) {
+    return resolve(a) === resolve(b);
+  }
+}
+
+/** The videos in a folder, by their endings, as { name, bytes, mtimeMs }; a name that starts with a dot, a folder and anything gone while
+    it was read are left out. { files, unreadable }: `unreadable` is true when this Mac will not let the folder be read (macOS keeps
+    Downloads behind a permission), and a folder that is not there is empty. */
+function videosIn(dir, readdir) {
+  let names = [];
+  try {
+    names = readdir(dir);
+  } catch (e) {
+    return { files: [], unreadable: Boolean(e) && (e.code === "EPERM" || e.code === "EACCES") };
+  }
+  const files = [];
+  for (const name of names) {
+    if (name.startsWith(".") || !ENDINGS.includes(endingOf(name))) continue;
+    try {
+      const found = statSync(join(dir, name));
+      if (found.isFile()) files.push({ name, bytes: found.size, mtimeMs: found.mtimeMs });
+    } catch (e) {
+      // A file gone while the folder was read is none.
+    }
+  }
+  return { files, unreadable: false };
+}
+
+/** What a project's renders/ holds of exports: { recorded, renders }. `recorded` are the files its records name (each record that is
+    complete, whose name gives the second the export began, and whose `exportedTo` is a video file that is there), each as
+    { name, dir, where, bytes, mtimeMs, began }; `renders` are the videos in renders/ that no record names. */
+function recordsIn(dir, downloads, zone) {
+  const folder = join(dir, "renders");
+  let names = [];
+  try {
+    names = readdirSync(folder);
+  } catch (e) {
+    return { recorded: [], renders: [] };
+  }
+  const recorded = [];
+  const named = new Set();
+  for (const name of names.filter((n) => n.endsWith(".meta.json"))) {
+    const when = metaNameOf(name);
+    let told = null;
+    try {
+      told = metaOf(readFileSync(join(folder, name), "utf8"));
+    } catch (e) {
+      // A record that cannot be read is none.
+    }
+    if (!told || !told.complete || !told.exportedTo) continue;
+    named.add(resolve(told.exportedTo));
+    if (!when || !ENDINGS.includes(endingOf(told.exportedTo)) || !isFile(told.exportedTo)) continue;
+    const found = statSync(told.exportedTo);
+    const inDownloads = sameFolder(dirname(told.exportedTo), downloads);
+    recorded.push({ name: basename(told.exportedTo), dir: inDownloads ? downloads : dirname(told.exportedTo), where: inDownloads ? "Downloads" : "another folder", bytes: found.size, mtimeMs: found.mtimeMs, began: beganAt(when, zone) });
+  }
+  const renders = [];
+  for (const name of names) {
+    if (name.endsWith(".meta.json") || name.startsWith(".") || !ENDINGS.includes(endingOf(name)) || named.has(resolve(folder, name)) || !isFile(join(folder, name))) continue;
+    const found = statSync(join(folder, name));
+    renders.push({ name, dir: folder, bytes: found.size, mtimeMs: found.mtimeMs });
+  }
+  return { recorded, renders };
+}
+
+/** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
+    the record (not a project kept for an earlier kind), whether its folder is on this Mac, when it last changed (projectChange), the
+    files its records name and the renders in its renders/ that none does; and the videos in Downloads and in what the other Mac
+    released into the episode (`edit/from-hyperframes/`). `home` is this Mac's home, `name` the episode's folder name and `folder` its
+    folder in Episodes. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
+    not let Downloads be read. `readdir` lists a folder as readdirSync does, for a test to give another. Nothing is written. */
+export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, readdir = readdirSync }) {
+  const downloads = downloadsFolder(home);
+  const work = episodeWork(home, name);
+  const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
+  const main = projects.find(isMain);
+  const reels = projects.filter((p) => p.state !== KEPT && /^reel [1-9]\d*$/.test(p.key)).sort((a, b) => Number(a.key.slice(5)) - Number(b.key.slice(5)));
+  const parts = [...(main ? [{ project: main, key: "main", label: "the main video" }] : []), ...reels.map((p) => ({ project: p, key: p.key, label: `Reel ${p.key.slice(5)}`, reel: Number(p.key.slice(5)) }))].map(({ project, key, label, reel }) => {
+    const dir = plainName(project.name) ? join(work, project.name) : "";
+    const here = dir !== "" && isFolder(dir);
+    return {
+      key, label, ...(reel ? { reel } : {}), project: project.name, fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
+      changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone) : { recorded: [], renders: [] })
+    };
+  });
+  const seen = videosIn(downloads, readdir);
+  const releasedDir = join(folder, RELEASED_FOLDER);
+  return {
+    unreadable: seen.unreadable,
+    input: { parts, downloads: { dir: downloads, files: seen.files }, released: { dir: releasedDir, files: videosIn(releasedDir, readdir).files }, finished: record.finished || null, zone }
+  };
 }
