@@ -266,19 +266,29 @@ const SCENARIOS = {
       await editMain(argv, { ...clip.t.ctx.deps, say: (line) => said.push(line) });
       lines.push(...said);
     };
-    const asked = keep(clipWorld({ answer: ["Ogdin"] }));
-    await run(asked, "finish", FOLDER);
-    await run(asked, "finish", FOLDER, "--as-it-is");
-    await run(asked, "finish", FOLDER);
-    await run(keep(clipWorld({ version: 1, answer: ["Ogdin"] })), "finish", FOLDER);
-    const unanswered = keep(clipWorld());
-    await run(unanswered, "finish", FOLDER);
-    await run(unanswered, "spell", FOLDER, "offers", "1");
-    return { w: { names: DEFAULT, downloads: "", found: asked.found, work: "" }, lines };
+    let first = null;
+    // On a Mac whose settings have the app off and on a Mac that has it on: the words differ, and both are walked.
+    for (const app of [false, true]) {
+      const asked = keep(clipWorld({ answer: ["Ogdin"], app }));
+      first = first || asked;
+      await run(asked, "finish", FOLDER);
+      await run(asked, "finish", FOLDER, "--as-it-is");
+      await run(asked, "finish", FOLDER);
+      await run(keep(clipWorld({ version: 1, answer: ["Ogdin"], app })), "finish", FOLDER);
+      const unanswered = keep(clipWorld({ app }));
+      await run(unanswered, "finish", FOLDER);
+      await run(unanswered, "spell", FOLDER, "offers", "1");
+      const v1 = keep(clipWorld({ version: 1, app }));
+      await run(v1, "spell", FOLDER, "offers", "1");
+      await run(v1, "spell", FOLDER, "offers");
+    }
+    return { w: { names: DEFAULT, downloads: "", found: first.found, work: "" }, lines };
   },
   "the guide's next step for an iPhone clip": async () => {
-    const facts = { name: "Pricing talk", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "short video", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null, source: null };
-    return { w: { names: DEFAULT, downloads: "", found: { folder: "" }, work: "" }, lines: [nextFor(facts, { version: 1, handoffs: {}, finished: {} }, 0).text] };
+    const facts = { name: "Pricing talk", id: "e-20261020-3fa9c1", aliases: [], at: 0, mac: "", drop: null, conflicted: false, kind: "short video", waiting: false, heldAsSession: false, elsewhere: false, readingsOff: false, reading: "done", readsAt: "", roughAt: "", offersAnswered: true, v2: true, app: true, placeholder: false, shownInFinalCut: false, finishRunning: false, shownSinceFinish: false, session: null, handoff: null, source: null };
+    const lines = [];
+    for (const over of [{}, { v2: false }, { app: false }, { app: false, v2: false }]) lines.push(nextFor({ ...facts, ...over }, { version: 1, handoffs: {}, finished: {} }, 0).text);
+    return { w: { names: DEFAULT, downloads: "", found: { folder: "" }, work: "" }, lines };
   }
 };
 

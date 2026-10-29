@@ -139,7 +139,8 @@ export function opsText(handoff, step, again) {
       `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
     - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
-      `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2.
+      `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
+      the app (HyperFrames) on.
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning`; and
       `shownSinceFinish`, when it was shown in Final Cut again since its finish.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
@@ -272,10 +273,20 @@ function videoNext(facts, notes, now) {
     if (!facts.shownInFinalCut) return toDo("show", 'Ask for any changes in your own words, then say "show it in Final Cut".');
     return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
   }
-  if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
-  if (facts.kind === "short video") return toDo("clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.');
+  if (facts.kind === "short video") return clipStep(facts);
+  if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
+}
+
+/** The next step for an iPhone clip, its spellings answered and no hand-off yet (plan PR 7, F5; review, minor 2). A clip she opens in
+    HyperFrames and exports is handed off in either version of the hand-off, so on a Mac that hands off version 1 only handing it off as it is
+    waits for version 2. The offer of HyperFrames is left out where this Mac's settings have the app off (`facts.app`); with nothing else to
+    offer on a Mac that hands off version 1, the step is only the wait. */
+function clipStep(facts) {
+  const edit = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off".';
+  if (facts.app) return toDo("clip-next", facts.v2 ? `${edit} Or say "hand it off" to hand it off as it is.` : `${edit} Handing it off as it is waits until this Mac hands off version 2: ask Jason.`);
+  return facts.v2 ? toDo("clip-next", 'Say "hand it off" to hand it off as it is.') : toDo("waits-v2", WAITS_V2);
 }
 
 /** Whether a session after all still owes the BRIMM Ops page its withdrawal: its empty revision is still to be written, or its

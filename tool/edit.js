@@ -3738,25 +3738,34 @@ const handoffOwed = (record) => !record.finished && recordKind(record) === "fini
     of a Mac that hands off version 1. */
 const handoffPending = (record) => !record.finished && !hasFinalCut(record) && answerOf(record) !== null;
 
-/** What is said of an iPhone clip whose spellings are answered and whose hand-off is not written: the two ways to go on. */
-const CLIP_NEXT = 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.';
+/** What is said of an iPhone clip whose spellings are answered and whose hand-off is not written: the ways to go on, by what this Mac can do
+    (plan PR 7, F1; review, minor 2). A clip she opens in HyperFrames and exports is handed off in either version of the hand-off (a
+    version 1 short-video hand-off on a Mac that has not switched); handing it off as it is waits for version 2. The offer of HyperFrames is
+    left out when this Mac's settings have the app off, and with it nothing is left to offer on a Mac that hands off version 1. */
+function clipNext(ctx, found, record) {
+  const v2 = writesV2For(ctx.settings, found.folder, record);
+  if (appOf(ctx.settings)) return v2 ? 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.' : 'Say "open it in HyperFrames" to edit it. Handing it off as it is waits until this Mac hands off version 2: ask Jason.';
+  return v2 ? 'Say "hand it off" to hand it off as it is.' : HANDOFF_WAITS;
+}
 
 /** What `finish` does for an iPhone clip the app has not opened (plan PR 7, item 4; architecture 4.2): it checks, in this order, a Mac that
     hands off version 1, a hand-off that is written already, and spellings not yet answered; then, with no hand-off yet, it asks once
     whether to hand the clip off as it is, and starts nothing. `--as-it-is` writes the hand-off from the import's captions, which is what
     the spellings card did before, in its words. A hand-off made already from the import is kept, with the revision the page holds: an
-    edited version needs HyperFrames first. */
+    edited version needs HyperFrames first. Every offer of HyperFrames in these words is left out where this Mac's settings have the app off,
+    and on a Mac that hands off version 1 the way that is handed off now (a clip opened in HyperFrames and exported) is named beside the wait. */
 async function finishClip(ctx, found, answers) {
   const { record } = found;
   const name = shownName(record);
-  if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, handoffFromSpellingsWaits(name));
+  const app = Boolean(appOf(ctx.settings));
+  if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, `${handoffFromSpellingsWaits(name)}${app ? ' Or open it in HyperFrames, export it on this Mac and say "hand it off".' : ""}`);
   if (record.finished && Number.isInteger(record.finished.revision)) {
-    const how = madeFromImport(record) ? ", from the clip as it was filmed. To hand off an edited version, open it in HyperFrames first." : ": a spelling changed writes its next revision.";
+    const how = madeFromImport(record) ? `, from the clip as it was filmed.${app ? " To hand off an edited version, open it in HyperFrames first." : ""}` : ": a spelling changed writes its next revision.";
     return refuse(ctx, `${name}'s hand-off is written already, as revision ${record.finished.revision}${how}`);
   }
   if (answerOf(record) === null) return refuse(ctx, `${name}'s hand-off is written once its spellings are answered. Say "show me the spellings".`);
   if (!answers.asItIs) {
-    ctx.say(`${name} was not opened in HyperFrames. Hand it off as it is, or open it in HyperFrames first?`);
+    ctx.say(app ? `${name} was not opened in HyperFrames. Hand it off as it is, or open it in HyperFrames first?` : `Hand ${name} off as it is?`);
     return 0;
   }
   const running = runningCommand(ctx.home, found.name, ctx.alive);
@@ -3962,7 +3971,7 @@ function spellCard(ctx, found) {
   if (answer) {
     ctx.say(`Claude's spellings for ${name} were answered on ${shownAt(answer.at)}:`);
     offers.forEach((o, i) => ctx.say(`${i + 1}. "${o.heard}" as "${o.spelled}": ${answer.applied.includes(o.heard) ? "applied" : "left"}.`));
-    if (handoffPending(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(HANDOFF_WAITS);
+    if (handoffPending(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(isClip(record) ? clipNext(ctx, found, record) : HANDOFF_WAITS);
     return 0;
   }
   if (!offers.length) {
@@ -4019,7 +4028,7 @@ async function answerOffers(ctx, found, words) {
   const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
   // No hand-off is written yet and none is due from the card: a raw video's is made when it is finished, and an iPhone clip's when she
   // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
-  const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? (writesV2For(ctx.settings, found.folder, record) ? CLIP_NEXT : HANDOFF_WAITS) : "";
+  const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? clipNext(ctx, found, record) : "";
   return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
 }
 
@@ -5988,6 +5997,7 @@ function guideFacts(ctx, e, links, rates) {
     ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,
     v2,
+    app: Boolean(appOf(ctx.settings)),
     placeholder: r.name.placeholder === true,
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",

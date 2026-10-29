@@ -117,12 +117,14 @@ export const CLIP_ANSWER = { state: "answered", guess: "short video", seen: "upr
 export const READING = { kind: "short video", model: "m", at: AT, on: "Mac Studio", account: "", outcome: "read" };
 
 /** An iPhone clip she answered, read by Claude: its record holds the offers (`answered` too, when `answer` lists the offers she applied,
-    by the words heard). This Mac hands off `version` of the hand-off. */
-export function clipWorld({ version = 2, answer = null, over = {}, files = CLIP_FILES } = {}) {
+    by the words heard). This Mac hands off `version` of the hand-off, and its settings turn the app on when `app` is true (they do not,
+    unless a test says so, so the words that offer HyperFrames are left out). */
+export function clipWorld({ version = 2, answer = null, over = {}, files = CLIP_FILES, app = false } = {}) {
   const t = setup({ programs: { FFPROBE: rawProbe } });
-  if (version) {
-    writeSettings(t.home, { handoffVersion: version });
-    t.ctx.settings = { ...t.ctx.settings, handoffVersion: version };
+  if (version || app) {
+    const patch = { ...(version ? { handoffVersion: version } : {}), ...(app ? { app: "hyperframes" } : {}) };
+    writeSettings(t.home, patch);
+    t.ctx.settings = { ...t.ctx.settings, ...patch };
   }
   const offers = { spellings: SPELLINGS, ...(answer ? { answered: { reading: READING.at, at: AT, on: "Mac Studio", applied: answer, left: SPELLINGS.map((s) => s.heard).filter((h) => !answer.includes(h)) } } : {}) };
   const spellings = answer ? answer.map((heard) => [heard, SPELLINGS.find((s) => s.heard === heard).spelled]) : [];

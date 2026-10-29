@@ -24,10 +24,20 @@ async function on(deps, ...argv) {
 const NAME = "Pricing talk";
 const HANDOFF = "Pricing talk.brimm-ops.json";
 const OGDEN = '"Ogdin" as "Ogden"';
+// What is said of a clip with no hand-off yet goes by what this Mac can do (review, minor 2): the offer of HyperFrames is left out when this
+// Mac's settings have the app off; as it is waits for version 2 on a Mac that hands off version 1, while a clip opened in HyperFrames and
+// exported is handed off in version 1 all the same (a version 1 short-video hand-off).
 const NEXT = 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.';
+const NEXT_NO_APP = 'Say "hand it off" to hand it off as it is.';
+const NEXT_V1 = 'Say "open it in HyperFrames" to edit it. Handing it off as it is waits until this Mac hands off version 2: ask Jason.';
 const WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
 const questionOf = (name) => `${name} was not opened in HyperFrames. Hand it off as it is, or open it in HyperFrames first?`;
 const QUESTION = questionOf(NAME);
+const QUESTION_NO_APP = `Hand ${NAME} off as it is?`;
+const V1_WAITS = `${NAME}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`;
+const V1_WAITS_APP = `${V1_WAITS} Or open it in HyperFrames, export it on this Mac and say "hand it off".`;
+const MADE = (n) => `${NAME}'s hand-off is written already, as revision ${n}, from the clip as it was filmed.`;
+const MADE_APP = (n) => `${MADE(n)} To hand off an edited version, open it in HyperFrames first.`;
 /** The made-up episode of exports-world.js is named "Pricing: what to charge?", and its hand-off is named for it. */
 const WORLD_NAME = "Pricing: what to charge?";
 const WORLD_HANDOFF = "Pricing- what to charge-.brimm-ops.json";
@@ -37,7 +47,7 @@ const handoffIn = (found, file = HANDOFF) => JSON.parse(readFileSync(join(found.
 
 describe("F1. the spellings card, for an iPhone clip", () => {
   it("records the answer and the spellings and writes no hand-off: nothing is run, and final/ is not made", async () => {
-    const { t, found } = clip();
+    const { t, found } = clip({ app: true });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
     assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT}`);
@@ -48,9 +58,17 @@ describe("F1. the spellings card, for an iPhone clip", () => {
     t.done();
   });
   it("says the same of an answer of none, with the spelling it applied none of", async () => {
-    const { t, found } = clip();
+    const { t, found } = clip({ app: true });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
     assert.equal(r.text, `No spelling applied. ${NEXT}`);
+    assert.equal(reread(found).finished, null);
+    t.done();
+  });
+  it("leaves the offer of HyperFrames out on a Mac whose settings have the app off, and says only that it can be handed off as it is", async () => {
+    const { t, found } = clip();
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
+    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT_NO_APP}`);
+    assert.doesNotMatch(r.text, /HyperFrames/);
     assert.equal(reread(found).finished, null);
     t.done();
   });
@@ -62,12 +80,30 @@ describe("F1. the spellings card, for an iPhone clip", () => {
     assert.equal(existsSync(join(found.folder, "final")), false);
     t.done();
   });
-  it("says only that the hand-off waits for version 2 on a Mac that hands off version 1, and keeps the answer", async () => {
+  it("says only that the hand-off waits for version 2 on a Mac that hands off version 1 and has the app off, and keeps the answer", async () => {
     const { t, found } = clip({ version: 1 });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${WAITS}`);
     assert.deepEqual([reread(found).spellings, reread(found).finished], [[["Ogdin", "Ogden"]], null]);
     t.done();
+  });
+  it("says, on a Mac that hands off version 1 and has the app on, that only as it is waits: a clip edited in HyperFrames is handed off in version 1", async () => {
+    const { t, found } = clip({ version: 1, app: true });
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
+    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT_V1}`);
+    assert.deepEqual([reread(found).spellings, reread(found).finished], [[["Ogdin", "Ogden"]], null]);
+    // The card, asked for again once it is answered, says the same.
+    const card = await on(t.ctx.deps, "spell", FOLDER, "offers");
+    assert.equal(card.said.at(-1), NEXT_V1);
+    t.done();
+  });
+  it("adds nothing to the card once answered on a Mac that hands off version 2, whatever the app setting", async () => {
+    for (const app of [true, false]) {
+      const { t } = clip({ answer: ["Ogdin"], app });
+      const card = await on(t.ctx.deps, "spell", FOLDER, "offers");
+      assert.doesNotMatch(card.text, /hand it off|HyperFrames|version 2/, String(app));
+      t.done();
+    }
   });
   it("writes no hand-off for a spelling added or dropped afterwards either", async () => {
     const { t, found } = clip({ answer: [] });
@@ -89,13 +125,22 @@ describe("F1. the spellings card, for an iPhone clip", () => {
 });
 
 describe("F2. finish on a clip that was not opened in HyperFrames: it asks once, and as it is", () => {
-  it("asks whether to hand it off as it is, exit 0, and starts and writes nothing, with or without a yes", async () => {
-    const { t, found } = clip({ answer: ["Ogdin"] });
+  it("asks whether to hand it off as it is, or open it in HyperFrames first, exit 0, and starts and writes nothing, with or without a yes", async () => {
+    const { t, found } = clip({ answer: ["Ogdin"], app: true });
     for (const argv of [["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
       const r = await on(t.ctx.deps, ...argv);
       assert.deepEqual([r.code, r.text], [0, QUESTION], argv.join(" "));
     }
     assert.deepEqual([t.started, t.calls, existsSync(join(found.folder, "final")), reread(found).rev, reread(found).editing.by], [[], [], false, found.record.rev, "Mac Studio"]);
+    t.done();
+  });
+  it("asks only whether to hand it off as it is on a Mac whose settings have the app off, and offers HyperFrames nowhere", async () => {
+    const { t, found } = clip({ answer: ["Ogdin"] });
+    for (const argv of [["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
+      const r = await on(t.ctx.deps, ...argv);
+      assert.deepEqual([r.code, r.text], [0, QUESTION_NO_APP], argv.join(" "));
+    }
+    assert.deepEqual([t.started, t.calls, existsSync(join(found.folder, "final"))], [[], [], false]);
     t.done();
   });
   it("writes the hand-off from the import's captions with --as-it-is, as the card did: kind short video, its main video alone, no suggestions", async () => {
@@ -131,17 +176,25 @@ describe("F2. finish on a clip that was not opened in HyperFrames: it asks once,
     for (const argv of [["finish", FOLDER], ["finish", FOLDER, "--as-it-is"]]) {
       const { t, found } = clip({ version: 1, answer: ["Ogdin"] });
       const r = await on(t.ctx.deps, ...argv);
-      assert.deepEqual([r.code, r.text], [1, `${NAME}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`], argv.join(" "));
+      assert.deepEqual([r.code, r.text], [1, V1_WAITS], argv.join(" "));
       assert.equal(existsSync(join(found.folder, "final")), false);
       t.done();
     }
     const { t } = clip({ version: 1 });
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER)).text, `${NAME}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`);
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER)).text, V1_WAITS);
     t.done();
+    // With the app on, the way that is handed off now is said too: a clip opened in HyperFrames and exported goes in version 1.
+    const withApp = clip({ version: 1, answer: ["Ogdin"], app: true });
+    for (const argv of [["finish", FOLDER], ["finish", FOLDER, "--as-it-is"]]) {
+      const r = await on(withApp.t.ctx.deps, ...argv);
+      assert.deepEqual([r.code, r.text], [1, V1_WAITS_APP], argv.join(" "));
+    }
+    assert.equal(existsSync(join(withApp.found.folder, "final")), false);
+    withApp.t.done();
   });
   it("asks the same of a clip answered under the old rules whose hand-off was never written, and owes it nothing now", async () => {
     // Its spellings were answered on a Mac that handed off version 1; the card wrote nothing then, and now writes nothing either.
-    const { t, found } = clip({ answer: ["Ogdin"] });
+    const { t, found } = clip({ answer: ["Ogdin"], app: true });
     const r = await on(t.ctx.deps, "finish", FOLDER);
     assert.deepEqual([r.code, r.text], [0, QUESTION]);
     assert.equal(reread(found).finished, null);
@@ -166,8 +219,8 @@ describe("F2. finish on a clip that was not opened in HyperFrames: it asks once,
     assert.equal(existsSync(join(busy.found.folder, "final")), false);
     busy.t.done();
   });
-  it("says nothing of a path, a flag or a command in the question", () => {
-    assert.doesNotMatch(QUESTION, /\/|--|~|\bedit\.js\b|\bnode\b/);
+  it("says nothing of a path, a flag or a command in the question, nor in the words about version 2", () => {
+    for (const text of [QUESTION, QUESTION_NO_APP, NEXT, NEXT_NO_APP, NEXT_V1, V1_WAITS, V1_WAITS_APP, MADE(1), MADE_APP(1)]) assert.doesNotMatch(text, /\/|--|~|\bedit\.js\b|\bnode\b/, text);
   });
 });
 
@@ -217,21 +270,30 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
     assert.deepEqual([r.code, r.text], [0, questionOf(WORLD_NAME)]);
     assert.deepEqual(never.t.started, []);
     never.t.done();
-    const none = clip({ answer: ["Ogdin"] });
+    const none = clip({ answer: ["Ogdin"], app: true });
     assert.equal((await on(none.t.ctx.deps, "finish", FOLDER)).text, QUESTION);
     none.t.done();
   });
   it("says a hand-off made from the import is written already, as its revision, and writes nothing", async () => {
-    const { t, found } = clip({ answer: ["Ogdin"] });
+    const { t, found } = clip({ answer: ["Ogdin"], app: true });
     assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--as-it-is")).code, 0);
     const tree = listAll(join(found.folder, "final"));
     const rev = reread(found).rev;
     const text = readFileSync(join(found.folder, "final", HANDOFF), "utf8");
     for (const argv of [["finish", FOLDER], ["finish", FOLDER, "--yes"], ["finish", FOLDER, "--as-it-is"]]) {
       const r = await on(t.ctx.deps, ...argv);
-      assert.deepEqual([r.code, r.text], [1, `${NAME}'s hand-off is written already, as revision 1, from the clip as it was filmed. To hand off an edited version, open it in HyperFrames first.`], argv.join(" "));
+      assert.deepEqual([r.code, r.text], [1, MADE_APP(1)], argv.join(" "));
     }
     assert.deepEqual([listAll(join(found.folder, "final")), reread(found).rev, readFileSync(join(found.folder, "final", HANDOFF), "utf8"), t.started], [tree, rev, text, []]);
+    t.done();
+  });
+  it("leaves out the advice to open the clip in HyperFrames from that sentence on a Mac whose settings have the app off", async () => {
+    const { t, found } = clip({ answer: ["Ogdin"] });
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--as-it-is")).code, 0);
+    const r = await on(t.ctx.deps, "finish", FOLDER);
+    assert.deepEqual([r.code, r.text], [1, MADE(1)]);
+    assert.doesNotMatch(r.text, /HyperFrames/);
+    assert.equal(reread(found).finished.revision, 1);
     t.done();
   });
   it("makes that hand-off again from the import's captions at a later spell, as it does today", async () => {

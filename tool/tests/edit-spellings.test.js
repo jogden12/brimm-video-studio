@@ -549,9 +549,10 @@ describe("spell … offers, for an iPhone clip", () => {
   // export or, asked, as it is (edit-finish-clip.test.js, which holds the hand-off this test used to check).
   it("records the answer and the spellings, writes no hand-off, and says how to go on", async () => {
     const { t, found } = await readOf("short video");
+    // This Mac's settings have the app off here, so the offer of HyperFrames is left out (review, minor 2); with it on, both ways are said.
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.`);
+    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. Say "hand it off" to hand it off as it is.`);
     const record = reread(found);
     assert.deepEqual([record.spellings, record.offers.answered.applied, record.finished], [[["Ogdin", "Ogden"]], ["Ogdin"], null]);
     assert.equal(existsSync(join(found.folder, "final")), false);
