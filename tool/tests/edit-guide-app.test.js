@@ -84,6 +84,17 @@ describe("the guide picks the way as finish does, by the record", () => {
     assert.equal(await line(w), says(OPEN));
     w.t.done();
   });
+  it("sends a raw video that has a Reel's project and no push to open it, on a Mac whose settings have the app off too: the Reel's project makes it unopened, as it does for finish (review M6)", async () => {
+    for (const set of [true, false]) {
+      const w = guideWorld({ projects: ["reel 2"], set });
+      assert.equal(await line(w), says(OPEN), `app ${set}`);
+      w.t.done();
+    }
+    // A Reel's project beside a push to Final Cut is the Final Cut way, as without it.
+    const pushed = guideWorld({ projects: ["reel 2"], set: false, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
+    assert.equal(await line(pushed), says(FINISH));
+    pushed.t.done();
+  });
   it("leaves a raw video that was pushed to Final Cut and has no project on the Final Cut way, and so one on a Mac whose settings have the app off", async () => {
     const pushed = guideWorld({ projects: null, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
     assert.equal(await line(pushed), says(FINISH));
@@ -506,7 +517,10 @@ describe("what says the guide's new states: the help and the README (the skills'
     for (const words of [
       "followed through HyperFrames (plan PR 10)", "Making the video for HyperFrames", "how long is left", "usually takes", ".hyperframes/app-history.jsonl", "the time of her last request there",
       "export on This Mac", "an export that began after its last change", "Final Cut way", "until the retirement's wave 4", "These only read, and write nothing",
-      "is told to clear the mark, and nothing of HyperFrames or Final Cut is said or read for it"
+      "is told to clear the mark, and nothing of HyperFrames or Final Cut is said or read for it",
+      // The ways, as finish picks them (review M6): a Reel's project makes a raw video that was never pushed go the HyperFrames way on any Mac.
+      "when it has a main project in use, or when it was never pushed to Final Cut and either this Mac's settings turn the app on or the record lists a Reel's project",
+      "pushed to Final Cut and no project in use, or never pushed on a Mac whose settings have the app off and no Reel project"
     ]) assert.ok(first.includes(words), words);
     assert.ok(row("| `guide drop [zoom]").includes("being imported, being read or having its video for HyperFrames made"));
     assert.ok(row('| `guide "<video>" done').includes("Its video for HyperFrames being made is waited for too, and ends with its next step; no notice is posted for it"));

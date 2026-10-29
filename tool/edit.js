@@ -2127,9 +2127,10 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 /** Which way `finish` goes for a video, by its record (plan PR 7, item 1): "hyperframes" for a raw video that has a main project in
     use, and for an iPhone clip whose main project in use the app has opened, to be finished from the exports the app made of it
     (exports.js); "clip" for any other iPhone clip she answered, which is asked whether to hand it off as it is (finishClip); "finished"
-    for a finished video, which is not edited here; "unopened" for a raw video with neither a project nor a push, on a Mac whose settings
-    turn the app on, which has nothing to finish yet and is told so in HyperFrames' words; and "final cut" for the rest, which go as they
-    always went. The Final Cut way stays for the episodes already under way in it, until the retirement's wave 4. */
+    for a finished video, which is not edited here; "unopened" for a raw video with no main project in use and no push, on a Mac whose
+    settings turn the app on, or on any Mac when the record lists a project (a Reel's), which has nothing to finish yet and is told so in
+    HyperFrames' words; and "final cut" for the rest, which go as they always went. The Final Cut way stays for the episodes already
+    under way in it, until the retirement's wave 4. */
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);

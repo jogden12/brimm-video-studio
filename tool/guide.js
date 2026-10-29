@@ -148,7 +148,8 @@ export function opsText(handoff, step, again) {
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
     - For a raw video and an iPhone clip (plan PR 10): `way`, how `finish` goes for it (edit.js finishWay): "hyperframes" (a main project
-      in use), "unopened" (a raw video with neither a project nor a push, on a Mac set up for the app), "clip" (an iPhone clip the app
+      in use), "unopened" (a raw video never pushed to Final Cut, with no main project in use, on a Mac set up for the app, or on any Mac
+      when the record lists a Reel's project), "clip" (an iPhone clip the app
       has not opened), "final cut" or "finished"; the first two are the HyperFrames way (viaApp). `copy`, while this Mac's run makes
       the video for HyperFrames, and null otherwise: { left, usual }, the seconds left as the panel's run says (null when it says none)
       and the seconds it usually takes by the speed this Mac measured (copyIn; null while not known). `project`, the main project in use
@@ -277,8 +278,9 @@ function sessionNext(facts, notes, now) {
 }
 
 /** Whether a video goes the HyperFrames way (plan PR 10): edit.js reads `way` from the record as `finish` does (finishWay). "hyperframes"
-    is a main project in use, and "unopened" a raw video with neither a project nor a push on a Mac set up for the app. Any other
-    way, or none given, is the Final Cut way of a raw video, whose stages stay until the retirement's wave 4 (the ruling of PR 10). */
+    is a main project in use, and "unopened" a raw video never pushed to Final Cut that has none, on a Mac set up for the app or with a
+    Reel's project (the rule of finishWay). Any other way, or none given, is the Final Cut way of a raw video, whose stages stay until
+    the retirement's wave 4 (the ruling of PR 10). */
 const viaApp = (facts) => facts.way === "hyperframes" || facts.way === "unopened";
 
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
