@@ -9,8 +9,10 @@
 // project of another Mac that has no snapshot listed in the record (reelWhy, projectOnAnotherMac, projectSnapshot), claims the episode
 // for this Mac as `open` does, and then gives it to openReelInApp, which does the rest, in this order:
 //   - a Reel project whose folder is not on this Mac, and that the record lists a snapshot of (snapshot.js; plan PR 11), is rebuilt from
-//     it, whichever Mac made it, as app.js rebuilds the main project (rebuildHere); a Reel project here that is older than the newest
-//     snapshot is neither opened nor handed over (olderHere);
+//     it, whichever Mac made it, as app.js rebuilds the main project (rebuildHere); a Reel project here whose marker says it is older than
+//     the newest snapshot is set aside and rebuilt in its place, as the main project is (olderMarked, rebuildHere with `older`; plan PR 18),
+//     with HyperFrames quit and its video kept for the new project when it passes the check every working copy does; one with no marker,
+//     older by the times of its files, is neither opened nor set aside (olderHere);
 //   - a Reel project made before, whose folder is on this Mac, is opened again, and nothing is made or started. If the recording has
 //     changed since it was made she is told, and the project is opened as it was (4.8). Unless its video is not in it (a hand took it,
 //     or it was just rebuilt, which leaves the video out): putReelVideoBack puts the Reel's video back as app.js putVideoBack does the
@@ -37,8 +39,8 @@
 //
 // What it says goes into her chat, so it holds no path, no flag and no name of a command. What it touches beyond the episode's own
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`.
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
+import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
+import { basename, extname, join } from "node:path";
 import { clockText } from "./clock.js";
 import { runningCommand } from "./detached.js";
 import { localStamp } from "./episode.js";
@@ -48,8 +50,8 @@ import { REELS_FILE, readReels, reelEntries } from "./reels.js";
 import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
 import {
-  changedSince, copyIn, copyOf, factsIn, fromOf, guidanceOf, jsonIn, logosIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderThanSnapshot, openProjectInApp,
-  plainName, rebuildHere, recordingChanged, sizedFacts, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn
+  asideWords, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
+  openProjectInApp, plainName, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -228,9 +230,12 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
       faces in it, the same: moving it would take it from under the finder.
     - The copy must be the width, height and length the project was made at (to a second), as its own brimm/facts.json says, start where it says
       the Reel starts (`reel.offset`, to half a second: a suggestion that has moved is another video), and be as large as its own facts say; or
-      it is left where it is (1). The project's other files are never touched.
-    - Then it is renamed into media/recording.mp4, on the same disk. `rename` is how a file is moved: a test gives another. */
-function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
+      it is left where it is (1). The project's other files are never touched. All of that is app.js copyFits, the check of every working copy.
+    - Then it is renamed into media/recording.mp4, on the same disk. `rename` is how a file is moved: a test gives another.
+    - `kept` is the video of the Reel's older project that was just set aside (plan PR 18), when there was one: where no copy is made, it
+      stands for the copy if it passes the same check (app.js keptFits), is moved into the project and she is told it was kept; otherwise it
+      stays where it is and the copy is asked for as above. */
+function putReelVideoBack(ctx, { found, record, n, project, dir, kept = null }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
   const of = `Reel ${n} of ${name}`;
@@ -253,7 +258,16 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
     return { code: 1 };
   }
   const copy = reelCopyPaths(home, found.name, n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, { n, start: listed.candidate.start, end: listed.candidate.end }));
+  const was = factsIn(join(dir, "brimm", "facts.json"));
+  const made = factsIn(copy.facts);
+  // Where the Reel starts in the recording, to half a second: a suggestion that has moved is another video.
+  const starts = Number.isFinite(was?.reel?.offset) ? Number.isFinite(made?.stretch?.start) && Math.abs(made.stretch.start - was.reel.offset) <= 0.5 : true;
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
+    const keeps = keptFits(ctx, { found, kept, copy, was, made, starts });
+    if (keeps.workingCopy && moveIn(kept, videoIn(dir), rename)) {
+      ctx.say(videoKept(of));
+      return { workingCopy: keeps.workingCopy };
+    }
     const requested = requestWorkCopy(ctx, { folder: found.name, reel: n });
     ctx.say(requested.started ? beingMade(n, name) : busyWith(n, name));
     return { code: 0 };
@@ -262,35 +276,17 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
     ctx.say(busyWith(n, name));
     return { code: 0 };
   }
-  const was = factsIn(join(dir, "brimm", "facts.json"));
-  if (!sizedFacts(was)) {
-    ctx.say(notWhole(of));
+  const fits = copyFits({ was, made, size: statOf(copy.video)?.size, starts });
+  if (fits.no) {
+    ctx.say({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](of));
     return { code: 1 };
   }
-  const made = factsIn(copy.facts);
-  const workingCopy = copyOf(made);
-  if (!sizedFacts(made) || !workingCopy) {
-    ctx.say(notPutBack(of));
-    return { code: 1 };
-  }
-  const starts = Number.isFinite(was.reel?.offset) ? Number.isFinite(made.stretch?.start) && Math.abs(made.stretch.start - was.reel.offset) <= 0.5 : true;
-  if (made.width !== was.width || made.height !== was.height || Math.abs(made.seconds - was.seconds) > 1 || !starts) {
-    ctx.say(notTheSame(of));
-    return { code: 1 };
-  }
-  if (statOf(copy.video)?.size !== workingCopy.bytes) {
-    ctx.say(notPutBack(of));
-    return { code: 1 };
-  }
-  try {
-    mkdirSync(dirname(videoIn(dir)), { recursive: true });
-    rename(copy.video, videoIn(dir));
-  } catch (e) {
+  if (!moveIn(copy.video, videoIn(dir), rename)) {
     ctx.say(notPutBack(of));
     return { code: 1 };
   }
   ctx.say(videoBack(of));
-  return { workingCopy };
+  return { workingCopy: fits.workingCopy };
 }
 
 /** The record with Reel `n` marked picked, which is what `reel pick` did and what parts.js and the hand-off read: a Reel the list
@@ -309,7 +305,7 @@ const picked = (n, candidate) => (next) => {
     that is made stays, whether or not the app opened.
     `ctx` is what edit.js gives a command, { home, machine, now, alive, say, start, settings }. `found` is { name, folder }, and
     `record` the episode's record. `deps` are as openInApp's: `save(next)`, which writes the next record and resolves 0 when it has
-    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env` and `chat`.
+    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env`, `chat` and `running`.
     The Reel's project in the record's `app` whose folder is on this Mac is opened again, with one more time it was opened, and
     nothing is made or started. A Reel project the record has whose folder is not here is replaced, when this Mac made it: by the
     folder at the project's name when one is there that the record does not know (adoptReel), and otherwise by a new project
@@ -334,6 +330,8 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
   // A Reel project whose folder is not on this Mac, and that the record lists a snapshot of, is rebuilt from it (plan PR 11), whichever Mac
   // made it. It is then here without its video, which is put back below, as a project `free` took the video from is.
   let rebuilt = false;
+  // The video of an older Reel project that was set aside (below), where it is now, for putReelVideoBack to keep if it can.
+  let kept = null;
   if (!project && earlier && plainName(earlier.name)) {
     const snapshot = snapshotOf(record.files, earlier.name);
     if (snapshot) {
@@ -343,15 +341,31 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
       rebuilt = true;
     }
   }
+  // A Reel project here whose marker says it is older than the newest snapshot, because the other Mac worked on it since, is set aside and
+  // rebuilt from the newest snapshot in its place, as the main project is (plan PR 18; app.js openInApp): the recording must not have changed
+  // since (it is looked at before anything is moved), and HyperFrames must be quit, which edit.js asked before the claim and is asked again
+  // here (app.js asideWords). A project with no marker is not set aside: it is refused below.
+  if (project && !rebuilt && olderMarked(found, { record, project, dir: join(work, project.name) })) {
+    const stop = await asideWords(ctx, { found, record, project, running: deps.running });
+    if (stop) {
+      ctx.say(stop);
+      return 1;
+    }
+    const built = rebuildHere(ctx, { found, record, snapshot: snapshotOf(record.files, project.name), dir: join(work, project.name), name: `Reel ${n} of ${record.name.text}`, older: true }, { cli, fs: deps.fs });
+    if (built.code !== undefined) return built.code;
+    rebuilt = true;
+    kept = videoIn(built.aside);
+  }
   if (project) {
     const folder = join(work, project.name);
-    // A project here that is older than the newest snapshot is not opened: the other Mac worked on it since.
+    // A project here that is older than the newest snapshot, and has no marker to say so, is not opened: the other Mac worked on it since,
+    // by the times of its files, which are not a word to set a folder aside on.
     if (!rebuilt && olderHere(found, { record, project, dir: folder })) {
       ctx.say(olderThanSnapshot(`Reel ${n} of ${record.name.text}`));
       return 1;
     }
     if (nothingAt(videoIn(folder))) {
-      const back = putReelVideoBack(ctx, { found, record, n, project, dir: folder }, { rename: deps.rename ?? renameSync });
+      const back = putReelVideoBack(ctx, { found, record, n, project, dir: folder, kept }, { rename: deps.rename ?? renameSync });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
     } else if (changedSince(project, { found, record })) {

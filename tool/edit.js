@@ -91,7 +91,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
@@ -161,14 +161,19 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         does; another Mac's claim refuses it, unless it is taken over. A project the
                                         other Mac made is rebuilt here from the snapshot it handed over, and its video
                                         made again; what HyperFrames kept of its history stays on that Mac. One it has
-                                        not handed over is refused. Only on a Mac that Jason has set up for HyperFrames
+                                        not handed over is refused. A project here that the other Mac has worked on
+                                        since, which its marker and the newest snapshot show, is set aside with
+                                        nothing deleted and rebuilt in its place from that snapshot, its video kept
+                                        when it fits; HyperFrames must be quit, which is asked before anything is
+                                        claimed. Only on a Mac that Jason has set up for HyperFrames
   node edit.js app "<episode>" reel <n> [--take-over]
                                         make Reel <n>, one of Claude's suggestions, a project of its own in HyperFrames,
                                         open it, and pick it. Its video, the suggestion's stretch of the recording, is
                                         made first: it is asked for, and the Reel is opened when it is said again. Its
                                         files are checked and brought over, and it is claimed for this Mac, as above.
-                                        A Reel project the other Mac made is rebuilt from its snapshot, as above. For a
-                                        finished video too. Reels are made here, never by HyperFrames itself
+                                        A Reel project the other Mac made is rebuilt from its snapshot, as above, and
+                                        one here that the other Mac has worked on since is set aside and rebuilt, as
+                                        above. For a finished video too. Reels are made here, never by HyperFrames itself
   node edit.js app "<episode>" what-happened
                                         what was done in HyperFrames on the episode's main video, newest first, under
                                         the day it happened: what she asked, what the app said, and the files it
@@ -1256,16 +1261,28 @@ const projectIsElsewhere = (name, on, of = "", holder = "") => `The HyperFrames 
 /** Who has the episode open, as projectIsElsewhere has it: "" when nobody does. */
 const holderOf = (ctx, record) => (record.editing ? (record.editing.by === ctx.machine ? "this Mac" : String(record.editing.by)) : "");
 
-/** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it (app.js olderHere), or "": decided
-    before anything is claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2).
-    `key` says which project ("main" or "reel 2"), and `of` how its words name it. With the project's marker (snapshot.js) that needs no
-    file of the snapshot; a project with no marker is judged by the times of its files when the snapshot is whole here, and otherwise
-    openInApp judges it again once the claim has brought the files. */
-function olderWords(ctx, { found, record }, key, of) {
+/** How `app` asks whether HyperFrames is running, before it sets an older project aside (and again where the folder is moved): `ctx.deps.running`
+    when a test says (as `release` and `free` have it), else pgrep (free.js hyperFramesRunning), for which `ctx.deps.pgrep` is a test's stand-in
+    for spawnSync. The one place that default is, so that a test can tell it from no way to ask at all (the review of PR 18, F9). */
+const hyperFramesAsked = (ctx) => ctx.deps.running ?? (() => hyperFramesRunning(ctx.deps.pgrep));
+
+/** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it, or "": decided before anything is
+    claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2). `key` says which project
+    ("main" or "reel 2"), and `of` how its words name it.
+    - A project whose marker (snapshot.js) names another snapshot than the newest (app.js olderMarked) is set aside, and the project rebuilt in
+      its place (plan PR 18), which needs HyperFrames quit: the only thing decided here is that. Open, or not to be told, it is refused in
+      `release`'s and `free`'s words (app.js quitWords); quit, it goes on to the claim, and openInApp sets it aside. The marker needs no file
+      of the snapshot, so this is told before the files are brought.
+    - A project with no marker is judged by the times of its files when the snapshot is whole here (olderHere), and refused in the words it
+      always had: those can be fooled by a clock or a deletion, so it is not set aside. When the snapshot is not whole yet, openInApp judges it
+      again once the claim has brought the files. */
+async function olderWords(ctx, { found, record }, key, of) {
   const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
   if (!project || !plainName(project.name)) return "";
   const dir = join(episodeWork(ctx.home, found.name), project.name);
-  return existsSync(dir) && olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
+  if (!existsSync(dir)) return "";
+  if (olderMarked(found, { record, project, dir })) return quitWords(hyperFramesAsked(ctx));
+  return olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
 }
 
 /** The refusal for a project of the record that is a session clip's folder on this Mac, however the record spells its name (PR 15's rule, as
@@ -1309,8 +1326,10 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       drop the other Mac's from the record. With a snapshot listed (the other Mac released the episode; plan PR 11) it goes on to the
       claim, and openInApp rebuilds the project from the snapshot. A project of this Mac's own whose folder is gone is rebuilt from its
       snapshot when there is one, and made again, as before, when there is not;
-    - a project of this Mac's that is older than the newest snapshot the record lists of it (olderWords; the other Mac worked on it
-      since) is refused in words before anything is claimed, so that the refusal leaves the record and its claim as they were;
+    - a project of this Mac's that is older than the newest snapshot the record lists of it (olderWords; the other Mac worked on it since)
+      is dealt with before anything is claimed, so that a refusal leaves the record and its claim as they were: one whose marker says so is
+      set aside and rebuilt (plan PR 18) once HyperFrames is quit, which is all that is asked here, and is refused in `release`'s and
+      `free`'s words while it is open or cannot be told; one with no marker, older by the times of its files, is refused in words as it was;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
@@ -1342,12 +1361,12 @@ export async function app(ctx, rest) {
   if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere, "", holderOf(ctx, got.record)));
   const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (clip) return refuse(ctx, clip);
-  const older = olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
+  const older = await olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openInApp(ctx, { found, record }, { env: ctx.deps.env, ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** `app "<episode>" reel <n> [--take-over]`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
@@ -1365,7 +1384,8 @@ export async function app(ctx, rest) {
     - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
       and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
       one, openReelInApp rebuilds it from the snapshot;
-    - a Reel project of this Mac's that is older than the newest snapshot of it (olderWords) is refused before anything is claimed;
+    - a Reel project of this Mac's that is older than the newest snapshot of it (olderWords) is dealt with before anything is claimed, as
+      `app` deals with the main project's: set aside and rebuilt once HyperFrames is quit, or refused;
     - the claim and the bring, as `open` and `app` make them (claimAndBring). What she is told to say again is "open Reel <n> of
       <name> in HyperFrames", and the bring it starts is told so (`bring … --asked-by "app reel <n>"`);
     - openReelInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record the
@@ -1390,12 +1410,12 @@ async function appReel(ctx, asked, flags) {
   if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `, holderOf(ctx, got.record)));
   const clip = clipWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (clip) return refuse(ctx, clip);
-  const older = olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
+  const older = await olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (older) return refuse(ctx, older);
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. Throws,

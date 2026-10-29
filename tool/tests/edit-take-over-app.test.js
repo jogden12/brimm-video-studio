@@ -6,7 +6,7 @@
 // HeyGen or `claude`: the pinned command line is the stand-in of tests/stand-ins/hyperframes.mjs.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NOT_SET_UP } from "../app.js";
@@ -447,7 +447,7 @@ describe("app: a project that cannot be rebuilt (group N)", () => {
   });
 });
 
-describe("app: a project older than its snapshot is neither opened nor handed over (group O)", () => {
+describe("app: a project older than its snapshot is not handed over again; edit-set-aside-app.test.js has what app does with it (group O, plan PR 11; plan PR 18)", () => {
   const OLDER = `The HyperFrames project for ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
   /** Mac Studio releases; Sallie's laptop takes over, rebuilds, makes the video, changes a composition, and releases. Mac Studio's folder is
       then older than the snapshot. */
@@ -465,58 +465,13 @@ describe("app: a project older than its snapshot is neither opened nor handed ov
     assert.equal(handed.code, 0, handed.text);
     return w;
   }
-  it("is not opened on the Mac that came back to it: it says so, asks for no video, opens nothing, and leaves the folder as it was", async () => {
-    const w = await worked();
-    const before = filesBelow(w.dirOf("main"));
-    const starts = w.t.started.length;
-    const r = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [1, [OLDER]]);
-    assert.deepEqual(filesBelow(w.dirOf("main")), before);
-    assert.deepEqual(runsOf({ home: w.t.home }), []);
-    assert.equal(w.t.started.length, starts, "no video is asked for");
-    w.t.done();
-  });
-  it("is put right, until a way is built, by moving the older folder away by hand: the project is then rebuilt from the other Mac's newer snapshot, with what it changed", async () => {
-    const w = await worked();
-    assert.deepEqual((await app(w.t.ctx.deps, FOLDER)).said, [OLDER]);
-    renameSync(w.dirOf("main"), join(w.t.dir, "older copy of the project"));
-    const r = await app(w.t.ctx.deps, FOLDER);
-    assert.equal(r.code, 0, r.text);
-    assert.match(r.said[0], /^The HyperFrames project for Pricing: what to charge\? is rebuilt on this Mac from what Sallie's laptop handed over at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. What HyperFrames kept of its history stays on Sallie's laptop\.$/);
-    assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
-    madeCopy({ home: w.t.home }, w.found);
-    const opened = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([opened.code, opened.said], [0, [BACK, OPEN, BUTTONS]]);
-    w.t.done();
-  });
-  it("is not handed over again by that Mac, whatever it was told before: nothing is written", async () => {
+  it("is not handed over again by that Mac: nothing is written", async () => {
     const w = await worked();
     const folders = readdirSync(join(w.found.folder, "app-snapshot"));
-    await app(w.t.ctx.deps, FOLDER);
     const rev = reread(w.found).rev;
     const r = await release(w.t.ctx.deps);
     assert.deepEqual([r.code, r.said], [1, [`The HyperFrames project for ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't handed over again. Nothing was handed over. Ask Jason.`]]);
     assert.deepEqual([readdirSync(join(w.found.folder, "app-snapshot")), reread(w.found).rev], [folders, rev]);
-    w.t.done();
-  });
-  it("is the same for a Reel project: Sallie's laptop rebuilds and changes it and hands it over, and Mac Studio's older one is not opened", async () => {
-    const w = takeOverWorld();
-    assert.equal((await release(w.t.ctx.deps)).code, 0);
-    await app(w.b.deps, FOLDER, "reel", "2");
-    madeReelCopy(w.b, w.found);
-    assert.equal((await app(w.b.deps, FOLDER, "reel", "2")).code, 0);
-    const changed = join(w.b.work, REEL2, "compositions", "title-card.html");
-    writeFileSync(changed, "<div>Pricing, in a new way</div>");
-    utimesSync(changed, new Date(ms(16, 0)), new Date(ms(16, 0)));
-    await w.t.ctx.deps.wait(60000);
-    assert.equal((await release(w.b.deps)).code, 0);
-    const starts = w.t.started.length;
-    const r = await app(w.t.ctx.deps, FOLDER, "reel", "2");
-    assert.deepEqual([r.code, r.said], [1, [`The HyperFrames project for Reel 2 of ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`]]);
-    assert.equal(w.t.started.length, starts);
-    // The main project of this Mac, which the other Mac never had, is not older than any snapshot.
-    const main = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([main.code, main.said], [0, [OPEN, BUTTONS]]);
     w.t.done();
   });
   it("is, for a project with no marker, opened when it is as new as the snapshot, within 2 seconds, or newer, and not when it is more than 2 seconds older", async () => {
@@ -582,15 +537,19 @@ describe("app and release: which project is older goes by the marker, not by the
     return { w, snapshots: readdirSync(join(w.found.folder, "app-snapshot")).sort() };
   }
   const listedTimes = (w) => [...new Set(Object.keys(reread(w.found).files).filter((rel) => rel.startsWith("app-snapshot/")).map((rel) => rel.split("/")[1]))];
-  it("when the other Mac only deleted a file: Mac Studio's project is not opened and not handed over, and the file does not come back", async () => {
+  it("when the other Mac only deleted a file: Mac Studio's project is older all the same, is not handed over, and when it is set aside the file does not come back to the new project", async () => {
     const { w } = await laptopWorked((dir) => rmSync(join(dir, "compositions", "title-card.html")));
     const [, second] = listedTimes(w);
     assert.equal(`app-snapshot/${second}/${MAIN}/compositions/title-card.html` in reread(w.found).files, false, "the laptop's snapshot has no such file");
-    const opened = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([opened.code, opened.said], [1, [OLDER]]);
     const handed = await release(w.t.ctx.deps);
     assert.deepEqual([handed.code, handed.said], [1, [OLDER_HANDING]]);
     assert.equal(`app-snapshot/${second}/${MAIN}/compositions/title-card.html` in reread(w.found).files, false);
+    const opened = await app(w.t.ctx.deps, FOLDER);
+    assert.equal(opened.code, 0, opened.text);
+    assert.equal(opened.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
+    assert.equal(existsSync(join(w.dirOf("main"), "compositions", "title-card.html")), false, "what the laptop deleted stays deleted");
+    const [aside] = readdirSync(join(w.work, "set aside"));
+    assert.equal(existsSync(join(w.work, "set aside", aside, "compositions", "title-card.html")), true, "and is in the folder that was set aside");
     w.t.done();
   });
   it("when the other Mac's clock is ten minutes behind: its snapshot is named before the first, is the newest all the same, and Mac Studio's project is older", async () => {
@@ -602,37 +561,11 @@ describe("app and release: which project is older goes by the marker, not by the
     assert.deepEqual(snapshots.length, 2);
     assert.equal(snapshots[0] < T1, true, "the laptop's snapshot sorts before Mac Studio's by its name");
     assert.deepEqual(listedTimes(w), [T1, snapshots[0]], "and the record lists it last");
-    const opened = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([opened.code, opened.said], [1, [OLDER]]);
-    // Rebuilt from the newest, Mac Studio has what the laptop changed.
-    renameSync(w.dirOf("main"), join(w.t.dir, "older copy of the project"));
+    // Set aside and rebuilt from the newest, Mac Studio has what the laptop changed, though its snapshot is named before the first.
     const rebuilt = await app(w.t.ctx.deps, FOLDER);
     assert.equal(rebuilt.code, 0, rebuilt.text);
+    assert.equal(rebuilt.said[0], `The older HyperFrames project for ${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`);
     assert.equal(textOf(join(w.dirOf("main"), "compositions", "title-card.html")), "<div>Pricing, in a new way</div>");
-    w.t.done();
-  });
-  it("is decided before the episode is claimed: the refusal leaves the record's rev and its claim as they were, waits for nothing and asks for nothing (the review of PR 11, I2)", async () => {
-    const { w } = await laptopWorked((dir) => rmSync(join(dir, "compositions", "title-card.html")));
-    const before = stateOf(w);
-    assert.equal(before.editing, null);
-    const r = await app(w.t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [1, [OLDER]]);
-    assert.deepEqual(stateOf(w), before);
-    w.t.done();
-  });
-  it("is the same for a Reel project that is older: nothing is claimed, and it is said of the Reel", async () => {
-    const w = takeOverWorld();
-    assert.equal((await release(w.t.ctx.deps)).code, 0);
-    await app(w.b.deps, FOLDER, "reel", "2");
-    madeReelCopy(w.b, w.found);
-    assert.equal((await app(w.b.deps, FOLDER, "reel", "2")).code, 0);
-    rmSync(join(w.b.work, REEL2, "compositions", "title-card.html"));
-    await w.t.ctx.deps.wait(60000);
-    assert.equal((await release(w.b.deps)).code, 0);
-    const before = stateOf(w);
-    const r = await app(w.t.ctx.deps, FOLDER, "reel", "2");
-    assert.deepEqual([r.code, r.said], [1, [`The HyperFrames project for Reel 2 of ${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`]]);
-    assert.deepEqual(stateOf(w), before);
     w.t.done();
   });
   it("does not take a file dated in the future for the project's last change: a rebuilt file is given the moment of the rebuild at most", async () => {
@@ -882,7 +815,7 @@ describe("what pins the words (group S)", () => {
     const app = usage('  node edit.js app "<episode>" [--take-over]').join(" ");
     for (const words of ["A project the other Mac made is rebuilt here from the snapshot it handed over, and its video made again; what HyperFrames kept of its history stays on that Mac. One it has not handed over is refused."]) assert.ok(app.includes(words), words);
     const reel = usage('  node edit.js app "<episode>" reel <n> [--take-over]').join(" ");
-    assert.ok(reel.includes("A Reel project the other Mac made is rebuilt from its snapshot, as above."), reel);
+    assert.ok(reel.includes("A Reel project the other Mac made is rebuilt from its snapshot, as above,"), reel);
   });
   it("has the README say it in the rows of release, app and app … reel, and in a paragraph of its own on handing a project over", () => {
     const [release] = rowOf("| `release \"<episode>\"");
