@@ -83,6 +83,7 @@ import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, projectOnAnotherMac } from "./app.js";
+import { versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds } from "./hyperframes.js";
 import { WORK_COPY_COMMAND, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
@@ -140,6 +141,18 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         files are checked and brought over, and it is claimed for this Mac, as open
                                         does; another Mac's claim refuses it, unless it is taken over. Only on a Mac
                                         that Jason has set up for HyperFrames
+  node edit.js app "<episode>" what-happened
+                                        what was done in HyperFrames on the episode's main video, newest first, under
+                                        the day it happened: what she asked, what the app said, and the files it
+                                        changed, from the history the app keeps in the project. It looks at this Mac's
+                                        project, and claims nothing, brings nothing and writes nothing. Only on a Mac
+                                        that Jason has set up for HyperFrames
+  node edit.js app "<episode>" versions
+                                        the versions HyperFrames has kept of the episode's main video, newest first,
+                                        under the day they were made: when, who, what each was called, and the files it
+                                        changed, from the history the app keeps. It changes no history, claims nothing
+                                        and writes nothing. Only on a Mac that Jason has set up for HyperFrames, with
+                                        its command line
   node edit.js push "<episode>" [main] [v<n>] [--no-hand-edits | --hand-edits] [--without-other-macs-changes]
                                         show the main timeline in Final Cut Pro, as a new version, in this Mac's
                                         library for the episode; with v<n>, version n as it was stored. Shown last in
@@ -1187,6 +1200,9 @@ const projectIsElsewhere = (name, on) => `The HyperFrames project for ${name} is
 const openInAppWords = (name) => `open ${name} in HyperFrames`;
 /** Who `app` tells the bring it starts that it asked (`bring … --asked-by app`), so that the bring ends with `openInAppWords`. */
 const APP_ASKED = "app";
+/** The words that follow an episode's in `app "<episode>" <question>`, by which `app` says what was done in the app on its project
+    or what versions it has kept, instead of opening it (app-history.js). */
+const APP_QUESTIONS = ["what-happened", "versions"];
 
 /** `app "<episode>" [--take-over]`: open the episode's main video in the HyperFrames app, making its project first (app.js
     openInApp; architecture 2026-10-27, 4.1). In order:
@@ -1207,16 +1223,25 @@ const APP_ASKED = "app";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
       project, which is written as every command writes a record (save). Whenever the app opened, the last line it says names the
       app's buttons that Studio cannot control (architecture 3.3 and 5.9); when the app did not open, it does not.
-    `ctx.deps.app` holds what a test gives openInApp in place of its defaults (cli, node, guidance, chat, spawn, env). */
+    `ctx.deps.app` holds what a test gives openInApp in place of its defaults (cli, node, guidance, chat, spawn, env).
+    `app "<episode>" what-happened` and `app "<episode>" versions` (plan PR 6) are questions about the project, not an opening of it:
+    a word after the episode's, when another word comes before it (`app versions` alone names an episode called "versions"). They
+    go through the same gate, the same words for a finished video and the same check that this Mac is set up, and then they are
+    app-history.js's: they claim nothing, bring nothing, ask for no working copy and write no record, so no claim of another Mac
+    refuses them, and `--take-over` is not read. `versions` needs the pinned command line (NO_COMMAND_LINE); `what-happened` reads a
+    file in the project and does not. `ctx.deps.app` holds what a test gives them too (cli, node, spawn, tz). */
 export async function app(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);
-  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  const question = words.length > 1 && APP_QUESTIONS.includes(words[words.length - 1]) ? words[words.length - 1] : "";
+  const got = episodeFor(ctx, question ? words.slice(0, -1) : words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
+  if (question === "what-happened") return whatHappened(ctx, { found, record: got.record }, { ...ctx.deps.app });
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
+  if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
   if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });

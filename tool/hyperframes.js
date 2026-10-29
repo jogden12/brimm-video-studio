@@ -9,8 +9,9 @@
 //     table is checked against the help the pinned version prints, so that a new pin cannot bring in a command nobody classified (F6);
 //   - the settings that deny a project's agent the commands it may not run, and the few variables the command line is run with (5.5,
 //     5.6);
-//   - when the app may take over her chat (F3, 5.6), and the arguments of `open`;
-//   - what `open` printed, and what the app's history holds, in her words (4.6, F7).
+//   - when the app may take over her chat (F3, 5.6), and the arguments of `open` and of `history`;
+//   - what `open` printed, and what the app's history holds (its turns, and the entries `history --json` prints), in her words
+//     (4.6, F7): the words of hers and the app's that it quotes are made plain first (plainText).
 //
 // Pure: nothing here runs a program or looks at a disk but this file's own pin, hyperframes.pin.json, and toolchainHolds, which looks at
 // the toolchain's folder (and only looks). The caller runs the program and reads the history; a test gives it what the pinned version
@@ -275,10 +276,29 @@ export function handoverAllowed(facts) {
     absolute could be taken for an option, or for another folder than the one meant. */
 export function openArgs(options) {
   const { home, node, project } = options ?? {};
-  for (const [name, path] of [["home", home], ["node", node], ["project", project]]) {
-    if (!absolute(path)) throw new Error(`openArgs: ${name} must be an absolute path`);
-  }
+  needAbsolute("openArgs", { home, node, project });
   return { file: node, args: [cliPath(home), "open", project, "--json"] };
+}
+
+/** Throws, in the name of `who`, for the first of `paths` ({ name: path }) that is not an absolute path: a path that is not could
+    be taken for an option, or for another folder than the one meant. */
+function needAbsolute(who, paths) {
+  for (const [name, path] of Object.entries(paths)) {
+    if (!absolute(path)) throw new Error(`${who}: ${name} must be an absolute path`);
+  }
+}
+
+/** How many versions `versions` asks the command line for: the newest 20 (4.6). */
+export const VERSIONS_LIMIT = 20;
+
+/** What to run to list a project's versions (4.6): { file, args } for a program-running call, `node <the pinned program> history
+    --json --limit 20 --dir <project>`, with nothing of npx in it, in the order the plan gives (the command line itself takes its
+    flags in any order; the stand-in used by the tests answers this order only, so that a call that drifted is seen). `home`, `node`
+    and `project` are absolute paths, or it throws, as openArgs does. */
+export function historyArgs(options) {
+  const { home, node, project } = options ?? {};
+  needAbsolute("historyArgs", { home, node, project });
+  return { file: node, args: [cliPath(home), "history", "--json", "--limit", String(VERSIONS_LIMIT), "--dir", project] };
 }
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -352,34 +372,160 @@ export function turnsOf(text) {
   return text.split("\n").flatMap((line) => turnOf(line) ?? []);
 }
 
+/** The furthest a moment can be from the epoch, in milliseconds either way, for a Date to hold it (ECMAScript's time value limit).
+    A number beyond it is a number and not a moment, and the clock that tells the time (clockIn) throws a RangeError for it. */
+const DATE_MOST = 8.64e15;
+/** Whether a value is a moment a Date can hold: a number no further from the epoch than DATE_MOST. NaN and the infinities are not. */
+const isMoment = (value) => typeof value === "number" && Math.abs(value) <= DATE_MOST;
+
+/** One entry of what `history --json` printed (publicEntry, in the pinned command line) as { kind, label, endedAt, files, undone,
+    pinned }, or null when it has no time that is a moment (isMoment): when it happened is what is told first, and an entry that
+    cannot be dated is passed over. `kind` is who made it (`who.kind`: "agent", "person" or "outside"); the name is not kept, since
+    it is the app's assistant's own. A part that is not what it should be is none (the texts are cut at 2,000 characters as a
+    turn's are), and `undone` and `pinned` are so only when they are `true`: whether it was undone is not guessed at. */
+function entryOf(raw) {
+  if (!isObject(raw) || !isMoment(raw.endedAt)) return null;
+  return {
+    kind: cut(isObject(raw.who) ? raw.who.kind : ""),
+    label: cut(raw.label),
+    endedAt: raw.endedAt,
+    files: Array.isArray(raw.files) ? raw.files.map(cut).filter(Boolean) : [],
+    undone: raw.undone === true,
+    pinned: raw.pinned === true
+  };
+}
+
+/** What `history --json` printed and its exit status (4.6, F7): { ok: true, entries }, the entries in the order the command line
+    gave them (the newest first), or { ok: false } when it cannot be read. History is a trial (F7), so anything that is not the
+    list the pinned version prints is "cannot read" and never a guess: an exit status other than 0, an output that is not a text
+    or is not JSON, one without a list of `entries`, one that says `ok: false` (as the command line's own refusals do), and a list
+    that has entries none of which can be read, which is not the same as a list with none. */
+export function readHistory(stdout, code) {
+  const failed = { ok: false };
+  if (code !== 0 || typeof stdout !== "string") return failed;
+  let said;
+  try {
+    said = JSON.parse(stdout);
+  } catch {
+    return failed;
+  }
+  if (!isObject(said) || said.ok === false || !Array.isArray(said.entries)) return failed;
+  const entries = said.entries.flatMap((raw) => entryOf(raw) ?? []);
+  return said.entries.length > 0 && entries.length === 0 ? failed : { ok: true, entries };
+}
+
+/** How long a text she or the app wrote may be in a line of hers, in characters (plainText). */
+export const QUOTE_MOST = 200;
+/** How many files a line names before it says how many there were instead (plainTurns, plainVersions). */
+export const FILES_MOST = 5;
+
+/** The five names of programs that a text, or a file's name, is left out whole for, since a line of hers holds none of them: npx,
+    npm and node (the programs that run the command line), and edit.js and hyperframes.mjs (this one, and the command line's). No
+    other program's name is looked for. */
+const COMMAND_WORDS = /\b(?:npx|npm|node)\b|edit\.js|hyperframes\.mjs/i;
+
+/** A word of a text, made plain: a `--word` token (a double hyphen and a letter at its start, as `--now` and `--dir=x`) is left out
+    whole; a path is its file's name (or its folder's, when it ends in a slash); and any other word with a slash in it is the words
+    it joins, as "and/or" and "9/16" are. A path is a word with a slash that starts with one, with a tilde or with a dot, that ends in
+    one, that has three parts or more, or whose last part has an extension. */
+function plainWord(word) {
+  if (/^--[A-Za-z]/.test(word)) return [];
+  if (!word.includes("/")) return [word];
+  const parts = word.split("/").filter(Boolean);
+  if (parts.length === 0) return [];
+  const last = parts[parts.length - 1];
+  const path = /^[/~.]/.test(word) || word.endsWith("/") || parts.length >= 3 || /\.[A-Za-z0-9]{1,8}\W*$/.test(last);
+  return path ? [last] : parts;
+}
+
+/** A text she or the app wrote, as a line of hers has it (4.6): on one line, with its markdown marks off (bold, slant and code), a
+    link as its words and an address left out, every path as its file's name, any other slash as a space, every `--word` token left
+    out whole and any other run of hyphens made one, and cut at `most` characters (QUOTE_MOST) at a word, with an ellipsis, when it
+    is longer. "" for what is not a text, what has no letter or number in it, and a text that holds one of the five program names
+    (COMMAND_WORDS): nothing can be made plain of that, so it is left out whole rather than changed into something it was not.
+    Whatever it is given, what it gives holds no slash, no double hyphen and none of those five names. It takes nothing else out of
+    what was said: a single-dash option, or the name of another program, stays. */
+export function plainText(text, most = QUOTE_MOST) {
+  if (typeof text !== "string") return "";
+  const words = text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[*`]/g, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap(plainWord)
+    .join(" ")
+    .replace(/-{2,}/g, "-");
+  if (!/[\p{L}\p{N}]/u.test(words) || COMMAND_WORDS.test(words)) return "";
+  if (words.length <= most) return words;
+  // The cut falls on the last space within `most` characters, unless that leaves less than half of them.
+  const head = words.slice(0, most + 1);
+  const at = head.lastIndexOf(" ");
+  return `${(at > most / 2 ? head.slice(0, at) : head.slice(0, most)).replace(/[\s,;:.\-–—]+$/, "")}…`;
+}
+
 /** A text on one line: its runs of space and line ends made one space, as the command line prints it. */
 const oneLine = (text) => (typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "");
 
-/** The names of files, without their folders, each once, in order: what she sees of a change, never where it is. */
-const namesOf = (files) => [...new Set((Array.isArray(files) ? files : []).map((file) => oneLine(typeof file === "string" ? file.split("/").pop() : "")).filter(Boolean))];
+/** The names of files, without their folders, each once, in order: what she sees of a change, never where it is. A name that holds
+    a program's name or a double hyphen is left out, since a line of hers holds neither. */
+const namesOf = (files) => [...new Set((Array.isArray(files) ? files : []).map((file) => oneLine(typeof file === "string" ? file.split("/").pop() : "")).filter((name) => name !== "" && !COMMAND_WORDS.test(name) && !name.includes("--")))];
 
-/** What was done in the app, in her words (4.6): one line for each turn, newest first, "3:41 pm: you asked …; HyperFrames did …;
-    changed index.html". The time is of the day, in the time zone `tz` (an IANA name; the Mac's own when none is given), and a time
-    zone that is not one throws, rather than tell a wrong time. A part with nothing in it is left out, a turn with nothing in it
-    is left out, and so is a turn whose date cannot be read: this says nothing rather than something wrong. Turns of the same
-    time are put later line first. What she asked and what the app did are quoted as they were written, on one line: they are hers
-    and the app's words, and are not scrubbed, so they hold whatever was said. The files are names only. Given the turns turnsOf
-    reads, in any order, which it leaves as they were. */
-export function plainTurns(turns, options) {
-  const clock = new Intl.DateTimeFormat("en-US", { timeZone: options?.tz, hour: "numeric", minute: "2-digit" });
+/** The files of a change, as a line of hers says them: "changed index.html, logo.html", or, past FILES_MOST, "changed 12 files". */
+const changedWords = (names) => (names.length === 0 ? "" : names.length > FILES_MOST ? `changed ${names.length} files` : `changed ${names.join(", ")}`);
+
+/** The time of day a moment is told as, "3:41 pm", in the zone `tz` (an IANA name; the Mac's own when none is given). A zone that
+    is not one throws, here, rather than tell a wrong time later. */
+function clockIn(tz) {
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
   // Built from parts: newer ICU versions put a no-break space before AM and PM, and her words have an ordinary one.
-  const timeOf = (ms) => {
+  return (ms) => {
     const parts = clock.formatToParts(ms);
     const part = (type) => parts.find((p) => p.type === type)?.value ?? "";
     return `${part("hour")}:${part("minute")} ${part("dayPeriod").toLowerCase()}`;
   };
+}
+
+/** What was done in the app, in her words (4.6): one line for each turn, newest first, "3:41 pm: you asked …; HyperFrames did …;
+    changed index.html". The time is of the day, in the time zone `tz` (clockIn), and a time zone that is not one throws, rather
+    than tell a wrong time. A part with nothing in it is left out, a turn with nothing in it is left out, and so is a turn whose
+    date cannot be read: this says nothing rather than something wrong. Turns of the same time are put later line first. What she
+    asked and what the app did are hers and the app's words, so they are quoted, but as a line of hers has them (plainText): the
+    real history has them long, in markdown, and with paths in them. The files are names only (namesOf, changedWords). Given the
+    turns turnsOf reads, in any order, which it leaves as they were. */
+export function plainTurns(turns, options) {
+  const timeOf = clockIn(options?.tz);
   return (Array.isArray(turns) ? turns : [])
     .map((turn, index) => ({ turn, index, ms: typeof turn?.at === "string" ? Date.parse(turn.at) : NaN }))
     .filter(({ ms }) => !Number.isNaN(ms))
     .sort((a, b) => b.ms - a.ms || b.index - a.index)
     .flatMap(({ turn, ms }) => {
-      const [asked, did, files] = [oneLine(turn.asked), oneLine(turn.did), namesOf(turn.files)];
-      const parts = [asked && `you asked ${asked}`, did && `HyperFrames did ${did}`, files.length && `changed ${files.join(", ")}`].filter(Boolean);
+      const [asked, did] = [plainText(turn.asked), plainText(turn.did)];
+      const parts = [asked && `you asked ${asked}`, did && `HyperFrames did ${did}`, changedWords(namesOf(turn.files))].filter(Boolean);
       return parts.length ? [`${timeOf(ms)}: ${parts.join("; ")}`] : [];
+    });
+}
+
+/** Who made a version, in her words, by the kind the command line gives (`who.kind`): the app's assistant, she by hand in the app,
+    or something that is not the app (the brand kit arriving, a transcript saved: A0 counted 17 versions in the command line's list
+    against 13 in the app's own, the others being these). A kind that is not among them is not told. */
+const WHO = { agent: "HyperFrames", person: "you", outside: "outside HyperFrames" };
+
+/** The versions the command line lists, in her words (4.6): one line for each entry readHistory gives, newest first by when it
+    ended, "3:41 pm: Make the title bigger (HyperFrames; undone; changed index.html)". The label is what the app wrote for it: her
+    request to the assistant, often headed by the name of the file she attached, "Imported media" for what she did by hand, and
+    "Changed outside the app", quoted as a line of hers has it (plainText), or "a change" when it has nothing that can be said. In
+    brackets: who (WHO), "undone" if it was undone, "kept" if it is pinned, and the files it changed. An entry of the same time
+    stays in the order given. The time is told as plainTurns tells it, and a time zone that is not one throws. An entry that cannot
+    be dated is passed over, and anything but a list is no entries. */
+export function plainVersions(entries, options) {
+  const timeOf = clockIn(options?.tz);
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry, index) => ({ entry, index, ms: isObject(entry) && isMoment(entry.endedAt) ? entry.endedAt : NaN }))
+    .filter(({ ms }) => !Number.isNaN(ms))
+    .sort((a, b) => b.ms - a.ms || a.index - b.index)
+    .map(({ entry, ms }) => {
+      const inside = [Object.hasOwn(WHO, entry.kind) ? WHO[entry.kind] : "", entry.undone === true ? "undone" : "", entry.pinned === true ? "kept" : "", changedWords(namesOf(entry.files))].filter(Boolean);
+      return `${timeOf(ms)}: ${plainText(entry.label) || "a change"}${inside.length ? ` (${inside.join("; ")})` : ""}`;
     });
 }
