@@ -11,8 +11,8 @@ import { dirname, join } from "node:path";
 import { cliPath } from "../hyperframes.js";
 import { projectFiles, settingsText, writeProject } from "../project.js";
 import {
-  ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, behindSnapshot, holds, keptSnapshots, listedBy, markerText, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf, snapshotStats, snapshotsOf,
-  timeName, timeOf, writeMarker
+  ASIDE_DIR, ASSETS_MOST, BEHIND_MS, LEFT_OUT_NOTE, MARKER, SNAPSHOTS_KEPT, SNAPSHOT_DIR, SNAPSHOT_MOST, asidePlace, behindSnapshot, holds, keptSnapshots, listedBy, markedOlder, markerText, momentText, notSynced, olderThan, readMarker, rebuildProject, snapshotFiles, snapshotOf,
+  snapshotStats, snapshotsOf, timeName, timeOf, writeMarker
 } from "../snapshot.js";
 
 const GUIDANCE = readFileSync(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url), "utf8");
@@ -588,6 +588,270 @@ describe("a project older than a snapshot (4.7)", () => {
     assert.equal(behindSnapshot([at(T)], [{ mtimeMs: Number.NaN }]), false);
     assert.equal(behindSnapshot(null, [at(T)]), true);
     assert.equal(behindSnapshot([at(T)], null), false);
+  });
+});
+
+/** Every file, folder and link under `dir`, as { <path from it>: "dir" | "file:<its text>" | "link:<where it leads>" }, to see two folders are the
+    same byte for byte. */
+function treeOf(dir) {
+  const out = {};
+  for (const rel of readdirSync(dir, { recursive: true }).sort()) {
+    const here = lstatSync(join(dir, rel));
+    out[rel] = here.isSymbolicLink() ? `link:${readlinkSync(join(dir, rel))}` : here.isDirectory() ? "dir" : `file:${readFileSync(join(dir, rel), "utf8")}`;
+  }
+  return out;
+}
+
+describe("asidePlace: where an older project folder is set aside to (PR 18)", () => {
+  const MAIN = "Pricing talk main 3fa9c1";
+  it("is a folder of its own in the episode's work folder, under the project's name and the moment, named as a snapshot's folder is", () => {
+    const work = "/Users/sallie/BRIMM Video Work/2026-10-14 Pricing talk (Mac Studio)";
+    assert.equal(ASIDE_DIR, "set aside");
+    assert.equal(asidePlace(work, MAIN, Date.parse("2026-10-29T19:20:41Z")), `${work}/set aside/${MAIN} 2026-10-29 19.20.41Z`);
+    assert.equal(asidePlace(work, "Reel 2 name", Date.parse("2026-10-29T19:20:41.900Z")), `${work}/set aside/Reel 2 name 2026-10-29 19.20.41Z`, "to the second, in UTC");
+  });
+  it("takes the next second while that name is taken, a link that leads nowhere counting, and is none after a hundred", (c) => {
+    const work = scratch(c);
+    const ms = Date.parse("2026-10-29T19:20:41Z");
+    mkdirSync(join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.41Z`), { recursive: true });
+    symlinkSync("/nowhere", join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.42Z`));
+    assert.equal(asidePlace(work, MAIN, ms), join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.43Z`));
+    for (let second = 2; second < 100; second++) mkdirSync(join(work, ASIDE_DIR, `${MAIN} ${timeName(ms + second * 1000)}`));
+    assert.equal(asidePlace(work, MAIN, ms), null, "a hundred seconds from the first are all taken");
+    assert.equal(asidePlace(work, MAIN, ms + 100 * 1000), join(work, ASIDE_DIR, `${MAIN} ${timeName(ms + 100 * 1000)}`));
+  });
+  it("is none for a moment that is not one", () => {
+    for (const ms of [Number.NaN, undefined, null, "now"]) assert.equal(asidePlace("/work", MAIN, ms), null, String(ms));
+  });
+});
+
+describe("markedOlder: a project whose marker names another snapshot than the newest (PR 18)", () => {
+  const T1 = "2026-10-20 20.00.00Z";
+  const T2 = "2026-10-20 20.01.00Z";
+  const newest = { time: T2 };
+  const dirIn = (c) => {
+    const dir = join(scratch(c), "project");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+  it("is true for another snapshot than the newest, and for one the record lists no more, whatever the times of the files say", (c) => {
+    const dir = dirIn(c);
+    put(dir, "index.html", "<html>");
+    writeMarker(dir, T1, "Mac Studio");
+    assert.equal(markedOlder(newest, dir), true);
+    writeMarker(dir, "2026-10-19 08.00.00Z", "Mac Studio");
+    assert.equal(markedOlder(newest, dir), true);
+    utimesSync(join(dir, "index.html"), new Date("2027-01-01T00:00:00Z"), new Date("2027-01-01T00:00:00Z"));
+    assert.equal(markedOlder(newest, dir), true, "a file dated in the future changes nothing");
+  });
+  it("is false for the newest snapshot, whatever the times of the files say", (c) => {
+    const dir = dirIn(c);
+    put(dir, "index.html", "<html>");
+    utimesSync(join(dir, "index.html"), new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+    writeMarker(dir, T2, "Sallie's laptop");
+    assert.equal(markedOlder(newest, dir), false);
+  });
+  it("is false when the marker's word is not to be had: none, a link, not JSON, no snapshot in it; and for no snapshot at all", (c) => {
+    const dir = dirIn(c);
+    put(dir, "index.html", "<html>");
+    assert.equal(markedOlder(newest, dir), false, "no marker: the times of the files are not its word");
+    put(dir, "elsewhere.json", markerText(T1, "Mac Studio"));
+    symlinkSync(join(dir, "elsewhere.json"), join(dir, MARKER));
+    assert.equal(markedOlder(newest, dir), false, "a link");
+    rmSync(join(dir, MARKER));
+    for (const text of ["", "not json", "[]", '{"snapshot":"yesterday"}', '{"by":"Mac Studio"}']) {
+      put(dir, MARKER, text);
+      assert.equal(markedOlder(newest, dir), false, text);
+    }
+    writeMarker(dir, T1, "Mac Studio");
+    assert.equal(markedOlder(null, dir), false);
+    assert.equal(markedOlder(undefined, dir), false);
+    assert.equal(markedOlder(newest, join(dir, "nowhere")), false);
+  });
+  it("agrees with olderThan wherever there is a marker, when it is not told which snapshots the record lists", (c) => {
+    const dir = dirIn(c);
+    put(dir, "index.html", "<html>");
+    for (const time of [T1, T2, "2026-10-19 08.00.00Z"]) {
+      writeMarker(dir, time, "");
+      assert.equal(markedOlder(newest, dir), olderThan(newest, dir, { folder: dir }), time);
+    }
+  });
+  describe("given the snapshots the record lists of the project", () => {
+    const at = (time) => ({ time, ms: timeOf(time) });
+    // The record lists two, T1 and T2, newest first; T0 was dropped when T2 was handed over.
+    const T0 = "2026-10-20 19.00.00Z";
+    const listed = [at(T2), at(T1)];
+    const marked = (c, time) => {
+      const dir = dirIn(c);
+      put(dir, "index.html", "<html>");
+      writeMarker(dir, time, "Mac Studio");
+      return dir;
+    };
+    it("is older for a snapshot the record lists that is not the newest", (c) => {
+      assert.equal(markedOlder(newest, marked(c, T1), listed), true);
+    });
+    it("is older for a snapshot the record lists no more that was named before every one it lists: the record keeps the two newest", (c) => {
+      assert.equal(markedOlder(newest, marked(c, T0), listed), true);
+      assert.equal(markedOlder(newest, marked(c, "2026-10-19 08.00.00Z"), listed), true);
+    });
+    it("is not older for the newest, whatever else is listed", (c) => {
+      assert.equal(markedOlder(newest, marked(c, T2), listed), false);
+    });
+    it("is not older for a snapshot the record never listed that was named after the newest, or between the ones it lists: that may be newer work, and is refused instead of set aside", (c) => {
+      assert.equal(markedOlder(newest, marked(c, "2026-10-21 08.00.00Z"), listed), false, "named after the newest");
+      assert.equal(markedOlder(newest, marked(c, "2026-10-20 20.00.30Z"), listed), false, "named between T1 and T2");
+      assert.equal(markedOlder(newest, marked(c, "2026-10-20 20.01.00Z"), [at("2026-10-20 20.01.00Z"), at(T1)]), false, "the newest");
+      // And olderThan, which refuses, still takes each of them for older.
+      assert.equal(olderThan(newest, marked(c, "2026-10-21 08.00.00Z"), { folder: scratch(c) }), true);
+    });
+    it("is told by the record's order and not the clock that named a snapshot: a snapshot listed but named later than the newest is older all the same", (c) => {
+      // The other Mac's clock is behind: its snapshot, listed last, is named before the first.
+      const behind = [at("2026-10-20 19.50.00Z"), at(T1)];
+      assert.equal(markedOlder({ time: "2026-10-20 19.50.00Z" }, marked(c, T1), behind), true);
+    });
+  });
+});
+
+describe("a project rebuilt in the place of an older folder, which is set aside (PR 18)", () => {
+  const T = "2026-10-20 20.00.00Z";
+  const T0 = "2026-10-20 19.00.00Z";
+  const MAIN = "Pricing talk main 3fa9c1";
+  const CLI = "/Users/sallie/BRIMM Video Work/.toolchain/hyperframes-0.8.208/node_modules/hyperframes/bin/hyperframes.mjs";
+  const FILES = { "index.html": "<html>", "brimm/facts.json": '{"seconds":6}', "compositions/title.html": "<div>", "assets/fonts/a.woff2": "font" };
+  /** What the older project holds: some of what the snapshot holds, its own, and what a snapshot leaves out (its video, its history, its renders). */
+  const OLDER = { "index.html": "<html>older", "compositions/title.html": "<div>older", "compositions/second.html": "<div>mine", "media/recording.mp4": "the working copy", ".hyperframes/app-history.jsonl": "{}", "renders/old.mp4": "a render", "assets/music/theme.mp3": "music" };
+  /** The episode's folder with a snapshot in it, the older project in the work folder, and the place it is to be set aside to. */
+  function olderWorld(c, files = FILES) {
+    const base = scratch(c);
+    const folder = join(base, "episode");
+    const listed = {};
+    for (const [rel, text] of Object.entries(files)) {
+      put(folder, `app-snapshot/${T}/${MAIN}/${rel}`, text);
+      utimesSync(join(folder, "app-snapshot", T, MAIN, rel), new Date("2026-10-20T13:40:00Z"), new Date("2026-10-20T13:40:00Z"));
+      listed[`app-snapshot/${T}/${MAIN}/${rel}`] = Buffer.byteLength(text);
+    }
+    const work = join(base, "work");
+    const dir = join(work, MAIN);
+    for (const [rel, text] of Object.entries(OLDER)) put(dir, rel, text);
+    writeMarker(dir, T0, "Mac Studio");
+    mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+    symlinkSync("/nowhere/hyperframes.mjs", join(dir, "node_modules", ".bin", "hyperframes"));
+    const aside = join(work, ASIDE_DIR, `${MAIN} 2026-10-29 19.20.41Z`);
+    return { base, folder, work, dir, aside, snapshot: snapshotOf(listed, MAIN), before: treeOf(dir), ino: lstatSync(dir).ino };
+  }
+  const ask = (w, deps) => rebuildProject({ folder: w.folder, snapshot: w.snapshot, dir: w.dir, cli: CLI, by: "Sallie's laptop", aside: w.aside }, deps);
+  /** The project in its place is the snapshot's files and the three the rebuild makes, and nothing of the older folder's. */
+  const isRebuilt = (w) => {
+    assert.deepEqual(readdirSync(w.dir, { recursive: true }).filter((rel) => !lstatSync(join(w.dir, rel)).isDirectory()).sort(), [...Object.keys(FILES), ".claude/settings.json", MARKER, "node_modules/.bin/hyperframes"].sort());
+    for (const [rel, text] of Object.entries(FILES)) assert.equal(readFileSync(join(w.dir, rel), "utf8"), text, rel);
+    assert.deepEqual(readMarker(w.dir), { snapshot: T, by: "Sallie's laptop" });
+    assert.equal(readlinkSync(join(w.dir, "node_modules", ".bin", "hyperframes")), CLI);
+  };
+  const asItWas = (w, where = w.dir) => {
+    assert.deepEqual(treeOf(where), w.before);
+    assert.equal(lstatSync(where).ino, w.ino, "the very folder, moved and not copied");
+  };
+  const only = (w, names) => assert.deepEqual(readdirSync(w.work).sort(), names);
+
+  it("moves the older folder to its place whole, with its history, its renders, its video and its link, and puts the rebuilt project where it was", (c) => {
+    const w = olderWorld(c);
+    assert.deepEqual(ask(w), { assetsLeft: false, aside: w.aside });
+    asItWas(w, w.aside);
+    isRebuilt(w);
+    only(w, [ASIDE_DIR, MAIN].sort());
+    assert.deepEqual(readdirSync(join(w.work, ASIDE_DIR)), [`${MAIN} 2026-10-29 19.20.41Z`]);
+  });
+  it("makes the project before it moves anything, moves the older folder before it renames the project into its place, and in no other order", (c) => {
+    const w = olderWorld(c);
+    const calls = [];
+    const seen = [];
+    const fs = {
+      ...fsModule,
+      renameSync: (from, to) => {
+        calls.push([from, to]);
+        // At each move, what stands where: the older folder (or not), the finished project beside (or not), and the set-aside place.
+        const beside = readdirSync(w.work).filter((name) => name.endsWith(".new"));
+        seen.push({ older: existsSync(join(w.dir, "compositions", "second.html")), beside: beside.map((name) => existsSync(join(w.work, name, MARKER))), aside: existsSync(w.aside) });
+        return fsModule.renameSync(from, to);
+      }
+    };
+    ask(w, { fs });
+    assert.equal(calls.length, 3, JSON.stringify(calls));
+    const [building, forward, last] = calls;
+    assert.match(building[0], new RegExp(`${MAIN} [0-9a-f]{8}\\.new [0-9a-f]{8}\\.part$`));
+    assert.match(building[1], new RegExp(`${MAIN} [0-9a-f]{8}\\.new$`));
+    assert.deepEqual(forward, [w.dir, w.aside]);
+    assert.deepEqual(last, [building[1], w.dir]);
+    assert.deepEqual(seen[1], { older: true, beside: [true], aside: false }, "when the older folder is moved the new project is whole beside its place and the older folder is still where it was");
+    assert.deepEqual(seen[2], { older: false, beside: [true], aside: true }, "and when the new one is renamed in, the older folder is in its set-aside place");
+  });
+  it("holds nothing of the older folder in the rebuilt project: its marker names the newest snapshot, it has no video or history, and what only the older folder had is in the set-aside folder", (c) => {
+    const w = olderWorld(c);
+    ask(w);
+    assert.equal(existsSync(join(w.dir, "media")), false);
+    assert.equal(existsSync(join(w.dir, ".hyperframes")), false);
+    assert.equal(existsSync(join(w.dir, "compositions", "second.html")), false);
+    assert.equal(readFileSync(join(w.aside, "compositions", "second.html"), "utf8"), "<div>mine");
+  });
+  it("leaves the older folder as it was, and nothing of its own, when the new project cannot be built", (c) => {
+    const w = olderWorld(c);
+    const copies = { n: 0 };
+    const fs = { ...fsModule, copyFileSync: (...args) => (++copies.n === 3 ? (() => { throw new Error("the disk is full"); })() : fsModule.copyFileSync(...args)) };
+    assert.deepEqual(ask(w, { fs }), { why: "could not" });
+    asItWas(w);
+    only(w, [MAIN]);
+  });
+  it("leaves the older folder as it was, and no new project beside it, when it cannot be moved", (c) => {
+    const w = olderWorld(c);
+    const fs = { ...fsModule, renameSync: (from, to) => (from === w.dir ? (() => { throw new Error("EXDEV: cross-device link not permitted"); })() : fsModule.renameSync(from, to)) };
+    assert.deepEqual(ask(w, { fs }), { why: "could not" });
+    asItWas(w);
+    assert.deepEqual(readdirSync(w.work).filter((name) => name !== ASIDE_DIR), [MAIN], "no .new or .part is left");
+    assert.equal(existsSync(w.aside), false);
+  });
+  it("puts the older folder back as it was, and removes only the project it built, when the new project cannot take its place", (c) => {
+    const w = olderWorld(c);
+    const fs = { ...fsModule, renameSync: (from, to) => (to === w.dir && from !== w.aside ? (() => { throw new Error("EACCES: permission denied"); })() : fsModule.renameSync(from, to)) };
+    assert.deepEqual(ask(w, { fs }), { why: "could not" });
+    asItWas(w);
+    assert.equal(existsSync(w.aside), false);
+    assert.deepEqual(readdirSync(w.work).filter((name) => name !== ASIDE_DIR), [MAIN], "the project it built is gone and the older folder is back");
+  });
+  it("deletes nothing when even the older folder cannot be put back: it stays whole in its set-aside place, the project it built stays beside its place, and the answer is `stuck`", (c) => {
+    const w = olderWorld(c);
+    const refuse = () => {
+      throw new Error("EACCES: permission denied");
+    };
+    const fs = { ...fsModule, renameSync: (from, to) => (to === w.dir ? refuse() : fsModule.renameSync(from, to)) };
+    assert.deepEqual(ask(w, { fs }), { why: "stuck" });
+    asItWas(w, w.aside);
+    assert.equal(existsSync(w.dir), false);
+    const beside = readdirSync(w.work).filter((name) => name.endsWith(".new"));
+    assert.equal(beside.length, 1, "what was built is not removed either");
+    assert.equal(existsSync(join(w.work, beside[0], "index.html")), true);
+  });
+  it("moves nothing, and makes nothing, when the snapshot is not whole, or holds nothing a snapshot holds", (c) => {
+    for (const spoil of [(w) => rmSync(join(w.folder, "app-snapshot", T, MAIN, "index.html")), (w) => writeFileSync(join(w.folder, "app-snapshot", T, MAIN, "index.html"), "<h")]) {
+      const w = olderWorld(c);
+      spoil(w);
+      assert.deepEqual(ask(w), { why: "not whole" });
+      asItWas(w);
+      only(w, [MAIN]);
+    }
+    const nothing = olderWorld(c, { ".env": "x", "media/recording.mp4": "v" });
+    assert.deepEqual(ask(nothing), { why: "not whole" });
+    asItWas(nothing);
+  });
+  it("says the assets were left out when the snapshot holds the note that says so, as the rebuild does", (c) => {
+    const w = olderWorld(c, { "index.html": "<html>", "assets/fonts/a.woff2": "font", [LEFT_OUT_NOTE]: "some assets were left out" });
+    assert.deepEqual(ask(w), { assetsLeft: true, aside: w.aside });
+    asItWas(w, w.aside);
+  });
+  it("is the rebuild it was when it is given no place to set anything aside: a folder that is there is left alone", (c) => {
+    const w = olderWorld(c);
+    assert.deepEqual(rebuildProject({ folder: w.folder, snapshot: w.snapshot, dir: w.dir, cli: CLI }), { why: "could not" });
+    asItWas(w);
+    only(w, [MAIN]);
   });
 });
 

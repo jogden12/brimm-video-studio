@@ -24,9 +24,16 @@
 // names another snapshot than the newest the record lists is older, whatever the times of its files say. A project with no marker (made
 // here, never handed over) is judged by the times of its files (behindSnapshot), as before.
 //
+// A project whose marker says it is older is set aside, not refused (plan PR 18; Jason, 2026-10-29: "have Studio move the older folder aside itself,
+// deleting nothing, and rebuild from the newer snapshot"): rebuildProject, given a place to set it aside to (asidePlace), builds the new project
+// beside its place first, then moves the older folder there with one rename, whole and as it is, then renames the new project into its place, and
+// puts the older folder back if that last step fails. A project with no marker is not set aside: its file times are not a word to act on.
+//
 // Nothing here writes into Dropbox. rebuildProject writes one project folder in the Mac's own work folder, whole or not at all (project.js).
+import { randomUUID } from "node:crypto";
+import * as nodeFs from "node:fs";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { recordFile, recordNumbers } from "./episode.js";
 import { settingsText, writeProject } from "./project.js";
 
@@ -41,6 +48,11 @@ export const SNAPSHOT_MOST = 100 * 1024 * 1024;
 /** How much older (in milliseconds) a project's newest file may be than the snapshot's and still be as new: Dropbox keeps a file's time to
     the whole second, so a copy may be up to a second either way. */
 export const BEHIND_MS = 2000;
+/** The folder, in an episode's own work folder on a Mac, that an older project folder is set aside into (asidePlace). No command takes it for a
+    project: a project is found by its name in the record, and app.js plainName refuses this name to a record. */
+export const ASIDE_DIR = "set aside";
+/** How many seconds from the moment asidePlace looks for a name that is not taken. */
+const ASIDE_TRIES = 100;
 
 /** The files of Studio's own brand kit in a project's `assets/`: its fonts and its logos. A snapshot always holds them, the limit on `assets/`
     never taking them (they are small, and the project's page cannot draw without them). */
@@ -73,6 +85,23 @@ export function timeOf(name) {
   const [year, month, day, hours, minutes, seconds] = read.slice(1).map(Number);
   const ms = Date.UTC(year, month - 1, day, hours, minutes, seconds);
   return timeName(ms) === name ? ms : null;
+}
+
+/** Where the older folder of the project called `name` is set aside to, in the episode's own work folder `work`: `set aside/<name> <moment>`,
+    the moment as a snapshot's folder is named (timeName), taken a second later while that name is there (a link that leads nowhere is
+    there too, and so is anything that cannot be looked at), and null when none of a hundred seconds is free or `ms` is not a moment. Nothing
+    is written. */
+export function asidePlace(work, name, ms) {
+  if (!Number.isFinite(ms)) return null;
+  for (let second = 0; second < ASIDE_TRIES; second++) {
+    const place = join(work, ASIDE_DIR, `${name} ${timeName(ms + second * 1000)}`);
+    try {
+      lstatSync(place);
+    } catch (e) {
+      if (e.code === "ENOENT") return place;
+    }
+  }
+  return null;
 }
 
 /** Whether a path from a project's folder is one a snapshot holds and a rebuild takes: a relative path of plain names, none starting with a
@@ -264,8 +293,15 @@ export function momentText(ms, zone) {
     made again from the raw video, as `free` leaves a project without it (app.js putVideoBack). `folder` is the episode's folder in Dropbox.
     `deps.fs` is node:fs, which a test replaces to make a step fail. Gives { assetsLeft }, true when no file of `assets/` was in the snapshot
     (they weighed too much to be handed over), or { why }: "not whole" when a file the record lists for it is not here at its size, or it
-    holds nothing, and "could not" when the folder could not be made (then none is left). Nothing in `folder` is written. */
-export function rebuildProject({ folder, snapshot, dir, cli, by = "", now }, deps = {}) {
+    holds nothing, and "could not" when the folder could not be made (then none is left). Nothing in `folder` is written.
+    `aside` (asidePlace) is where the folder that is at `dir` already, an older project, is to be set aside to (plan PR 18): the new project is
+    made beside `dir` first, whole or not at all, in a folder of its own (`<name> <8 characters>.new`); then the older folder is moved to
+    `aside` with one rename, whole and as it is, a rename of a folder on one volume copying and deleting nothing; then the new project is
+    renamed into `dir`. A step that fails leaves the older folder where it was: one that fails before the move leaves nothing of its own; one
+    that fails after it puts the older folder back with a rename, and then takes away the project it built (the one thing removed, which is
+    Studio's own and can be built again). Gives { assetsLeft, aside } when it was set aside, or { why }: those two, and "stuck" when even the
+    older folder could not be put back, which leaves it whole in its set-aside place and the new project built beside `dir`, nothing removed. */
+export function rebuildProject({ folder, snapshot, dir, cli, by = "", now, aside = null }, deps = {}) {
   const stats = snapshotStats(folder, { ...snapshot, files: snapshot.files.filter(({ rel }) => holds(rel)) });
   if (stats === null || stats.length === 0) return { why: "not whole" };
   // A file keeps the time it had, but not one in the future: the project's last change (exports.js projectChange) is read from these
@@ -275,12 +311,55 @@ export function rebuildProject({ folder, snapshot, dir, cli, by = "", now }, dep
   files.set(".claude/settings.json", settingsText("main"));
   files.set(MARKER, markerText(snapshot.time, by));
   files.set("node_modules/.bin/hyperframes", { link: cli });
+  const assetsLeft = stats.some(({ rel }) => rel === LEFT_OUT_NOTE);
+  if (aside === null) {
+    try {
+      writeProject(dir, files, deps.fs ? { fs: deps.fs } : {});
+    } catch (e) {
+      return { why: "could not" };
+    }
+    return { assetsLeft };
+  }
+  const placed = replaceOlder({ dir, aside, files, fs: deps.fs ?? nodeFs });
+  return placed.why ? placed : { assetsLeft, aside };
+}
+
+/** Put the project that `files` make (project.js) in place of the older folder at `dir`, which goes to `aside`: the order, and what a step that
+    fails leaves, are rebuildProject's. Gives {} when it is done, or { why: "could not" | "stuck" }. */
+function replaceOlder({ dir, aside, files, fs }) {
+  const building = join(dirname(dir), `${basename(dir)} ${randomUUID().slice(0, 8)}.new`);
   try {
-    writeProject(dir, files, deps.fs ? { fs: deps.fs } : {});
+    writeProject(building, files, { fs });
   } catch (e) {
     return { why: "could not" };
   }
-  return { assetsLeft: stats.some(({ rel }) => rel === LEFT_OUT_NOTE) };
+  // The project just built is Studio's own, made seconds ago from the snapshot: it is the one thing taken away, and only when a later step fails.
+  const dropBuilt = () => {
+    try {
+      fs.rmSync(building, { recursive: true, force: true });
+    } catch (e) {
+      // It stays beside the project's place, whole, and the next try builds another.
+    }
+  };
+  try {
+    fs.mkdirSync(dirname(aside), { recursive: true });
+    fs.renameSync(dir, aside);
+  } catch (e) {
+    dropBuilt();
+    return { why: "could not" };
+  }
+  try {
+    fs.renameSync(building, dir);
+  } catch (e) {
+    try {
+      fs.renameSync(aside, dir);
+    } catch (again) {
+      return { why: "stuck" };
+    }
+    dropBuilt();
+    return { why: "could not" };
+  }
+  return {};
 }
 
 /** Whether a project's files `local` are older than a snapshot's `there`: the newest of them is more than BEHIND_MS older than the snapshot's.
@@ -366,6 +445,27 @@ export function putMarkerText(dir, text) {
     rmSync(`${file}.writing`, { force: true });
     throw e;
   }
+}
+
+/** Whether the project in `dir` is older than `newest`, the newest snapshot the record lists of it (snapshotOf), by its marker's word alone
+    (plan PR 18), which is what a folder is set aside on. `listed` is every snapshot the record lists of the project, as snapshotsOf gives them
+    ({ time, ms }, newest first). It is older when the marker names:
+    - a snapshot the record lists that is not the newest: the record's own order of listing says it is older; or
+    - one the record lists no more that was named before every snapshot it does list: the record keeps the two newest, so a Mac that was away
+      while the other Mac handed over twice holds a marker for a snapshot that has been dropped.
+    A marker for a snapshot that the record never listed, or that was named after one it lists, may be newer work, not older (Dropbox can undo
+    the record of a hand-over this Mac made, and the snapshot's files stay), and a clock that is ahead names a snapshot late: that is not a word to
+    set a folder aside on (olderThan takes it for older, to refuse). A project with no marker, or whose marker cannot be read (it is a link, a
+    pipe, not JSON, or names no snapshot), is not marked older, whatever the times of its files say. false for no snapshot. Without `listed`
+    every marker for another snapshot is older, as olderThan has it. */
+export function markedOlder(newest, dir, listed = null) {
+  if (!newest) return false;
+  const marker = readMarker(dir);
+  if (marker === null || marker.snapshot === newest.time) return false;
+  if (!Array.isArray(listed)) return true;
+  if (listed.some((snapshot) => snapshot.time === marker.snapshot)) return true;
+  const named = timeOf(marker.snapshot);
+  return named !== null && listed.every((snapshot) => named < snapshot.ms);
 }
 
 /** Whether the project in `dir` on this Mac is older than `newest`, the newest snapshot the record lists of it (snapshotOf): the other Mac
