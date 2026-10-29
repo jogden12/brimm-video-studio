@@ -519,6 +519,13 @@ describe("C2. a Reel's title that is not proposed", () => {
     long.t.done();
     twelve.t.done();
   });
+  it("does not propose a caption as a Reel's title, whatever the caption is called (review M4)", async () => {
+    const w = ready({ over: { reels: reelsWith("") } });
+    screen(w, "reel 2", { "index.html": '<div id="cap-01" data-start="0" data-duration="1">Said aloud</div><div class="caption-line" data-start="1" data-duration="1">Said again</div>' }, { only: true });
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
+    assert.equal(w.t.said().split("\n").at(-1), `Reel 2 has no title on screen. Say what it says: it starts "${REEL2_OPENING}".`);
+    w.t.done();
+  });
   it("asks as it did, and proposes no line, when the Reel's picture is too big to be read in full", async () => {
     const w = ready({ over: { reels: reelsWith("") } });
     const hosts = Array.from({ length: 3000 }, (_, i) => `<div id="h${i}" data-composition-id="h${i}" data-composition-src="compositions/big.html" data-start="${i % 100}" data-duration="5"></div>`).join("");

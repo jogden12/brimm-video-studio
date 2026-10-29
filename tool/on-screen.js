@@ -153,14 +153,18 @@ const NOT_WORDS = new Set(["head", "title", "desc", "script", "style", "noscript
 /** Elements that end a line before and after them. Any other element, a span or a bold word, goes on in the line it is in. */
 const BLOCK = new Set(["address", "article", "aside", "blockquote", "body", "dd", "details", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "html", "li", "main", "nav", "ol", "p", "pre", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul", "svg", "text", "template", "center", "menu", "dir"]);
 const HIDDEN_STYLE = /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?)\s*(?:!\s*important\s*)?(?:;|$)/i;
-const CAPTION_CLASS = /^(?:cap|caps|caption|captions|subtitle|subtitles)$/i;
+/** `cap`, as the app names a caption (`cap`, `cap-01`, `cap-box`): at the start of a name, alone or joined by a dash or an underscore. A
+    `drop-cap` or a `recap` is not one. */
+const CAP_NAME = /^caps?(?:$|[-_])/i;
 /** A name that is the captions': "captions", "caption", "subtitles", and those with a word joined by a dash, an underscore or a space. */
 const CAPTIONS_NAME = /(?:^|[-_ ])(?:captions?|subtitles?)(?:$|[-_ ])/i;
 const NUMBER = /^\d+(?:\.\d+)?$/;
 
 const hidden = (attrs) => attrs.hidden !== undefined || HIDDEN_STYLE.test(attrs.style ?? "");
+/** Whether a class or an id is the captions' (review M4): the app numbers its captions (`cap-01`), and a box can be named for what it holds. */
+const captionName = (name) => CAPTIONS_NAME.test(name) || CAP_NAME.test(name);
 /** An element that is, or is in, the captions: by its track, its class or its id. */
-const captioned = (attrs) => (attrs["data-track-kind"] ?? "").trim().toLowerCase() === "captions" || (attrs.class ?? "").split(/\s+/).some((name) => CAPTION_CLASS.test(name)) || /^(?:captions?|subtitles?)$/i.test(attrs.id ?? "");
+const captioned = (attrs) => (attrs["data-track-kind"] ?? "").trim().toLowerCase() === "captions" || (attrs.class ?? "").split(/\s+/).some(captionName) || captionName(attrs.id ?? "");
 const stemOf = (rel) => posix.basename(String(rel), ".html");
 /** When an element is on the screen, { start, duration } in seconds, or null: the start is a number of 0 or more, and the duration a number above 0. */
 function timingOf(attrs) {

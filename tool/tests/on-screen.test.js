@@ -165,6 +165,33 @@ describe("A3. captions are never words", () => {
     const files = projectOf('<div class="clip capacity escape captain" data-start="1" data-duration="2">Kept</div>');
     assert.deepEqual(texts(wordsOf(files)), ["Kept"]);
   });
+  it("passes over an id or a class that is the captions' name with a word joined to it by a dash, an underscore or a space (review M4)", () => {
+    // The app numbers its captions (`cap-01`), and a captions box can be named for what it holds: none of them is a title.
+    const files = projectOf([
+      '<div id="cap-01" data-start="0" data-duration="1">By its id</div>',
+      '<div id="caption-2" data-start="1" data-duration="1">By a longer id</div>',
+      '<div id="the_captions" data-start="1.5" data-duration="1">By an id with an underscore</div>',
+      '<div class="caption-line" data-start="2" data-duration="1">By a class</div>',
+      '<div class="clip captions-wrap" data-start="3" data-duration="1"><span>In a wrap</span></div>',
+      '<div class="main_subtitles" data-start="4" data-duration="1">Joined by an underscore</div>',
+      '<div class="cap-box" data-start="5" data-duration="1">The box of a caption</div>',
+      '<div class="clip cap_line" data-start="5.5" data-duration="1">Also by an underscore</div>',
+      '<div id="SUBTITLE-3" data-start="5.8" data-duration="1">In capitals</div>',
+      '<div class="clip" data-start="6" data-duration="2">A title</div>'
+    ].join(""));
+    assert.deepEqual(wordsOf(files), [{ text: "A title", at: 6 }]);
+  });
+  it("keeps a name that holds the letters of a captions name without being one: a drop cap, a capacity, a captain, a recap", () => {
+    const files = projectOf([
+      '<div class="drop-cap" data-start="1" data-duration="1">Drop</div>',
+      '<div id="recap-1" data-start="2" data-duration="1">Recap</div>',
+      '<div id="capacity-2" class="captain" data-start="3" data-duration="1">Capacity</div>',
+      '<div id="captionless" data-start="4" data-duration="1">Captionless</div>',
+      '<div class="subtitled" data-start="5" data-duration="1">Subtitled</div>',
+      '<div id="cap2" data-start="6" data-duration="1">Joined to a figure</div>'
+    ].join(""));
+    assert.deepEqual(texts(wordsOf(files)), ["Drop", "Recap", "Capacity", "Captionless", "Subtitled", "Joined to a figure"]);
+  });
 });
 
 describe("A4. order", () => {
