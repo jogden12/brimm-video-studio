@@ -210,6 +210,14 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
                                         detached. An iPhone clip she answered that was not opened in HyperFrames is asked
                                         about once; --as-it-is writes its hand-off from the import's captions
+  node edit.js finish "<episode>" reels [--yes] [--take "reel <n>=<file | this Mac | the other Mac>"] [--final "reel <n>"]
+                     [--without "reel <n>"]
+                                        for a video her editor finished: find the exports of the Reels made from it in
+                                        HyperFrames (app … reel <n>), and ask what it must. With --yes and nothing left to
+                                        ask, it transcribes them again, copies them into final/ and writes the next revision
+                                        of the hand-off the video has already, under the same id: main, its suggestions and
+                                        the Reels it holds as they were, with these Reels added, detached. It never writes its
+                                        first hand-off (the spellings do), and a Reel number is never given twice
   node edit.js show "<episode>" transcript|notes|plan
                                         print its transcript (a raw video's she has answered: its rough cut's, or, with a
                                         HyperFrames project in use, the recording's own), Claude's notes or its cut plan,
