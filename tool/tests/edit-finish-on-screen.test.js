@@ -222,6 +222,61 @@ describe("B4. refused", () => {
     plain([BOTH, EMPTY]);
     w.t.done();
   });
+  // What she gives goes into the hand-off as it is (review M1): a title is not a paragraph, and a line is words.
+  const TOO_LONG = "A line on the screen can have at most 300 characters. Say it shorter.";
+  const TOO_MANY = "At most 500 lines can be on the screen. Say fewer.";
+  it("refuses a line of more than 300 characters, and takes one of 300", async () => {
+    const w = ready();
+    const long = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Alex Rivera", "--on-screen", "w".repeat(301), "--yes");
+    assert.deepEqual([long.code, long.said], [1, [TOO_LONG]]);
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json")), reread(w.found).rev, Boolean(reread(w.found).editing)], [[], false, 1, false]);
+    const fine = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "w".repeat(300), "--yes");
+    assert.equal(fine.code, 0, fine.text);
+    assert.deepEqual(w.asked().parts[0].onPicture, ["w".repeat(300)]);
+    plain([TOO_LONG]);
+    w.t.done();
+  });
+  it("refuses more than 500 lines, and takes 500", async () => {
+    const w = ready();
+    const lines = (count) => Array.from({ length: count }, (_, i) => `Line ${i}`);
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true, onScreen: lines(501) }), 1);
+    assert.deepEqual(w.t.said().split("\n"), [TOO_MANY]);
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json"))], [[], false]);
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true, onScreen: lines(500) }), 0);
+    assert.deepEqual(w.asked().parts[0].onPicture, lines(500));
+    plain([TOO_MANY]);
+    w.t.done();
+  });
+  it("refuses a line that holds no letter and no figure, and takes one in another script, or of figures alone", async () => {
+    const w = ready();
+    for (const line of ["---", "...", "!?", "—", "* * *", "\u0007\u0007", " — "]) {
+      const r = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Alex Rivera", "--on-screen", line, "--yes");
+      assert.deepEqual([r.code, r.said], [1, [EMPTY]], JSON.stringify(line));
+    }
+    assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json"))], [[], false]);
+    for (const line of ["日本語", "42", "Ça va", "5€"]) {
+      const r = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", line);
+      assert.deepEqual([r.code, r.said.at(-2)], [0, `On screen in the main video, as you said: "${line}".`], line);
+    }
+    w.t.done();
+  });
+  it("takes the control characters out of the lines she gives", async () => {
+    const w = ready();
+    const r = await on(w.t.ctx.deps, "finish", FOLDER, "--on-screen", "Alex\u0007 Riv\u001b[31mera", "--on-screen", "Head of\u007f Pricing\u0085", "--yes");
+    assert.deepEqual([r.code, r.said.at(-2)], [0, 'On screen in the main video, as you said: "Alex Riv[31mera" and "Head of Pricing".']);
+    assert.deepEqual(w.asked().parts[0].onPicture, ["Alex Riv[31mera", "Head of Pricing"]);
+    w.t.done();
+  });
+  it("takes the control characters out of the lines found, which an entity can write", async () => {
+    const w = ready({ shown: false });
+    screen(w, "main", { "index.html": '<div class="clip" data-start="3" data-duration="2">Head&#7; of&#27;[0m Pricing&#x85;</div>' }, { only: true });
+    const r = await on(w.t.ctx.deps, "finish", FOLDER);
+    assert.equal(r.said.at(-2), 'On screen in the main video I found "Head of[0m Pricing" at 0:03. Right?');
+    for (const line of r.said) assert.doesNotMatch(line, /\p{Cc}/u);
+    const yes = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
+    assert.deepEqual([yes.code, w.asked().parts[0].onPicture], [0, ["Head of[0m Pricing"]]);
+    w.t.done();
+  });
 });
 
 describe("B5. when it is not asked", () => {

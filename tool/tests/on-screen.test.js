@@ -111,6 +111,14 @@ describe("A2. what is not words", () => {
   it("gives none for a line of punctuation alone, or for one with nothing in it", () => {
     assert.deepEqual(wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3"><p>***</p><p>   </p><p>•</p><p>2026</p></div>')), [{ text: "2026", at: 1 }]);
   });
+  it("takes the control characters out of a line, which an entity can write, and gives none for a line of nothing else (review M1)", () => {
+    const found = wordsOf(projectOf('<div class="clip" data-start="1" data-duration="3"><p>Head&#7; of&#27;[0m Pricing&#x85;&#x7f;</p><p>&#7;&#27;</p><p>&#7;---&#27;</p><p>Tab\there</p></div>'));
+    assert.deepEqual(texts(found), ["Head of[0m Pricing", "Tab here"]);
+    for (const { text } of found) assert.doesNotMatch(text, /\p{Cc}/u);
+    // Taken out before the length is counted and before the line is looked at for words.
+    const padded = `${"w".repeat(299)}${"&#7;".repeat(40)}x`;
+    assert.deepEqual(texts(wordsOf(projectOf(`<div class="clip" data-start="1" data-duration="3"><p>${padded}</p></div>`))), [`${"w".repeat(299)}x`]);
+  });
   it("gives none for a line of more than 300 characters: it is not a title", () => {
     const long = "word ".repeat(80).trim();
     assert.equal(long.length > 300, true);

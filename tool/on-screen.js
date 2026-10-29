@@ -48,6 +48,12 @@ const decode = (text) => text.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (
   return Number.isInteger(code) && code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : whole;
 });
 
+/** A line as it is told (review M1): its whitespace collapsed to single spaces and its control characters taken out. An entity can write a
+    control character (`&#7;`, `&#27;`), and so can an argument, and one in a line would move a cursor or colour a screen where the line is told. */
+const cleanLine = (value) => String(value ?? "").replace(/\s+/g, " ").replace(/\p{Cc}/gu, "").trim();
+/** Whether a line holds a letter or a figure: one that does not is no words. */
+const hasWords = (line) => /[\p{L}\p{N}]/u.test(line);
+
 const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/y;
 const TAG_NAME = /<([A-Za-z][^\s/>]*)/y;
 
@@ -234,9 +240,9 @@ export function wordsOnScreen(read) {
   /** The line a document has gathered so far, put in the element it belongs to, when it holds words. */
   const flush = (doc) => {
     if (!doc.buffer.length) return;
-    const line = decode(doc.buffer.join("")).replace(/[\s ]+/g, " ").trim();
+    const line = cleanLine(decode(doc.buffer.join("")));
     doc.buffer = [];
-    if (doc.unit && line.length <= LINE_MOST && /[\p{L}\p{N}]/u.test(line)) {
+    if (doc.unit && line.length <= LINE_MOST && hasWords(line)) {
       lines += 1;
       if (lines > LINES_MOST) throw SPENT;
       doc.unit.lines.push(line);
@@ -370,7 +376,6 @@ export function projectWordsIn(work, name, io) {
 
 // --- What finish says and asks of them (plan PR 8; architecture 8.5). Every sentence is plain: no path, no flag, no command name. ---
 
-const oneLine = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
 const timed = (word) => `"${word.text}" at ${clockText(word.at)}`;
 /** What a Reel's title may be, in words, as `title` takes it: a longer first line is not proposed. */
@@ -378,6 +383,8 @@ const TITLE_WORDS_MOST = 12;
 
 export const BOTH_SAID = "Say what is on screen, or that nothing is, but not both.";
 export const EMPTY_LINE = "A line on the screen needs words. Say what it says.";
+export const TOO_LONG = `A line on the screen can have at most ${LINE_MOST} characters. Say it shorter.`;
+export const TOO_MANY = `At most ${LINES_MOST} lines can be on the screen. Say fewer.`;
 const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
 const NOT_HERE = "I could not look at the main video's project on this Mac, so I do not know what is on its picture. Say what is on screen, or say that nothing is.";
 const NOT_ALL_READ = "I could not read all the words on the main video's picture. Say what is on screen, or say that nothing is.";
@@ -396,9 +403,11 @@ const NOTHING_SAID = "Nothing is on the main video's picture, as you said.";
     `words` are the lines that go on, or null when none is decided; `line` is what is said, and `ask` what is asked, or ""; `shows` is
     there only when the line asks "Right?", and holds the lines it shows. */
 export function mainWordsSaid({ found = [], here = true, incomplete = false, given = [], none = false, yes = false, taking = true, shown = false } = {}) {
-  const lines = (Array.isArray(given) ? given : []).map(oneLine);
+  const lines = (Array.isArray(given) ? given : []).map(cleanLine);
   if (none && lines.length) return { refusal: BOTH_SAID };
-  if (lines.some((line) => line === "")) return { refusal: EMPTY_LINE };
+  if (lines.length > LINES_MOST) return { refusal: TOO_MANY };
+  if (lines.some((line) => !hasWords(line))) return { refusal: EMPTY_LINE };
+  if (lines.some((line) => line.length > LINE_MOST)) return { refusal: TOO_LONG };
   if (none) return { words: [], line: NOTHING_SAID, ask: "" };
   if (lines.length) return { words: lines, line: `On screen in the main video, as you said: ${listed(lines.map((line) => `"${line}"`))}.`, ask: "" };
   if (!taking) return { words: null, line: "", ask: "" };
