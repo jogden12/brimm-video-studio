@@ -1,7 +1,9 @@
 // The working copy of a raw video (workcopy.js): the video HyperFrames is given to edit. What it is made as, the words said when
 // a video cannot be used, the key and the places of the copy are all decided from what ffprobe printed, so the arguments and the
 // words are tested here with no video. The job is tested with stand-ins for ffprobe and ffmpeg, which write the files the real
-// programs would. No test runs ffmpeg or ffprobe, and none touches the real Final Cut Pro, HyperFrames or Claude.
+// programs would. No test here runs ffmpeg or ffprobe, and none touches the real Final Cut Pro, HyperFrames or Claude. The job
+// run with the real ffmpeg, on made-up HDR clips, is workcopy-real.test.js, which needs a Mac that has VideoToolbox and skips
+// itself anywhere else.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -12,8 +14,8 @@ import { lockOf, takeEpisodeLock } from "../detached.js";
 import { clearRuns } from "../filing.js";
 import { episodeWork, runsFolder, workFolder } from "../settings.js";
 import {
-  rateOf, workCopySize, isHdr, workCopyArgs, workCopyFault, workCopyKey, workCopyPaths, workCopyFacts, workCopyLimits, workCopyNotes,
-  canNotBeUsed, hasFilters, makeWorkCopy, requestWorkCopy, workCopyLockOf, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET
+  rateOf, workCopySize, isHdr, storedOf, workCopyArgs, workCopyFault, workCopyKey, workCopyPaths, workCopyFacts, workCopyLimits, workCopyNotes,
+  canNotBeUsed, hasFilters, hasHwaccel, makeWorkCopy, requestWorkCopy, workCopyLockOf, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET
 } from "../workcopy.js";
 
 /** What ffprobe writes of a video, cut down to what the tool reads: its picture (null for none), then its sounds in the order
@@ -29,36 +31,54 @@ const printedOf = ({ picture = {}, sounds = [{ codec_name: "aac" }], duration = 
   ],
   format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", start_time: "0.000000", duration }
 });
-/** The colour of an iPhone's HDR video, and of one in PQ. */
-const HLG = { color_primaries: "bt2020", color_transfer: "arib-std-b67", color_space: "bt2020nc" };
-const PQ = { color_primaries: "bt2020", color_transfer: "smpte2084", color_space: "bt2020nc" };
+/** The colour of an iPhone's HDR video, and of one in PQ: both 10 bits, 4:2:0, as an iPhone writes them. */
+const HLG = { color_primaries: "bt2020", color_transfer: "arib-std-b67", color_space: "bt2020nc", pix_fmt: "yuv420p10le" };
+const PQ = { color_primaries: "bt2020", color_transfer: "smpte2084", color_space: "bt2020nc", pix_fmt: "yuv420p10le" };
 /** An iPhone's clip, turned on its side: coded 3840 by 2160, with a note to turn it a quarter. */
 const UPRIGHT = { side_data_list: [{ side_data_type: "Display Matrix", rotation: -90 }] };
+/** An iPhone's HDR clip of 1920 by 1080, stored turned round (a display matrix of -180, and a Dolby Vision record beside it), with
+    the rate that wanders a little: the shape ffprobe printed of a real one. */
+const TURNED_ROUND = {
+  ...HLG, width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "1662900/55433",
+  side_data_list: [{ side_data_type: "DOVI configuration record", dv_profile: 8, dv_bl_signal_compatibility_id: 4 }, { side_data_type: "Display Matrix", rotation: -180 }]
+};
 
 /** Everything the module decides from what ffprobe printed, as the job asks for it. */
-const factsFrom = (printed) => ({ facts: factsOf(printed), streams: streamsOf(printed), colour: colourOf(printed), rate: rateOf(printed).rate });
+const factsFrom = (printed) => ({ facts: factsOf(printed), streams: streamsOf(printed), colour: colourOf(printed), rate: rateOf(printed).rate, stored: storedOf(printed) });
 const argsFor = (printed, more = {}, input = "/in/a b.mov", output = "/out/work/key.mp4") => workCopyArgs(input, output, { ...factsFrom(printed), ...more });
 const after = (args, flag) => args[args.indexOf(flag) + 1];
 
 /** What ffmpeg prints for -filters, with the filters given among the others: a source, and the names that merely begin as the
-    ones looked for do, as tonemap_opencl does. */
-const filtersOf = (...names) => `Filters:
+    ones looked for do, as scale_vaapi does for scale_vt. The column of flags before each name is the width `flags` is: three
+    characters, as ffmpeg printed it before, or two (`listing(".S", ...)`), as ffmpeg 9.0.2 on the Mac Studio prints it. */
+const listing = (flags, names) => {
+  const plainFlags = ".".repeat(flags.length);
+  return `Filters:
   T.. = Timeline support
   .S. = Slice threading
-  ..C = Command support
-  A = Audio input/output
+${flags.length === 3 ? "  ..C = Command support\n" : ""}  A = Audio input/output
   V = Video input/output
   N = Dynamic number and/or type of input/output
   | = Source or sink filter
- ... aresample         A->A       Resample audio data.
- ... fps               V->V       Force constant framerate.
-${names.map((name) => ` .S. ${name.padEnd(17)} V->V       A filter.`).join("\n")}
- ... yuvtestsrc        |->V       Generate YUV test pattern.
+  ------
+ ${plainFlags} aresample         A->A       Resample audio data.
+ ${plainFlags} fps               V->V       Force constant framerate.
+${names.map((name) => ` ${flags} ${name.padEnd(17)} V->V       A filter.`).join("\n")}
+ ${plainFlags} yuvtestsrc        |->V       Generate YUV test pattern.
 `;
-const WITH_BOTH = filtersOf("tonemap", "tonemap_opencl", "zscale");
+};
+const filtersOf = (...names) => listing(".S.", names);
+/** The same, in the two-character column of flags ffmpeg 9.0.2 prints. */
+const filtersOf9 = (...names) => listing(".S", names);
+/** What ffmpeg prints for -hwaccels, with the methods given. */
+const hwaccelsOf = (...names) => `Hardware acceleration methods:\n${names.map((name) => `${name}\n`).join("")}`;
+/** A Mac's ffmpeg that can make an HDR video standard: the filter that sizes and converts the colour in VideoToolbox, with names
+    that merely begin as it does beside it, and the hwaccel that decodes in VideoToolbox. */
+const WITH_SCALE_VT = filtersOf9("scale_vt", "scale_vaapi", "tonemap");
+const WITH_VIDEOTOOLBOX = hwaccelsOf("videotoolbox");
 
 /** Words Sallie reads hold no path, no flag and no command name. */
-const plain = (text) => !/[/\\]/.test(text) && !/(^|\s)--?[A-Za-z]/.test(text) && !/ffmpeg|ffprobe|zscale|tonemap|x264|libx|\.mp4|\.json|\.js\b|workcopy|node\b/i.test(text);
+const plain = (text) => !/[/\\]/.test(text) && !/(^|\s)--?[A-Za-z]/.test(text) && !/ffmpeg|ffprobe|zscale|tonemap|scale_vt|videotoolbox|hwaccel|x264|libx|\.mp4|\.json|\.js\b|workcopy|node\b/i.test(text);
 
 describe("the frame rate of a working copy", () => {
   const rates = (r_frame_rate, avg_frame_rate) => printedOf({ picture: { r_frame_rate, avg_frame_rate } });
@@ -129,6 +149,49 @@ describe("HDR", () => {
     assert.equal(isHdr({ primaries: "bt709", transfer: "arib-std-b67" }), false);
     assert.equal(isHdr({ primaries: "", transfer: "" }), false);
     assert.equal(isHdr(null), false);
+  });
+});
+
+describe("how a picture is stored: the turn it is shown with, and how deep its colour is", () => {
+  const turnOf = (picture) => storedOf(printedOf({ picture })).turn;
+  const withMatrix = (rotation) => ({ side_data_list: [{ side_data_type: "Display Matrix", rotation }] });
+  it("is the degrees clockwise the picture is turned to be upright, which ffprobe's rotation counts the other way", () => {
+    // An iPhone's upright clip: ffprobe says -90, and the picture is turned a quarter clockwise. Jason's, stored turned round, says -180.
+    assert.equal(turnOf(UPRIGHT), 90);
+    assert.equal(turnOf(withMatrix(-180)), 180);
+    assert.equal(turnOf(withMatrix(180)), 180);
+    assert.equal(turnOf(withMatrix(90)), 270);
+    assert.equal(turnOf(TURNED_ROUND), 180);
+    assert.equal(turnOf(withMatrix(-45)), 45);
+  });
+  it("is 0 for a picture with no note to turn it, or a note that says so, and for what cannot be read", () => {
+    assert.equal(turnOf({}), 0);
+    assert.equal(turnOf(withMatrix(0)), 0);
+    assert.equal(turnOf({ side_data_list: [{ side_data_type: "DOVI configuration record" }] }), 0);
+    assert.deepEqual(storedOf("{"), { turn: 0, bits: 10 });
+    assert.deepEqual(storedOf(""), { turn: 0, bits: 10 });
+    assert.deepEqual(storedOf(printedOf({ picture: null })), { turn: 0, bits: 10 });
+  });
+  it("reads the old rotate tag too, which counted clockwise already, as factsOf does for the sides", () => {
+    assert.equal(turnOf({ tags: { rotate: "90" } }), 90);
+    assert.equal(turnOf({ tags: { rotate: "270" } }), 270);
+    assert.equal(turnOf({ tags: { rotate: "0" } }), 0);
+    // The note in the side data is the newer one and wins, as it does in factsOf.
+    assert.equal(turnOf({ ...withMatrix(-90), tags: { rotate: "180" } }), 90);
+  });
+  it("is the bits of the colour of each sample, from the pixel format: 10 for an iPhone's HDR, 8 for a plain 4:2:0", () => {
+    const bitsOf = (pix_fmt) => storedOf(printedOf({ picture: { pix_fmt } })).bits;
+    assert.equal(bitsOf("yuv420p10le"), 10);
+    assert.equal(bitsOf("p010le"), 10);
+    assert.equal(bitsOf("yuv420p12le"), 12);
+    assert.equal(bitsOf("yuv420p"), 8);
+    assert.equal(bitsOf("nv12"), 8);
+    // Not told, it is the 10 an HDR picture is.
+    assert.equal(storedOf(printedOf()).bits, 10);
+  });
+  it("is of the picture, and never of a cover picture or a sound", () => {
+    const cover = JSON.stringify({ streams: [{ index: 0, codec_type: "video", pix_fmt: "yuv420p", disposition: { attached_pic: 1 }, ...withMatrix(-90) }, { index: 1, codec_type: "audio" }] });
+    assert.deepEqual(storedOf(cover), { turn: 0, bits: 10 });
   });
 });
 
@@ -214,39 +277,107 @@ describe("the arguments ffmpeg is given for a working copy", () => {
       assert.deepEqual(a.slice(a.indexOf("-colorspace"), a.indexOf("-colorspace") + 8), tags, JSON.stringify(picture));
     }
   });
-  it("tone-map an iPhone's HLG video to standard BT.709 colour, after it is made smaller, and write it as 8-bit 4:2:0", () => {
+  // An HDR video is made standard by the Mac's own hardware: VideoToolbox decodes it, sizes it and converts its colour to BT.709
+  // (scale_vt), ffmpeg downloads the frames, turns them by the note the video is stored with, and writes them as 8 bits. The
+  // look of it is for Jason's eye (plan, PR 3, step 5); these tests pin what ffmpeg is asked to do.
+  const SCALE_VT = (w, h) => `scale_vt=w=${w}:h=${h}:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709`;
+  const HARDWARE = ["-noautorotate", "-display_rotation", "0", "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"];
+  it("decode an iPhone's HLG video with VideoToolbox, before its input, and turn ffmpeg's own turning of the picture off", () => {
     const a = argsFor(printedOf({ picture: HLG }));
-    assert.equal(after(a, "-vf"), "fps=30:start_time=0,scale=1920:1080,"
-      + "zscale=pin=bt2020:tin=arib-std-b67:min=bt2020nc:rin=tv:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
-      + "zscale=t=bt709:m=bt709:r=tv:dither=error_diffusion,format=yuv420p");
+    assert.deepEqual(a.slice(0, 14), ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...HARDWARE, "-i", "/in/a b.mov"]);
+    // The picture and the sound are mapped by their numbers, as they are for any video.
+    assert.deepEqual(a.slice(14, 18), ["-map", "0:0", "-map", "0:1"]);
+  });
+  it("size an HLG video and make its colour BT.709 in VideoToolbox, download it as 10 bits, and write it as 8-bit 4:2:0", () => {
+    const a = argsFor(printedOf({ picture: HLG }));
+    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,format=yuv420p`);
+    // What is written is tagged BT.709, limited range, as any working copy is.
     assert.deepEqual(a.slice(a.indexOf("-colorspace"), a.indexOf("-colorspace") + 8), ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]);
+    assert.deepEqual([after(a, "-pix_fmt"), after(a, "-profile:v")], ["yuv420p", "high"]);
   });
-  it("tone-map a PQ video the same way, from its own transfer", () => {
-    const vf = after(argsFor(printedOf({ picture: PQ })), "-vf");
-    assert.match(vf, /,zscale=pin=bt2020:tin=smpte2084:min=bt2020nc:rin=tv:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv:dither=error_diffusion,format=yuv420p$/);
+  it("end in 8 bits last, after the picture is turned and nothing else is done to its colour, so that it is ffmpeg's scaler that drops the 10 bits, which dithers", () => {
+    // VideoToolbox makes the colour standard in 10 bits. The step to 8 is ffmpeg's own, the chain's last, and the scaler adds an
+    // ordered dither whenever it drops from more than 8 bits to 8, where the software chain dithered by error diffusion. That a
+    // smooth gradient comes out unbanded is checked for real in workcopy-real.test.js.
+    for (const picture of [HLG, PQ, TURNED_ROUND, { ...HLG, ...UPRIGHT }]) {
+      const pieces = after(argsFor(printedOf({ picture })), "-vf").split(",");
+      assert.equal(pieces.at(-1), "format=yuv420p");
+      assert.equal(pieces.filter((p) => p.startsWith("format=")).length, 2);
+      assert.equal(pieces.indexOf("hwdownload"), pieces.findIndex((p) => p.startsWith("scale_vt=")) + 1);
+      assert.equal(pieces[pieces.indexOf("hwdownload") + 1], "format=p010le");
+    }
   });
-  it("tone-map an upright HDR clip at the size it is shown, and use the curve it is told to", () => {
-    const vf = after(argsFor(printedOf({ picture: { ...HLG, ...UPRIGHT } }), { toneMap: "mobius" }), "-vf");
-    assert.match(vf, /,scale=1080:1920,zscale=pin=bt2020:tin=arib-std-b67:/);
-    assert.match(vf, /,tonemap=tonemap=mobius:desat=0,/);
+  it("make a PQ video the same way: VideoToolbox reads the transfer from the picture's own tags", () => {
+    assert.equal(after(argsFor(printedOf({ picture: PQ })), "-vf"), after(argsFor(printedOf({ picture: HLG })), "-vf"));
   });
-  it("refuse a curve the tonemap filter does not have, rather than ask ffmpeg for it", () => {
-    assert.throws(() => argsFor(printedOf({ picture: HLG }), { toneMap: "filmic" }), /filmic/);
-    assert.throws(() => argsFor(printedOf({ picture: HLG }), { toneMap: "none" }), /none/);
+  it("size an upright HDR clip from the picture as it is shown, and ask VideoToolbox for the size it is stored at, for the turn to come after", () => {
+    // Shown 1080 by 1920 (stored on its side as 1920 by 1080 after the size is made): VideoToolbox makes it 1920 by 1080, and
+    // ffmpeg then turns it a quarter clockwise.
+    const a = argsFor(printedOf({ picture: { ...HLG, ...UPRIGHT } }));
+    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=clock,format=yuv420p`);
+    assert.deepEqual([a.includes("-noautorotate"), after(a, "-display_rotation")], [true, "0"]);
   });
-  it("do not touch the colour of a video in standard colour, and wide colour with an ordinary transfer is not HDR", () => {
-    for (const picture of [{}, { color_primaries: "bt2020", color_transfer: "bt2020-10" }, { color_primaries: undefined, color_transfer: undefined }]) {
-      const vf = after(argsFor(printedOf({ picture })), "-vf");
-      assert.ok(!/zscale|tonemap|gbrpf32le/.test(vf), vf);
+  it("turn a clip stored turned round by a half turn, and one turned the other way a quarter the other way", () => {
+    assert.equal(after(argsFor(printedOf({ picture: TURNED_ROUND })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,hflip,vflip,format=yuv420p`);
+    const left = { ...HLG, side_data_list: [{ side_data_type: "Display Matrix", rotation: 90 }] };
+    assert.equal(after(argsFor(printedOf({ picture: left })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=cclock,format=yuv420p`);
+  });
+  it("turn a picture stored at an odd angle as ffmpeg's own turning would, by that angle", () => {
+    const odd = { ...HLG, width: 1920, height: 1080, side_data_list: [{ side_data_type: "Display Matrix", rotation: -45 }] };
+    assert.match(after(argsFor(printedOf({ picture: odd })), "-vf"), /,hwdownload,format=p010le,rotate=45\*PI\/180,format=yuv420p$/);
+  });
+  it("leave a picture that is not turned alone, whether it says so or says nothing", () => {
+    for (const picture of [HLG, { ...HLG, side_data_list: [{ side_data_type: "Display Matrix", rotation: 0 }] }]) {
+      assert.match(after(argsFor(printedOf({ picture })), "-vf"), /,hwdownload,format=p010le,format=yuv420p$/);
+    }
+  });
+  it("download an 8-bit HDR picture as the 8 bits VideoToolbox gives it, which is not the 10-bit format", () => {
+    assert.match(after(argsFor(printedOf({ picture: { ...HLG, pix_fmt: "yuv420p" } })), "-vf"), /,hwdownload,format=nv12,format=yuv420p$/);
+  });
+  it("make a 4K HDR copy 3840 on its longer side with the 4K switch, and never larger than the picture", () => {
+    assert.match(after(argsFor(printedOf({ picture: HLG }), { fourK: true }), "-vf"), new RegExp(`,${SCALE_VT(3840, 2160)},`));
+    assert.match(after(argsFor(printedOf({ picture: { ...HLG, width: 1280, height: 720 } }), { fourK: true }), "-vf"), new RegExp(`,${SCALE_VT(1280, 720)},`));
+  });
+  it("keep the clock of the picture as any copy does: every picture on an even grid from 0, at the rate it is made at", () => {
+    assert.match(after(argsFor(printedOf({ picture: TURNED_ROUND })), "-vf"), /^fps=30:start_time=0,scale_vt=/);
+    const slow = { ...HLG, r_frame_rate: "24/1", avg_frame_rate: "24/1" };
+    const a = argsFor(printedOf({ picture: slow }));
+    assert.match(after(a, "-vf"), /^fps=24:start_time=0,scale_vt=/);
+    assert.equal(after(a, "-g"), "24");
+    assert.equal(after(a, "-af"), "aresample=async=1:first_pts=0");
+  });
+  it("leave no note to turn the picture in the file: ffmpeg's own turning is off and the note it would pass on is set to nothing", () => {
+    // Both are input options, so both come before -i. Without the second, ffmpeg passes the stored note on to the file, and a
+    // player would turn a picture that has been turned already.
+    const a = argsFor(printedOf({ picture: { ...HLG, ...UPRIGHT } }));
+    const input = a.indexOf("-i");
+    for (const flag of ["-noautorotate", "-display_rotation", "-hwaccel", "-hwaccel_output_format"]) assert.ok(a.indexOf(flag) > -1 && a.indexOf(flag) < input, flag);
+    assert.equal(a.filter((x) => x === "-display_rotation").length, 1);
+    assert.ok(!a.includes("-autorotate"));
+  });
+  it("are refused when an HDR picture is not told how it is stored, rather than made without the turn it needs", () => {
+    const printed = printedOf({ picture: { ...HLG, ...UPRIGHT } });
+    assert.throws(() => workCopyArgs("/in/a.mov", "/out/a.mp4", { facts: factsOf(printed), streams: streamsOf(printed), colour: colourOf(printed), rate: "30" }), /stored/);
+    // A video in standard colour has no need of it.
+    assert.ok(workCopyArgs("/in/a.mov", "/out/a.mp4", { ...factsFrom(printedOf()), stored: undefined }));
+  });
+  it("do not touch a video in standard colour: no hardware, no VideoToolbox, no turning by hand, whatever way up it is stored", () => {
+    for (const picture of [{}, UPRIGHT, { color_primaries: "bt2020", color_transfer: "bt2020-10" }, { color_primaries: undefined, color_transfer: undefined }]) {
+      const a = argsFor(printedOf({ picture }));
+      const vf = after(a, "-vf");
+      assert.ok(!/scale_vt|hwdownload|p010le|transpose|flip|rotate/.test(vf), vf);
       assert.match(vf, /,format=yuv420p$/);
+      for (const flag of ["-hwaccel", "-hwaccel_output_format", "-noautorotate", "-display_rotation", "-autorotate"]) assert.ok(!a.includes(flag), flag);
+      assert.deepEqual(a.slice(0, 7), ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a b.mov"]);
     }
   });
   it("have no filter whose arguments hold a comma, which ffmpeg would take for the start of the next filter", () => {
     // Every piece of the chain, cut at its commas, begins with a filter's name: none is the end of an expression such as min(a,b).
-    for (const picture of [{}, HLG, PQ, UPRIGHT]) {
+    const odd = { ...HLG, width: 1920, height: 1080, side_data_list: [{ side_data_type: "Display Matrix", rotation: -45 }] };
+    for (const picture of [{}, HLG, PQ, UPRIGHT, { ...HLG, ...UPRIGHT }, TURNED_ROUND, odd, { ...HLG, pix_fmt: "yuv420p" }]) {
       for (const fourK of [false, true]) {
         const pieces = after(argsFor(printedOf({ picture }), { fourK }), "-vf").split(",");
-        for (const piece of pieces) assert.match(piece, /^(fps|scale|format|zscale|tonemap)=/, piece);
+        for (const piece of pieces) assert.match(piece, /^(fps|scale|scale_vt|hwdownload|format|transpose|hflip|vflip|rotate)(=|$)/, piece);
       }
     }
   });
@@ -289,17 +420,32 @@ describe("a video that cannot be made into a working copy", () => {
     assert.equal(workCopyFault({ ...good(), ...factsFrom(printedOf({ sounds: [{ codec_name: "apple_apac" }] })) }), "its sound is in a form this Mac can't read");
     assert.equal(workCopyFault({ ...good(), ...factsFrom(printedOf({ sounds: [] })) }), null);
   });
-  it("refuses an HDR video on a Mac whose ffmpeg lacks the filters that tone-map it, and says so in words", () => {
-    const hdr = { ...good(), ...factsFrom(printedOf({ picture: HLG })) };
+  it("refuses an HDR video on a Mac whose ffmpeg lacks the filter that sizes and converts it in VideoToolbox, and says so in words", () => {
+    const hdr = { ...good(), ...factsFrom(printedOf({ picture: HLG })), hwaccels: WITH_VIDEOTOOLBOX };
     const said = "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason";
-    assert.equal(workCopyFault({ ...hdr, filters: filtersOf("tonemap", "tonemap_opencl") }), said);
-    assert.equal(workCopyFault({ ...hdr, filters: filtersOf("zscale", "tonemap_vaapi") }), said);
+    // Today's Mac Studio: tonemap, colorspace and the like, but not the filter, and a name that only begins as it does is not it.
+    assert.equal(workCopyFault({ ...hdr, filters: filtersOf9("tonemap", "colorspace", "scale", "zscale") }), said);
+    assert.equal(workCopyFault({ ...hdr, filters: filtersOf9("scale_vaapi", "scale_cuda", "scale_vt_x", "transpose_vt") }), said);
     assert.equal(workCopyFault({ ...hdr, filters: "" }), said);
-    assert.equal(workCopyFault({ ...hdr, filters: WITH_BOTH }), null);
+    assert.equal(workCopyFault({ ...hdr, filters: undefined }), said);
+    assert.equal(workCopyFault({ ...hdr, filters: WITH_SCALE_VT }), null);
+    // In either width of the column of flags ffmpeg prints.
+    assert.equal(workCopyFault({ ...hdr, filters: filtersOf("scale_vt") }), null);
+  });
+  it("refuses an HDR video on a Mac whose ffmpeg has no VideoToolbox to decode it with, in the same words", () => {
+    const hdr = { ...good(), ...factsFrom(printedOf({ picture: PQ })), filters: WITH_SCALE_VT };
+    const said = "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason";
+    assert.equal(workCopyFault({ ...hdr, hwaccels: hwaccelsOf() }), said);
+    assert.equal(workCopyFault({ ...hdr, hwaccels: hwaccelsOf("vaapi", "cuda", "videotoolbox_x") }), said);
+    assert.equal(workCopyFault({ ...hdr, hwaccels: "" }), said);
+    assert.equal(workCopyFault({ ...hdr, hwaccels: undefined }), said);
+    assert.equal(workCopyFault({ ...hdr, hwaccels: hwaccelsOf("vaapi", "videotoolbox") }), null);
+    assert.equal(workCopyFault({ ...hdr, hwaccels: WITH_VIDEOTOOLBOX }), null);
   });
   it("does not let that touch a video in standard colour", () => {
-    assert.equal(workCopyFault({ ...good(), filters: "" }), null);
-    assert.equal(workCopyFault({ ...good(), filters: filtersOf() }), null);
+    assert.equal(workCopyFault({ ...good(), filters: "", hwaccels: "" }), null);
+    assert.equal(workCopyFault({ ...good(), filters: filtersOf(), hwaccels: hwaccelsOf() }), null);
+    assert.equal(workCopyFault({ ...good(), ...factsFrom(printedOf({ picture: UPRIGHT })), filters: undefined, hwaccels: undefined }), null);
   });
   it("refuses a video when less than twice its size is free on the disk, and says how much is wanted and how much there is", () => {
     const sized = (freeBytes) => workCopyFault({ ...good(), rawBytes: 3 * 1024 ** 3, freeBytes });
@@ -315,10 +461,10 @@ describe("a video that cannot be made into a working copy", () => {
     assert.equal(workCopyFault({ ...good(), rawBytes: undefined, freeBytes: 10 }), null);
   });
   it("tells the first thing that is wrong: what cannot be read, the picture, the sound, the colour, then the room", () => {
-    const bad = { ...factsFrom(printedOf({ picture: HLG, sounds: [{ codec_name: "apple_apac" }] })), filters: "", freeBytes: 1, rawBytes: 1e9 };
+    const bad = { ...factsFrom(printedOf({ picture: HLG, sounds: [{ codec_name: "apple_apac" }] })), filters: "", hwaccels: "", freeBytes: 1, rawBytes: 1e9 };
     assert.equal(workCopyFault(bad), "its sound is in a form this Mac can't read");
     assert.equal(workCopyFault({ ...bad, ...factsFrom(printedOf({ picture: HLG })) }), "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason");
-    assert.match(workCopyFault({ ...bad, ...factsFrom(printedOf({ picture: HLG })), filters: WITH_BOTH }), /^there is not enough room/);
+    assert.match(workCopyFault({ ...bad, ...factsFrom(printedOf({ picture: HLG })), filters: WITH_SCALE_VT, hwaccels: WITH_VIDEOTOOLBOX }), /^there is not enough room/);
     assert.equal(workCopyFault({ ...bad, ...factsFrom(printedOf({ picture: null })) }), "there is no picture in it");
     assert.equal(workCopyFault({ ...bad, facts: null }), "it could not be read as a video");
   });
@@ -336,10 +482,36 @@ describe("a video that cannot be made into a working copy", () => {
 
 describe("which filters a Mac's ffmpeg has", () => {
   it("is read from what ffmpeg prints for -filters, by the whole name of each: a name that only begins as another does is not it", () => {
-    assert.equal(hasFilters(WITH_BOTH, ["zscale", "tonemap"]), true);
+    assert.equal(hasFilters(WITH_SCALE_VT, ["scale_vt"]), true);
+    assert.equal(hasFilters(WITH_SCALE_VT, ["scale_vt", "tonemap"]), true);
     assert.equal(hasFilters(filtersOf("tonemap_opencl", "tonemap_vaapi", "zscale"), ["zscale", "tonemap"]), false);
     assert.equal(hasFilters(filtersOf("tonemap"), ["zscale", "tonemap"]), false);
     assert.equal(hasFilters(filtersOf("zscale"), ["zscale"]), true);
+    assert.equal(hasFilters(filtersOf9("scale_vaapi", "scale_cuda", "transpose_vt"), ["scale_vt"]), false);
+  });
+  it("reads the two characters of flags ffmpeg 9.0.2 prints before each name, which the Mac Studio's does: three were once the rule", () => {
+    // Lines as that ffmpeg prints them, under a legend that still shows three: with a column of three characters alone, no filter
+    // of this Mac was ever found, and every HDR video would have been refused with the filter in place.
+    const real = `Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  A = Audio input/output
+  V = Video input/output
+  N = Dynamic number and/or type of input/output
+  | = Source or sink filter
+  ------
+ TS colorspace        V->V       Convert between colorspaces.
+ .. hwdownload        V->V       Download a hardware frame to a normal frame
+ .. scale_vt          V->V       Scale Videotoolbox frames
+ .S tonemap           V->V       Conversion to/from different dynamic ranges.
+ T. vflip             V->V       Flip the input video vertically.
+ .. yuvtestsrc        |->V       Generate YUV test pattern.
+`;
+    assert.equal(hasFilters(real, ["scale_vt"]), true);
+    assert.equal(hasFilters(real, ["scale_vt", "hwdownload", "tonemap", "colorspace", "vflip"]), true);
+    assert.equal(hasFilters(real, ["zscale"]), false);
+    assert.equal(hasFilters(real, ["scale"]), false);
+    assert.equal(hasFilters(filtersOf9("scale_vt"), ["scale_vt"]), true);
   });
   it("reads a column of flags a letter wider than today's, which a newer ffmpeg may print", () => {
     assert.equal(hasFilters(" .SC. zscale            V->V       Apply resizing.\n .S.. tonemap           V->V       Conversion.\n", ["zscale", "tonemap"]), true);
@@ -350,6 +522,33 @@ describe("which filters a Mac's ffmpeg has", () => {
     assert.equal(hasFilters(text, ["tonemap"]), false);
     assert.equal(hasFilters("", ["zscale"]), false);
     assert.equal(hasFilters(undefined, ["zscale"]), false);
+    // Nor the legend or a description in the narrower column of flags.
+    const narrow = "Filters:\n  T.. = Timeline support\n  A = Audio input/output\n  ------\n .. fps               V->V       Applies scale_vt to nothing.\n TS ab               A->A       See scale_vt V->V here.\n";
+    assert.equal(hasFilters(narrow, ["scale_vt"]), false);
+    for (const word of ["T", "A", "=", "Timeline", "See", "Applies", "V->V"]) assert.equal(hasFilters(narrow, [word]), false, word);
+    assert.equal(hasFilters(narrow, ["fps", "ab"]), true);
+  });
+});
+
+describe("which hardware decoders a Mac's ffmpeg has", () => {
+  it("is read from what ffmpeg prints for -hwaccels, a method to a line, by the whole name", () => {
+    assert.equal(hasHwaccel(hwaccelsOf("videotoolbox"), "videotoolbox"), true);
+    assert.equal(hasHwaccel(hwaccelsOf("vaapi", "cuda", "videotoolbox"), "videotoolbox"), true);
+    assert.equal(hasHwaccel(hwaccelsOf("vaapi", "cuda"), "videotoolbox"), false);
+    assert.equal(hasHwaccel(hwaccelsOf("videotoolbox_x", "xvideotoolbox"), "videotoolbox"), false);
+    assert.equal(hasHwaccel(hwaccelsOf(), "videotoolbox"), false);
+  });
+  it("is read as the Mac Studio's ffmpeg prints it, with the line that says what the list is above it and a blank line below", () => {
+    assert.equal(hasHwaccel("Hardware acceleration methods:\nvideotoolbox\n\n", "videotoolbox"), true);
+    assert.equal(hasHwaccel("Hardware acceleration methods:\r\nvideotoolbox\r\n", "videotoolbox"), true);
+  });
+  it("does not take the line that says what the list is, or a word in a sentence, for a method", () => {
+    assert.equal(hasHwaccel("Hardware acceleration methods:\n", "videotoolbox"), false);
+    assert.equal(hasHwaccel("Hardware acceleration methods:\n", "Hardware"), false);
+    assert.equal(hasHwaccel("Hardware acceleration methods: videotoolbox\n", "videotoolbox"), false);
+    assert.equal(hasHwaccel("videotoolbox is not here\n", "videotoolbox"), false);
+    assert.equal(hasHwaccel("", "videotoolbox"), false);
+    assert.equal(hasHwaccel(undefined, "videotoolbox"), false);
   });
 });
 
@@ -489,9 +688,10 @@ const failingRename = (n, code = "EXDEV") => {
     ffmpeg that write what the real ones do, and a recorder for the progress panel. `script` says what they find, or which of
     them fails: `source` is what ffprobe says of the raw video, `copy` what it says of the copy (and "" for nothing it can read),
     `ffmpeg` is how ffmpeg ends ("works", "fail", "memory", "time", "killed", "nothing", "empty" or "throw"), `filters` what it
-    prints for -filters, `free` the room on the disk, `bytes` the raw video's size, `fourK` the 4K switch, `deps` more for the
-    job to be given, and `defaultProbe` has the job read the video through `run` as it does when it is given no probe. The home
-    folder is not made here: the job makes what it needs in it. */
+    prints for -filters and `hwaccels` what it prints for -hwaccels (by default a Mac that can make an HDR video standard),
+    `free` the room on the disk, `bytes` the raw video's size, `fourK` the 4K switch, `deps` more for the job to be given, and
+    `defaultProbe` has the job read the video through `run` as it does when it is given no probe. The home folder is not made
+    here: the job makes what it needs in it. */
 function setup(script = {}) {
   const dir = mkdtempSync(join(tmpdir(), "brimm-workcopy-"));
   const home = join(dir, "home");
@@ -511,7 +711,7 @@ function setup(script = {}) {
   const events = [];
   const seen = [];
   // The programs that run outside the watchdog: ffprobe, which writes what it knows of the file asked about into the file asked
-  // for, and ffmpeg when it is asked which filters it has, which it prints.
+  // for, and ffmpeg when it is asked which filters or which hardware decoders it has, which it prints.
   const run = async (cmd, args) => {
     calls.push({ cmd, args });
     if (cmd === "FFPROBE") {
@@ -519,7 +719,7 @@ function setup(script = {}) {
       writeFileSync(args[args.indexOf("-o") + 1], args[args.length - 1] === video ? script.source ?? SOURCE : script.copy ?? copyOf());
       return { code: 0, stderr: "" };
     }
-    return { code: 0, stderr: "", stdout: script.filters ?? WITH_BOTH };
+    return { code: 0, stderr: "", stdout: args.includes("-hwaccels") ? script.hwaccels ?? WITH_VIDEOTOOLBOX : script.filters ?? WITH_SCALE_VT };
   };
   const probe = async (file) => {
     probed.push(file);
@@ -662,32 +862,67 @@ describe("making the working copy", () => {
     assert.deepEqual(both.made, ["the video for HyperFrames", "its speed made steady at 30 pictures a second", "its HDR colours made standard"]);
     assert.equal(both.words, "Done");
   });
-  it("reads which filters this Mac's ffmpeg has, once, for an HDR video, and tone-maps it", async (c) => {
+  it("reads which filters and which hardware decoders this Mac's ffmpeg has, once each, for an HDR video, and makes it with VideoToolbox", async (c) => {
     const t = setup({ source: printedOf({ picture: HLG }) });
     c.after(t.done);
     const result = await t.job();
     assert.equal(result.ok, true);
     const listings = t.calls.filter((x) => x.cmd === "FFMPEG");
-    assert.equal(listings.length, 1);
-    assert.ok(listings[0].args.includes("-filters"));
-    assert.match(after(t.guarded[0].args, "-vf"), /,tonemap=tonemap=hable:desat=0,/);
+    assert.deepEqual(listings.map((x) => x.args.filter((a) => a === "-filters" || a === "-hwaccels")), [["-filters"], ["-hwaccels"]]);
+    const args = t.guarded[0].args;
+    assert.deepEqual(args.slice(args.indexOf("-noautorotate"), args.indexOf("-i")), ["-noautorotate", "-display_rotation", "0", "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]);
+    assert.match(after(args, "-vf"), /^fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p$/);
   });
-  it("does not ask which filters it has for a video in standard colour", async (c) => {
+  it("turns an upright HDR clip by the note it is stored with, as ffprobe says it of the raw video, and leaves the file with none", async (c) => {
+    const t = setup({ source: printedOf({ picture: { ...HLG, ...UPRIGHT } }) });
+    c.after(t.done);
+    assert.equal((await t.job()).ok, true);
+    assert.match(after(t.guarded[0].args, "-vf"), /,scale_vt=w=1920:h=1080:[^,]*,hwdownload,format=p010le,transpose=clock,format=yuv420p$/);
+    assert.equal(after(t.guarded[0].args, "-display_rotation"), "0");
+    const stored = setup({ source: printedOf({ picture: TURNED_ROUND }) });
+    c.after(stored.done);
+    assert.equal((await stored.job()).ok, true);
+    assert.match(after(stored.guarded[0].args, "-vf"), /,hwdownload,format=p010le,hflip,vflip,format=yuv420p$/);
+  });
+  it("does not ask which filters or hardware decoders it has for a video in standard colour", async (c) => {
     const t = setup();
     c.after(t.done);
     await t.job();
     assert.deepEqual(t.calls.filter((x) => x.cmd === "FFMPEG"), []);
+    assert.ok(!t.guarded[0].args.includes("-hwaccel"));
   });
-  it("makes a video in standard colour on a Mac whose ffmpeg has no tone-mapping filter, and refuses an HDR one in words", async (c) => {
-    const sdr = setup({ filters: filtersOf() });
+  it("makes a video in standard colour on a Mac whose ffmpeg has neither VideoToolbox nor its filter, and refuses an HDR one in words", async (c) => {
+    const sdr = setup({ filters: filtersOf9(), hwaccels: hwaccelsOf() });
     c.after(sdr.done);
     assert.equal((await sdr.job()).ok, true);
-    const hdr = setup({ source: printedOf({ picture: HLG }), filters: filtersOf("tonemap_opencl") });
-    c.after(hdr.done);
-    const result = await hdr.job();
-    assert.deepEqual([result.ok, result.failed], [false, ["It can't be used: it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason."]]);
-    assert.deepEqual(hdr.guarded, []);
-    assert.deepEqual(hdr.inWork(), []);
+    const said = ["It can't be used: it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason."];
+    // Today's Mac Studio has tonemap and VideoToolbox but not zscale: with no filter to size and convert in VideoToolbox, it is
+    // refused, and so it is with the filter but no hardware decoder, and with neither.
+    for (const [what, script] of [
+      ["no scale_vt", { filters: filtersOf9("tonemap", "colorspace", "transpose_vt") }],
+      ["no videotoolbox", { hwaccels: hwaccelsOf() }],
+      ["neither", { filters: filtersOf("tonemap_opencl"), hwaccels: hwaccelsOf("vaapi") }]
+    ]) {
+      const hdr = setup({ source: printedOf({ picture: HLG }), ...script });
+      c.after(hdr.done);
+      const result = await hdr.job();
+      assert.deepEqual([result.ok, result.failed], [false, said], what);
+      assert.deepEqual(hdr.guarded, [], what);
+      assert.deepEqual(hdr.inWork(), [], what);
+      assert.ok(hdr.logs.some((line) => line.includes("could not be made")), what);
+    }
+  });
+  it("refuses an HDR video in words when ffmpeg cannot say which filters or hardware decoders it has, and says why in the log", async (c) => {
+    for (const [what, flag] of [["filters", "-filters"], ["decoders", "-hwaccels"]]) {
+      // The video is read through the stand-in probe; this `run` is asked only the two questions about ffmpeg, and fails one.
+      const run = async (cmd, args) => (args.includes(flag) ? { code: 1, stderr: "Unrecognized option\n" } : { code: 0, stderr: "", stdout: args.includes("-hwaccels") ? WITH_VIDEOTOOLBOX : WITH_SCALE_VT });
+      const t = setup({ source: printedOf({ picture: HLG }), deps: { run } });
+      c.after(t.done);
+      const result = await t.job();
+      assert.deepEqual([result.ok, result.failed], [false, ["It can't be used: it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason."]], what);
+      assert.ok(t.logs.some((line) => line.includes("could not say which") && line.includes("Unrecognized option")), `${what}: ${t.logs.join("\n")}`);
+      assert.deepEqual(t.guarded, [], what);
+    }
   });
   it("refuses in words, and runs no ffmpeg, a video with no picture, one whose only sound it cannot read, and one with no length", async (c) => {
     const cases = [
