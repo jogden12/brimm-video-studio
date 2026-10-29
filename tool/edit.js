@@ -59,7 +59,7 @@ import { heldBy, commitOf, episodeHolding, holdingEpisode, readSeen, seenKey, re
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
-import { BRINGING, START as REELS_START, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked } from "./finish-reels.js";
+import { BRINGING, REEL_KEY, START as REELS_START, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked } from "./finish-reels.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, exportsFound, lookForExports } from "./exports.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
@@ -3861,6 +3861,14 @@ function shownAfter(stamp, ms) {
   return new Date(Date.parse(stamp) + ms + offset).toISOString().slice(0, 16).replace("T", " ");
 }
 
+/** Why final/ may not be written yet because of a finish on the other Mac, in plain words, or "": its late check of its copies is still to
+    come, and would put its own copies back over what is written now. `finished` is the record's. A finish on this Mac is not asked of
+    here: its command is running (runningCommand), which refuses first. */
+function lateCheckWaits(ctx, finished) {
+  const checked = finished.on !== ctx.machine ? Date.parse(finished.at) + LATE_CHECK_MS + LATE_MARGIN_MS : 0;
+  return checked > ctx.now() ? `The finish on ${finished.on} is still checking its copies in final/, until ${shownAfter(finished.at, LATE_CHECK_MS + LATE_MARGIN_MS)}. Say it again after that. Nothing was changed.` : "";
+}
+
 /** What is said when the hand-off waits for the switch, and when it is written. */
 const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What `finish` says of a video whose hand-off is written from its spellings (a finished video, an iPhone clip she answered) on a
@@ -4013,7 +4021,14 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     if (notYet) return refuse(ctx, notYet);
     // Only while the video is the kind its hand-off was made as: answered again as another kind, the spelling is kept and the
     // hand-off waits for the new reading (`kind … --again` sets this one aside).
-    if (importKind(record) === recordKind(record)) return importHandoff(ctx, found, record, done);
+    if (importKind(record) === recordKind(record)) {
+      // A finish of the Reels (`finish "<episode>" reels`) on the other Mac has a late check of final/ to come, as a Final Cut finish has:
+      // the hand-off written now would be put back over (plan PR 9, the review's C1). The first hand-off, and a revision with no Reel
+      // in it, have none.
+      const waits = Object.keys(finished.parts || {}).some((key) => REEL_KEY.test(key)) ? lateCheckWaits(ctx, finished) : "";
+      if (waits) return refuse(ctx, waits);
+      return importHandoff(ctx, found, record, done);
+    }
     return save(ctx, found, record, `${shownName(record)}: spelled. Its hand-off waits for its new reading.`);
   }
   if (!finished && handoffOwed(record)) return importHandoff(ctx, found, record, done);
@@ -4105,8 +4120,8 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       acceptRev(ctx.home, found.record.id, found.record.rev);
       return 1;
     }
-    const checked = finished.on !== ctx.machine ? Date.parse(finished.at) + LATE_CHECK_MS + LATE_MARGIN_MS : 0;
-    if (checked > ctx.now()) return refuse(ctx, `The finish on ${finished.on} is still checking its copies in final/, until ${shownAfter(finished.at, LATE_CHECK_MS + LATE_MARGIN_MS)}. Say it again after that. Nothing was changed.`);
+    const waits = lateCheckWaits(ctx, finished);
+    if (waits) return refuse(ctx, waits);
     const files = {};
     for (const [rel, text] of writes) {
       before.push([rel, readFileSync(join(found.folder, rel), "utf8")]);

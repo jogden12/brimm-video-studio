@@ -1044,9 +1044,18 @@ export async function finishNow(ctx, found, deps = {}) {
     // finish to put right (the P1 check, T20).
     const late = readEpisode(found.folder);
     const theirs = late.record ? heldElsewhere(late.record, ctx.machine) : null;
-    const problems = theirs
-      ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ at the late check, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
-      : check(entries, opts);
+    // A record written above this finish's own that no longer says this finish (a spelling that made the hand-off again, a finish of the
+    // Reels or of a part on the other Mac) came with files in final/ that are its own, and that differ from this finish's in size because
+    // they are newer: none of this finish's is put back over them (plan PR 9, the review's C1). A record above that still says this finish
+    // (a claim, a new name) left final/ as this finish made it, and a copy gone from it is put back. One above that cannot be read yet is
+    // not known to say it, and is not put back over either.
+    const stillMine = Boolean(late.record) && late.record.rev > asked.rev + 1 && Boolean(late.record.finished) && late.record.finished.revision === revision;
+    const movedOn = written && laterRecord(found.folder, asked.rev + 1) && !stillMine;
+    const problems = movedOn
+      ? []
+      : theirs
+        ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ at the late check, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
+        : check(entries, opts);
     // Its record is put back only when it is gone and no later record is there: never over a record the other Mac wrote
     // under its number, or over one written since. Then the episode is read again, and From Final Cut is emptied only
     // when its record still holds this finish.
@@ -1062,8 +1071,9 @@ export async function finishNow(ctx, found, deps = {}) {
         }
       }
       const now = readEpisode(found.folder);
-      holds = Boolean(now.record && now.record.finished && now.record.finished.revision === revision);
-      if (!holds) failed.push(now.record ? `The episode's record no longer holds this finish: the other Mac changed it. ${sayAgain}` : `The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. ${sayAgain}`);
+      // Not when a record above it was not known to say it: its copies were not checked, so nothing is removed that it took.
+      holds = Boolean(now.record && now.record.finished && now.record.finished.revision === revision) && !movedOn;
+      if (!holds) failed.push(now.record ? `The episode's record no longer holds this finish: the other Mac changed it${movedOn ? " after the copies were made, so nothing in final/ was put back over what it wrote" : ""}. ${sayAgain}` :`The episode's record cannot be read now: ${String(now.why).replace(/\.$/, "")}. ${sayAgain}`);
     }
     if (problems.length) {
       failed.push(...problems);
