@@ -443,6 +443,24 @@ describe("the guide for an iPhone clip", () => {
     assert.equal(await line(off), says('Say "hand it off" to hand it off as it is.'));
     for (const w of [copying, idle, never, off]) w.t.done();
   });
+  it("does not say its video is being made while its project is here and the app never opened it, as for a raw video: a video at work beside a project here is not the main video's (plan PR 17; the review of PR 10, M3)", async () => {
+    const never = (kind) => guideWorld({ kind, over: { app: { toolchain: PIN.version, projects: [entry("main", { opened: [], state: "made" })] } } });
+    const clip = never("short video");
+    atWork(clip.t, "workcopy");
+    assert.equal(await line(clip), says(CLIP_NEXT));
+    const raw = never("raw");
+    atWork(raw.t, "workcopy");
+    assert.equal(await line(raw), says(OPEN));
+    // With no project here the video at work is the main video's, and each is told it is being made.
+    for (const kind of ["short video", "raw"]) {
+      const none = guideWorld({ kind, projects: null });
+      atWork(none.t, "workcopy");
+      assert.equal(await line(none), says(`The video for HyperFrames is being made. ${AFTER}`), kind);
+      none.t.done();
+    }
+    clip.t.done();
+    raw.t.done();
+  });
   it("says its finish is running, as for a raw video", async () => {
     for (const kind of ["short video", "raw"]) {
       const w = guideWorld({ kind });

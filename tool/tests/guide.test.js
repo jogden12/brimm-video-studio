@@ -232,6 +232,10 @@ const STAGE_ROWS = [
   [CLIP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
   [CLIP({ project: PROJECT({ opened: false }) }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  // With its video being made again beside the project (a video at work beside a project here is not the main video's: a Reel's holds the same lock), it is offered
+  // the same, as a raw video in the same state is told to open it, and not that its video is being made (plan PR 17; the review of PR 10, M3).
+  [CLIP({ project: PROJECT({ opened: false }), copy: { left: 120, usual: null } }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
+  [CLIP({ project: PROJECT({ opened: false }), copy: { left: null, usual: 240 }, v2: false }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
   [CLIP({ v2: false }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Handing it off as it is waits until this Mac hands off version 2: ask Jason.'],
   [CLIP({ app: false, v2: false }), "waits-v2", V1],
   // A finish at work is said of an iPhone clip too, since it is finished from its export now.
@@ -368,6 +372,19 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     ]) {
       const n = nextFor({ ...BASE, ...over, handoff: handoffOf(kind) }, NONE, NOW);
       assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
+    }
+  });
+  it("tells an iPhone clip and a raw video the same of a video at work: it is being made only while no project is here, and beside a project the next step stands (plan PR 17; the review of PR 10, M3)", () => {
+    const copy = { left: 120, usual: null };
+    for (const [project, clip, raw] of [[null, "making-copy", "making-copy"], [PROJECT({ opened: false }), "clip-next", "open-app"]]) {
+      const forClip = nextFor({ ...BASE, ...CLIP({ project, copy }) }, NONE, NOW);
+      const forRaw = nextFor({ ...BASE, ...APP({ way: "hyperframes", project, copy }) }, NONE, NOW);
+      assert.deepEqual([forClip.stage, forRaw.stage], [clip, raw], JSON.stringify(project));
+    }
+    // Where the app is off neither is told it is being made, with a project here or not: the clip is offered what it is offered, the raw video told this Mac is not set up.
+    for (const project of [null, PROJECT({ opened: false })]) {
+      assert.equal(nextFor({ ...BASE, ...CLIP({ project, copy }), app: false }, NONE, NOW).stage, "clip-next", "a clip, with the app off");
+      assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project, copy }), app: false }, NONE, NOW).stage, "app-off", "a raw video, with the app off");
     }
   });
   it("says on a Mac whose settings have the app off what `app` says there, in the words `app` has, and that is no stage to wait for (plan PR 17; the review of PR 10, M2)", () => {

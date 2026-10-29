@@ -359,8 +359,10 @@ function videoNext(facts, notes, now) {
     return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
   }
   // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
-  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app.
-  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy ? copyStep(facts.copy) : clipStep(facts);
+  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
+  // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
+  // plan PR 17, the review of PR 10, M3).
+  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }
