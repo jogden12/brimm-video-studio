@@ -164,3 +164,172 @@ export function projectChange(dir) {
   walk(dir, "");
   return lastChangeOf({ files, turns: turnsOf(tailOf(join(dir, ".hyperframes", "app-history.jsonl"), HISTORY_BYTES)) });
 }
+
+// --- Which export a part takes ---
+
+const nfc = (text) => String(text).normalize("NFC");
+const capital = (text) => text[0].toUpperCase() + text.slice(1);
+const count = (n) => (n === 2 ? "two" : String(n));
+const minuteOf = (ms) => Math.floor(ms / 60000);
+const secondOf = (ms) => Math.floor(ms / 1000);
+const endingOf = (name) => ((/\.([A-Za-z0-9]+)$/.exec(String(name)) || [])[1] || "").toLowerCase();
+const taking = (file) => TAKEN_ENDINGS.includes(file.ending);
+
+/** Where a file is, as a person is told it: the places an export can be found in. */
+const FROM = { Downloads: "from Downloads", "another folder": "from another folder", "the other Mac": "from what the other Mac released", renders: "HyperFrames' own render" };
+/** Whether a file is on the other Mac's side, as a person is told: on this Mac, or from the other Mac. */
+const placeOf = (file) => (file.where === "the other Mac" ? "from the other Mac" : "on this Mac");
+
+/** Files as a person is told them: by name, and by where each is when two have one name. */
+function shown(files) {
+  const twice = (f) => files.filter((g) => nfc(g.name) === nfc(f.name)).length > 1;
+  const order = (f) => `${nfc(f.name)}\u0000${f.where === "the other Mac" ? 1 : 0}`;
+  return [...files].sort((a, b) => (order(a) < order(b) ? -1 : 1)).map((f) => (twice(f) ? `${f.name} ${placeOf(f)}` : f.name)).join(", ");
+}
+/** The files, but for one with the name and the size of an earlier one: the same export, in both places, is taken once. */
+const once = (files) => files.filter((f, i) => !files.some((g, k) => k < i && nfc(g.name) === nfc(f.name) && g.bytes === f.bytes));
+
+/** The video a part is given, as the detached part is told it. */
+const videoOf = (file) => ({ name: file.name, dir: file.dir, where: file.where, bytes: file.bytes, mtimeMs: file.mtimeMs, began: file.began ?? null });
+
+/** The files that can be a part's export: those its own records name (`part.recorded`), and those in Downloads and in what the other Mac
+    released whose name is an export's name for the part's project. A file found both ways is one, the record's; one with nothing in it
+    is none. Each is { name, dir, where, bytes, mtimeMs, began, ending }. */
+function candidatesOf(part, input, zone) {
+  const out = [];
+  const at = new Map();
+  const add = (candidate) => {
+    const key = `${nfc(candidate.dir)}\u0000${nfc(candidate.name)}`;
+    if (!at.has(key)) {
+      at.set(key, out.length);
+      out.push(candidate);
+    } else if (candidate.via === "record") out[at.get(key)] = candidate;
+  };
+  for (const recorded of part.recorded || []) add({ ...recorded, via: "record", ending: endingOf(recorded.name) });
+  for (const [place, where] of [[input.downloads, "Downloads"], [input.released, "the other Mac"]]) {
+    for (const file of place.files) {
+      const read = exportNameOf(file.name);
+      if (read && nfc(read.project) === nfc(part.project)) add({ ...file, dir: place.dir, where, via: "name", ending: read.ending, began: beganAt(read, zone) });
+    }
+  }
+  return out.filter((candidate) => candidate.bytes > 0);
+}
+
+/** What `finish` looks for among HyperFrames' exports, and what it asks (architecture 8.1, plan PR 7), in plain data.
+    `input`: { parts, downloads, released, finished, zone }. A part is { key, label, reel?, project, fromSuggestion, here, mac, changed,
+    recorded, renders }: its key ("main" or "reel 2") and label ("the main video", "Reel 2"), the project's name, the suggestion a Reel
+    was made from, whether the project is on this Mac and the Mac it was made on, when it last changed (projectChange, null when not known),
+    the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` and
+    `released` are { dir, files }, their video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
+    `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }.
+    Gives { parts, asks, stops, mentions, looked }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video, export:
+    null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is to
+    answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); and where it looked. Nothing is touched. */
+export function lookForExports(input, answers = {}) {
+  const { take = {}, final = [], without = [] } = answers || {};
+  const zone = input.zone || LOCAL_ZONE;
+  const finished = input.finished && input.finished.parts ? input.finished : null;
+  const finishedAt = finished ? Date.parse(finished.at) : NaN;
+  const asks = [];
+  const stops = [];
+  const mentions = [];
+  const out = [];
+  for (const part of input.parts) {
+    const { key, label } = part;
+    const Cap = capital(label);
+    const made = (video, line, over = {}) => out.push({ key, label, ...(part.reel ? { reel: part.reel } : {}), project: part.project, projects: [part.project], fromSuggestion: part.fromSuggestion, video, export: null, kept: false, noHandEdits: false, line, ...over });
+    const keep = () => made(null, `${Cap}: kept as the last finish made it.`, { kept: true });
+    const before = finished ? finished.parts[key] : undefined;
+    const prior = before && before.project === part.project ? before : null;
+    // A Reel left out of this finish that the last finish finished stays in the hand-off, as lookFor keeps one.
+    if (key !== "main" && without.includes(key)) {
+      if (before) keep();
+      continue;
+    }
+    const candidates = candidatesOf(part, input, zone);
+    const exports = once(candidates.filter(taking));
+    const webms = candidates.filter((candidate) => candidate.ending === "webm");
+    const renders = (part.renders || []).filter((file) => file.bytes > 0).map((file) => ({ ...file, where: "renders", ending: endingOf(file.name) }));
+    /** What was passed over, said when a part has no export taken, or (a WebM) when one began after the export that is. */
+    const passedOver = (than) => {
+      for (const webm of webms) if (than === undefined || webm.began.ms > than.began.ms) mentions.push(`${webm.name} is a WebM, which is not taken: export it again as MP4.`);
+      if (than === undefined && renders.length) {
+        const newest = renders.reduce((best, file) => (file.mtimeMs > best.mtimeMs ? file : best));
+        mentions.push(`${Cap}'s project has a video that HyperFrames' own render made, ${newest.name}. It is not an export, so it is not taken. Export it from HyperFrames, or tell me its file name to use it.`);
+      }
+    };
+
+    // A file she names: wherever it is, whatever it is called, and with no check against the project's last change.
+    if (take[key] !== undefined) {
+      const said = nfc(take[key]);
+      const lower = said.toLowerCase();
+      const place = lower === "this mac" ? "this" : lower === "the other mac" ? "other" : "";
+      const notAnExport = () => asks.push(`"${take[key]}" is not an export of ${label}. ${exports.length ? `The ones there are: ${shown(once(exports))}.` : "There is none there."} Which is the final one?`);
+      let chosen;
+      if (place) {
+        const inPlace = exports.filter((file) => (file.where === "the other Mac") === (place === "other"));
+        const newest = inPlace.length ? Math.max(...inPlace.map((file) => minuteOf(file.began.ms))) : null;
+        const group = inPlace.filter((file) => minuteOf(file.began.ms) === newest);
+        if (!group.length) notAnExport();
+        else if (group.length > 1) asks.push(`For ${label} there are ${count(group.length)} exports ${placeOf(group[0])}: ${shown(group)}. Which is the final one?`);
+        else [chosen] = group;
+      } else {
+        const listed = [[input.downloads, "Downloads"], [input.released, "the other Mac"]]
+          .flatMap(([folder, where]) => folder.files.map((file) => ({ ...file, dir: folder.dir, where, ending: endingOf(file.name) })))
+          .filter((file) => taking(file) && file.bytes > 0);
+        const named = once([...exports, ...listed, ...renders.filter(taking)]).filter((file) => nfc(file.name) === said);
+        const here = named.filter((file) => file.where !== "the other Mac");
+        const there = named.filter((file) => file.where === "the other Mac");
+        if (!named.length) notAnExport();
+        else if (here.length && there.length) asks.push(`${named[0].name} is both on this Mac and from the other Mac, and they differ. Say which: this Mac, or the other Mac.`);
+        else [chosen] = here.length ? here : there;
+      }
+      if (chosen) made(videoOf(chosen), `${Cap}: ${chosen.name}, ${FROM[chosen.where]}, the file you named.`);
+      else passedOver();
+      continue;
+    }
+
+    // Nothing to take: the part the last finish took is kept, a Reel is asked about, and the main video stops.
+    if (!exports.length) {
+      if (prior) {
+        const changedSince = part.here && part.changed !== null && secondOf(part.changed) > secondOf(finishedAt);
+        if (changedSince && !final.includes(key)) asks.push(`${Cap}'s project changed in HyperFrames, at ${zone.text(part.changed)}, after the last hand-off. Export it again from HyperFrames on This Mac, or say the last hand-off is final.`);
+        else keep();
+        continue;
+      }
+      if (key !== "main") asks.push(`${Cap} has no export. Export it from HyperFrames on This Mac, or say to leave it out of this hand-off. If you exported it under another name, tell me its file name.`);
+      else if (!part.here) stops.push(`${Cap}'s HyperFrames project is on ${part.mac}, so its exports are there. Finish it on that Mac.`);
+      else stops.push('The main video has no export yet. Export it from HyperFrames on This Mac, as MP4, then say "hand it off" again. If HyperFrames is still exporting it, say it again when the export is done.');
+      passedOver();
+      continue;
+    }
+
+    // The newest by when it began; two that began in one minute are asked about.
+    const newest = Math.max(...exports.map((file) => minuteOf(file.began.ms)));
+    const top = exports.filter((file) => minuteOf(file.began.ms) === newest);
+    if (top.length > 1) {
+      asks.push(`For ${label} there are ${count(top.length)} exports that began at ${zone.text(top[0].began.ms)}: ${shown(top)}. Which is the final one?`);
+      passedOver();
+      continue;
+    }
+    const [export_] = top;
+    // It must have begun after the project's last change, to the second; a start known only to the minute counts to the end of it.
+    const upper = export_.began.exact ? export_.began.ms : export_.began.ms + 59999;
+    const older = part.here && part.changed !== null && secondOf(part.changed) > secondOf(upper);
+    if (older && !final.includes(key)) {
+      asks.push(`${Cap}'s newest export, ${export_.name}, began at ${zone.text(export_.began.ms)}, before you last changed it in HyperFrames, at ${zone.text(part.changed)}. Export it again from HyperFrames on This Mac, or say that export is the final one.`);
+      continue;
+    }
+    if (prior && prior.source && prior.source.bytes === export_.bytes && prior.source.mtimeMs === export_.mtimeMs) {
+      keep();
+      continue;
+    }
+    const where = FROM[export_.where];
+    made(videoOf(export_), !part.here
+      ? `${Cap}: ${export_.name}, ${where}. Its project is on ${part.mac}, so the export could not be checked against it.`
+      : `${Cap}: ${export_.name}, ${where}, exported ${zone.text(export_.began.ms)}.${older ? " HyperFrames changed after it, and you said it is final." : ""}`);
+    passedOver(export_);
+  }
+  const names = input.parts.map((part) => part.project);
+  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.` };
+}
