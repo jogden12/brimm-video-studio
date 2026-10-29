@@ -300,7 +300,7 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const { name, number } = nextMain(record, projects);
   const reels = jsonIn(join(found.folder, REELS_FILE));
   writeProject(join(episodeWork(home, found.name), name), projectFiles({
-    kind: "main", number, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
+    kind: "main", number, short: record.kind === "short video", id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };

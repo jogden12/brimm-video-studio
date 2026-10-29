@@ -15,7 +15,8 @@
 // brimm/facts.json says where the stretch starts in the recording; it has no cut or Reel suggestions, and brimm/face-track.json
 // only when the face finder found a face in its video. The notes of a main and a Reel project carry the ruling of 2026-10-28: a Reel
 // is made by Studio only, so the agent never makes one as a new project, and tells her to say "Open Reel 2 in HyperFrames" in her
-// Claude chat when she asks it for one; a session clip's own rules, first of all, forbid any new project from it.
+// Claude chat when she asks it for one (a short video's main project has no Reels to ask for, and its notes leave the line out); a
+// session clip's own rules, first of all, forbid any new project from it.
 // A project holds only the files chosen here: projectFiles gives the whole set, and the tests hold each kind's list whole.
 //
 // writeProject puts a file set on disk whole or not at all. It is made in the run's own folder, the working copy is renamed into
@@ -353,8 +354,10 @@ This is a clip of a private client session. These rules come before everything e
     phrase of architecture 6.3 that runs `app "<episode>" reel 2`. */
 const REELS_ARE_STUDIOS = `Never make a Reel as a new project yourself: the app would put it outside BRIMM Video Work with a second copy of the whole recording, and Studio could not find its export. Studio makes every Reel. When she asks you for one, tell her to say "Open Reel 2 in HyperFrames" in her Claude chat, with the number of the Reel she wants.`;
 
-/** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. */
-function brimmRules(kind) {
+/** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
+    video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
+    to send her to "Open Reel 2 in HyperFrames", and has no line about Reels at all. */
+function brimmRules(kind, short = false) {
   const episode = kind !== "clip";
   return [
     "# The BRIMM: rules for this project",
@@ -368,7 +371,7 @@ function brimmRules(kind) {
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
-    ...(kind === "main" ? [`- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
+    ...(kind === "main" && !short ? [`- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
     ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, "- **This Reel.** It is exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker. `brimm/face-track.json`, when it is there, says where the faces are."] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
@@ -429,10 +432,10 @@ function thisProject({ kind, what, name, offset, files }) {
 
 /** The notes for the agent (5.4), the text of both CLAUDE.md and AGENTS.md: a session clip's own rules first, then BRIMM's rules,
     then what the project is, then HyperFrames' own guidance without what conflicts. */
-function notesText({ kind, what, name, offset, files, guidance }) {
+function notesText({ kind, what, name, offset, files, guidance, short }) {
   return [
     ...(kind === "clip" ? [CLIP_RULES] : []),
-    brimmRules(kind),
+    brimmRules(kind, short),
     thisProject({ kind, what, name, offset, files }),
     "# HyperFrames' own guidance\n\nWhat follows is the guidance the pinned HyperFrames ships, without what the rules above forbid.",
     hyperframesGuidance(guidance).trim()
@@ -458,7 +461,8 @@ const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
     - for an episode's part, `name` and, for a Reel, `part` ({reel: n}); its `spellings` ([wrong, right] pairs) and `logos`
       (the paths of the logos chosen, in the Assets folder);
     - for the main video, the cut `plan` and the Reel candidates, `reels`, and `number`, which main project this is (projectName),
-      the first when it is not given;
+      the first when it is not given; and `short`, true when the episode is a short video (an iPhone clip), which has no Reels: its
+      notes say nothing of them (brimmRules);
     - for a Reel, its `stretch` of the recording, { start, end } in seconds (a Reel's video is that stretch, cut by workcopy.js, and
       its words are the recording's words in it, on its own clock: reelWords), the cut `plan` of the recording, by whose phrases the
       words are placed as the main video's are, before they are chosen (it may be none: the words are then only moved inside their
@@ -512,7 +516,7 @@ export function projectFiles(input) {
     ...(kind === "reel" ? { reel: { n: input.part.reel, offset: input.stretch.start } } : {}),
     files: Object.fromEntries(paths.map((path) => [path, aboutOf(kind, path) ?? ""]))
   }));
-  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance });
+  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && input.short === true });
   files.set("CLAUDE.md", notes);
   files.set("AGENTS.md", notes);
   return files;

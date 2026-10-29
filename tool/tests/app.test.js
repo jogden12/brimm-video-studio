@@ -214,6 +214,15 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.started, []);
     plain(e.said);
   });
+  it("leaves the Reels out of the notes of a short video's project, which has none to ask for, and keeps them in a raw video's", async (c) => {
+    // `app … reel` answers that a short video has no Reels, so it is not told to send her to "Open Reel 2 in HyperFrames".
+    const short = episode(c, { record: { kind: "short video" } });
+    assert.equal(await run(short), 0);
+    assert.doesNotMatch(readFileSync(join(short.project, "CLAUDE.md"), "utf8"), /Open Reel \d in HyperFrames|Never make a Reel as a new project/);
+    const raw = episode(c);
+    assert.equal(await run(raw), 0);
+    assert.match(readFileSync(join(raw.project, "CLAUDE.md"), "utf8"), /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat/);
+  });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);
     await run(e);

@@ -347,6 +347,20 @@ describe("the ruling: a Reel is made by Studio only (Jason, 2026-10-28; plan PR 
     // The main project's line about the Reels Studio suggests stays, with the rule after it.
     assert.match(rulesOf(projectFiles(main())), /\*\*Reels\.\*\* The Reels Studio suggests are in `brimm\/reel-suggestions\.json`, by their word ids\. Never make a Reel as a new project yourself/);
   });
+  it("is not in the rules of a short video's main project: it has no Reels, and \"Open Reel 2 in HyperFrames\" would be answered that a short video has none", () => {
+    const short = projectFiles(main({ short: true, reels: undefined, plan: undefined }));
+    for (const notes of [short.get("CLAUDE.md"), short.get("AGENTS.md")]) {
+      assert.doesNotMatch(notes, /Open Reel \d in HyperFrames|Never make a Reel as a new project|\*\*Reels\.\*\*/);
+    }
+    // The rest of the rules are the main project's own: the same notes with the Reels' line out.
+    const whole = rulesOf(projectFiles(main({ reels: undefined, plan: undefined })));
+    assert.equal(whole.split("\n").filter((line) => !line.startsWith("- **Reels.**")).join("\n"), rulesOf(short));
+    // Only the main project's: a Reel's project is a Reel, and a flag a Reel or a clip is given changes nothing.
+    assert.match(rulesOf(projectFiles(reel({ short: true }))), /Never make a Reel as a new project yourself/);
+    assert.equal(projectFiles(clip({ short: true })).get("CLAUDE.md"), projectFiles(clip()).get("CLAUDE.md"));
+    // A main project that is not told it is a short video's keeps the rule.
+    for (const over of [{}, { short: false }, { short: undefined }, { short: "yes" }]) assert.match(rulesOf(projectFiles(main(over))), /Open Reel 2 in HyperFrames/, JSON.stringify(over));
+  });
   it("is in a session clip's own rules, above the BRIMM rules: no new projects, a Reel or any other, from a clip of a private client session", () => {
     const own = projectFiles(clip()).get("CLAUDE.md");
     const first = own.slice(0, own.indexOf("# The BRIMM: rules for this project"));
