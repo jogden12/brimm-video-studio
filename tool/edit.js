@@ -87,7 +87,7 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, isMain as inUse, openInApp, plainName, projectOnAnotherMac } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
-import { historyTail, turnTime, versionsOf, whatHappened } from "./app-history.js";
+import { historyTail, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
@@ -6119,11 +6119,12 @@ function guideCopy(ctx, e, r, rates) {
 
 /** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when
     the record has none, or its folder is not on this Mac. `opened` is whether the record lists a time the app opened it; `last` the time
-    of the last turn in the project's `.hyperframes/app-history.jsonl` in words (app-history.js turnTime, in the zone a test gives as
-    `deps.app.tz`), "" when the app has kept none that can be read; `exported` whether it has an export that began after its last change,
-    as `finish` finds one (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in
-    the project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading,
-    is no export seen: the guide only reads, and `finish` tells her what it needs. */
+    of the newest turn that `what-happened` tells in the project's `.hyperframes/app-history.jsonl` (app-history.js toldTurns, so that it is
+    the first time that gives), in words (turnTime, in the zone a test gives as `deps.app.tz`), "" when the app has kept none that can be
+    read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
+    which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in the
+    project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading, is
+    no export seen: the guide only reads, and `finish` tells her what it needs. */
 function guideProject(ctx, e, r) {
   const main = (r.app?.projects ?? []).find(inUse);
   if (!main || !plainName(main.name)) return null;
@@ -6133,7 +6134,8 @@ function guideProject(ctx, e, r) {
   } catch (err) {
     return null;
   }
-  const last = turnsOf(historyTail(dir)).reduce((latest, turn) => Math.max(latest, Date.parse(turn.at)), -Infinity);
+  // The newest turn what-happened tells (app-history.js toldTurns): a later one with nothing in it is left out there, and so here.
+  const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
   let exported = false;
   try {
     const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
@@ -6145,7 +6147,7 @@ function guideProject(ctx, e, r) {
   } catch (err) {
     exported = false;
   }
-  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: Number.isFinite(last) ? turnTime(last, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported };
+  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: newest ? turnTime(newest.ms, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported };
 }
 
 /** A session, as the guide reads it (guide.js VideoFacts `session`): her choice of what she wants from it, whether this Mac can

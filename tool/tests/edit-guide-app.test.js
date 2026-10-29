@@ -52,11 +52,12 @@ async function line(w, over) {
   assert.doesNotMatch(r.text, PLAIN);
   return r.said[0];
 }
-/** The app's history in the project of the main video: a turn for each time, in the order given. */
-function history(w, ...times) {
+/** The app's history in the project of the main video: a turn for each time, in the order given. A turn given as an object is that line
+    as it is, such as a turn with nothing in it. */
+function history(w, ...turns) {
   const dir = join(w.dirOf("main"), ".hyperframes");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "app-history.jsonl"), times.map((at, i) => JSON.stringify({ at, engine: "claude", asked: `Request ${i + 1}`, did: "Done.", files: [] })).join("\n") + "\n");
+  writeFileSync(join(dir, "app-history.jsonl"), turns.map((turn, i) => JSON.stringify(typeof turn === "string" ? { at: turn, engine: "claude", asked: `Request ${i + 1}`, did: "Done.", files: [] } : turn)).join("\n") + "\n");
 }
 /** What the progress panel keeps for the run of this very process (atWork takes the lock as this process), and for its speeds. */
 function panel(w, run) {
@@ -237,6 +238,14 @@ describe("the guide while a video is in HyperFrames", () => {
       assert.equal(await line(w), says(edit(last)), turns.join());
       w.t.done();
     }
+  });
+  it("gives the time of the newest turn what-happened tells, not of a later one it leaves out for having nothing in it: the first time it gives (review M4)", async () => {
+    const w = guideWorld();
+    history(w, "2026-10-20T14:41:00-05:00", { at: "2026-10-20T14:50:00-05:00", engine: "claude", asked: "", did: "", files: [] });
+    assert.equal(await line(w), says(edit("today at 2:41 pm")));
+    const told = await on(depsOf(w), "app", FOLDER, "what-happened");
+    assert.deepEqual(told.said.slice(0, 3), [`What was done in HyperFrames on Pricing: what to charge?, newest first:`, "Today:", "  2:41 pm: you asked Request 1; HyperFrames did Done."]);
+    w.t.done();
   });
   it("gives no time when the app has kept no history, or none that can be read", async () => {
     const none = guideWorld();

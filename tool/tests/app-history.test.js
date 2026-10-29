@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, plainTurns, turnsOf } from "../hyperframes.js";
-import { CANNOT_LIST, MOST_TURNS, daysOf, historyTail, noVersions, nothingYet, turnTime, versionsOf, whatHappened } from "../app-history.js";
+import { CANNOT_LIST, MOST_TURNS, daysOf, historyTail, noVersions, nothingYet, toldTurns, turnTime, versionsOf, whatHappened } from "../app-history.js";
 import { episodeWork } from "../settings.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
@@ -195,6 +195,29 @@ describe("the time of a turn, for the guide (plan PR 10)", () => {
       assert.equal(turnTime(Date.parse(turn.at), { tz: NEW_YORK, now: NEXT_DAY }), `yesterday at ${/^(\d+:\d\d [ap]m):/.exec(line)[1]}`);
     }
     assert.doesNotMatch(told("2026-10-20T19:41:08.000Z"), PLAIN);
+  });
+});
+
+describe("the turns what-happened tells, which the guide's time is the newest of (plan PR 10, review M4)", () => {
+  const all = [...turnsOf(fixture("app-history.jsonl")), { at: "2026-10-27T21:00:00.000Z", engine: "claude", asked: "", did: "", files: [] }];
+  it("are the turns plainTurns has a line for, newest first, a turn with nothing in it left out even when it is the newest", () => {
+    const told = toldTurns(all, { tz: NEW_YORK });
+    assert.deepEqual(told.map((t) => t.line), plainTurns(all, { tz: NEW_YORK }));
+    assert.deepEqual(told.map((t) => t.line), THREE);
+    assert.deepEqual(told.map((t) => t.ms), [Date.parse("2026-10-27T20:05:02.000Z"), Date.parse("2026-10-27T19:52:30.000Z"), Date.parse("2026-10-27T19:41:08.000Z")]);
+  });
+  it("stop at the newest `most` of them, looking at as few as it takes", () => {
+    assert.deepEqual(toldTurns(all, { tz: NEW_YORK }, 1), [{ ms: Date.parse("2026-10-27T20:05:02.000Z"), index: 2, line: THREE[0] }]);
+    assert.equal(toldTurns(all, { tz: NEW_YORK }, 2).length, 2);
+    assert.deepEqual(toldTurns(all, { tz: NEW_YORK }, 0), []);
+    assert.deepEqual(toldTurns([], { tz: NEW_YORK }), []);
+    // A zone that is not one is no zone for a time to be told in, as plainTurns has it, but it is not looked at when there is no turn to tell.
+    assert.throws(() => toldTurns(all, { tz: "Not/AZone" }), RangeError);
+    assert.deepEqual(toldTurns([], { tz: "Not/AZone" }), []);
+  });
+  it("put, for one time, the later line first", () => {
+    const twice = [{ at: "2026-10-27T19:41:08.000Z", asked: "first" }, { at: "2026-10-27T19:41:08.000Z", asked: "second" }];
+    assert.deepEqual(toldTurns(twice, { tz: NEW_YORK }).map((t) => [t.index, t.line]), [[1, "3:41 pm: you asked second"], [0, "3:41 pm: you asked first"]]);
   });
 });
 
