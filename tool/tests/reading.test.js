@@ -421,6 +421,23 @@ describe("read, a raw video", () => {
   });
 });
 
+// A reading is written by the code that runs it, so its record names the checkout this code is in (filing.js thisCheckout), not the
+// one this Mac's settings name: those may be another brimm-video's. A finished or a raw video's reading puts the record in with its
+// files (unedited.js intoEpisode), where an iPhone clip's, above, writes the record alone. No commit is given, as none is on a Mac.
+describe("read, the commit its record names as the one that wrote it", () => {
+  for (const kind of ["finished", "raw"]) {
+    it(`is the checkout this code is in, for a ${kind} video, with the settings naming a folder that is no checkout`, async () => {
+      const { t, found } = reading(kind);
+      t.ctx.deps.commit = undefined;
+      writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+      const r = await on(t.ctx.deps, ...readArgs(kind));
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
+      t.done();
+    });
+  }
+});
+
 describe("read refuses, asking Claude nothing and writing nothing", () => {
   /** What a refusal leaves: nothing asked, the record as it was, and a result in `words`. */
   const refused = async (t, found, argv, words, deps = t.ctx.deps) => {

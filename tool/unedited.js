@@ -60,7 +60,7 @@ import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, re
 import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, readSeen, seenKey } from "./filing.js";
+import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, ofTheSwitch } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
@@ -1582,7 +1582,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   try {
     const why = notAsWas(found, before.record.rev);
     if (why) throw new Error(why);
-    const writer = { commit: deps.commit || (deps.settings ? commitOf(deps.settings.checkout) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" };
+    const writer = { commit: deps.commit || (deps.settings ? commitOf(thisCheckout()) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" };
     const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
     writeEpisode(folder, change({ ...found.record, files: { ...found.record.files, ...sizes } }), { expectRev: before.record.rev, writeText: (to, text) => entries.push(write(to, text)), writer, home });
   } catch (e) {
