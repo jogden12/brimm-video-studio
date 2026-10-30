@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { startDetached, runDetached, resultFile, readResult, runningCommand, lockOf } from "../detached.js";
 
 const FOLDER = "2026-10-13 Talk (Mac Studio)";
+/** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
+const EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
 
 function setup() {
   const home = mkdtempSync(join(tmpdir(), "brimm-detached-"));
@@ -106,10 +108,13 @@ describe("a command run detached", () => {
     assert.deepEqual(readdirSync(join(t.home, "BRIMM Video Work", FOLDER)), ["bring.result.json"]);
     t.done();
   });
-  it("is started detached, with this checkout's edit.js, and returns at once", () => {
+  it("is started detached, with the edit.js of the checkout this code is in, not the checkout the settings name, and returns at once", () => {
     const started = [];
-    startDetached({ settings: { checkout: "/checkout" }, start: (cmd, args) => started.push([cmd, ...args]) }, { command: "bring", folder: FOLDER, args: ["--quiet"] });
-    assert.deepEqual(started, [[process.execPath, "/checkout/tool/edit.js", "bring", "--now", FOLDER, "--quiet"]]);
+    // The settings name another checkout, as on a Mac whose installer was brimm-video's: the run is the second half of a command,
+    // so it is the code of the first half.
+    startDetached({ settings: { checkout: "/elsewhere/BRIMM video" }, start: (cmd, args) => started.push([cmd, ...args]) }, { command: "bring", folder: FOLDER, args: ["--quiet"] });
+    assert.deepEqual(started, [[process.execPath, EDIT_JS, "bring", "--now", FOLDER, "--quiet"]]);
+    assert.ok(existsSync(EDIT_JS), "the program it starts is a file that is there");
   });
   it("has no result before it has run, and no running command without a lock", () => {
     const t = setup();

@@ -29,6 +29,7 @@ import { sessionLabel } from "../kinds.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 import { rawProbe } from "./phase4.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -285,6 +286,15 @@ describe("read, an iPhone clip", () => {
     assert.deepEqual(notices, [NOTICE]);
     t.done();
   });
+  it("writes its record as the checkout this code is in, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
+    const { t, found } = reading("short video");
+    t.ctx.deps.commit = undefined;
+    writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+    const r = await on(t.ctx.deps, ...readArgs("short video"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
+    t.done();
+  });
   it("has no Reels, which the list of Reels says as drop and push say it, naming no file", async () => {
     const { t, found } = reading("short video");
     for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "1"], ["push", FOLDER, "reel", "1"]]) {
@@ -409,6 +419,23 @@ describe("read, a raw video", () => {
     assert.match(readResult(t.home, FOLDER, "read").failed[0], /^Pricing talk is no longer answered as raw with retakes, so Claude did not read it\./);
     t.done();
   });
+});
+
+// A reading is written by the code that runs it, so its record names the checkout this code is in (filing.js thisCheckout), not the
+// one this Mac's settings name: those may be another brimm-video's. A finished or a raw video's reading puts the record in with its
+// files (unedited.js intoEpisode), where an iPhone clip's, above, writes the record alone. No commit is given, as none is on a Mac.
+describe("read, the commit its record names as the one that wrote it", () => {
+  for (const kind of ["finished", "raw"]) {
+    it(`is the checkout this code is in, for a ${kind} video, with the settings naming a folder that is no checkout`, { skip: WITHOUT_COMMIT }, async () => {
+      const { t, found } = reading(kind);
+      t.ctx.deps.commit = undefined;
+      writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+      const r = await on(t.ctx.deps, ...readArgs(kind));
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
+      t.done();
+    });
+  }
 });
 
 describe("read refuses, asking Claude nothing and writing nothing", () => {

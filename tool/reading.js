@@ -27,7 +27,7 @@ import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
 import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
-import { commitOf } from "./filing.js";
+import { commitOf, thisCheckout } from "./filing.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { timelineFor } from "./timeline.js";
@@ -524,7 +524,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   // it, on the record the call was made from.
   if (!madeAt.length) {
     try {
-      const writer = { commit: deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+      const writer = { commit: deps.commit || commitOf(thisCheckout()), on: ctx.machine };
       const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
       writeEpisode(folder, change(record), { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home });
     } catch (e) {

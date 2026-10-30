@@ -20,6 +20,8 @@ import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
 import { episode } from "./phase4.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
+/** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
+const OWN_EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
 
@@ -780,6 +782,16 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
     // Claimed, as the plan orders it (the claim, then the copy), and no project is recorded or opened.
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
+    t.done();
+  });
+  it("asks for the working copy with the edit.js of the checkout this code is in, though this Mac's settings name another checkout", async () => {
+    const { t } = world({ copy: false });
+    // As on a Mac whose settings brimm-video's installer wrote: they name brimm-video's checkout, whose edit.js has no `workcopy`.
+    writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.equal(r.code, 0, r.text);
+    // Most of these tests look at args.slice(1); the program asked for is args[0].
+    assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args[0], ...args.slice(1)]), [[process.execPath, OWN_EDIT_JS, "workcopy", "--now", FOLDER]]);
     t.done();
   });
   it("opens the project from the working copy the run it asked for made, and asks for none again: the copy's key is the one app looks for", async () => {

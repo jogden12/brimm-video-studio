@@ -32,7 +32,7 @@ import { downloadsFolder, episodeWork, episodesFolder, runsFolder } from "./sett
 import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
 import { cantOpen, revealed } from "./reveal.js";
-import { commitOf } from "./filing.js";
+import { commitOf, thisCheckout } from "./filing.js";
 import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
 import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
@@ -647,7 +647,7 @@ export function letGoClaim(ctx, found) {
   const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
   const work = join(runsFolder(ctx.home), `let-go-${process.pid}-${Date.now()}`);
   try {
-    writeEpisode(found.folder, { ...now.record, editing: null }, { expectRev: asked.rev, writeText: textWriter({ work, ...opts }), writer: { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine }, home: ctx.home });
+    writeEpisode(found.folder, { ...now.record, editing: null }, { expectRev: asked.rev, writeText: textWriter({ work, ...opts }), writer: { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine }, home: ctx.home });
     return "The episode is let go again, as it was before the finish.";
   } catch (e) {
     // A record written since (one not whole yet, say: the other Mac's take-over on its way) is not this Mac's claim to keep
@@ -670,7 +670,7 @@ export async function finishNow(ctx, found, deps = {}) {
   const tools = ctx.deps.tools || findPrograms();
   const my = { run: ctx.deps.run || runProgram, tools, model: tools.model, wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole, readAll: ctx.deps.readAll || readThrough };
   const opts = { ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) };
-  const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+  const writer = { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine };
   // The run's own folder is on the same disk as Dropbox, so what is made in it can be cloned in.
   // Named for this process, so a run that dies leaves nothing clearRuns keeps.
   const work = join(runsFolder(ctx.home), `finish-${process.pid}-${Date.now()}`);
@@ -1364,7 +1364,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   const seconds = record.video.seconds;
   const dropped = (record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n);
   const { list, left } = reels ? suggestionsFrom({ candidates: reels.reels.candidates, dropped, seconds, spellings }) : { list: [], left: [] };
-  const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+  const writer = { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine };
   const at = localStamp(new Date(ctx.now()));
   const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, main: { file: record.video.file, seconds, srt }, onPicture: onPictureOf(record), suggestions: list, reels: onFile && Array.isArray(onFile.reels) ? onFile.reels.map((r) => (reelsNow.done.has(r.n) && reelsNow.done.get(r.n).srt !== null ? { ...r, srt: reelsNow.done.get(r.n).srt } : r)) : [] });
   const fault = handoffFaultV2(handoff);
@@ -1532,7 +1532,7 @@ export async function finishSession(ctx, found, { host } = {}) {
   if (hers.length) return { why: hers.join("\n") };
   const target = handoffTarget(ctx, { folder, record });
   if (target.refusal) return { why: target.refusal };
-  const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+  const writer = { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine };
   const at = localStamp(new Date(ctx.now()));
   const handoff = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writer.commit, reels: [], session: approved.session });
   const fault = handoffFaultV2(handoff);

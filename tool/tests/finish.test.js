@@ -8,18 +8,19 @@ import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rename
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, finishFinished, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, numbersTakenWords, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
+import { finishNow, finishFinished, letGoClaim, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, numbersTakenWords, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
 import { handoffFault } from "../handoff.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { recordFile, recordText, acceptRev } from "../episode.js";
 import { clearRuns } from "../filing.js";
 import { noProgress } from "../progress.js";
-import { runsFolder, writeSettings } from "../settings.js";
+import { episodeWork, runsFolder, writeSettings } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { fromFinalCutFolder } from "../settings.js";
 import { tidyTranscript } from "../shared/transcript.js";
 import { setup, episodeFor, episodeAs, reread, listAll, EDITED, NAME, NOT_YET, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 /** What final/ holds after the made-up edit is finished. */
@@ -573,6 +574,35 @@ describe("finish, the detached part", () => {
     assert.ok(!existsSync(join(found.folder, "final")));
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], "the hand-off is not shown when the record was not written");
     assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, "From Final Cut keeps every file");
+    t.done();
+  });
+});
+
+// A finish is written by the code that runs it, so its records and its hand-off name the checkout this code is in (filing.js
+// thisCheckout), not the one this Mac's settings name: those may be another brimm-video's. No commit is given, as none is on a Mac.
+describe("which brimm-video a finish names as the one that wrote", () => {
+  /** No commit is given, and the settings name a folder that is no checkout. */
+  const elsewhere = (t) => {
+    t.ctx.deps.commit = undefined;
+    t.ctx.settings = { ...t.ctx.settings, checkout: "/elsewhere/BRIMM video" };
+  };
+  it("is the checkout this code is in, for the record and the hand-off that finishNow writes", { skip: WITHOUT_COMMIT }, async () => {
+    const t = setup();
+    const found = await asked(t);
+    elsewhere(t);
+    const result = await finishNow(t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([reread(found).writer, handoffIn(found).madeBy], [{ commit: OWN_COMMIT, on: "Mac Studio" }, `brimm-video ${OWN_COMMIT}`]);
+    t.done();
+  });
+  it("is the checkout this code is in, for the record that lets a finish's claim go", { skip: WITHOUT_COMMIT }, () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { editing: { by: "Mac Studio", since: "2026-10-20T14:59:00-05:00" } } });
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), JSON.stringify({ version: 1, at: "2026-10-20T15:00:00-05:00", rev: 1, claimed: true, parts: [] }));
+    elsewhere(t);
+    assert.equal(letGoClaim(t.ctx, { folder: found.folder, name: found.name }), "The episode is let go again, as it was before the finish.");
+    assert.deepEqual([reread(found).editing, reread(found).writer], [null, { commit: OWN_COMMIT, on: "Mac Studio" }]);
     t.done();
   });
 });
@@ -2294,6 +2324,18 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.deepEqual(record.finished.parts.main.spellings, [["Sallie", "Sally"]]);
     assert.deepEqual(Object.keys(record.files).filter((rel) => rel.startsWith("final/")).sort(), ["final/Talk.brimm-ops.json", "final/Talk.srt", "final/Talk.transcript.txt"]);
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", "Talk.brimm-ops.json")] }]);
+    t.done();
+  });
+  it("names the checkout this code is in as the one that wrote the record and made the hand-off, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
+    const t = setup();
+    handoffVersion(t, 2);
+    t.ctx.deps.commit = undefined;
+    t.ctx.settings = { ...t.ctx.settings, checkout: "/elsewhere/BRIMM video" };
+    const found = video(t);
+    const done = await finishFinished(t.ctx, found, { record: found.record });
+    assert.equal(done.ok, true, done.why);
+    const handoff = JSON.parse(readFileSync(join(found.folder, "final", "Talk.brimm-ops.json"), "utf8"));
+    assert.deepEqual([handoff.madeBy, reread(found).writer], [`brimm-video ${OWN_COMMIT}`, { commit: OWN_COMMIT, on: "Mac Studio" }]);
     t.done();
   });
   it("writes the record it is found with when it is given no other: finishFinished(ctx, found)", async () => {

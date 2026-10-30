@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { factsOf, streamsOf, colourOf, encodeArgs } from "../cuts.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { clearRuns } from "../filing.js";
@@ -1201,8 +1202,11 @@ describe("the words of the job", () => {
 
 describe("asking for the working copy", () => {
   const FOLDER = "2026-10-27 Pricing talk";
+  /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. The settings
+      of these tests name another checkout, "/checkout", which the run is never started from. */
+  const OWN_EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
   /** What edit.js gives a command: this Mac's home folder, how a run is known to be alive, how a program is started detached, and
-      the checkout the programs are run from. `alive` says which processes are running. */
+      the checkout the settings name. `alive` says which processes are running. */
   const asking = (c, alive = () => false) => {
     const home = mkdtempSync(join(tmpdir(), "brimm-workcopy-ask-"));
     c.after(() => rmSync(home, { recursive: true, force: true }));
@@ -1223,7 +1227,7 @@ describe("asking for the working copy", () => {
   it("starts the detached run of the episode when none is at work on it, and returns at once", (c) => {
     const { ctx, started } = asking(c);
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: true, running: "" });
-    assert.deepEqual(started, [[process.execPath, ["/checkout/tool/edit.js", "workcopy", "--now", FOLDER]]]);
+    assert.deepEqual(started, [[process.execPath, [OWN_EDIT_JS, "workcopy", "--now", FOLDER]]]);
   });
   it("starts none for a second request while the first one runs", (c) => {
     const { ctx, home, started } = asking(c, (pid) => pid === process.pid);
@@ -1257,13 +1261,13 @@ describe("asking for the working copy", () => {
   it("passes the 4K switch on to the run", (c) => {
     const { ctx, started } = asking(c);
     requestWorkCopy(ctx, { folder: FOLDER, fourK: true });
-    assert.deepEqual(started[0][1], ["/checkout/tool/edit.js", "workcopy", "--now", FOLDER, "--4k"]);
+    assert.deepEqual(started[0][1], [OWN_EDIT_JS, "workcopy", "--now", FOLDER, "--4k"]);
   });
   it("asks for a Reel's video with its number (plan PR 5), and a Reel's is never of 4K", (c) => {
     const { ctx, started } = asking(c);
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER, reel: 2 }), { started: true, running: "" });
     requestWorkCopy(ctx, { folder: FOLDER, reel: 12, fourK: true });
-    assert.deepEqual(started.map(([, args]) => args), [["/checkout/tool/edit.js", "workcopy", "--now", FOLDER, "--reel", "2"], ["/checkout/tool/edit.js", "workcopy", "--now", FOLDER, "--reel", "12"]]);
+    assert.deepEqual(started.map(([, args]) => args), [[OWN_EDIT_JS, "workcopy", "--now", FOLDER, "--reel", "2"], [OWN_EDIT_JS, "workcopy", "--now", FOLDER, "--reel", "12"]]);
   });
   it("starts none for a Reel's video while a copy is made, and none for the video while a Reel's is: they share the lock, one copy at a time", (c) => {
     const { ctx, home, started } = asking(c, (pid) => pid === process.pid);

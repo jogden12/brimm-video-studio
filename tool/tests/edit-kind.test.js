@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
 import { askBlocked, clockAt } from "../unedited.js";
 import { claimed, layoutOf, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
@@ -22,6 +23,10 @@ import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
 import { notSessionCardOf } from "../receipts.js";
 import { setup, episodeFor, listAll, reread, otherMac, FOLDER, ID, NAME } from "./episodes.js";
+
+/** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. The settings
+    of these tests name another checkout, "/checkout", which a detached run is never started from. */
+const OWN_EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -501,7 +506,7 @@ describe("kind: the reading", () => {
       assert.equal(r.code, 0, `${word}: ${r.text}`);
       const copy = word === "finished" ? [] : [[process.execPath, COPY_ARGS]];
       assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args.slice(1)]), [[process.execPath, readArgs(word === "clip" ? "short video" : word, 3)], ...copy], word);
-      for (const [, args] of t.started) assert.equal(args[0], "/checkout/tool/edit.js");
+      for (const [, args] of t.started) assert.equal(args[0], OWN_EDIT_JS);
       t.done();
     }
   });
@@ -665,7 +670,7 @@ describe("kind: the working copy (plan PR 4)", () => {
       assert.equal(r.code, 0, `${word}: ${r.text}`);
       assert.deepEqual(startedBy(t), [readArgs(kept, 3), COPY_ARGS], word);
       // Both are this checkout's edit.js, started detached on the episode's folder; the copy is asked for no 4K.
-      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args[0]]), [[process.execPath, "/checkout/tool/edit.js"], [process.execPath, "/checkout/tool/edit.js"]], word);
+      assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args[0]]), [[process.execPath, OWN_EDIT_JS], [process.execPath, OWN_EDIT_JS]], word);
       // `kind` only asks: it takes no lock for the copy, writes nothing for it, and the record is the answer's alone.
       assert.deepEqual([existsSync(workCopyLockOf(t.home, FOLDER)), reread(found).rev, readdirSync(join(found.folder, "record"))], [false, 3, ["0001.json", "0002.json", "0003.json"]], word);
       t.done();
