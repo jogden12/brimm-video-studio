@@ -13,8 +13,10 @@
 // A placement is a `<video>` or an `<audio>` whose `src` is the recording, in index.html's own markup, with a start that is a number and a
 // duration above 0. Nested compositions are not read: a composition a host names (`data-composition-src`) is a file of its own, on a clock
 // of its own, and an inline one (a second `data-composition-id` around the recording) starts at a time that the recording's start is
-// relative to; a recording inside either is not a placement. A page that does not place the recording so is one that cannot be read, and
-// `show` prints the recording's own transcript for it, as it did before.
+// relative to; a recording inside either cannot be read as a placement. A page that does not place the recording so is one that cannot be
+// read, and so is a page with even one element of the recording that cannot be: where the rest of it is on the timeline is then not known,
+// and the elements that can be read would tell only part of it. `show` prints the recording's own transcript for such a page, as it did
+// before.
 //
 // Pure over the page's text and the captions, but for `recordingPlacementsIn`, which reads index.html as the project's other files are read
 // (on-screen.js projectReader: a regular file of at most 2 MB, never through a link) and only reads.
@@ -60,27 +62,31 @@ const isRecording = (src) => typeof src === "string" && posix.normalize(src.trim
 
 /** Where the page `html` (an index.html) puts the recording on its timeline: a list of { start, duration, mediaStart, rate }, in the
     order the page has them. None for a page that is not text, has more elements than a page is read for, or places the recording
-    nowhere that can be read (see the top of this file). */
+    nowhere that can be read (see the top of this file). None as well when any `<video>` or `<audio>` of the recording cannot be read as
+    a placement (a start by another clip's name, a duration that is no time, or an element in a composition of its own): the page then
+    shows the recording somewhere that is not known, and the placements that can be read would tell only part of it. */
 export function recordingPlacements(html) {
   if (typeof html !== "string") return [];
   const tree = htmlTree(html);
   if (tree === null) return [];
   const found = [];
+  let unreadable = false;
   /** `compositions` is how many compositions the element is inside: the main one is one, and the recording is read inside no more. */
   const walk = (node, compositions) => {
     if (node.text !== undefined) return;
     const { tag, attrs } = node;
-    // A host's file has a clock of its own, and nothing inside a host in the page is on the timeline.
-    if (attrs["data-composition-src"] !== undefined) return;
-    if ((tag === "video" || tag === "audio") && compositions <= 1 && isRecording(attrs.src)) {
-      const placed = placementOf(attrs);
+    if ((tag === "video" || tag === "audio") && isRecording(attrs.src)) {
+      const placed = compositions <= 1 ? placementOf(attrs) : null;
       if (placed) found.push(placed);
+      else unreadable = true;
     }
-    const inside = compositions + (attrs["data-composition-id"] !== undefined ? 1 : 0);
+    // A host's file has a clock of its own, and so has a composition inside the page: what is in either is not on the timeline's.
+    const host = attrs["data-composition-src"] !== undefined;
+    const inside = host ? Math.max(compositions + 1, 2) : compositions + (attrs["data-composition-id"] !== undefined ? 1 : 0);
     for (const kid of node.kids) walk(kid, inside);
   };
   walk(tree, 0);
-  return found;
+  return unreadable ? [] : found;
 }
 
 /** The captions (captionsOf's, each { start, end, text } in seconds of the recording) at their times on the timeline `placements`
@@ -109,9 +115,12 @@ export function captionsOnTimeline(captions, placements) {
 }
 
 /** The recording's captions `srt` at their times on the timeline `placements` put it on, as the transcript tool stamps a transcript
-    (lib.js stampedText: one "[m:ss] words" line to a caption, the text ending in a new line), or "" when no caption is on the timeline. */
+    (lib.js stampedText: one "[m:ss] words" line to a caption, the text ending in a new line), "" when the file has captions and none is on
+    the timeline, and null when it holds no captions at all (empty, or not captions): that says nothing of the timeline. */
 export function timelineTranscript(srt, placements) {
-  const lines = captionsOnTimeline(captionsOf(srt), placements);
+  const captions = captionsOf(srt);
+  if (!captions.length) return null;
+  const lines = captionsOnTimeline(captions, placements);
   return stampedText(lines.map((line, i) => `${i + 1}\n${captionTime(line.start)} --> ${captionTime(line.end)}\n${line.text}\n`).join("\n"));
 }
 

@@ -68,15 +68,38 @@ describe("recordingPlacements: where the page puts the recording on its timeline
     assert.deepEqual(placements(video('data-duration="9"')), [{ start: 0, duration: 9, mediaStart: 0, rate: 1 }]);
     assert.deepEqual(placements(video('data-start="" data-duration="9"')), [{ start: 0, duration: 9, mediaStart: 0, rate: 1 }]);
   });
-  it("passes over a placement whose numbers cannot be a place on the timeline", () => {
+  it("finds none for a recording element whose numbers cannot be a place on the timeline", () => {
     const odd = [
       'data-start="intro" data-duration="9"', 'data-start="intro + 2" data-duration="9"', 'data-start="-1" data-duration="9"', 'data-start="0"', 'data-start="0" data-duration=""',
       'data-start="0" data-duration="0"', 'data-start="0" data-duration="-3"', 'data-start="0" data-duration="long"', 'data-start="0" data-duration="Infinity"',
       'data-start="0" data-duration="9" data-playback-start="-2"', 'data-start="0" data-duration="9" data-playback-rate="0"', 'data-start="0" data-duration="9" data-playback-rate="-1"'
     ];
     for (const attrs of odd) assert.deepEqual(placements(video(attrs)), [], attrs);
-    // ... and keeps the one that is fine beside them.
-    assert.deepEqual(placements(video('data-start="intro" data-duration="9"') + video('data-start="2" data-duration="9"')), [{ start: 2, duration: 9, mediaStart: 0, rate: 1 }]);
+  });
+  it("finds none at all when any element of the recording cannot be read as a placement, since where the rest of it is not known", () => {
+    // A start by another clip's name is legal in HyperFrames (the second is 4.5 s on from the first's end, say), and not a time here.
+    const first = video('data-start="0" data-duration="4.5"');
+    const byName = video('data-start="title" data-duration="10" data-media-start="4.5"');
+    const fine = video('data-start="2" data-duration="9"');
+    assert.deepEqual(placements(first), [{ start: 0, duration: 4.5, mediaStart: 0, rate: 1 }]);
+    assert.deepEqual(placements(first + byName), []);
+    assert.deepEqual(placements(byName + first), []);
+    assert.deepEqual(placements(first + byName + fine), []);
+    assert.deepEqual(placements(first + video('data-start="0" data-duration="9" data-playback-rate="0"')), []);
+    assert.deepEqual(placements(first + video('data-duration="0"', "audio")), []);
+  });
+  it("finds none at all when the recording is also in a composition nested inside the main one or inside a host, beside one that can be read", () => {
+    const fine = video('data-start="2" data-duration="9"');
+    const inline = `<div id="inner" data-composition-id="inner" data-start="20" data-duration="10">${video('data-start="1" data-duration="9"')}</div>`;
+    const host = `<div id="h" data-composition-id="h" data-composition-src="compositions/h.html" data-start="5" data-duration="9">${video('data-start="1" data-duration="9"')}</div>`;
+    const bareHost = `<div id="h" data-composition-src="compositions/h.html" data-start="5" data-duration="9">${video('data-start="1" data-duration="9"')}</div>`;
+    assert.deepEqual(placements(fine + inline), []);
+    assert.deepEqual(placements(fine + host), []);
+    assert.deepEqual(placements(fine + bareHost), []);
+    // A page with no main composition around the recording, and a host holding it: still not the timeline's.
+    assert.deepEqual(recordingPlacements(`<div data-composition-src="compositions/h.html">${video('data-start="1" data-duration="9"')}</div>${video('data-start="2" data-duration="9"')}`), []);
+    // Another file's elements are not the recording's, whatever they sit in.
+    assert.deepEqual(placements(fine + `<div data-composition-src="compositions/h.html"><video src="media/broll.mp4" data-start="1" data-duration="9"></video></div>`), [{ start: 2, duration: 9, mediaStart: 0, rate: 1 }]);
   });
   it("reads the placements anywhere in index.html's own markup, but not in a composition nested inside the main one or one a host names", () => {
     const wrapped = `<div class="layer">${video('data-start="1" data-duration="9"')}</div>`;
@@ -173,10 +196,13 @@ describe("timelineTranscript: the stamped text of those captions", () => {
     assert.equal(text, "[59:59] Hello.\n");
     assert.equal(timelineTranscript("1\n00:00:00,000 --> 00:00:02,000\n Hello.\n\n", [{ start: 3600, duration: 20, mediaStart: 0, rate: 1 }]), "[1:00:00] Hello.\n");
   });
-  it("is empty when no caption is on the timeline", () => {
+  it("is empty when the file has captions and none is on the timeline", () => {
     assert.equal(timelineTranscript(SRT, [{ start: 0, duration: 2, mediaStart: 100, rate: 1 }]), "");
-    assert.equal(timelineTranscript("", [{ start: 0, duration: 2, mediaStart: 0, rate: 1 }]), "");
-    assert.equal(timelineTranscript("not captions", [{ start: 0, duration: 2, mediaStart: 0, rate: 1 }]), "");
+  });
+  it("is null, which is no answer, when the file holds no captions: empty, or not captions", () => {
+    for (const given of ["", "\n\n", "not captions", "1\nsoon --> later\nWords\n\n", undefined, null]) {
+      assert.equal(timelineTranscript(given, [{ start: 0, duration: 2, mediaStart: 0, rate: 1 }]), null, JSON.stringify(given));
+    }
   });
 });
 

@@ -126,7 +126,14 @@ describe("show transcript, with a main HyperFrames project in use: the recording
       ["the recording has a duration of 0", { index: page(recording('data-start="3" data-duration="0"')) }],
       ["the recording starts after another clip, by a name, not a number", { index: page(recording('data-start="title" data-duration="23.423"')) }],
       ["another file is on the timeline, and not the recording", { index: page('<video src="media/broll.mp4" data-start="3" data-duration="9"></video>') }],
-      ["there are no captions of the recording", { index: page(recording('data-start="3" data-duration="23.423"')), srt: null }]
+      ["there are no captions of the recording", { index: page(recording('data-start="3" data-duration="23.423"')), srt: null }],
+      // A caption file that holds no captions says nothing of the timeline: it is not that no caption is on it.
+      ["the captions file is empty", { index: page(recording('data-start="3" data-duration="30"')), srt: "" }],
+      ["the captions file is not captions", { index: page(recording('data-start="3" data-duration="30"')), srt: "this is not a caption file\n" }],
+      ["the captions file has no caption in the shape of one", { index: page(recording('data-start="3" data-duration="30"')), srt: "1\nsoon --> later\nWords\n\n" }],
+      // Where the rest of the recording is, is not known when one of its elements cannot be read: only the first would be told.
+      ["one element of the recording starts by another clip's name, beside one that can be read", { index: page(recording('data-start="0" data-duration="4.5"') + recording('data-start="title" data-duration="10" data-media-start="4.5"')) }],
+      ["the recording is also in a composition inside the main one, beside one that can be read", { index: page(recording('data-start="3" data-duration="30"') + `<div id="inner" data-composition-id="inner" data-start="20" data-duration="10">${recording('data-start="1" data-duration="9"')}</div>`) }]
     ];
     for (const [what, made] of cases) {
       it(`when ${what}`, async () => {

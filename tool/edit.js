@@ -2834,8 +2834,9 @@ const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-no
     with the times of the project's timeline (plan PR 7, item 5). Those are the recording's captions where the project's index.html
     puts the recording, which is not the start when the app's agent has moved it for a title card (on-timeline.js); when the page, the
     recording in it or the captions cannot be read, the recording's own transcript is printed as it is, with its own times. A finished
-    video's, a clip's with no main project and one from before the switch is the video's own. Of a video not yet answered, or a session whose mark is not
-    cleared, it prints nothing into her chat (printWhy): it opens a read-only copy of the file on this Mac, in TextEdit (showCopy). */
+    video's, a clip's with no main project and one from before the switch is the video's own. Of a video not yet answered, or a
+    session whose mark is not cleared, it prints nothing into her chat (printWhy): it opens a read-only copy of the file on this Mac,
+    in TextEdit (showCopy). */
 async function show(ctx, rest) {
   const words = rest.slice();
   const kind = words.pop();
