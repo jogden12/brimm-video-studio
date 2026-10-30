@@ -7,7 +7,8 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { episodeWork } from "./settings.js";
 import { caffeinate } from "./filing.js";
 import { isRunning } from "./run.js";
@@ -238,9 +239,14 @@ export function spawnDetached(cmd, args, { log = join(process.env.HOME || homedi
   if (typeof out === "number") closeSync(out);
 }
 
-/** Start an edit.js command detached, on the episode `folder`, with this checkout's edit.js, and return at once: the run is
-    `node edit.js <command> --now <folder> <args…>`, which runs its work with runDetached. `ctx.start` is how a program is
+/** Start an edit.js command detached, on the episode `folder`, and return at once: the run is
+    `node edit.js <command> --now <folder> <args…>`, which runs its work with runDetached. The run is the second half of the
+    command that starts it, so it is the same code as the first half: the edit.js of the checkout this code is in (the folder
+    above tool/), and never the one this Mac's settings name. The settings' checkout is where this Mac's launch agent and her
+    folder's commands run from, and when they run it, it is this code. But a Mac that brimm-video set up names brimm-video's
+    checkout, whose edit.js has no `workcopy`: it prints its help in the log and does nothing. `ctx.start` is how a program is
     started detached (spawnDetached, unless a test gives another). */
 export function startDetached(ctx, { command, folder, args = [] }) {
-  ctx.start(process.execPath, [join(ctx.settings.checkout, "tool", "edit.js"), command, "--now", folder, ...args]);
+  const checkout = dirname(dirname(fileURLToPath(import.meta.url)));
+  ctx.start(process.execPath, [join(checkout, "tool", "edit.js"), command, "--now", folder, ...args]);
 }

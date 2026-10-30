@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.js";
 import { RECORD_VERSION, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
@@ -14,6 +15,9 @@ import { writeSettings, libraryFor } from "../settings.js";
 import { writePending } from "../filing.js";
 
 const NOW = Date.parse("2026-10-14T12:00:00");
+/** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. The settings
+    of these tests name another checkout, "/checkout", which a detached run is never started from. */
+const OWN_EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
 /** The attributes of every tag of one name in a Final Cut file, in the order they come, as the file writes them. */
 const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}((?: [\\w-]+="[^"]*")*)/?>`, "g"))]
   .map((m) => Object.fromEntries([...m[1].matchAll(/ ([\w-]+)="([^"]*)"/g)].map((a) => [a[1], a[2]])));
@@ -289,7 +293,7 @@ describe("node edit.js open", () => {
     const r = await t.run("open", "talk");
     assert.equal(r.code, 0);
     assert.deepEqual(r.said, ['Dropbox is bringing 1 file of Talk over to this Mac. Say "open Talk" again when it is done; "how far is it?" shows how far it has got.']);
-    assert.deepEqual(t.started, [[process.execPath, "/checkout/tool/edit.js", "bring", "--now", "2026-10-13 Talk (Mac Studio)"]]);
+    assert.deepEqual(t.started, [[process.execPath, OWN_EDIT_JS, "bring", "--now", "2026-10-13 Talk (Mac Studio)"]]);
     t.done();
   });
   it("says at the first open on this Mac how to keep the episode offline, and not after", async () => {

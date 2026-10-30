@@ -441,7 +441,7 @@ export const workCopyLockOf = (home, folder) => join(episodeWork(home, folder), 
     (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `reel` is the number of a Reel, whose stretch of the
     recording the run makes the copy of instead (`--reel <n>`; plan PR 5): a Reel's copy is never of 4K, and it has the same lock, so
     one copy of an episode is made at a time, a Reel's or the video's. `ctx` is what edit.js gives its commands: {
-    home, alive, start, settings }. */
+    home, alive, start }. The run is this checkout's edit.js, whatever checkout the settings name (startDetached). */
 export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0 }) {
   const running = runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder));
   if (running) return { started: false, running };
