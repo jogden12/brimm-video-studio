@@ -55,7 +55,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { heldBy, commitOf, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
@@ -1528,7 +1528,7 @@ export async function pushPart(ctx, found, { part, xml, told = [], noHandEdits =
     const next = part === "main"
       ? { ...record, main: { ...record.main, pushed: [...pushed, push] } }
       : { ...record, reels: record.reels.map((reel) => (reel === target ? { ...reel, pushed: [...pushed, push] } : reel)) };
-    const writer = { commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine };
+    const writer = { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine };
     try {
       // This Mac at work on the episode again: answers it gave about parts it pushed last count no more (the P1 check, T15).
       writeEpisode(found.folder, withoutOwnAnswers({ ...next, libraries: { ...record.libraries, [ctx.machine]: `${found.name}.fcpbundle` }, files: { ...record.files, [file]: entry.bytes } }, ctx.machine), { expectRev: record.rev, writeText: textWriter({ work, ...opts }), writer, home: ctx.home });
@@ -1979,8 +1979,9 @@ function flagsOf(rest, valued = []) {
   return { words, flags };
 }
 
-/** Who writes a record from this Mac: this checkout's commit, for information only, and the Mac. */
-const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(ctx.settings.checkout), on: ctx.machine });
+/** Who writes a record from this Mac: the commit of the checkout this code is in (thisCheckout, not the one the settings name),
+    for information only, and the Mac. */
+const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine });
 
 /** Write the episode's next record, `record`, and say `done`. When the other Mac wrote meanwhile, or Dropbox holds a conflicted
     copy, nothing is written and the person is told why. Resolves 0 when written, 1 when not. */

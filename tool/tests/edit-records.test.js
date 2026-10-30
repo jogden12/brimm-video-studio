@@ -8,6 +8,7 @@ import { nameEpisode, titleEpisode, pickReels, dropReels, editMain } from "../ed
 import { RECORD_VERSION, recordFile, recordText } from "../episode.js";
 import { writtenFile } from "../settings.js";
 import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
+import { OWN_COMMIT } from "./own-checkout.js";
 
 describe("name", () => {
   it("names the episode as it is given, and renames nothing", async () => {
@@ -46,6 +47,18 @@ describe("what every record command does first", () => {
     await nameEpisode(t.ctx, found, "Pricing");
     assert.ok(t.clones.some(([, to]) => to === recordFile(found.folder, found.record.rev + 1)));
     t.done();
+  });
+  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", async () => {
+    const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => pickReels(t.ctx, found, [1])];
+    for (const command of commands) {
+      const t = setup();
+      t.ctx.deps.commit = undefined;
+      t.ctx.settings = { ...t.ctx.settings, checkout: "/elsewhere/BRIMM video" };
+      const found = episodeFor(t, { record: { reels: EDITED.reels } });
+      assert.equal(await command(t, found), 0, t.said());
+      assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
+      t.done();
+    }
   });
   it("says what Dropbox took away, and writes nothing, when this Mac's last change was undone; once, as 1a's commands do", async () => {
     const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => pickReels(t.ctx, found, [1])];

@@ -29,6 +29,7 @@ import { sessionLabel } from "../kinds.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 import { rawProbe } from "./phase4.js";
+import { OWN_COMMIT } from "./own-checkout.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -283,6 +284,15 @@ describe("read, an iPhone clip", () => {
     assert.ok(!existsSync(join(found.folder, "Pricing talk.reel-suggestions.txt")));
     assert.deepEqual(record.reels, []);
     assert.deepEqual(notices, [NOTICE]);
+    t.done();
+  });
+  it("writes its record as the checkout this code is in, with no commit given and the settings naming a folder that is no checkout", async () => {
+    const { t, found } = reading("short video");
+    t.ctx.deps.commit = undefined;
+    writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+    const r = await on(t.ctx.deps, ...readArgs("short video"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
     t.done();
   });
   it("has no Reels, which the list of Reels says as drop and push say it, naming no file", async () => {

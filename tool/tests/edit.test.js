@@ -13,6 +13,7 @@ import { RECORD_VERSION, newEpisode, readEpisode, recordFile, recordText } from 
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
 import { writePending } from "../filing.js";
+import { OWN_COMMIT } from "./own-checkout.js";
 
 const NOW = Date.parse("2026-10-14T12:00:00");
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. The settings
@@ -366,6 +367,15 @@ describe("node edit.js push", () => {
     assert.match(r.main.pushed[0].asked, /^[0-9a-f]{12}$/);
     assert.equal(r.files["edit/main.v1.mac-studio.fcpxml"], statSync(join(path, "edit", "main.v1.mac-studio.fcpxml")).size);
     assert.deepEqual(r.libraries, { "Mac Studio": "2026-10-13 Talk (Mac Studio).fcpbundle" });
+    t.done();
+  });
+  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", async () => {
+    const t = setup();
+    imported(t);
+    writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
+    const r = await t.run("push", "talk");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(record(t).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
     t.done();
   });
   it("refuses a second push with no answer, and asks whether the timeline was changed in Final Cut", async () => {

@@ -8,6 +8,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
@@ -82,6 +83,12 @@ export function commitOf(checkout) {
   const commit = ran.status === 0 ? String(ran.stdout).trim() : "";
   return /^[0-9a-f]{7,}$/.test(commit) ? commit : "unknown";
 }
+
+/** The checkout this code is in: the folder above tool/, where this file is. It is the checkout at work, so it is the one a
+    detached run is started from (detached.js), and the one whose commit (commitOf) a record or a hand-off names as the brimm-video
+    that wrote it. The checkout this Mac's settings name is not: it is where its launch agent and her folder's commands run from,
+    and a Mac that brimm-video set up names brimm-video's. */
+export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** File a video that has been worked on into its episode, in Episodes under BRIMM Video. `file` is the raw video in the drop
     folder; `made` are the files made of it, each where it belongs, and `at(to)` where its whole copy is in the run's own
