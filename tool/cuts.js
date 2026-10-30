@@ -10,7 +10,7 @@ const list = (v) => (Array.isArray(v) ? v : []);
 const ms = (t) => Math.round(t * 1000) / 1000;
 const two = (n) => String(n).padStart(2, "0");
 /** A time in seconds as a caption file writes it: 00:01:07,250. */
-const captionTime = (t) => {
+export const captionTime = (t) => {
   const n = Math.max(0, Math.round(t * 1000));
   return `${two(Math.floor(n / 3600000))}:${two(Math.floor(n / 60000) % 60)}:${two(Math.floor(n / 1000) % 60)},${String(n % 1000).padStart(3, "0")}`;
 };

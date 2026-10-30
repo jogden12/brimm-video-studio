@@ -424,6 +424,41 @@ export const FILES_MOST = 5;
     other program's name is looked for. */
 const COMMAND_WORDS = /\b(?:npx|npm|node)\b|edit\.js|hyperframes\.mjs/i;
 
+/** A chip is a thing the person attached to a request in the app, its Storyboard ability, say. The app writes it into the request she
+    typed as U+E000, then the encodeURIComponent of a JSON object (`{"t":"ability","id":"storyboard","name":"Storyboard"}`), then U+E001
+    (Jason's by-hand check of 30 October: his fbb80c's first turn, said with %7B…%7D in it). The app's own label for such a turn has the
+    chip as `#Storyboard`, and that is how she reads it. */
+const CHIP = /([^]*)/g;
+/** The mark of a chip that has no other mark to go with it. */
+const CHIP_MARK = /[]/g;
+
+/** How the app labels a chip, `#<name>`, from the text between its two marks: the object's `name` when that is a text with something
+    in it, and "" for a chip that cannot be read (not a percent-encoding, not JSON, not an object, or no such name). */
+function chipName(coded) {
+  try {
+    const chip = JSON.parse(decodeURIComponent(coded));
+    const name = isObject(chip) && typeof chip.name === "string" ? chip.name.trim() : "";
+    return name === "" ? "" : `#${name}`;
+  } catch {
+    return "";
+  }
+}
+
+/** A text with each chip said as `#<name>` and a chip that cannot be read left out, as are the lone marks that have no chip. A chip is
+    set off by a space from a word or another chip beside it, and from a full stop or a comma beside it by none: "Use #Storyboard, then". */
+function chipsSaid(text) {
+  const sticks = (char, mark) => char === mark || /[\p{L}\p{N}]/u.test(char ?? "");
+  return text
+    .replace(CHIP, (whole, coded, at) => {
+      const name = chipName(coded);
+      const before = sticks(text[at - 1], "");
+      const after = sticks(text[at + whole.length], "");
+      if (name === "") return before && after ? " " : "";
+      return `${before ? " " : ""}${name}${after ? " " : ""}`;
+    })
+    .replace(CHIP_MARK, "");
+}
+
 /** A word of a text, made plain: a `--word` token (a double hyphen and a letter at its start, as `--now` and `--dir=x`) is left out
     whole; a path is its file's name (or its folder's, when it ends in a slash); and any other word with a slash in it is the words
     it joins, as "and/or" and "9/16" are. A path is a word with a slash that starts with one, with a tilde or with a dot, that ends in
@@ -438,16 +473,17 @@ function plainWord(word) {
   return path ? [last] : parts;
 }
 
-/** A text she or the app wrote, as a line of hers has it (4.6): on one line, with its markdown marks off (bold, slant and code), a
+/** A text she or the app wrote, as a line of hers has it (4.6): on one line, with a chip the person attached to a request said as
+    `#<name>` as the app labels it (and one that cannot be read left out), its markdown marks off (bold, slant and code), a
     link as its words and an address left out, every path as its file's name, any other slash as a space, every `--word` token left
     out whole and any other run of hyphens made one, and cut at `most` characters (QUOTE_MOST) at a word, with an ellipsis, when it
     is longer. "" for what is not a text, what has no letter or number in it, and a text that holds one of the five program names
     (COMMAND_WORDS): nothing can be made plain of that, so it is left out whole rather than changed into something it was not.
-    Whatever it is given, what it gives holds no slash, no double hyphen and none of those five names. It takes nothing else out of
-    what was said: a single-dash option, or the name of another program, stays. */
+    Whatever it is given, what it gives holds no slash, no double hyphen and none of those five names, a chip's name included. It
+    takes nothing else out of what was said: a single-dash option, or the name of another program, stays. */
 export function plainText(text, most = QUOTE_MOST) {
   if (typeof text !== "string") return "";
-  const words = text
+  const words = chipsSaid(text)
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/https?:\/\/\S+/gi, " ")
     .replace(/[*`]/g, "")

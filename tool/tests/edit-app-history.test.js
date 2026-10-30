@@ -292,6 +292,20 @@ describe("app … what-happened: what was done in the app", () => {
     assert.deepEqual([r.code, r.said], [0, [HEAD, "Yesterday:", ...THREE.map((line) => `  ${line}`)]]);
     w.t.done();
   });
+  it("tells a chip the person attached to a request as the app does, #Storyboard, and not the %7B…%7D the app writes it as (Jason's fbb80c)", async () => {
+    const w = world();
+    const { dir } = await opened(w);
+    const turn = {
+      at: "2026-10-30T16:34:09.974Z", engine: "claude",
+      asked: "Add a title card at the start that says First, as real text, shown for 3 seconds. %7B%22t%22%3A%22ability%22%2C%22id%22%3A%22storyboard%22%2C%22name%22%3A%22Storyboard%22%7D",
+      did: "The storyboard is ready in the Storyboard tab. It has two frames.", files: ["STORYBOARD.md", "boards/storyboard.html", "compositions/title.html"]
+    };
+    recordedIn(dir, { turns: `${JSON.stringify(turn)}\n` });
+    const r = await app({ ...w.t.ctx.deps, now: () => Date.parse("2026-10-30T20:00:00.000Z") }, FOLDER, "what-happened");
+    assert.deepEqual(r.said, [`What was done in HyperFrames on ${NAME}, newest first:`, "Today:", "  12:34 pm: you asked Add a title card at the start that says First, as real text, shown for 3 seconds. #Storyboard; HyperFrames did The storyboard is ready in the Storyboard tab. It has two frames.; changed STORYBOARD.md, storyboard.html, title.html"]);
+    assert.doesNotMatch(r.text, /%7B|%22|[]/);
+    w.t.done();
+  });
   it("tells the time in the Mac's own zone when none is given, and the day by the clock it is run on", async () => {
     const w = world();
     const { dir } = await opened(w);
