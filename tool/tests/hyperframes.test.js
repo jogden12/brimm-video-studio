@@ -654,6 +654,79 @@ describe("what she or the app wrote, in a line of hers", () => {
   it("says nothing for what is not a text, or has nothing in it", () => {
     for (const nothing of [undefined, null, 5, {}, ["a"], true, "", "   ", "\n\t", "**", "``", "/", "//", "--"]) assert.equal(plainText(nothing), "", String(nothing));
   });
+
+  // A chip is a thing the person attached to a request in the app, its Storyboard ability, say. The app writes it into the request as U+E000,
+  // the encodeURIComponent of a JSON object, and U+E001 (Jason's by-hand check of 30 October, his fbb80c: `what-happened` printed %7B…%7D).
+  describe("a chip the person attached to a request, as the app shows it", () => {
+    const START = "";
+    const END = "";
+    /** A chip as the app writes it, of `object`. */
+    const chip = (object) => `${START}${encodeURIComponent(JSON.stringify(object))}${END}`;
+    /** The chip of the app's Storyboard ability, exactly as fbb80c's first turn has it. */
+    const STORYBOARD = `${START}%7B%22t%22%3A%22ability%22%2C%22id%22%3A%22storyboard%22%2C%22name%22%3A%22Storyboard%22%7D${END}`;
+    const ASKED = "Add a title card at the start that says First, as real text, shown for 3 seconds.";
+    it("is made by the helper as the real one is", () => {
+      assert.equal(chip({ t: "ability", id: "storyboard", name: "Storyboard" }), STORYBOARD);
+    });
+    it("is #<name>, as the app labels it, for fbb80c's own request", () => {
+      assert.equal(plainText(`${ASKED} ${STORYBOARD}`), `${ASKED} #Storyboard`);
+      assert.equal(plainText(STORYBOARD), "#Storyboard");
+      assert.doesNotMatch(plainText(`${ASKED} ${STORYBOARD}`), /%7B|%22|[]/);
+    });
+    it("is #<name> wherever it sits: set off from a word beside it by a space, and from a stop beside it by none", () => {
+      assert.equal(plainText(`${STORYBOARD} ${ASKED}`), `#Storyboard ${ASKED}`);
+      assert.equal(plainText(`Use${STORYBOARD}for the title`), "Use #Storyboard for the title");
+      assert.equal(plainText(`Use ${STORYBOARD}, then ${STORYBOARD}.`), "Use #Storyboard, then #Storyboard.");
+    });
+    it("is each one's name when there are two or more in a request, in the order they are in", () => {
+      const brand = chip({ t: "ability", id: "brand", name: "Brand kit" });
+      assert.equal(plainText(`Use ${STORYBOARD} and ${brand} for the intro`), "Use #Storyboard and #Brand kit for the intro");
+      assert.equal(plainText(`${STORYBOARD}${brand}${STORYBOARD}`), "#Storyboard #Brand kit #Storyboard");
+    });
+    it("is left out when it does not decode: not a percent-encoding, not JSON, or not an object", () => {
+      const broken = ["%7Bnot%20json%7D", "%E0%A4%A", "%", "plain words", "", "%5B%22Storyboard%22%5D", "%22Storyboard%22", "5", "null", "true"];
+      for (const coded of broken) assert.equal(plainText(`Make it blue ${START}${coded}${END} please`), "Make it blue please", coded);
+      assert.equal(plainText(`${START}%7Bnot%20json%7D${END}`), "");
+    });
+    it("is left out when it has no name that is a text with something in it", () => {
+      for (const object of [{ t: "ability" }, { name: "" }, { name: "   " }, { name: 5 }, { name: null }, { name: ["Storyboard"] }, { name: { text: "Storyboard" } }, {}]) {
+        assert.equal(plainText(`Make it blue ${chip(object)} please`), "Make it blue please", JSON.stringify(object));
+      }
+    });
+    it("leaves a request that is only such a chip with nothing to say", () => {
+      assert.equal(plainText(chip({ t: "ability" })), "");
+      assert.equal(plainText(`   ${chip({ name: "" })}  `), "");
+    });
+    it("drops a lone mark and leaves the words around it", () => {
+      assert.equal(plainText(`keep ${START} this`), "keep this");
+      assert.equal(plainText(`keep ${END} this`), "keep this");
+      assert.equal(plainText(`${END} keep this`), "keep this");
+      assert.equal(plainText(`${START}`), "");
+      assert.equal(plainText(`${END}${START}`), "");
+    });
+    it("reads the nearest end for a start, so a lone start before a whole chip leaves the chip as it was", () => {
+      assert.equal(plainText(`keep ${START} words ${STORYBOARD}`), "keep words #Storyboard");
+    });
+    it("is a word like any other for the rules of a line of hers: no slash, no double hyphen, none of the five program names", () => {
+      assert.equal(plainText(`Use ${chip({ name: "and/or" })} now`), "Use #and or now");
+      assert.equal(plainText(`Use ${chip({ name: "assets/logos/logo.png" })} now`), "Use logo.png now");
+      assert.equal(plainText(`Use ${chip({ name: "--now" })} now`), "Use #-now now");
+      assert.equal(plainText(`Use ${chip({ name: "a--b" })} now`), "Use #a-b now");
+      assert.equal(plainText(`Use ${chip({ name: "npx" })} now`), "");
+      assert.equal(plainText(`Use ${chip({ name: "hyperframes.mjs" })} now`), "");
+      assert.equal(plainText(`Use ${chip({ name: "Node" })} now`), "");
+    });
+    it("takes a name with space in it as it is, and trims its ends", () => {
+      assert.equal(plainText(`Use ${chip({ name: "  Brand   kit " })} now`), "Use #Brand kit now");
+    });
+    it("is cut with the rest of the text at 200 characters", () => {
+      const said = plainText(`${"word ".repeat(60)}${STORYBOARD}`);
+      assert.ok(said.endsWith("…") && said.length <= QUOTE_MOST + 1, said);
+    });
+    it("is read by the same rule whatever it is next to: a markdown mark, a link or a path", () => {
+      assert.equal(plainText(`**Make it** ${STORYBOARD} in assets/fonts/a.ttf`), "Make it #Storyboard in a.ttf");
+    });
+  });
   it("never gives a path, a flag or a command, whatever it is given", () => {
     const nasty = [
       "see assets/fonts/a.ttf and compositions/x.html", "/Users/sallie/BRIMM Video Work/E/P/index.html", "C:\\Users\\x\\a.png", "npx hyperframes lint --fix", "node edit.js app",
@@ -661,7 +734,10 @@ describe("what she or the app wrote, in a line of hers", () => {
       "https://example.com", "hyperframes.mjs open", "~/Movies/x.mp4", "../../etc/passwd", "./a", "a/", "/", "//", "node_modules/.bin/hyperframes", "x".repeat(5000), "\u0000/\u0000",
       "end /", "/ start", "a/b c/d.e f/g/h", "**bold/path.txt**", "`code --flag`", "[a](b) [c](d/e)", "\n/\n--\n", "Node.js and NPM", "see 1/2 and 3/4/5", "mid--dash--dash", "-- --flag --- -- x"
     ];
-    for (const text of nasty) {
+    // ... and the same of a chip the app attached to a request, whose name is the app's to choose (it is #<name> in her line).
+    const chipped = ["a/b --now", "npx hyperframes", "../../etc/passwd", "x//y", "--", "node", "/Users/x/a.png", "9/16", "a--b/c", "hyperframes.mjs"]
+      .map((name) => `see ${encodeURIComponent(JSON.stringify({ t: "ability", name }))} here`);
+    for (const text of [...nasty, ...chipped]) {
       const said = plainText(text);
       assert.doesNotMatch(said, PLAIN, `${JSON.stringify(text)} -> ${JSON.stringify(said)}`);
       assert.doesNotMatch(said, /\bnpm\b/i, said);
@@ -695,6 +771,16 @@ describe("what was done in the app, in her words, with what the real history has
   });
   it("leaves out a file whose name holds a command or a double hyphen", () => {
     assert.deepEqual(say({ asked: "", files: ["node.html", "a--b.png", "x/npx.js", "ok.html", "edit.js"] }), ["3:41 pm: changed ok.html"]);
+  });
+  it("says a chip the person attached to a request as #<name>, as fbb80c's first turn has it in the app's history", () => {
+    const asked = "Add a title card at the start that says First, as real text, shown for 3 seconds. %7B%22t%22%3A%22ability%22%2C%22id%22%3A%22storyboard%22%2C%22name%22%3A%22Storyboard%22%7D";
+    const line = JSON.stringify({ at: "2026-10-30T16:34:09.974Z", engine: "claude", asked, did: "The storyboard is ready in the Storyboard tab.", files: ["STORYBOARD.md", "boards/storyboard.html"] });
+    assert.deepEqual(plainTurns(turnsOf(line), { tz: NEW_YORK }), ["12:34 pm: you asked Add a title card at the start that says First, as real text, shown for 3 seconds. #Storyboard; HyperFrames did The storyboard is ready in the Storyboard tab.; changed STORYBOARD.md, storyboard.html"]);
+  });
+  it("says what the app did with a chip in it the same way, and a turn with nothing but a chip that cannot be said as a turn with nothing", () => {
+    const chip = (object) => `${encodeURIComponent(JSON.stringify(object))}`;
+    assert.deepEqual(say({ asked: "", did: `Done with ${chip({ name: "Storyboard" })}.` }), ["3:41 pm: HyperFrames did Done with #Storyboard."]);
+    assert.deepEqual(say({ asked: chip({ t: "ability" }), did: "", files: [] }), []);
   });
   it("never says a path, a flag or a command, whatever the turn holds", () => {
     const said = plainTurns(turnsOf(fixture("app-history.jsonl")), { tz: NEW_YORK });
@@ -734,6 +820,13 @@ describe("the versions, in her words", () => {
     assert.deepEqual(say({ label: "" }, { label: "   " }, { label: "ran npx hyperframes lint", files: ["index.html"] }, { label: "", kind: "", files: [] }), [
       "3:41 pm: a change (HyperFrames)", "3:41 pm: a change (HyperFrames)", "3:41 pm: a change (HyperFrames; changed index.html)", "3:41 pm: a change"
     ]);
+  });
+  it("says a chip in a label as #<name>, as the app's own label for the turn has it, and a label with only a chip it cannot say as a change", () => {
+    const TEXT = "Add a title card at the start that says First, as real text, shown for 3 seconds.";
+    const chipped = `${TEXT} %7B%22t%22%3A%22ability%22%2C%22id%22%3A%22storyboard%22%2C%22name%22%3A%22Storyboard%22%7D`;
+    assert.deepEqual(say({ label: chipped }), [`3:41 pm: ${TEXT} #Storyboard (HyperFrames)`]);
+    assert.deepEqual(say({ label: `${TEXT} #Storyboard` }), [`3:41 pm: ${TEXT} #Storyboard (HyperFrames)`], "the label the app writes is said as it is");
+    assert.deepEqual(say({ label: "%7B%22t%22%3A%22ability%22%7D" }, { label: "" }), ["3:41 pm: a change (HyperFrames)", "3:41 pm: a change (HyperFrames)"]);
   });
   it("puts a long label, a path and markdown in a label as a line of hers has them", () => {
     assert.deepEqual(say({ label: `**${"word ".repeat(100)}** in assets/fonts/a.ttf` }), [`3:41 pm: ${"word ".repeat(39)}word… (HyperFrames)`]);
