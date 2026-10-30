@@ -8,7 +8,7 @@ import { nameEpisode, titleEpisode, pickReels, dropReels, editMain } from "../ed
 import { RECORD_VERSION, recordFile, recordText } from "../episode.js";
 import { writtenFile } from "../settings.js";
 import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
-import { OWN_COMMIT } from "./own-checkout.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 describe("name", () => {
   it("names the episode as it is given, and renames nothing", async () => {
@@ -48,7 +48,7 @@ describe("what every record command does first", () => {
     assert.ok(t.clones.some(([, to]) => to === recordFile(found.folder, found.record.rev + 1)));
     t.done();
   });
-  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", async () => {
+  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
     const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => pickReels(t.ctx, found, [1])];
     for (const command of commands) {
       const t = setup();

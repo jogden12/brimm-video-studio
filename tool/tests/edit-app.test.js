@@ -22,7 +22,7 @@ import { episode } from "./phase4.js";
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
 const OWN_EDIT_JS = fileURLToPath(new URL("../edit.js", import.meta.url));
-const GUIDANCE =fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
+const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */

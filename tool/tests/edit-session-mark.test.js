@@ -20,7 +20,7 @@ import { HOST } from "../shared/show.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import { sameAccount, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
-import { OWN_COMMIT } from "./own-checkout.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -712,7 +712,7 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
     assert.deepEqual(handoff.session.principles.map((p) => [p.n, p.name]), [[1, "Price the outcome"], [2, "Say the price first"], [3, "Check one number"]]);
     t.done();
   });
-  it("names the checkout this code is in as the one that made the hand-off and wrote the record, with no commit given and the settings naming a folder that is no checkout", async () => {
+  it("names the checkout this code is in as the one that made the hand-off and wrote the record, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
     const mac = await decided();
     const { t, found } = mac;
     t.ctx.deps.commit = undefined;

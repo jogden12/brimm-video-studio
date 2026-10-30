@@ -20,7 +20,7 @@ import { fromFinalCutFolder } from "../settings.js";
 import { tidyTranscript } from "../shared/transcript.js";
 import { setup, episodeFor, episodeAs, reread, listAll, EDITED, NAME, NOT_YET, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
-import { OWN_COMMIT } from "./own-checkout.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 /** What final/ holds after the made-up edit is finished. */
@@ -586,7 +586,7 @@ describe("which brimm-video a finish names as the one that wrote", () => {
     t.ctx.deps.commit = undefined;
     t.ctx.settings = { ...t.ctx.settings, checkout: "/elsewhere/BRIMM video" };
   };
-  it("is the checkout this code is in, for the record and the hand-off that finishNow writes", async () => {
+  it("is the checkout this code is in, for the record and the hand-off that finishNow writes", { skip: WITHOUT_COMMIT }, async () => {
     const t = setup();
     const found = await asked(t);
     elsewhere(t);
@@ -595,7 +595,7 @@ describe("which brimm-video a finish names as the one that wrote", () => {
     assert.deepEqual([reread(found).writer, handoffIn(found).madeBy], [{ commit: OWN_COMMIT, on: "Mac Studio" }, `brimm-video ${OWN_COMMIT}`]);
     t.done();
   });
-  it("is the checkout this code is in, for the record that lets a finish's claim go", () => {
+  it("is the checkout this code is in, for the record that lets a finish's claim go", { skip: WITHOUT_COMMIT }, () => {
     const t = setup();
     const found = episodeFor(t, { record: { editing: { by: "Mac Studio", since: "2026-10-20T14:59:00-05:00" } } });
     mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
@@ -2326,7 +2326,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-R", join(found.folder, "final", "Talk.brimm-ops.json")] }]);
     t.done();
   });
-  it("names the checkout this code is in as the one that wrote the record and made the hand-off, with no commit given and the settings naming a folder that is no checkout", async () => {
+  it("names the checkout this code is in as the one that wrote the record and made the hand-off, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
     const t = setup();
     handoffVersion(t, 2);
     t.ctx.deps.commit = undefined;

@@ -13,7 +13,7 @@ import { RECORD_VERSION, newEpisode, readEpisode, recordFile, recordText } from 
 import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
 import { writeSettings, libraryFor } from "../settings.js";
 import { writePending } from "../filing.js";
-import { OWN_COMMIT } from "./own-checkout.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 const NOW = Date.parse("2026-10-14T12:00:00");
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. The settings
@@ -369,7 +369,7 @@ describe("node edit.js push", () => {
     assert.deepEqual(r.libraries, { "Mac Studio": "2026-10-13 Talk (Mac Studio).fcpbundle" });
     t.done();
   });
-  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", async () => {
+  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
     const t = setup();
     imported(t);
     writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });

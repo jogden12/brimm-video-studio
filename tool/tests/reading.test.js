@@ -29,7 +29,7 @@ import { sessionLabel } from "../kinds.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 import { rawProbe } from "./phase4.js";
-import { OWN_COMMIT } from "./own-checkout.js";
+import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -286,7 +286,7 @@ describe("read, an iPhone clip", () => {
     assert.deepEqual(notices, [NOTICE]);
     t.done();
   });
-  it("writes its record as the checkout this code is in, with no commit given and the settings naming a folder that is no checkout", async () => {
+  it("writes its record as the checkout this code is in, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
     const { t, found } = reading("short video");
     t.ctx.deps.commit = undefined;
     writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
@@ -426,7 +426,7 @@ describe("read, a raw video", () => {
 // files (unedited.js intoEpisode), where an iPhone clip's, above, writes the record alone. No commit is given, as none is on a Mac.
 describe("read, the commit its record names as the one that wrote it", () => {
   for (const kind of ["finished", "raw"]) {
-    it(`is the checkout this code is in, for a ${kind} video, with the settings naming a folder that is no checkout`, async () => {
+    it(`is the checkout this code is in, for a ${kind} video, with the settings naming a folder that is no checkout`, { skip: WITHOUT_COMMIT }, async () => {
       const { t, found } = reading(kind);
       t.ctx.deps.commit = undefined;
       writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });

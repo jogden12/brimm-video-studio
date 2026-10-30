@@ -12,7 +12,7 @@ import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { zoomTimeOf } from "../kinds.js";
-import { OWN_CHECKOUT, OWN_COMMIT } from "./own-checkout.js";
+import { OWN_CHECKOUT, OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const SETTINGS = { version: 1, machine: "Mac Studio", root: ROOT, checkout: "/Users/jasonogden/Claude Code/BRIMM video" };
@@ -126,8 +126,10 @@ describe("which brimm-video wrote a record", () => {
     assert.equal(commitOf(join(dir, "not there")), "unknown");
     rmSync(dir, { recursive: true, force: true });
   });
-  it("is, for the checkout this code is in, the commit git says there: that checkout is the folder above tool/, and no setting names it", () => {
+  it("is, for the checkout this code is in, the folder above tool/: no setting names it", () => {
     assert.equal(thisCheckout(), OWN_CHECKOUT);
+  });
+  it("is, for the checkout this code is in, the commit git says there", { skip: WITHOUT_COMMIT }, () => {
     assert.equal(commitOf(thisCheckout()), OWN_COMMIT);
   });
 });
