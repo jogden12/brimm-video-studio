@@ -155,8 +155,8 @@ export function turnTime(ms, { tz, now }) {
 
 /** The folder of the main project in use on this Mac, or null: the record has none (one kept for an earlier kind is none in use,
     and a folder the record does not list is not looked at: the next `app` takes it into the record), or its name leads nowhere a
-    folder is, or its folder is not here. */
-function mainProjectDir(ctx, { found, record }) {
+    folder is, or its folder is not here. `show … transcript` finds the project's index.html with it too (edit.js). */
+export function mainProjectDir(ctx, { found, record }) {
   const project = (record.app?.projects ?? []).find(isMain);
   if (!project || !plainName(project.name)) return null;
   const dir = join(episodeWork(ctx.home, found.name), project.name);

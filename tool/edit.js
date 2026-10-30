@@ -93,7 +93,8 @@ import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfte
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
-import { historyTail, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
+import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
+import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
@@ -2830,9 +2831,11 @@ const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-no
     reads an episode's files only through this (spec section 4), and it takes no path. A file not whole on this Mac yet is
     brought over by a detached run, as open does. The transcript of a raw video she has answered is its rough cut's, with its
     times (spec 3, "Show me the transcript"), unless the record has a main HyperFrames project in use: then it is the recording's own,
-    with the times of the project's timeline (plan PR 7, item 5). A finished video's, a clip's and one from before the switch is the
-    video's own. Of a video not yet answered, or a session whose mark is not cleared, it prints nothing into her chat (printWhy): it
-    opens a read-only copy of the file on this Mac, in TextEdit (showCopy). */
+    with the times of the project's timeline (plan PR 7, item 5). Those are the recording's captions where the project's index.html
+    puts the recording, which is not the start when the app's agent has moved it for a title card (on-timeline.js); when the page, the
+    recording in it or the captions cannot be read, the recording's own transcript is printed as it is, with its own times. A finished
+    video's, a clip's with no main project and one from before the switch is the video's own. Of a video not yet answered, or a session whose mark is not
+    cleared, it prints nothing into her chat (printWhy): it opens a read-only copy of the file on this Mac, in TextEdit (showCopy). */
 async function show(ctx, rest) {
   const words = rest.slice();
   const kind = words.pop();
@@ -2849,14 +2852,36 @@ async function show(ctx, rest) {
   // Mac instead.
   if (printWhy(record) || found.held) return showCopy(ctx, found, record, `${stem}${ending}`, what);
   // The record picks a raw video's transcript (plan PR 7, item 5): with a main HyperFrames project in use, the recording's own, whose times
-  // are the project's timeline's; otherwise the rough cut's, which the reading still makes and an episode going the Final Cut way needs.
-  const roughCut = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" && !(record.app?.projects ?? []).some(inUse);
+  // are the project's timeline's where the page leaves the recording at its start; otherwise the rough cut's, which the reading still
+  // makes and an episode going the Final Cut way needs.
+  const projectInUse = (record.app?.projects ?? []).some(inUse);
+  const roughCut = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" && !projectInUse;
   const file = roughCut ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
   const path = join(found.folder, file);
-  if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
-  if (!ctx.isWhole(path)) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [file] });
+  /** A file not whole on this Mac yet is brought over by a detached run, unless one is at it already. */
+  const bringing = (name) => {
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [name] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
+  };
+  if (!existsSync(path)) return refuse(ctx, `${shownName(record)} has no ${what} yet.`);
+  if (!ctx.isWhole(path)) return bringing(file);
+  // The recording's own transcript has the recording's times. Where the project's page puts the recording is where they are on its timeline,
+  // so the recording's captions are printed at those times when the page, the recording in it and the captions can be read (on-timeline.js).
+  const placements = kind === "transcript" && projectInUse && !roughCut ? recordingPlacementsIn(mainProjectDir(ctx, { found, record })) : [];
+  const captions = join(found.folder, `${stem}.srt`);
+  if (placements.length && existsSync(captions)) {
+    if (!ctx.isWhole(captions)) return bringing(`${stem}.srt`);
+    let onTimeline = null;
+    try {
+      onTimeline = timelineTranscript(readFileSync(captions, "utf8"), placements);
+    } catch (e) {
+      // Captions that cannot be read are no captions: the recording's own transcript is printed, with its own times.
+    }
+    if (onTimeline === "") return refuse(ctx, `${shownName(record)} has no spoken words on its timeline.`);
+    if (onTimeline !== null) {
+      ctx.say(onTimeline.replace(/\n$/, ""));
+      return 0;
+    }
   }
   const text = readFileSync(path, "utf8");
   ctx.say((kind === "notes" ? notesForHer(text, record) : text).replace(/\n$/, ""));

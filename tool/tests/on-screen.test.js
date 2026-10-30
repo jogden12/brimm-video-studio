@@ -10,7 +10,7 @@ import { closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdte
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { projectWords, projectWordsIn, wordsOnScreen } from "../on-screen.js";
+import { htmlTree, projectReader, projectWords, projectWordsIn, wordsOnScreen } from "../on-screen.js";
 
 const FIXTURES = new URL("./fixtures/hyperframes-0.8.208/on-screen/", import.meta.url);
 const fixture = (rel) => readFileSync(new URL(rel, FIXTURES), "utf8");
@@ -827,5 +827,39 @@ describe("A8. a file is read as the one thing it was looked at as, and no more t
     assert.equal(opened.length, 3, "index.html and both names");
     assert.deepEqual(closed, opened, "every file it opened, it closed, one at a time");
     done();
+  });
+});
+
+describe("A9. the reader and the tree that other readers of a project use (on-timeline.js reads index.html with them)", () => {
+  const made = [];
+  const folder = (files) => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-on-screen-"));
+    made.push(dir);
+    for (const [rel, text] of Object.entries(files)) writeFileSync(join(dir, rel), text);
+    return dir;
+  };
+  const done = () => made.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  it("reads a file of the project as the words of a project are read: its text and an id", () => {
+    const read = projectReader(folder({ "index.html": "<p>Hi</p>" }));
+    assert.equal(read("index.html").text, "<p>Hi</p>");
+    assert.equal(typeof read("index.html").id, "string");
+    assert.equal(read("nothing.html"), null);
+    done();
+  });
+  it("is none for a folder that is not there or a path that is not one, and gives none of a file that is a link or more than 2 MB", () => {
+    for (const nothing of [undefined, null, "", 5, join(tmpdir(), "brimm-on-screen-not-there")]) assert.equal(projectReader(nothing), null, String(nothing));
+    const dir = folder({ "real.html": "<p>Hi</p>", "big.html": " ".repeat(2 * 1024 * 1024 + 1) });
+    symlinkSync(join(dir, "real.html"), join(dir, "index.html"));
+    const read = projectReader(dir);
+    assert.deepEqual([read("index.html"), read("big.html")], [null, null]);
+    assert.equal(read("real.html").text, "<p>Hi</p>");
+    done();
+  });
+  it("gives a page as a tree of elements and texts, and none for a page of more elements than a page is read for", () => {
+    const tree = htmlTree('<div id="a"><video src="x.mp4" data-start=2></video>words</div>');
+    const [div] = tree.kids;
+    assert.deepEqual([div.tag, div.attrs.id, div.kids.map((kid) => kid.tag ?? kid.text), div.kids[0].attrs["data-start"]], ["div", "a", ["video", "words"], "2"]);
+    assert.equal(htmlTree("<span></span>".repeat(200001)), null);
+    assert.notEqual(htmlTree("<span></span>".repeat(200000)), null);
   });
 });

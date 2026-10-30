@@ -7,8 +7,9 @@
 // A text on the screen is an element with a numeric `data-start` and a duration above 0, that is not the captions, holding words. A
 // composition a host names (`data-composition-src`) is read as the file it names, on the host's clock, with the host's own
 // `data-variable-values` for the words of its `data-var-text` elements (A0 and A0b wrote both). `wordsOnScreen` is pure over a `read`;
-// `projectWords` is the one function here that reads the disk, and it only reads: a regular file of the project, of at most 2 MB, that is
-// `index.html` or a `.html` file under `compositions/`, and never through a link.
+// `projectReader` is the one function here that reads the disk (`projectWords` reads through it), and it only reads: a regular file of the
+// project, of at most 2 MB, that is `index.html` or a `.html` file under `compositions/`, and never through a link. `projectReader` and
+// `htmlTree` are also what on-timeline.js reads the recording's place on the timeline with.
 //
 // Below the reader are the words `finish` says and asks of what it found (`mainWordsSaid` for the main video's picture, `reelTitleAsk` for
 // a Reel's title): plain sentences, with no path, no flag and no command name, since they go into Sallie's chat.
@@ -153,6 +154,20 @@ function parse(source, spend) {
     }
   }
   return root;
+}
+
+/** A page as a tree (parse's), for a reader that is not wordsOnScreen, such as on-timeline.js looking for the recording: null for a
+    page with more than ELEMENTS_MOST elements, which is not read in full. It has the budget of one page, not of a whole project. */
+export function htmlTree(source) {
+  let elements = 0;
+  try {
+    return parse(String(source), () => {
+      elements += 1;
+      if (elements > ELEMENTS_MOST) throw SPENT;
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 // --- What on a page is words ---
@@ -334,25 +349,24 @@ export function wordsOnScreen(read) {
     .flatMap((made) => made.lines.map((text) => ({ text, at: Math.round(made.at * 1000) / 1000 })));
 }
 
-/** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder.
-    `incomplete: true` is there only for a project that was not read in full (its budget was used up, see wordsOnScreen), and its
-    words are none. Only `index.html` and the compositions under `compositions/` that a host names are opened, and only a regular file
-    of at most 2 MB whose real path is its name as written, under the project's real path (a link, or a file reached through one,
-    wherever it leads, is not read). The project's other
+/** The reader of the files of the project in the folder `dir`: a `read(rel)` for wordsOnScreen, or null when there is no such folder.
+    `read(rel)` gives { text, id } for the file `rel` (a path from the project), or null for anything that is not to be read. Only a
+    regular file of at most 2 MB whose real path is its name as written, under the project's real path, is read (a link, or a file
+    reached through one, wherever it leads, is not). The project's other
     writer, the app's agent, can swap a file between the look and the read, so a file is looked at, opened without following a link and
     without waiting for a writer (as `historyTail` opens the history), and read through the descriptor: it must be the file looked at (the
     same device and inode), a regular file within 2 MB, and no more than 2 MB and a byte is read from it, whatever it grows to. A file is
     what its device and inode say, so that two names of one file are one file, and its bytes are read once. It writes nothing.
     `io` gives the file functions in place of node's, for a test to swap a file from inside the look: lstat, open, fstat, read, close
-    and realpath. */
-export function projectWords(dir, io = {}) {
+    and realpath. projectWords reads the words of a project with it, and on-timeline.js reads index.html. */
+export function projectReader(dir, io = {}) {
   const { lstat = lstatSync, open = openSync, fstat = fstatSync, read: readAt = readSync, close = closeSync, realpath = realpathSync } = io;
   let base;
   try {
-    if (typeof dir !== "string" || dir === "" || !statSync(dir).isDirectory()) return { here: false, words: [] };
+    if (typeof dir !== "string" || dir === "" || !statSync(dir).isDirectory()) return null;
     base = realpathSync(dir);
   } catch (e) {
-    return { here: false, words: [] };
+    return null;
   }
   const texts = new Map();
   /** The whole of an open file as text, or null when it holds more than 2 MB: read in pieces, none past the 2 MB and a byte. */
@@ -390,6 +404,16 @@ export function projectWords(dir, io = {}) {
       if (fd !== undefined) close(fd);
     }
   };
+  return read;
+}
+
+/** The words on the picture of the project in the folder `dir`: { here, words }. `here` is false when there is no such folder.
+    `incomplete: true` is there only for a project that was not read in full (its budget was used up, see wordsOnScreen), and its
+    words are none. Only `index.html` and the compositions under `compositions/` that a host names are opened, each as projectReader
+    opens a file of the project. It writes nothing. `io` is projectReader's. */
+export function projectWords(dir, io = {}) {
+  const read = projectReader(dir, io);
+  if (read === null) return { here: false, words: [] };
   const words = wordsOnScreen(read);
   return words === null ? { here: true, words: [], incomplete: true } : { here: true, words };
 }
