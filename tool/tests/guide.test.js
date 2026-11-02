@@ -25,7 +25,9 @@ const OPS_TEXTS = {
   kit: 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: 'Correct the form to what is live, then press "This is what is live".',
-  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. Cut each "Clip to cut" in OpusClip. Then make it a short video with "New short video from a clip", on the episode\'s "Reels" card.',
+  // The page's Reels card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text". OpusClip is no longer used
+  // (Jason, 2 November 2026), and the page (version 10) stops writing "Clip to cut": the step sends her to neither.
+  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
   posttext: 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   postedShort: "Post it on Instagram, and as a YouTube Short.",
   checked: 'Check each principle marked "Check it", then press "Use in drafts".',
@@ -118,6 +120,11 @@ describe("the BRIMM Ops page's steps", () => {
       [HANDOFF({ kind: "session", emptyAt: 1 }), "withdrawn", false, T.withdrawn],
       [HANDOFF({ kind: "session", emptyAt: 2, revision: 3 }), "withdrawn", false, T.withdrawn]
     ]) assert.equal(opsText(handoff, step, again, have), want, `${handoff.kind} ${step} ${again} ${have}`);
+  });
+  it("sends her to OpusClip in no step, and to no \"Clip to cut\" or \"New short video from a clip\": Reels are made in HyperFrames and handed off (Jason, 2 November 2026)", () => {
+    for (const [handoff, steps] of [[HANDOFF(), OPS.episode], [HANDOFF({ kind: "raw" }), OPS.episode], [HANDOFF({ kind: "short video" }), OPS["short video"]], [HANDOFF({ kind: "session" }), OPS.session], [HANDOFF({ kind: "session", emptyAt: 1 }), OPS.withdrawal]]) {
+      for (const step of steps) for (const again of [false, true]) assert.doesNotMatch(opsText(handoff, step, again, 1), /OpusClip|Clip to cut|from a clip/i, `${handoff.kind} ${step} ${again}`);
+    }
   });
 });
 

@@ -153,17 +153,26 @@ describe("her folder's settings", () => {
     assert.ok(skill.includes('| "Ask Claude again for Reels" | `ask "<episode>"`'), skill);
     assert.ok(!/Not ready yet[\s\S]*Showing the Reels/.test(skill), skill);
   });
-  it("have the skill say, where she would be sent to make a Reel brimm-video cannot make yet, that she cuts it in OpusClip and BRIMM Ops writes its post text (Sallie's walkthrough, 25 Oct)", () => {
+  it("have the skill say, where brimm-video cannot make a Reel on this Mac, that it cannot and that Jason sets the Mac up for HyperFrames, and send her to OpusClip nowhere (Jason, 2 November 2026)", () => {
     // "Show me the Reels" listed them, "Finish Reels 1 and 3" said to make Reel 1 first, and nothing made one: a circle. Since plan PR 5 a
-    // Mac set up for HyperFrames makes a Reel by "Open Reel 2 in HyperFrames", and `reels` ends by saying so; a Mac that is not set up is
-    // still sent where it was.
+    // Mac set up for HyperFrames makes a Reel by "Open Reel 2 in HyperFrames", and `reels` ends by saying so. Reels are made in HyperFrames,
+    // so on a Mac that is not set up `reels` says brimm-video cannot make Reels on this Mac, and Claude adds that Jason sets the Mac up.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const row = (start) => skill.split("\n").find((line) => line.startsWith(start));
-    assert.match(row('| "Show me the Reels" |'), /When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames"\. When it says brimm-video cannot make Reels from this video yet, say so\. For now she cuts them in OpusClip; BRIMM Ops writes their post text \("New short video from a clip", on the episode's Reels card\)\. Never send a client or group session's Reels to OpusClip\. \|$/);
-    assert.match(row('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |'), /If it says this Mac isn't set up for HyperFrames, say so, and where she cuts Reels for now, as for "Show me the Reels": never offer to make one here \|$/);
+    assert.match(row('| "Show me the Reels" |'), /When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames"\. When it says brimm-video cannot make a Reel on this Mac, say so, and that Jason sets the Mac up for HyperFrames\. \|$/);
+    assert.match(row('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |'), /If it says this Mac isn't set up for HyperFrames, say so, and that Jason sets the Mac up for HyperFrames, as for "Show me the Reels": never offer to make one here \|$/);
     const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut"));
-    assert.ok(notReady.includes(`- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say brimm-video can't make it here yet, and where she makes it for now, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason." Never OpusClip.`), notReady);
+    assert.ok(notReady.includes(`- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say brimm-video can't make it on this Mac, and that Jason sets the Mac up for HyperFrames, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason."\n`), notReady);
     assert.doesNotMatch(skill, /make Reel \d|make it first/);
+    assert.doesNotMatch(skill, /OpusClip/i);
+  });
+  it("keep the two skills in step on the Reels: the same list row, the same row for making one, the same line of what is not ready, and OpusClip in neither", () => {
+    const [strict, open] = ["SKILL.md", "SKILL-open.md"].map((name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8"));
+    const starts = ['| "Show me the Reels" |', '| "Make Reel 2" / "Open Reel 2 in HyperFrames" |', "- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames:"];
+    const lines = (text) => starts.map((start) => text.split("\n").find((line) => line.startsWith(start)));
+    assert.ok(lines(strict).every(Boolean), "the strict skill holds all three");
+    assert.deepEqual(lines(open), lines(strict));
+    for (const text of [strict, open]) assert.doesNotMatch(text, /OpusClip/i);
   });
   it("have the skill make a Reel with app … reel, drop one with reel drop, and pick one by no other command (plan PR 5)", () => {
     // `reel pick` is gone: a Reel is picked by opening it. The rows of a Reel's making and dropping are the skill's only words for either.

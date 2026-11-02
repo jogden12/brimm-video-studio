@@ -68,7 +68,8 @@ export const openReelWords = (n, name) => `open Reel ${n} of ${name} in HyperFra
 export const notMadeYet = (n, name) => `Reel ${n} isn't made yet. Say "${openReelWords(n, name)}" to make it.`;
 
 /** What `reels` ends with on a Mac set up for the app, for the suggestions `numbers` she has not dropped (in the order of the list): how
-    to make one, in place of the line that sends her to OpusClip, which is for a Mac that cannot. */
+    to make one, since Reels are made in HyperFrames. A Mac that is not set up for it ends with reels.js notMadeWords instead: that
+    brimm-video cannot make Reels on this Mac. */
 export const makeOneWords = (numbers, name) => (numbers.length === 1
   ? `To make it, say "${openReelWords(numbers[0], name)}".`
   : `To make one, say "${openReelWords(numbers[0], name)}", with the number of the one you want.`);
