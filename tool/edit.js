@@ -59,7 +59,7 @@ import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSee
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
-import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
+import { BRINGING, REEL_KEY, START as REELS_START, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
@@ -4336,12 +4336,44 @@ async function importHandoff(ctx, found, record, done) {
   return 0;
 }
 
+/** Whether a finished part (its entry in `finished.parts`) was made from an export of HyperFrames: the record says so with `project`, the
+    project the export was of. finish.js writes exactly one of three facts on every part it takes: `project` (HyperFrames'), `export` (Final
+    Cut's, with the export of its edit) or `noHandEdits` (Final Cut's, with nothing changed by hand). A part that says none of them, as one
+    written by hand, is told as Final Cut's, as every part was. The main part of a finished video or of an iPhone clip handed off as it is
+    says `import` instead, and is never asked about here: a spelling makes its hand-off again from the import's captions (importHandoff). */
+const partFromApp = (part) => typeof part.project === "string" && part.project !== "";
+
+/** What makes a part's old spelling new, as she is told it, for `count` parts made the same way: a part made from an export of HyperFrames
+    is exported again from there and handed off (a finish takes the new export and transcribes it with the spellings; finish-reels.js
+    exportAgainWords has the words, as it has a finished video's Reels'); a part made through Final Cut is shown there, Shared and finished again. */
+const changesIt = (app, count) => (app ? exportAgainWords(count, "hand it off") : `${count === 1 ? "it is" : "each is"} shown in Final Cut, Shared and finished again`);
+
+/** The parts (each { name, app, … }) by the way they were made: those made from an export of HyperFrames first, then those made through
+    Final Cut. A way no part was made is left out. */
+const byMaking = (parts) => [true, false].map((app) => ({ app, parts: parts.filter((part) => part.app === app) })).filter((group) => group.parts.length);
+
+/** What she is told of the final transcripts that keep a spelling taken back or changed: `keeping` is each part that does, { name, app, pairs },
+    its name as she hears it, whether it was made from an export of HyperFrames, and the pairs it keeps, as `"a" as "b"`. When every part of the
+    finish went through Final Cut (`allFinalCut`) it is the one sentence it always was, of each part. Otherwise each way a part was made has a
+    sentence of its own, naming the parts that keep a spelling: "Those of" begins the second, which follows the first. */
+function keptWords(keeping, allFinalCut) {
+  if (!keeping.length) return "";
+  const pairsOf = (parts) => listed([...new Set(parts.flatMap((part) => part.pairs))]);
+  if (allFinalCut) return ` The final transcripts keep ${pairsOf(keeping)} until each part is shown in Final Cut, Shared and finished again.`;
+  return byMaking(keeping).map(({ app, parts }, i) => ` ${i === 0 ? "The final transcripts of" : "Those of"} ${listed(parts.map((part) => part.name))} keep ${pairsOf(parts)} until ${changesIt(app, parts.length)}.`).join("");
+}
+
+/** What she is told of the captions drawn into the picture of the parts in `drawn` ({ name, app, … }, the parts that may have any): they keep the
+    old spelling until the part is made again, one sentence for each way a part was made. */
+const stillWords = (drawn) => byMaking(drawn).map(({ app, parts }) => ` If ${listed(parts.map((part) => part.name))} ${parts.length === 1 ? "shows" : "show"} captions on screen, they keep the old spelling until ${changesIt(app, parts.length)}.`).join("");
+
 /** The record with its spellings, `spellings`; and after a finish (spec section 4, "spell applies to every timeline and to
     the final transcripts") the final transcripts with each spelling they do not hold yet, and the hand-off made again as its
     next revision, each file put in by the rule, and only when its words change. Each finished part's transcripts hold the
     spellings that changed them: its `spellings`, or, for a part no spelling has reached since a finish made it, the record's
     own. Only the others are applied to it, so none is applied twice, and a spelling taken back or changed leaves the part as
-    it is, which is said: a finish again makes a part's transcripts again only once it is Shared again. Before reading them
+    it is, which is said, part by part, by the way each was made (keptWords, stillWords): a finish again makes a part's transcripts
+    again only once its video is new, exported again from HyperFrames or Shared again from Final Cut. Before reading them
     it checks they are here, whole (her folder may be online-only after a hand-off): if not, it starts bringing them over and
     stops. (`spell` has refused already while a finish runs, whose late check would put its own copies back.) When the record
     cannot be written, each final file is put back as it was, each on its own; one that cannot be is named, and she is told
@@ -4381,12 +4413,13 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   const meantOf = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
   const parts = Object.entries(finished.parts || {}).map(([key, part]) => {
     const held = part.spellings || found.record.spellings || [];
-    return { key, part, held, stem: `final/${basename(part.file, extname(part.file))}`, toApply: spellings.filter(([h]) => meantOf(held, h) === undefined) };
+    return { key, part, held, name: key === "main" ? "the main video" : capital(key), app: partFromApp(part), stem: `final/${basename(part.file, extname(part.file))}`, toApply: spellings.filter(([h]) => meantOf(held, h) === undefined) };
   });
   // Every part's own list is kept from now on, so a part a finish reuses keeps it, and one it makes again starts afresh.
   const withHeld = (held) => ({ ...finished, parts: Object.fromEntries(parts.map((p) => [p.key, { ...p.part, spellings: held[p.key] || p.held }])) });
-  const kept = [...new Set(parts.flatMap((p) => p.held.filter(([h, m]) => meantOf(spellings, h) !== m).map(([h, m]) => `"${h}" as "${m}"`)))];
-  const keptNote = kept.length ? ` The final transcripts keep ${listed(kept)} until each part is shown in Final Cut, Shared and finished again.` : "";
+  // What each part keeps: the pairs it holds that are taken back or changed now, which cannot be taken out of its words.
+  const keeping = parts.map((p) => ({ name: p.name, app: p.app, pairs: p.held.filter(([h, m]) => meantOf(spellings, h) !== m).map(([h, m]) => `"${h}" as "${m}"`) })).filter((k) => k.pairs.length);
+  const keptNote = keptWords(keeping, parts.every((p) => !p.app));
   if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${keptNote}`);
   const finals = [...parts.flatMap((p) => [`${p.stem}.srt`, `${p.stem}.transcript.txt`, ...(p.part.words ? [p.part.words] : [])]), finished.handoff];
   const gone = finals.find((rel) => !existsSync(join(found.folder, rel)));
@@ -4468,9 +4501,9 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       files[rel] = put(join(found.folder, rel), text, { replace: true }).bytes;
     }
     // A finished part may have captions drawn into its picture (whether it has is not known here), which keep the old spelling
-    // until it is finished again: a full episode's main video has none.
-    const drawn = parts.filter((p) => p.key !== "main" || presetOf(record, "main").job !== "full-episode").map((p) => (p.key === "main" ? "the main video" : capital(p.key)));
-    const still = drawn.length ? ` If ${listed(drawn)} ${drawn.length === 1 ? "shows" : "show"} captions on screen, they keep the old spelling until ${drawn.length === 1 ? "it is" : "each is"} shown in Final Cut, Shared and finished again.` : "";
+    // until it is made again, by the way it was made (stillWords): a full episode's main video has none, in Final Cut and in
+    // HyperFrames (the brief its agent is given says a wide main video has no captions drawn on it).
+    const still = stillWords(parts.filter((p) => p.key !== "main" || presetOf(record, "main").job !== "full-episode"));
     const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}`);
     if (code !== 0) {
       const lost = putBack();
