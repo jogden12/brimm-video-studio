@@ -114,7 +114,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         then to open it there; once it is open, when she last asked the app for something;
                                         and once it is exported, to hand it off. Once its finish has written the hand-off
                                         it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
-                                        copies, though the finish goes on checking them for a quarter of an hour. On a Mac
+                                        copies (a spelling, handing it off again and handing it over wait until then),
+                                        though the finish goes on checking them for a quarter of an hour. On a Mac
                                         that Jason has not set up for HyperFrames it says that this Mac is not set up,
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
@@ -236,7 +237,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         exported, and ask what it must. --final says an export is the final one though the
                                         project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
-                                        detached. An iPhone clip she answered that was not opened in HyperFrames is asked
+                                        detached. It says when the hand-off will be ready, and returns once the run has begun
+                                        (at most five seconds; it says so if none does). An iPhone clip she answered that was
+                                        not opened in HyperFrames is asked
                                         about once; --as-it-is writes its hand-off from the import's captions. For a main
                                         video taken from an export it reads the words on its picture out of the HyperFrames
                                         project and asks if they are right (a --yes takes them only after a call has shown
@@ -250,8 +253,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         HyperFrames (app … reel <n>), and ask what it must. With --yes and nothing left to
                                         ask, it transcribes them again, copies them into final/ and writes the next revision
                                         of the hand-off the video has already, under the same id: main, its suggestions and
-                                        the Reels it holds as they were, with these Reels added, detached. It never writes its
-                                        first hand-off (the spellings do), and a Reel number is never given twice
+                                        the Reels it holds as they were, with these Reels added, detached. It says when the
+                                        hand-off will be ready, and returns once the run has begun (at most five seconds; it
+                                        says so if none does). It never writes its first hand-off (the spellings do), and a
+                                        Reel number is never given twice
   node edit.js show "<episode>" transcript|notes|plan
                                         print its transcript (a raw video's she has answered: its rough cut's, or, with a
                                         HyperFrames project in use, the recording's own), Claude's notes or its cut plan,

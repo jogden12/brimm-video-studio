@@ -8,7 +8,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { editMain, finishEpisode } from "../edit.js";
+import { HELP, editMain, finishEpisode } from "../edit.js";
 import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { recordFile, recordText } from "../episode.js";
 import { FOLDER, reread } from "./episodes.js";
@@ -107,6 +107,16 @@ describe("finish … --yes, until the run it started holds the episode's lock", 
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
     assert.equal(looks(w), 0);
     w.t.done();
+  });
+});
+
+describe("the help, on the start of a finish", () => {
+  it("says that --yes says when the hand-off will be ready, and returns once the run has begun, at most five seconds, and says so if none does", () => {
+    const finish = HELP.slice(HELP.indexOf('node edit.js finish "<episode>" [--yes]'), HELP.indexOf('node edit.js finish "<episode>" reels'));
+    const flat = finish.replace(/\n {40}/g, " ");
+    assert.ok(flat.includes("It says when the hand-off will be ready, and returns once the run has begun (at most five seconds; it says so if none does)"), flat);
+    const reels = HELP.slice(HELP.indexOf('node edit.js finish "<episode>" reels'), HELP.indexOf('node edit.js show "<episode>"')).replace(/\n {40}/g, " ");
+    assert.ok(reels.includes("It says when the hand-off will be ready, and returns once the run has begun (at most five seconds; it says so if none does)"), reels);
   });
 });
 
