@@ -1760,7 +1760,9 @@ const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames" };
     say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
     session, by its label and short id, and what its runs left with nothing of its video's names in it (cleanFor), a result
     left before it became one included, and with nothing said of what to say next. Words fit such an episode only when they
-    are its label or its id, and a light import's status only by its label. */
+    are its label or its id, and a light import's status only by its label. A finish at work that has written its hand-off and only
+    waits for its late check (finish-check.js) is said so, in place of that it is running: that the hand-off is written, and when
+    Studio checks Dropbox's copies and then takes away the originals it took. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -1808,7 +1810,11 @@ export async function status(ctx, rest) {
     // The working copy is made under a lock of its own, beside whatever holds the episode's (workcopy.js workCopyLockOf): its run
     // is looked for there, and its progress is in the panel's files with the others', by its process.
     const copying = runningRun(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder)) !== null;
-    if (command) lines.push(`${shown}: ${command} is running.`);
+    // A finish whose hand-off is written and shown only waits for its late check (finish-check.js): that is said in place of that it is
+    // running, with when Studio checks Dropbox's copies and then takes away what it took.
+    const checking = command === "finish" && e.inForce ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
+    if (checking) lines.push(`${shown}: the hand-off is written. ${checkSentence(checking)}`);
+    else if (command) lines.push(`${shown}: ${command} is running.`);
     if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
     let results = [];
     try {

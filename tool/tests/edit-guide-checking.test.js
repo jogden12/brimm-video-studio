@@ -14,64 +14,19 @@ import { LATE_CHECK_MS } from "../dropbox.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { CHECKING_FILE, markChecking } from "../finish-check.js";
 import { OPS_PAGE } from "../guide.js";
-import { clockAt } from "../unedited.js";
 import { episodeWork } from "../settings.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
-import { ANSWERED, exportOf, whisper } from "./exports-world.js";
-import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
+import { ANSWERED, exportOf } from "./exports-world.js";
+import { OFFERS, READ } from "./guide-world.js";
 import { finishedWorld } from "./reels-world.js";
+import { HANDOFF, NAMED, atWait, check, exported, on, seeing, whileChecking } from "./checking-world.js";
 
-const NAMED = "Pricing: what to charge? (3fa9c1)";
-const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
 const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 const KIT = 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.';
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
-const POST_TEXT ='Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.';
+const POST_TEXT = 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
-const THIS_PROCESS = (pid) => pid === process.pid;
-/** What Studio says of its late check, after the guide's lines: when it checks Dropbox's copies (`due`, ms), and what it then takes away. */
-const check = (due, where = "the export out of Downloads") => `Studio checks Dropbox's copies at ${clockAt(due)}${where ? `, and then takes ${where}` : ""}. You do not need to wait for it.`;
-
-/** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
-async function on(deps, ...argv) {
-  const said = [];
-  const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
-  return { code, said, text: said.join("\n") };
-}
-/** The deps of a guide run that sees this process as the finish run at work. */
-const seeing = (w, over = {}) => depsOf(w, { alive: THIS_PROCESS, ...over });
-/** Have `then` run once, at the first wait of `waited` milliseconds: the late check's (15 minutes) unless another is given. */
-function atWait(t, then, waited = LATE_CHECK_MS) {
-  const wait = t.ctx.deps.wait;
-  let done = false;
-  t.ctx.deps.wait = async (ms) => {
-    if (ms === waited && !done) {
-      done = true;
-      await then();
-    }
-    return wait(ms);
-  };
-}
-/** A raw video or an iPhone clip, with the exports of its HyperFrames projects in Downloads, and finish asked with a yes. */
-async function exported(kind = "raw") {
-  const w = guideWorld({ kind, projects: kind === "raw" ? ["main", "reel 2"] : ["main"], programs: { WHISPER: whisper() } });
-  exportOf(w, "main");
-  if (kind === "raw") exportOf(w, "reel 2");
-  assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
-  return w;
-}
-/** Run the finish as the command line runs it. While it waits for its late check, ask the guide each of `asks` (a name for the ask, and
-    the words of a guide run), and give back what each said, with `due`, the time the check is made. */
-async function whileChecking(w, asks, over = {}) {
-  const heard = {};
-  atWait(w.t, async () => {
-    heard.due = w.t.now() + LATE_CHECK_MS;
-    for (const [name, argv] of Object.entries(asks)) heard[name] = await on(seeing(w, over), ...argv);
-  });
-  assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
-  return heard;
-}
 
 describe("the guide while a raw video's finish waits for its late check", () => {
   it("gives the BRIMM Ops page's step, and after its lines the line of when Studio checks Dropbox's copies and then takes the export out of Downloads", async () => {
