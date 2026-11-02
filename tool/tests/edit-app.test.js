@@ -13,8 +13,11 @@ import { NOT_SET_UP } from "../app.js";
 import { HELD } from "../gate.js";
 import { lockOf, readResult } from "../detached.js";
 import { layoutOf, localStamp, recordFile, recordText } from "../episode.js";
+import { COPY_STEP } from "../guide.js";
 import { PIN, cliPath } from "../hyperframes.js";
+import { addRates, progressFolder } from "../progress.js";
 import { episodeWork, writeSettings } from "../settings.js";
+import { clockAt } from "../unedited.js";
 import { workCopyKey, workCopyPaths } from "../workcopy.js";
 import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
 import { episode } from "./phase4.js";
@@ -782,6 +785,15 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
     // Claimed, as the plan orders it (the claim, then the copy), and no project is recorded or opened.
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
+    t.done();
+  });
+  it("says when the video will be ready, as a clock time and in minutes, once this Mac has measured how long the copy takes, as the guide says how long it usually takes", async () => {
+    const { t } = world({ copy: false });
+    // 10 seconds for each second of the recording of 23.423 seconds: 234 seconds.
+    addRates(progressFolder(t.home), { [COPY_STEP]: 10 });
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`The video for HyperFrames is being made. It is ready about ${clockAt(t.now() + 234000)}, in about 4 minutes. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
     t.done();
   });
   it("asks for the working copy with the edit.js of the checkout this code is in, though this Mac's settings name another checkout", async () => {

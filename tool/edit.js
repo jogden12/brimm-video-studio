@@ -5527,7 +5527,10 @@ async function answerKind(ctx, found, plan, began) {
   // `app`, which asks for it when it is not there.
   if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
-    say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
+    // When its rough cut is ready too, as the guide says it (guideReading), once this Mac has measured the speeds of Claude's call and of
+    // the rough cut.
+    const rough = roughIn(readRates(progressFolder(ctx.home)), wrote.record.video && wrote.record.video.seconds);
+    say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.${rough === null ? "" : ` Its rough cut is ready about ${clockNear(holdsUntil + rough * 1000)}.`}`);
     return 0;
   }
   return waitForReading(ctx, found, name, previous, began);
