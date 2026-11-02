@@ -145,10 +145,11 @@ export function opsText(handoff, step, again) {
       and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
       them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
     - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
-      and is otherwise `finishRunning`: { due, took }, `due` the time the check is made (ms) and `took` the places the finish took
-      originals from ("Downloads", "From Final Cut"); null for any other. She need not wait for the check, so a raw video or an iPhone
-      clip is not at its finish running then: the stage is the one it is once the finish has ended. What Studio is still to do is said
-      in a line edit.js adds of its own (Item `also`).
+      and is otherwise `finishRunning`: { due, took, at }, `due` the time the check is made (ms), `at` the same as this Mac's clock says
+      it ("15:20") and `took` the places the finish took originals from ("Downloads", "From Final Cut"); null for any other. She need not
+      wait for the check, so a raw video, an iPhone clip or a finished video is not at its finish running then: the stage is the one it
+      is once the finish has ended, for a finished video's Reels exported meanwhile the Reels' (said for after the check, which
+      `finish … reels` is stopped until). What Studio is still to do is said in a line edit.js adds of its own (Item `also`).
     - `lateProblem`, when the late check of the video's last finish found a problem after its hand-off was written and a later finish has
       not ended well since (finish-check.js flagProblem): every answer for it then leads with the problem (nextFor).
     - `finishFailed`, when the finish her last yes started has ended without writing a hand-off (finish-ended.js): its run ended and did
@@ -338,9 +339,12 @@ function appStep(facts) {
     plan PR 10, review I2) or one the other Mac has open, which `finish … reels` refuses. */
 const reelsWaiting = (facts) => (facts.kind === "finished" && !facts.gated && !facts.elsewhere && Array.isArray(facts.reelsExported) ? facts.reelsExported.filter(Number.isInteger) : []);
 
-/** The step for the Reels exported and not in the hand-off (plan PR 16): which they are, and what she says to add them to it. */
-function reelsStep(reels) {
-  return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels" to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
+/** The step for the Reels exported and not in the hand-off (plan PR 16): which they are, and what she says to add them to it. While the
+    finish that handed off the Reels before them only waits for its late check (`checking`), that command is stopped until the check is
+    made (edit.js stoppedWords), so she is told to say it after the time Studio checks Dropbox's copies (`checking.at`). */
+function reelsStep(reels, checking) {
+  const after = checking ? ` after ${checking.at}` : "";
+  return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels"${after} to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
 }
 
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
@@ -356,9 +360,11 @@ function videoNext(facts, notes, now) {
   if (facts.handoff) {
     if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
-    // finished (nextFor) is above them: her word stands. While a finish runs, `finish … reels` refuses another, so the stage is that finish's.
+    // finished (nextFor) is above them: her word stands. While a finish copies, `finish … reels` refuses another, so the stage is that finish's. Once it
+    // only waits for its late check (`checking`) it is no finish at work as far as she is concerned: the stage is the Reels', said for after the check,
+    // which that command is stopped until.
     const reels = reelsWaiting(facts);
-    if (reels.length) return facts.finishRunning ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels);
+    if (reels.length) return facts.finishRunning && !facts.checking ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels, facts.checking);
     return opsStep(facts, notes, now) || { done: true };
   }
   // The gate holds it as a session whose mark is not cleared, though its kind is another (a Dropbox conflict or a hand edit leaves one): `app`
