@@ -19,7 +19,7 @@ import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
-import { clearChecking, markChecking } from "./finish-check.js";
+import { clearChecking, clearProblem, flagProblem, markChecking } from "./finish-check.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
 import { suggestionsFor } from "./suggestions-in-main.js";
@@ -46,6 +46,10 @@ const MOST_LOOKS = 120;
     or, when a finish takes both, the finished videos. */
 const WAITING = { "final cut": "Waiting for Final Cut's files", hyperframes: "Waiting for HyperFrames' exports", both: "Waiting for the finished videos" };
 const stepsFor = (waiting) => [WAITING[waiting], "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"];
+
+/** The notice a finish posts on this Mac when its late check fails after it said she could go on: the video, and what to say to see
+    why (the result says the same). */
+const problemNotice = (name) => `The check of ${name}'s copies in Dropbox found a problem: say "how far is it?"`;
 
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 const stem = (name) => basename(name, extname(name));
@@ -638,7 +642,9 @@ function laterRecord(folder, n) {
     writes as the finish's result: `made` the files copied into final/, `failed` what went wrong, `next` what a person is to
     check by eye, and the offers. Nothing is thrown from here. `deps.lateCheck` stands in for the late check in a test. `deps.nonce`
     is the nonce of the lock the run holds (detached.js): the marker the run leaves while it waits for the late check names it
-    (finish-check.js), and is believed only while that lock is the run's own. */
+    (finish-check.js), and is believed only while that lock is the run's own. `deps.notify` posts the notice on this Mac (unedited.js
+    banner) of a late check that fails after the hand-off was written; the run then leaves a note too, which a later finish that
+    ends well takes away. */
 /** Let go the claim a finish's quick part took for an episode nobody had open, when the finish did not write its record: the
     episode goes back to as it was. Only while the record is still the one the claim wrote, and still this Mac's. Gives
     back what to say, or "" when there was nothing to let go (the P1 check, T4 and T17). */
@@ -680,10 +686,11 @@ export async function finishNow(ctx, found, deps = {}) {
   mkdirSync(work, { recursive: true });
   let ended = false;
   // Whether its record was written, whether a record it wrote let its claim go already, and whether it left the marker of its late
-  // check (finish-check.js), which it takes away when it ends.
+  // check (finish-check.js), which it takes away when it ends; and the video's name, for the notice of a check that fails then.
   let recordWritten = false;
   let letGoneAlready = false;
   let marked = false;
+  let named = "";
   try {
     const asked = readJson(join(episodeWork(ctx.home, found.name), "finish.asked.json"));
     if (!asked) {
@@ -1074,6 +1081,7 @@ export async function finishNow(ctx, found, deps = {}) {
       try {
         markChecking(ctx.home, found.name, { nonce: deps.nonce, revision, due: lastCopy + LATE_CHECK_MS, took: taken.map((file) => file.place) });
         marked = true;
+        named = shownName(nextRecord);
       } catch (e) {
         // The marker could not be written: the check goes on, and the guide says what it said while a finish runs.
       }
@@ -1138,8 +1146,25 @@ export async function finishNow(ctx, found, deps = {}) {
     failed.push(`The finish stopped: ${e.message}`);
     return result();
   } finally {
-    // The run is over: it leaves no marker for the guide to believe, whatever ended it.
-    if (marked) clearChecking(ctx.home, found.name);
+    // The run is over: it leaves no marker for the guide to believe, whatever ended it. And if it ended badly after she was told she
+    // could go on, it is not silent: a notice on this Mac, and a note the guide tells until a later finish ends well. Nothing here may
+    // throw, or the run's result would be lost.
+    if (marked) {
+      clearChecking(ctx.home, found.name);
+      if (!ended) {
+        try {
+          flagProblem(ctx.home, found.name, ctx.now());
+        } catch (e) {
+          // The notice and the result say the same.
+        }
+        try {
+          (deps.notify || (() => {}))(problemNotice(named));
+        } catch (e) {
+          // A notice is a courtesy: the result says the same.
+        }
+      }
+    }
+    if (ended) clearProblem(ctx.home, found.name);
     // A finish that did not write its record lets go a claim its quick part took for it.
     if (!ended && !recordWritten && !letGoneAlready) {
       const gone = letGoClaim(ctx, found);
