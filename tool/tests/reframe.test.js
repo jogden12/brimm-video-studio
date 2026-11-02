@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTools } from "../run.js";
-import { stillsArgs, needsReframe, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
+import { stillsArgs, needsReframe, speakerPlace, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
 
 const WIDE = { width: 1920, height: 1080 };
 /** A face box whose middle is `centre` of the way across the picture. `size` is its width, as a share of the picture's. */
@@ -36,6 +36,41 @@ describe("whether a video needs a new shape", () => {
   it("is left as it is when it is already vertical or square", () => {
     assert.equal(needsReframe({ width: 1080, height: 1920 }), false);
     assert.equal(needsReframe({ width: 1080, height: 1080 }), false);
+  });
+});
+
+describe("where the speaker is across the picture", () => {
+  // The boxes here are made of halves, quarters and eighths, which a computer keeps exactly, so that a middle is compared as it is.
+  it("is the middle of the picture, and says no face was found, when no still holds one", () => {
+    for (const boxes of [[], [[]], [[], [], []], undefined, null]) assert.deepEqual(speakerPlace(boxes), { at: 0.5, found: false }, JSON.stringify(boxes));
+  });
+  it("is the middle of the face in a still, as a fraction of the picture's width from its left", () => {
+    assert.deepEqual(speakerPlace([[face(0.25, 0.125)]]), { at: 0.25, found: true });
+    assert.deepEqual(speakerPlace([[face(0.875, 0.125)]]), { at: 0.875, found: true });
+  });
+  it("takes the largest face in a still for the speaker: the one that covers the most of the picture, and not the widest", () => {
+    assert.equal(speakerPlace([[face(0.25, 0.125), face(0.75, 0.25), face(0.5, 0.125)]]).at, 0.75);
+    assert.equal(speakerPlace([[{ x: 0.125, y: 0.4, w: 0.25, h: 0.03125 }, { x: 0.6875, y: 0.2, w: 0.125, h: 0.25 }]]).at, 0.75);
+  });
+  it("goes by the still in the middle of them, so one odd still does not move it", () => {
+    assert.equal(speakerPlace([[face(0.25, 0.125)], [face(0.875, 0.125)], [face(0.375, 0.125)]]).at, 0.375);
+    assert.equal(speakerPlace([[face(0.875, 0.125)], [face(0.25, 0.125)], [face(0.375, 0.125)], [face(0.125, 0.125)], [face(0.5, 0.125)]]).at, 0.375);
+  });
+  it("stays on a face, and never in the gap between two people, when the stills are split evenly between them: the lower of the two in the middle", () => {
+    assert.equal(speakerPlace([[face(0.75, 0.25)], [face(0.25, 0.25)]]).at, 0.25);
+    assert.equal(speakerPlace([[face(0.75, 0.25)], [face(0.25, 0.25)], [face(0.75, 0.25)], [face(0.25, 0.25)]]).at, 0.25);
+  });
+  it("goes only by the stills a face was found in", () => {
+    assert.deepEqual(speakerPlace([[], [face(0.25, 0.125)], [], []]), { at: 0.25, found: true });
+  });
+  it("passes over a box that is not a face's numbers, and a still that holds no list of them", () => {
+    assert.deepEqual(speakerPlace([[null, { x: "left", w: 0.1, h: 0.1 }, { x: 0.1, w: NaN, h: 0.1 }, face(0.25, 0.125)]]), { at: 0.25, found: true });
+    assert.deepEqual(speakerPlace([[{ x: NaN, w: 0.1, h: 0.1 }], null, "faces", [undefined]]), { at: 0.5, found: false });
+  });
+  it("is the place cropFor puts the crop on: the same stills, the same face", () => {
+    const stills = [[face(0.25, 0.125)], [face(0.875, 0.125)], [face(0.375, 0.125)]];
+    const { at } = speakerPlace(stills);
+    assert.equal(cropFor(WIDE, stills).x, Math.round(at * WIDE.width - 606 / 2));
   });
 });
 
