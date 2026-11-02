@@ -51,7 +51,7 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
   return found;
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
-const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
 const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
@@ -109,12 +109,12 @@ describe("guide, from the records", () => {
     assert.deepEqual((await on(later, "guide")).said, [DROP_LINE, "Nothing is under way. To start, put the video in your drop folder."]);
     t.done();
   });
-  it("lists two versions under one hand-off id once, by the newest hand-off: drop the new one on the same episode", async () => {
+  it("lists two versions under one hand-off id once, by the newest hand-off: the page's button for it names both revisions", async () => {
     const t = setup();
     const first = handedOff(t);
     handedOff(t, { id: "e-20261021-a2a2a2", name: "2026-10-21 Launch talk again (Mac Studio)", text: "Launch talk again", revision: 2, under: first.record.id, at: "2026-10-21T13:00:00-05:00", over: { versionOf: first.record.id } });
     writeGuideNotes(t.home, { version: 1, handoffs: { [first.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
-    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): On the BRIMM Ops page: Drag the new hand-off onto the same episode, then press "Take the hand-off".']);
+    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".']);
     t.done();
   });
   it("still lists an older version held as a session when the newer one's hand-off goes out under its id, by its label, and finds it only by its label or id", async () => {
@@ -544,7 +544,7 @@ describe("guide tell", () => {
   });
 });
 
-const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
 describe("guide notes her word", () => {
   it("notes only the step that comes next, then says the next one", async () => {
     const t = setup();
