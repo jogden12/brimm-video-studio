@@ -13,11 +13,13 @@
 // A Reel's project (plan PR 5, architecture 4.3) is a stretch of the recording as a project of its own: its video is that stretch,
 // cut by workcopy.js; its transcript.json holds the recording's words in the stretch on the stretch's own clock (reelWords), and
 // brimm/facts.json says where the stretch starts in the recording; it has no cut or Reel suggestions, and brimm/face-track.json
-// only when the face finder found a face in its video. The notes of a main and a Reel project carry the ruling of 2026-10-28: a Reel
-// is made by Studio only, so the agent never makes one as a new project, and tells her to say "Open Reel 2 in HyperFrames" in her
-// Claude chat when she asks it for one (a short video's main project has no Reels to ask for, so its notes leave that line out, and
-// have one in its place: no Reel and no new project from it); a session clip's own rules, first of all, forbid any new project
-// from it.
+// only when the face finder found a face in its video. Its page is upright, 1080 by 1920, whatever the video's shape, with the
+// video placed so that the speaker the finder found is in the middle of the frame (reelCrop; Jason, 2 November), while
+// brimm/facts.json keeps the video's own size, which a video put back is held to. The notes of a main and a Reel project carry
+// the ruling of 2026-10-28: a Reel is made by Studio only, so the agent never makes one as a new project, and tells her to say
+// "Open Reel 2 in HyperFrames" in her Claude chat when she asks it for one (a short video's main project has no Reels to ask for,
+// so its notes leave that line out, and have one in its place: no Reel and no new project from it); a session clip's own rules,
+// first of all, forbid any new project from it.
 // A project holds only the files chosen here: projectFiles gives the whole set, and the tests hold each kind's list whole.
 //
 // writeProject puts a file set on disk whole or not at all. It is made in the run's own folder, the working copy is renamed into
@@ -31,6 +33,7 @@ import { clockText, heardWords, insideTheirTime } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
+import { UPRIGHT, shownWidth, speakerPlace, uprightPosition } from "./reframe.js";
 
 /** A file of this tool's own, by its path from this file. */
 const own = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -88,15 +91,32 @@ export function projectName({ name, part, number, clip, id }) {
 /** A number of seconds as the page writes it: to the thousandth, with no trailing zeros. */
 const secondsText = (seconds) => String(Math.round(Number(seconds) * 1000) / 1000);
 
+/** How a Reel's page is cropped (Jason, 2 November; architecture 4.3): { at, found, position, across }. Studio makes a Reel upright and
+    puts the speaker in the middle of the frame. The speaker is where reframe.js speakerPlace finds one in the stills the face finder
+    looked in, `track` being faceTrack's (the largest face in each still, and the place the middle one of the stills): `at` is how far
+    across the picture, as a fraction of its width from its left, and `found` whether any still held a face; with none, or no track,
+    `at` is the middle and `found` is false. `position` is the `object-position` across that puts `at` in the middle of the frame
+    (reframe.js uprightPosition, a percentage), and `across` whether the working copy's picture is wider than the frame, so that
+    anything is cropped across at all. `facts` are the working copy's. */
+export function reelCrop(facts, track) {
+  const { at, found } = speakerPlace((Array.isArray(track?.stills) ? track.stills : []).map((still) => still?.faces));
+  return { at, found, position: uprightPosition(facts, at), across: shownWidth(facts) > UPRIGHT.width };
+}
+
 /** The page of a project (5.2): one composition, "main", as long as the working copy, with the working copy as its one video,
     of the working copy's size; GSAP from the project's vendor/ folder and the brand's typefaces from its assets/fonts/, so that
     nothing is loaded from the network (F4). Its structure is the golden's: the same attributes on the root and on the video, and
     one paused timeline registered under the root's id. `facts` are the working copy's, as workcopy.js writes them ({seconds,
-    width, height}); the video has sound unless `facts.audio` is false. */
-export function indexHtml(facts) {
-  const width = Math.round(Number(facts?.width));
-  const height = Math.round(Number(facts?.height));
-  if (!(width > 0 && height > 0 && Number(facts?.seconds) > 0)) throw new Error("indexHtml: the working copy's facts need its width, height and seconds");
+    width, height}); the video has sound unless `facts.audio` is false.
+    A Reel's page (`crop`, reelCrop's) is upright instead: the composition is 1080 by 1920 whatever the working copy's size, its
+    portrait resolution, viewport and body included, and the video still fills it (`object-fit: cover`), placed by `object-position`
+    so that the speaker is in the middle (the export shows the same crop: HyperFrames' runtime and renderer read the video's
+    object-fit and object-position). Given no crop, the page is the working copy's own shape, byte for byte as it always was. */
+export function indexHtml(facts, crop = null) {
+  const picture = { width: Math.round(Number(facts?.width)), height: Math.round(Number(facts?.height)) };
+  if (!(picture.width > 0 && picture.height > 0 && Number(facts?.seconds) > 0)) throw new Error("indexHtml: the working copy's facts need its width, height and seconds");
+  const { width, height } = crop ? UPRIGHT : picture;
+  const placed = crop ? `; object-position: ${Number.isFinite(crop.position) ? crop.position : 50}% 50%` : "";
   const length = secondsText(facts.seconds);
   const shape = width > height ? "landscape" : width < height ? "portrait" : "square";
   const faces = FONTS.map((f) => `      @font-face { font-family: "${f.family}"; src: url("assets/fonts/${f.file}") format("${f.format}"); font-weight: ${f.weight}; font-style: ${f.style}; }`);
@@ -144,7 +164,7 @@ ${faces.join("\n")}
         data-start="0"
         data-duration="${length}"
         data-track-index="0"
-        style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover"
+        style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover${placed}"
         data-has-audio="${facts.audio === false ? "false" : "true"}"
       ></video>
     </div>
@@ -204,9 +224,10 @@ export function reelWords(words, stretch) {
 /** brimm/face-track.json (architecture 4.3): where the faces are in a Reel's video, from what the face finder (faces.swift)
     printed of a still every `every` seconds of it, { every, stills: [{ file, faces: [{x, y, w, h}] }] }: for each still, its time
     on the Reel's clock (its number times `every`, as unedited.js cropsFor reads it) and its boxes as the finder gave them, in
-    fractions of the picture from its top left corner. The upright crop is the app's job; this is what Studio offers for it. null
-    when no still holds a face, or the finder printed nothing that can be read: then there is no file. A still whose file has no
-    number is left out. */
+    fractions of the picture from its top left corner. Studio crops the Reel's page upright on the speaker by these (reelCrop), and
+    the file is there for the app's agent to move that crop by, or to follow the speaker with it. null when no still holds a face,
+    or the finder printed nothing that can be read: then there is no file, and the crop is the middle of the picture. A still
+    whose file has no number is left out. */
 export function faceTrack(found) {
   const every = Number(found?.every);
   if (!(every > 0) || !Array.isArray(found?.stills)) return null;
@@ -479,7 +500,8 @@ export const settingsText = (kind) => jsonText(settingsFor(kind));
       its words are the recording's words in it, on its own clock: reelWords), the cut `plan` of the recording, by whose phrases the
       words are placed as the main video's are, before they are chosen (it may be none: the words are then only moved inside their
       time), and the `faces` the face finder printed of its video, { every, stills }, if any were looked for (faceTrack: a file only
-      when one holds a face). No cut or Reel suggestions are written, and the plan cuts nothing;
+      when one holds a face; the page is upright, cropped on the speaker they show, or on the middle of the picture when none does:
+      reelCrop). No cut or Reel suggestions are written, and the plan cuts nothing;
     - for a session's clip, `clip`, its number. A clip has no spellings, suggestions or logos, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
@@ -499,9 +521,11 @@ export function projectFiles(input) {
   const placed = saidWords(input.words, kind === "clip" ? [] : input.plan?.phrases);
   const transcript = transcriptJson(kind === "reel" ? reelWords(placed, input.stretch) : placed, episode ? input.spellings : []);
   const track = kind === "reel" ? faceTrack(input.faces) : null;
+  // A Reel's page is upright and cropped on the speaker the finder found; a main video's and a clip's is the working copy's own shape.
+  const crop = kind === "reel" ? reelCrop(input.facts, track) : null;
 
   const files = new Map();
-  files.set("index.html", indexHtml(input.facts));
+  files.set("index.html", indexHtml(input.facts, crop));
   files.set("meta.json", jsonText({ id: name, name, createdAt: input.createdAt }));
   files.set("hyperframes.json", jsonText(HYPERFRAMES_JSON));
   files.set("package.json", jsonText({ name, private: true, type: "module", scripts: SCRIPTS }));

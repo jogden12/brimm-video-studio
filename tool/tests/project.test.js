@@ -9,7 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
-import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
+import { wordsOnScreen } from "../on-screen.js";
+import { recordingPlacements } from "../on-timeline.js";
+import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelCrop, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -328,6 +330,125 @@ describe("the face track (architecture 4.3; plan PR 5)", () => {
     assert.ok(!projectFiles(reel()).get("CLAUDE.md").includes("face-track.json: where"));
     assert.ok(json(projectFiles(reel({ faces: FACES })), "brimm/facts.json").files["brimm/face-track.json"]);
     assert.ok(!("brimm/face-track.json" in json(projectFiles(reel()), "brimm/facts.json").files));
+  });
+});
+
+describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jason, 2 November; architecture 4.3)", () => {
+  // A face is made of halves and eighths, which a computer keeps exactly: `centre` is how far across the picture its middle is.
+  const box = (centre) => ({ x: centre - 0.0625, y: 0.2, w: 0.125, h: 0.25 });
+  /** What the face finder printed of a Reel's video, a still every 2 seconds: for each still, the middles of the faces in it. */
+  const seen = (...stills) => ({ every: 2, stills: stills.map((centres, i) => ({ file: `${String(i + 1).padStart(4, "0")}.jpg`, faces: centres.map(box) })) });
+  const pageOf = (over) => projectFiles(reel(over)).get("index.html");
+  /** The `object-position` the page gives the video, as it is written: "13.43% 50%". */
+  const positionOf = (html) => videoTag(html).match(/object-position: ([^;"]+)/)?.[1] ?? null;
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+
+  it("is 1080 by 1920 and portrait whatever the working copy's shape: the root, the viewport and the body", () => {
+    for (const facts of [FACTS, { ...FACTS, width: 1280, height: 720 }, { ...FACTS, width: 1080, height: 1080 }, { ...FACTS, width: 1080, height: 1920 }]) {
+      const html = pageOf({ facts, faces: seen([0.25]) });
+      const shown = JSON.stringify(facts);
+      assert.match(rootTag(html), /data-duration="6"[\s\S]*data-width="1080"[\s\S]*data-height="1920"/, shown);
+      assert.match(html, /<html lang="en" data-resolution="portrait">/, shown);
+      assert.match(html, /content="width=1080, height=1920"/, shown);
+      assert.ok(html.includes("        width: 1080px;\n        height: 1920px;\n"), shown);
+      assert.doesNotMatch(html, /data-width="1920"|data-resolution="landscape"|height: 1080px/, shown);
+    }
+  });
+  it("keeps the working copy's video filling the frame, as the main project's does, and places it by object-position", () => {
+    const html = pageOf({ faces: seen([0.25]) });
+    assert.match(videoTag(html), /src="media\/recording\.mp4"/);
+    assert.match(videoTag(html), /style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 13\.43% 50%"/);
+    // The same attributes as the main project's video, and nothing else: only its style says where the picture is placed.
+    assert.deepEqual(attributes(videoTag(html)), attributes(videoTag(projectFiles(main()).get("index.html"))));
+    assert.deepEqual(attributes(rootTag(html)), attributes(rootTag(projectFiles(main()).get("index.html"))));
+    assert.equal(html.match(/window\.__timelines\["main"\] =/g).length, 1);
+    // The video has sound unless the working copy has none, as before.
+    assert.match(videoTag(html), /data-has-audio="true"/);
+    assert.match(videoTag(pageOf({ facts: { ...FACTS, audio: false } })), /data-has-audio="false"/);
+  });
+
+  it("puts the speaker in the middle of the frame: a face a quarter of the way across the picture is at 13.43%, three quarters of the way across at 86.57%, in the middle at 50%", () => {
+    assert.equal(positionOf(pageOf({ faces: seen([0.25]) })), "13.43% 50%");
+    assert.equal(positionOf(pageOf({ faces: seen([0.75]) })), "86.57% 50%");
+    assert.equal(positionOf(pageOf({ faces: seen([0.5]) })), "50% 50%");
+  });
+  it("stops at the picture's own edges, 0% and 100%, for a speaker too near a side to be put in the middle", () => {
+    assert.equal(positionOf(pageOf({ faces: seen([0.0625]) })), "0% 50%");
+    assert.equal(positionOf(pageOf({ faces: seen([0.9375]) })), "100% 50%");
+  });
+  it("takes the largest face in a still for the speaker, and goes by the middle one of the stills, skipping the stills with nobody in them", () => {
+    // The face at the right covers more of the picture, though it is not the one found first.
+    const larger = { every: 2, stills: [{ file: "0001.jpg", faces: [box(0.25), { x: 0.625, y: 0.2, w: 0.25, h: 0.5 }] }] };
+    assert.equal(positionOf(pageOf({ faces: larger })), "86.57% 50%");
+    // Three stills with a face: the middle one of 0.25, 0.875 and 0.375 is 0.375. A still with nobody in it is not counted.
+    assert.equal(positionOf(pageOf({ faces: seen([0.25], [], [0.875], [], [0.375]) })), "31.71% 50%");
+    // Two stills: the lower of the two, a place a face was and not the gap between them.
+    assert.equal(positionOf(pageOf({ faces: seen([0.75], [0.25]) })), "13.43% 50%");
+  });
+  it("is the middle, 50%, when there are no faces to go by: none looked for, none found, or what the finder printed cannot be read", () => {
+    for (const faces of [undefined, null, seen(), seen([]), seen([], [], []), { every: 2 }, { stills: seen([0.25]).stills }, "faces"]) {
+      assert.equal(positionOf(pageOf({ faces })), "50% 50%", JSON.stringify(faces));
+      assert.match(rootTag(pageOf({ faces })), /data-width="1080"[\s\S]*data-height="1920"/);
+    }
+  });
+  it("is 50% for a working copy that is upright already, wherever the speaker is: there is nothing to crop across", () => {
+    for (const facts of [{ ...FACTS, width: 1080, height: 1920 }, { ...FACTS, width: 720, height: 1280 }, { ...FACTS, width: 1080, height: 2400 }]) {
+      assert.equal(positionOf(pageOf({ facts, faces: seen([0.25]) })), "50% 50%", JSON.stringify(facts));
+    }
+  });
+  it("goes by the working copy's shape, not its size: a 16:9 picture of any size is placed alike, and a square one is cropped across too", () => {
+    const [small, large] = [{ ...FACTS, width: 1280, height: 720 }, { ...FACTS, width: 3840, height: 2160 }].map((facts) => positionOf(pageOf({ facts, faces: seen([0.25]) })));
+    assert.deepEqual([small, large], ["13.43% 50%", "13.43% 50%"]);
+    assert.equal(positionOf(pageOf({ facts: { ...FACTS, width: 1080, height: 1080 }, faces: seen([0.375]) })), "21.43% 50%");
+  });
+
+  it("is a Reel's alone: a main project's page and a clip's are the working copy's own shape, with no object-position, whatever faces they are given", () => {
+    for (const files of [projectFiles(main()), projectFiles(main({ faces: seen([0.25]) })), projectFiles(clip()), projectFiles(clip({ faces: seen([0.25]) }))]) {
+      const html = files.get("index.html");
+      assert.match(rootTag(html), /data-width="1920"[\s\S]*data-height="1080"/);
+      assert.match(html, /data-resolution="landscape"/);
+      assert.doesNotMatch(html, /object-position/);
+    }
+  });
+  it("leaves a main project's page and a clip's as they were, byte for byte: each page's hash is that of the page before the Reel's was made upright", () => {
+    // Made by main's code at f931c7b (30 October), before the Reel's page was made upright, for the working copy's facts of each page.
+    const WIDE_PAGE = "a1c09d62d221da061fed60f5fe708fb4e8325daab51d0ade1e678ff05acf2c2e";
+    assert.equal(sha(indexHtml(FACTS)), WIDE_PAGE);
+    assert.equal(sha(projectFiles(main()).get("index.html")), WIDE_PAGE);
+    assert.equal(sha(projectFiles(main({ short: true })).get("index.html")), WIDE_PAGE);
+    assert.equal(sha(projectFiles(clip()).get("index.html")), WIDE_PAGE);
+    assert.equal(sha(indexHtml({ ...FACTS, width: 1080, height: 1920, seconds: 42.5 })), "a4502cf4227f92e94d4a2aa029158a79398d8c505e38c62b3ffbb8c8f78dde2f");
+    assert.equal(sha(indexHtml({ ...FACTS, width: 1280, height: 720, seconds: 1.45, audio: false })), "072c6c8a348588518a5ed1a892c463efd2d029632b92b5592da6dee129c4f1b2");
+    assert.equal(sha(indexHtml({ ...FACTS, width: 1080, height: 1080, seconds: 10 })), "dafd4e7e239566253325e61bf3ba4207cd2b0b499189cf51fe09ba6dc798d050");
+    assert.equal(projectFiles(main({ facts: { ...FACTS, width: 1080, height: 1920 } })).get("index.html"), indexHtml({ ...FACTS, width: 1080, height: 1920 }));
+  });
+  it("is refused for a working copy whose facts say no size or length, as any page is", () => {
+    for (const facts of [undefined, {}, { seconds: 6 }, { ...FACTS, width: 0 }, { ...FACTS, seconds: 0 }]) assert.throws(() => projectFiles(reel({ facts })), /indexHtml/, JSON.stringify(facts));
+  });
+
+  it("leaves the working copy's own size in brimm/facts.json, since it is the video's and a video put back is held to it", () => {
+    const facts = json(projectFiles(reel({ facts: { ...FACTS, width: 1280, height: 720 }, faces: seen([0.25]) })), "brimm/facts.json");
+    assert.deepEqual([facts.width, facts.height, facts.seconds, facts.fps], [1280, 720, 6, 30]);
+  });
+  it("is read as the wide page was: no words on the picture, and the recording placed at the start for the length of the working copy", () => {
+    const html = pageOf({ faces: seen([0.25]) });
+    assert.deepEqual(wordsOnScreen((rel) => (rel === "index.html" ? html : null)), []);
+    assert.deepEqual(recordingPlacements(html), [{ start: 0, duration: 6, mediaStart: 0, rate: 1 }]);
+    assert.deepEqual(recordingPlacements(html), recordingPlacements(projectFiles(main()).get("index.html")));
+  });
+
+  describe("reelCrop: how a Reel's page is cropped", () => {
+    it("is the speaker's place across the picture, whether a face was found, the object-position that puts it in the middle, and whether the picture is cropped across at all", () => {
+      assert.deepEqual(reelCrop(FACTS, faceTrack(seen([0.25]))), { at: 0.25, found: true, position: 13.43, across: true });
+      assert.deepEqual(reelCrop(FACTS, faceTrack(seen([0.75]))), { at: 0.75, found: true, position: 86.57, across: true });
+    });
+    it("is the middle of the picture, and says no face was found, when the face track is none", () => {
+      assert.deepEqual(reelCrop(FACTS, null), { at: 0.5, found: false, position: 50, across: true });
+      assert.deepEqual(reelCrop(FACTS, undefined), { at: 0.5, found: false, position: 50, across: true });
+    });
+    it("is not across for a picture that is upright already, though its speaker is found", () => {
+      assert.deepEqual(reelCrop({ ...FACTS, width: 1080, height: 1920 }, faceTrack(seen([0.25]))), { at: 0.25, found: true, position: 50, across: false });
+    });
   });
 });
 
