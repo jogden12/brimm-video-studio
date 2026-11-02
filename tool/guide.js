@@ -149,6 +149,8 @@ export function opsText(handoff, step, again) {
       originals from ("Downloads", "From Final Cut"); null for any other. She need not wait for the check, so a raw video or an iPhone
       clip is not at its finish running then: the stage is the one it is once the finish has ended. What Studio is still to do is said
       in a line edit.js adds of its own (Item `also`).
+    - `lateProblem`, when the late check of the video's last finish found a problem after its hand-off was written and a later finish has
+      not ended well since (finish-check.js flagProblem): every answer for it then leads with the problem (nextFor).
     - `gated`, when the gate holds a video as a session whose mark is not cleared, though its kind is not a session's (a record of
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
@@ -195,7 +197,10 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const SESSION_MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
-const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
+/** What every answer for a video leads with, ahead of its step, once the late check of its last finish found a problem after she had
+    been told she could go on (facts.lateProblem): why is in the status, which is what she is told to say. */
+const LATE_PROBLEM = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
+const TEACHINGS_OFF ="Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
 /** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
     rough cut stays among them until the retirement's wave 2 stops the reading making one (spec section 10). */
@@ -396,11 +401,20 @@ const withdrawalOwed = (facts, notes) => {
   return Boolean(next) && next.step === "withdrawn";
 };
 
-/** The one next step for a video, from what edit.js read of it, her notes on this Mac, and the time now (ms). A file in a drop
-    folder first; then what holds any video up (a conflict, her answer, a version that was a session after all); then a video she
-    said was finished, which is done, unless it is a session after all whose withdrawal is still owed, which nothing noted can
-    skip; then a session's steps, or any other video's. */
+/** The one next step for a video, from what edit.js read of it, her notes on this Mac, and the time now (ms): stepFor's, led by the
+    problem the late check of its last finish found (`lateProblem`), when it found one that a later finish has not put right. That is
+    said of a video with a hand-off written that is not a session and is not done, and not while a finish runs: a later finish is
+    what puts it right, and it is at work. The stage, the step and what comes after it are the step's own. */
 export function nextFor(facts, notes, now) {
+  const next = stepFor(facts, notes, now);
+  const leads = facts.lateProblem === true && Boolean(facts.handoff) && facts.kind !== "session" && !facts.finishRunning && !next.done;
+  return leads ? { ...next, text: `${LATE_PROBLEM} ${next.text}` } : next;
+}
+
+/** The step for a video, without what it may be led with. A file in a drop folder first; then what holds any video up (a conflict,
+    her answer, a version that was a session after all); then a video she said was finished, which is done, unless it is a session
+    after all whose withdrawal is still owed, which nothing noted can skip; then a session's steps, or any other video's. */
+function stepFor(facts, notes, now) {
   if (facts.drop) return dropNext(facts.drop, facts.mac);
   if (facts.conflicted) return toDo("conflicted", 'Dropbox kept two copies of a change to it. Say "sort out the conflict".');
   if (facts.waiting) return facts.elsewhere ? toDo("answering-elsewhere", `It is being answered on ${spokenMac(facts.mac)}. Carry on there.`) : toDo("waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.');

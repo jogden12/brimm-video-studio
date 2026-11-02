@@ -60,7 +60,7 @@ import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
-import { checkingNow } from "./finish-check.js";
+import { checkingNow, problemFlagged } from "./finish-check.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
@@ -6566,6 +6566,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
   // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
   // asked only of a finish at work, and of no video the gate holds.
   const checking = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
+  // The late check of its last finish found a problem after she was told she could go on, and no later finish has ended well since (the
+  // note finish.js leaves): asked only of a video with a hand-off that is not a session's, and of none the gate holds.
+  const lateProblem = !hidden && Boolean(handoff) && kind !== "session" && problemFlagged(ctx.home, e.name);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6587,6 +6590,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     checking,
+    lateProblem,
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     gated: kind !== "session" && sessionNotCleared(r),
     way,

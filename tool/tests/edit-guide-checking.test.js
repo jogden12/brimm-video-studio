@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
+import { finishNow } from "../finish.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { CHECKING_FILE, markChecking } from "../finish-check.js";
@@ -187,6 +188,70 @@ describe("the guide while a finish of the Final Cut way waits for its late check
     assert.deepEqual(heard.next.said.slice(0, 1), [`${NAMED}: ${TAKEN}${ONLINE}`]);
     assert.equal(heard.next.said.at(-1), check(heard.due, "what it took out of From Final Cut"));
     t.done();
+  });
+});
+
+describe("the guide after a late check found a problem that she had been told she could go on from", () => {
+  const LEAD = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
+  const STEP = [`${NAMED}: ${LEAD} ${TAKEN}${ONLINE}`, `Then: ${KIT}`, "Step: taken"];
+  /** A raw video whose finish wrote its hand-off and then failed at its late check. */
+  async function failedCheck() {
+    const w = await exported();
+    const found = { ...w.found, record: reread(w.found) };
+    const result = await finishNow(w.t.ctx, found, { nonce: "a run's nonce", notify: () => {}, lateCheck: () => ["a copy in final/ is not whole"] });
+    assert.equal(result.ok, false);
+    return w;
+  }
+  it("leads its answer with the problem and what to say, then gives the step as it did, in the list, for the video and in a line of `tell`", async () => {
+    const w = await failedCheck();
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1")).said, STEP);
+    assert.deepEqual((await on(seeing(w), "guide")).said.slice(2), [`  ${NAMED}: ${LEAD} ${TAKEN}${ONLINE}`]);
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1", "tell")).said, [`${NAMED}: ${LEAD} ${TAKEN}${ONLINE}`]);
+    w.t.done();
+  });
+  it("still shows the hand-off in Finder, and notes the steps she does", async () => {
+    const w = await failedCheck();
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1", "show")).said, [`Shown in Finder: the hand-off of ${NAMED}.`]);
+    const done = await on(seeing(w), "guide", "3fa9c1", "done", "taken");
+    assert.equal(done.said[0], `Noted: ${NAMED}, taken.`);
+    assert.ok(done.said[1].startsWith(`${NAMED}: ${LEAD} On the BRIMM Ops page: ${KIT}`), done.said[1]);
+    w.t.done();
+  });
+  it("goes when a later finish ends well, and stays when one fails before its hand-off is written", async () => {
+    const w = await failedCheck();
+    // Not asked again, the finish finds that the episode changed since it was asked, and writes nothing.
+    const early = await finishNow(w.t.ctx, { ...w.found, record: w.found.record }, { nonce: "a run's nonce", notify: () => {} });
+    assert.equal(early.ok, false);
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1")).said, STEP);
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { yes: true }), 0, w.t.said());
+    assert.equal((await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) }, { nonce: "a run's nonce", notify: () => {} })).ok, true);
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1")).said, [`${NAMED}: ${TAKEN}${ONLINE}`, `Then: ${KIT}`, "Step: taken"]);
+    w.t.done();
+  });
+  it("is not said while a later finish runs: it says its finish is running while it copies, and the step and the check once it waits", async () => {
+    const w = await failedCheck();
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { yes: true }), 0, w.t.said());
+    const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
+    assert.deepEqual(heard.next.said, [`${NAMED}: ${TAKEN}${ONLINE}`, `Then: ${KIT}`, "Step: taken", check(heard.due, "")]);
+    w.t.done();
+  });
+  it("is not said of a video she has said is finished", async () => {
+    const w = await failedCheck();
+    assert.deepEqual((await on(seeing(w), "guide", "3fa9c1", "finished")).said, [`${NAMED} is no longer under way.`]);
+    assert.deepEqual((await on(seeing(w), "guide")).said.slice(1), ["Nothing is under way. To start, put the video in your drop folder."]);
+    w.t.done();
+  });
+  it("is said of an iPhone clip and of a finished video whose Reels were handed off", async () => {
+    const clip = await exported("short video");
+    assert.equal((await finishNow(clip.t.ctx, { ...clip.found, record: reread(clip.found) }, { nonce: "n", notify: () => {}, lateCheck: () => ["a copy in final/ is not whole"] })).ok, false);
+    assert.deepEqual((await on(seeing(clip), "guide", "3fa9c1")).said, [`${NAMED}: ${LEAD} ${TAKEN}`, `Then: ${POST_TEXT}`, "Step: taken"]);
+    const reels = await finishedWorld();
+    exportOf(reels, "reel 2");
+    assert.equal(await finishEpisode(reels.t.ctx, { ...reels.found, record: reread(reels.found) }, { reels: true, yes: true }), 0, reels.t.said());
+    assert.equal((await finishNow(reels.t.ctx, { ...reels.found, record: reread(reels.found) }, { nonce: "n", notify: () => {}, lateCheck: () => ["a copy in final/ is not whole"] })).ok, false);
+    assert.deepEqual((await on(seeing(reels), "guide", "3fa9c1")).said, [`${NAMED}: ${LEAD} ${TAKEN}`, `Then: ${KIT}`, "Step: taken"]);
+    clip.t.done();
+    reels.t.done();
   });
 });
 

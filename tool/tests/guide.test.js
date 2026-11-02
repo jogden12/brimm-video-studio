@@ -567,6 +567,57 @@ describe("the next step while a finish waits for its late check (the BRIMM Ops p
   });
 });
 
+describe("what the guide leads with once a late check found a problem after she was told she could go on", () => {
+  const LEAD = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
+  const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
+  const problem = (over = {}) => ({ ...BASE, ...APP({ way: "hyperframes" }), handoff: handoffOf("raw"), lateProblem: true, ...over });
+  it("is the problem in one plain sentence and what to say, ahead of the step it would say, whose stage and step stay", () => {
+    const plain = nextFor(problem({ lateProblem: false }), NONE, NOW);
+    const n = nextFor(problem(), NONE, NOW);
+    assert.deepEqual(n, { ...plain, text: `${LEAD} ${plain.text}` });
+    assert.deepEqual([n.stage, n.step], ["ops", "taken"]);
+    assert.ok(n.text.startsWith(`${LEAD} On the BRIMM Ops page: `));
+  });
+  it("leads every kind of video with a hand-off: a clip, a finished video, a raw video on the Final Cut way, and a stage that is not the page's", () => {
+    for (const over of [
+      CLIP({ way: "hyperframes", handoff: handoffOf("short video") }),
+      { kind: "finished", handoff: OPS_HANDOFF },
+      RAW({ way: "final cut", shownInFinalCut: true, handoff: handoffOf("raw") }),
+      { kind: "finished", handoff: OPS_HANDOFF, reelsExported: [2] },
+      APP({ way: "hyperframes", handoff: handoffOf("raw"), conflicted: true })
+    ]) {
+      const plain = nextFor({ ...BASE, ...over }, NONE, NOW);
+      const n = nextFor({ ...BASE, ...over, lateProblem: true }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], [plain.stage, `${LEAD} ${plain.text}`], JSON.stringify(over));
+    }
+  });
+  it("is said by every answer that says the step: the list, the video, and the line `tell` says", () => {
+    const facts = problem();
+    const item = { facts, next: nextFor(facts, NONE, NOW), folder: null, record: null };
+    assert.ok(overviewLines({ drop: "D", items: [item], old: 0 })[2].startsWith(`  ${facts.name}: ${LEAD} On the BRIMM Ops page: `));
+    assert.equal(videoLines(item)[0], `${facts.name}: ${item.next.text}`);
+    assert.equal(told(item, item, item), `${facts.name}: ${item.next.text}`);
+    assert.ok(told(item, item, item).startsWith(`${facts.name}: ${LEAD} `));
+  });
+  it("is not said while a finish runs, with or without a check to wait for: a later finish is what puts it right", () => {
+    const running = nextFor(problem({ finishRunning: true }), NONE, NOW);
+    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const checking = nextFor(problem({ finishRunning: true, checking: { due: NOW, took: [] } }), NONE, NOW);
+    assert.deepEqual([checking.stage, checking.step], ["ops", "taken"]);
+    assert.ok(!checking.text.includes(LEAD));
+  });
+  it("is not said for a video with no hand-off, for a session, or for one that is done", () => {
+    assert.ok(!nextFor(problem({ handoff: null, offersAnswered: false }), NONE, NOW).text.includes(LEAD));
+    assert.ok(!nextFor({ ...BASE, ...SESSION({ choice: null }), lateProblem: true }, NONE, NOW).text.includes(LEAD));
+    assert.deepEqual(nextFor(problem(), { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } }, NOW), { done: true });
+    assert.deepEqual(nextFor(problem(), { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-24T09:00:00-05:00" } } }, NOW), { done: true });
+  });
+  it("is said in sentences under 25 words, with no path or flag", () => {
+    assert.doesNotMatch(LEAD, /\/|\\|--|\.js\b/);
+    for (const sentence of LEAD.split(/(?<=[.;])\s+/)) assert.ok(sentence.split(/\s+/).length < 25, sentence);
+  });
+});
+
 describe("the guide's lists", () => {
   const item = (name, over = {}, next = { done: false, stage: "spellings", text: "T.", step: "", after: "" }) => ({ facts: { ...BASE, name, ...over }, next, folder: null, record: null });
   const waiting = { done: false, stage: "waiting", text: "W.", step: "", after: "" };
