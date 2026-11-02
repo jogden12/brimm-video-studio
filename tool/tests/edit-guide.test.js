@@ -117,6 +117,31 @@ describe("guide, from the records", () => {
     assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".']);
     t.done();
   });
+  it("sends her on to the page's Reels card for a newer revision when her note is at the cascade, a raw episode's online-only words last, and leaves nothing under way once it is noted", async () => {
+    const TAKE_AGAIN = 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
+    const REELS = 'Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
+    const ONLINE = 'Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
+    // The Reels of a video her editor finished come later, as a newer revision, after every step is noted; a raw episode's go with its main video.
+    for (const [kind, says] of [["finished", `${TAKE_AGAIN} ${REELS}`], ["raw", `${TAKE_AGAIN} ${REELS} ${ONLINE}`]]) {
+      const t = setup();
+      const first = handedOff(t, { kind });
+      handedOff(t, { id: "e-20261021-a2a2a2", name: "2026-10-21 Launch talk again (Mac Studio)", text: "Launch talk again", kind, revision: 2, under: first.record.id, at: "2026-10-21T13:00:00-05:00", over: { versionOf: first.record.id } });
+      const noted = (step, revision) => ({ version: 1, handoffs: { [first.record.id]: { kind: "episode", step, revision, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+      writeGuideNotes(t.home, noted("cascade", 1));
+      assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", `  Launch talk again (a2a2a2): On the BRIMM Ops page: ${says}`], kind);
+      assert.deepEqual((await on(light(t), "guide", "Launch talk again")).said, [`Launch talk again (a2a2a2): On the BRIMM Ops page: ${says}`, "Then: that is the last step.", "Step: taken"], kind);
+      // Noted, the take is the last step: the note stays at the cascade, at revision 2, and nothing is left under way.
+      assert.deepEqual(await on(light(t), "guide", "Launch talk again", "done", "taken"), { code: 0, said: ["Noted: Launch talk again (a2a2a2), taken.", "Launch talk again (a2a2a2) is done: nothing is left to do for it."] }, kind);
+      assert.deepEqual(readGuideNotes(t.home).handoffs, { [first.record.id]: { kind: "episode", step: "cascade", revision: 2, at: localStamp(new Date(t.now())) } }, kind);
+      assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Nothing is under way. To start, put the video in your drop folder."], kind);
+      // With her note at the step before it, the take is the page's button alone, and the cascade step, still to come, is what follows.
+      writeGuideNotes(t.home, noted("live", 1));
+      const live = await on(light(t), "guide", "Launch talk again");
+      assert.equal(live.said[0], `Launch talk again (a2a2a2): On the BRIMM Ops page: ${kind === "raw" ? `${TAKE_AGAIN} ${ONLINE}` : TAKE_AGAIN}`, kind);
+      assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each\.$/, kind);
+      t.done();
+    }
+  });
   it("still lists an older version held as a session when the newer one's hand-off goes out under its id, by its label, and finds it only by its label or id", async () => {
     const t = setup();
     const label = "Video of 20 Oct, 12:30 (Mac Studio)";
