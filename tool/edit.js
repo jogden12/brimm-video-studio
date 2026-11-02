@@ -2513,7 +2513,7 @@ async function finish(ctx, rest) {
     }
     // The progress panel shows the finish as it shows an import (phase P).
     const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
-    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ nonce }) => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress, nonce }));
     if (result.taking || result.running) {
       ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
       // The finish never ran: a claim its quick part took for it is let go (the P1 check, T17).

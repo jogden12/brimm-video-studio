@@ -19,6 +19,7 @@ import { cutPhrases } from "./recut.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
+import { clearChecking, markChecking } from "./finish-check.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
 import { suggestionsFor } from "./suggestions-in-main.js";
@@ -635,7 +636,9 @@ function laterRecord(folder, n) {
 
 /** Do finish's detached work for an episode, as finish.asked.json says. Resolves {ok, made, failed, next}, which runDetached
     writes as the finish's result: `made` the files copied into final/, `failed` what went wrong, `next` what a person is to
-    check by eye, and the offers. Nothing is thrown from here. `deps.lateCheck` stands in for the late check in a test. */
+    check by eye, and the offers. Nothing is thrown from here. `deps.lateCheck` stands in for the late check in a test. `deps.nonce`
+    is the nonce of the lock the run holds (detached.js): the marker the run leaves while it waits for the late check names it
+    (finish-check.js), and is believed only while that lock is the run's own. */
 /** Let go the claim a finish's quick part took for an episode nobody had open, when the finish did not write its record: the
     episode goes back to as it was. Only while the record is still the one the claim wrote, and still this Mac's. Gives
     back what to say, or "" when there was nothing to let go (the P1 check, T4 and T17). */
@@ -676,9 +679,11 @@ export async function finishNow(ctx, found, deps = {}) {
   const work = join(runsFolder(ctx.home), `finish-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   let ended = false;
-  // Whether its record was written, and whether a record it wrote let its claim go already.
+  // Whether its record was written, whether a record it wrote let its claim go already, and whether it left the marker of its late
+  // check (finish-check.js), which it takes away when it ends.
   let recordWritten = false;
   let letGoneAlready = false;
+  let marked = false;
   try {
     const asked = readJson(join(episodeWork(ctx.home, found.name), "finish.asked.json"));
     if (!asked) {
@@ -1061,10 +1066,23 @@ export async function finishNow(ctx, found, deps = {}) {
     // open-lock Mac a copy of it is shown (reveal.js), and one that cannot be made is not shown, which is said.
     if (written && !(await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: my.run, record: nextRecord, label: shownName(nextRecord), path: join(finalDir, handoffName) }))) next.push(cantOpen(shownName(nextRecord)));
 
+    // She need not wait for the late check: the record holds this finish, and the hand-off is written and shown. So that the guide and
+    // `status` can say so, the run leaves a marker on this Mac's own disk from here until it ends, however it ends (finish-check.js),
+    // and the panel's last step says she can go on. A finish whose record was not written leaves no marker and says nothing of the
+    // kind: there is nothing for her to go on to, and she waits for it as she did.
+    if (written) {
+      try {
+        markChecking(ctx.home, found.name, { nonce: deps.nonce, revision, due: lastCopy + LATE_CHECK_MS, took: taken.map((file) => file.place) });
+        marked = true;
+      } catch (e) {
+        // The marker could not be written: the check goes on, and the guide says what it said while a finish runs.
+      }
+    }
+
     // The late check, at least 15 minutes after the last copy. Only when it finds every copy whole, and the record says what
     // was finished, are the files this finish took from From Final Cut deleted there; and only those still as they were
     // when taken. One made again since is kept, and named.
-    progress.step("Checking the copies");
+    progress.step("Checking the copies", marked ? "Checking the copies (you can go on)" : undefined);
     await my.wait(Math.max(0, lastCopy + LATE_CHECK_MS - ctx.now()));
     // Once the other Mac has the episode, nothing is copied into it again: what is not whole is said, for that Mac's own
     // finish to put right (the P1 check, T20).
@@ -1120,6 +1138,8 @@ export async function finishNow(ctx, found, deps = {}) {
     failed.push(`The finish stopped: ${e.message}`);
     return result();
   } finally {
+    // The run is over: it leaves no marker for the guide to believe, whatever ended it.
+    if (marked) clearChecking(ctx.home, found.name);
     // A finish that did not write its record lets go a claim its quick part took for it.
     if (!ended && !recordWritten && !letGoneAlready) {
       const gone = letGoClaim(ctx, found);

@@ -226,6 +226,20 @@ describe("the time left in all", () => {
     assert.equal(t.file().total, 3);
     t.done();
   });
+  it("is measured under a step's name, whatever the step is shown as: the finish's last step says she can go on, and is still Checking the copies", () => {
+    const t = setup();
+    t.r.begin("a.mov");
+    t.r.length(100);
+    t.r.steps(["Copying into the episode", "Checking the copies"]);
+    t.r.step("Copying into the episode");
+    t.clock.t += 2000;
+    t.r.step("Checking the copies", "Checking the copies (you can go on)");
+    assert.deepEqual([t.file().step, t.file().n, t.file().of, t.file().detail], ["Checking the copies (you can go on)", 2, 2, "Checking the copies (you can go on) (step 2 of 2)"]);
+    t.clock.t += 900_000;
+    t.r.end(true);
+    assert.deepEqual(readRates(t.folder), { "Copying into the episode": 0.02, "Checking the copies": 9 });
+    t.done();
+  });
   it("is not measured from a video whose work did not finish, as when ffmpeg stopped at once, which would make it look shorter", () => {
     const t = setup();
     t.r.begin("a.mov");
