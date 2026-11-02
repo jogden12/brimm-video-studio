@@ -823,3 +823,32 @@ describe("settingsText (5.5; plan PR 11)", () => {
     assert.notEqual(settingsText("main"), settingsText("clip"));
   });
 });
+
+describe("what the documents say of a Reel's page (Jason, 2 November): Studio makes it upright, 1080 by 1920, and crops it on the speaker", () => {
+  const read = (path) => fs.readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  const readme = read("README.md");
+  const spec = read("docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md");
+  const plan = read("docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md");
+  const rowOf = (start) => readme.split("\n").filter((line) => line.startsWith(start));
+
+  it("has the README's row of `app … reel` say how the Reel opens: upright, where the speaker is, the formula, who can move the crop, and that an older Reel project stays as it was", () => {
+    const [row] = rowOf("| `app \"<episode>\" reel <n> [--take-over]`");
+    for (const words of [
+      "**It opens upright, 1080 by 1920, cropped on the speaker**", "`data-resolution=\"portrait\"`", "`object-fit: cover`", "`object-position: <p>% 50%`", "the largest face in each still the finder looked in",
+      "the lower of two", "p = (540 - place x `Wi`) / (1080 - `Wi`)", "`speakerPlace` and `uprightPosition`", "has nothing to crop across and is 50", "the app's agent can move the crop",
+      "`finish` refuses a Reel that is not upright", "`brimm/facts.json` keeps the video's own size", "A Reel project made before this stays as it was made, wide"
+    ]) assert.ok(row.includes(words), words);
+  });
+  it("has the specification say it in 4.3, in the table of a project's files, in the notes (5.4) and in the list of what is kept", () => {
+    for (const words of [
+      "**The Reel opens upright, cropped on the speaker by Studio**", "**Where the speaker is**", "p` = (540 - `c` x `Wi`) / (1080 - `Wi`)", "**The app's agent can still adjust it.**", "a Reel project made before this stays as it was made, wide",
+      "A Reel's is upright whatever the video's shape (4.3): 1080 by 1920", "Studio makes the Reel's upright crop from it (4.3); the app's agent can move that crop by it, or follow the speaker with it",
+      "Studio made the Reel upright, 1080 by 1920, and cropped it on the speaker", "`speakerPlace` and `uprightPosition`"
+    ]) assert.ok(spec.includes(words), words);
+  });
+  it("no longer says anywhere that the crop is the app's job, or that the app opens a wide Reel and is asked to make it upright", () => {
+    for (const [what, text] of [["README", readme], ["specification", spec], ["plan", plan]]) {
+      assert.doesNotMatch(text, /upright crop is the app'?s|crop it on the speaker\. `brimm\/face-track|make the composition upright and crop|The app opens a wide project of the Reel|ask the app to make it upright/, what);
+    }
+  });
+});
