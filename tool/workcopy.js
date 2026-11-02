@@ -4,6 +4,8 @@
 // rate, and AAC at 48 kHz. It has the raw video's own length and clock and is cut nowhere, so every time the tool and Claude have
 // given for the recording is a time in the working copy. An HDR video (an iPhone records HDR by default) is made standard colour
 // by the Mac's own hardware, VideoToolbox, because the ffmpeg on the Mac Studio has no zscale to tone-map it with in software.
+// That is Apple's own conversion, and it keeps the whole HDR range in the standard one, so it reads flat: the picture is given a
+// mild contrast and colour look after it (hdrLook), which Jason chose by eye on 2 November 2026.
 //
 // Two layers. The first is pure: from what ffprobe printed (and a switch for 4K) it decides the ffmpeg arguments, the words said
 // when a video cannot be used, the key of the copy and where it goes. The second is the job, which has ffmpeg make the copy under
@@ -188,6 +190,31 @@ function turnFilters(turn) {
   return [`rotate=${turn}*PI/180`];
 }
 
+/** The look an HDR picture is given once it is standard colour, which Jason chose by eye on 2 November 2026 from Apple's own
+    conversion and two strengths of the look, on his own iPhone recording. Apple's conversion (VideoToolbox's, AVFoundation's,
+    QuickTime's) keeps the whole HDR range inside the standard one, so a room of white walls and bright windows comes out light
+    grey and hazy, and the picture reads washed out. The working copy matches that conversion exactly (against avconvert's own
+    export of the same pictures its mean difference is 1.2 in CIELAB, which is the encoder's noise), and nothing in scale_vt
+    changes its curve, so the look is added after it, by Jason's choice, and is no repair of the conversion. It is two strengths,
+    on the 8-bit samples of limited range:
+    - `HDR_LOOK_CONTRAST`, how much of an S-curve is taken from the luma, from 0 (none) to 1: the dark half comes out darker and
+      the light half lighter about the middle grey, and black, white and that grey stay where they are. 0.3 spreads the luma of
+      his recording 15% wider. (The medium look he was shown beside it was 0.45.)
+    - `HDR_LOOK_COLOUR`, how many times each colour is as far from the grey as it was: 1 leaves them, and 1.12 makes the colour
+      of his recording 18% fuller. (The medium look was 1.22.) */
+export const HDR_LOOK_CONTRAST = 0.3;
+export const HDR_LOOK_COLOUR = 1.12;
+
+/** The look as ffmpeg's lutyuv filter, for samples of 8 bits in limited range (luma 16 to 235, the colours 16 to 240 about their
+    grey, 128): the luma is 16 + 219 × (t − contrast × sin(2πt) ÷ 2π), where t is its place from black (0) to white (1), and each
+    colour is 128 + (colour − 128) × `colour`. The filter has no comma in it and no quote, so that the chain, cut at its commas,
+    still has one piece for each filter and needs no quoting. For that it has no clip(), and needs none: with a contrast from 0
+    to 1 and a colour up to 1.13, no sample a picture of 8 bits can have comes out of 0 to 255, and ffmpeg holds what did to it.
+    (ffmpeg cuts what a lut computes down to a whole number, so the filter at the strengths 0 and 1 is the identity in arithmetic
+    only: the tests use a step that is `val` itself for one that changes nothing.) */
+export const hdrLook = (contrast = HDR_LOOK_CONTRAST, colour = HDR_LOOK_COLOUR) =>
+  `lutyuv=y=16+219*(((val-16)/219)-${contrast}*sin(2*PI*((val-16)/219))/(2*PI)):u=128+(val-128)*${colour}:v=128+(val-128)*${colour}`;
+
 /** The filters that make an HDR picture standard, from the rate and the size it is made at (workCopySize, as it is shown) and
     how it is stored (storedOf), in this order:
     - fps, first, as for every copy, so that each picture has its place on an even grid from 0;
@@ -197,13 +224,22 @@ function turnFilters(turn) {
     - hwdownload, and the pixel format the frames are downloaded in: p010le for the 10 bits an iPhone records, nv12 for 8. It
       must be the format the hardware holds them in, and ffmpeg does not convert there;
     - the turn, by hand, in software (turnFilters);
-    - format=yuv420p, last: the drop to 8 bits is ffmpeg's own scaler's, which adds an ordered dither whenever it drops from
+    - format=yuv420p: the drop to 8 bits is ffmpeg's own scaler's, which adds an ordered dither whenever it drops from
       more than 8 bits to 8, so a smooth wall or sky does not band, as it did not when zscale dithered by error diffusion. The
       colour is made standard in the 10 bits VideoToolbox gives (its words hold more than 10 bits, which is what the dither
-      works from) and nothing is done to it after. That holds because the file is tagged BT.709, as the frames are
+      works from) and nothing is done to it before the drop. That holds because the file is tagged BT.709, as the frames are
       (workCopyArgs): with no tags to say so, ffmpeg's scaler converts the colour between the frames' tags and the file's as well,
       which does not dither, and a gradient comes out in bands (tried: a ramp of 16 steps went from a few hundred changes along a
-      row to three). workcopy-real.test.js looks at a gradient.
+      row to three). workcopy-real.test.js looks at a gradient;
+    - the look (hdrLook), last of all, in the 8 bits that are left. It is there, and not in 10 bits before the drop, because of
+      what was measured on a real iPhone recording against Apple's own conversion of the same pictures. The colours of the copy are
+      Apple's only through what ffmpeg does with the frames' tags at the encoder: the frames leave this chain tagged bt2020nc,
+      though scale_vt was asked for bt709, and the file is tagged bt709. A step in 10 bits before the drop moved the colours two
+      levels of luma and a hundredth of saturation from Apple's, and cost seven tenths more of the processor's time; the look
+      here costs about a tenth, and a step in its place that changes nothing leaves every picture exactly as it is
+      (workcopy-real.test.js checks that).
+    ANY CHANGE TO THIS CHAIN IS CHECKED AGAINST APPLE'S OWN CONVERSION of the same pictures (AVAssetImageGenerator, or `avconvert
+    --preset Preset1920x1080`, whose frames a picture of the copy must equal to within the encoder's noise) before it is trusted.
     There is no comma in any of them but the ones between filters. */
 const hdrChain = ({ rate, width, height, stored }) => {
   const quarter = stored.turn === 90 || stored.turn === 270;
@@ -214,7 +250,8 @@ const hdrChain = ({ rate, width, height, stored }) => {
     "hwdownload",
     `format=${stored.bits > 8 ? "p010le" : "nv12"}`,
     ...turnFilters(stored.turn),
-    "format=yuv420p"
+    "format=yuv420p",
+    hdrLook()
   ];
 };
 
@@ -291,7 +328,8 @@ export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeB
     - An HDR picture is made standard with the Mac's hardware instead (hdrChain, HDR_INPUT): VideoToolbox decodes it, sizes it and
       converts its colour, and ffmpeg's own turning of a stored-on-its-side picture, which hardware frames skip, is off. The
       picture is turned by hand in software after it is downloaded, by the note it is stored with (`stored.turn`), and the file
-      is left with no note, so that it is never turned twice.
+      is left with no note, so that it is never turned twice. It is then given the look (hdrLook), as the chain's last step; a
+      video in standard colour is given none.
     - The picture is H.264 High at 8 bits and 4:2:0 (encodeArgs' own settings, at WORK_COPY_CRF and WORK_COPY_PRESET), with a
       keyframe every second, so that a place in the video is reached by decoding a second of it at most when it is scrubbed.
     - It is tagged BT.709 in limited range: what a video in standard colour is, and what an HDR one is once VideoToolbox has
@@ -300,7 +338,7 @@ export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeB
       colours shifted a little: the plan asks only for HDR to be converted, and none of the cameras here makes such a video.
     - The file is told it is an mp4, so it can be written under another name and given its own when it is whole.
     - A Reel's copy is of a stretch of the video, { start, end } in seconds of it (architecture 4.3, plan PR 5), and is made with
-      this very chain, which is the whole point: its colours (an HDR video's made standard by VideoToolbox, with the turn it needs,
+      this very chain, which is the whole point: its colours (an HDR video's made standard by VideoToolbox, with its turn and its look,
       included), its size, its rate and its clock are the working copy's, and no chain of its own is made for a Reel. Two arguments
       are added and nothing else. `-ss` is an input option, so it goes before the input, after the hardware's options an HDR video
       has there (HDR_INPUT), and seeks to the start (the start of the stretch is then the new video's 0, and ffmpeg decodes from
