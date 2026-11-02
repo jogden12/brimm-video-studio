@@ -23,23 +23,35 @@ export const stillsArgs = (video, folder, every = EVERY) => ["-nostdin", "-hide_
 /** Does a video need a new shape for a Reel? Only a picture wider than it is tall. A vertical or square one is left as it is. */
 export const needsReframe = (facts) => facts.width > facts.height;
 
-/** The crop that makes a 9:16 picture of a wide one, as {x, y, w, h, found} in whole pixels of the source: its full height, and
-    9/16 of that wide, rounded down to an even number. `facts` is the picture's {width, height} as it is shown, after any
-    turning. `boxes` holds, for each still of the stretch, the list of face boxes found in it, each box {x, y, w, h} in
-    fractions of the picture.
-    The speaker is taken to be the largest face in a still, and the crop is placed with the speaker's face in its middle, side
-    to side, as far as the picture's edges allow. Of all the stills it goes by the one in the middle, so one odd still does not
-    move it. With an even number of them that is the lower of the two in the middle: a place a face was, and never the gap
-    between two people. With no face found it is the middle of the picture, and `found` is false. */
-export function cropFor(facts, boxes) {
-  const w = Math.floor(facts.height * 9 / 32) * 2;
-  const middles = boxes.filter((faces) => faces.length).map((faces) => {
+/** A box the face finder printed, if it has the numbers to work with: where it is across the picture and how large it is. */
+const isBox = (box) => box !== null && typeof box === "object" && [box.x, box.w, box.h].every(Number.isFinite);
+
+/** Where the speaker is across a picture, as {at, found}: `at` is how far from its left side, as a fraction of its width, and
+    `found` whether a face was found at all. `boxes` holds, for each still of the stretch, the list of face boxes found in it, each
+    box {x, y, w, h} in fractions of the picture.
+    The speaker is taken to be the largest face in a still: the one that covers the most of the picture. Of all the stills it goes
+    by the one in the middle, so one odd still does not move it. With an even number of them that is the lower of the two in the
+    middle: a place a face was, and never the gap between two people. A still with no face is not counted. With no face found it is
+    the middle of the picture, 0.5, and `found` is false. What is not a list of boxes made of numbers is no face. */
+export function speakerPlace(boxes) {
+  const middles = (Array.isArray(boxes) ? boxes : []).map((faces) => (Array.isArray(faces) ? faces.filter(isBox) : [])).filter((faces) => faces.length).map((faces) => {
     const speaker = faces.reduce((a, b) => (b.w * b.h > a.w * a.h ? b : a));
     return speaker.x + speaker.w / 2;
   }).sort((a, b) => a - b);
   const found = middles.length > 0;
-  const middle = found ? middles[Math.ceil(middles.length / 2) - 1] : 0.5;
-  const x = Math.max(0, Math.min(facts.width - w, Math.round(middle * facts.width - w / 2)));
+  return { at: found ? middles[Math.ceil(middles.length / 2) - 1] : 0.5, found };
+}
+
+/** The crop that makes a 9:16 picture of a wide one, as {x, y, w, h, found} in whole pixels of the source: its full height, and
+    9/16 of that wide, rounded down to an even number. `facts` is the picture's {width, height} as it is shown, after any
+    turning. `boxes` holds, for each still of the stretch, the list of face boxes found in it, each box {x, y, w, h} in
+    fractions of the picture.
+    The crop is placed with the speaker's face (speakerPlace) in its middle, side to side, as far as the picture's edges allow.
+    With no face found it is the middle of the picture, and `found` is false. */
+export function cropFor(facts, boxes) {
+  const w = Math.floor(facts.height * 9 / 32) * 2;
+  const { at, found } = speakerPlace(boxes);
+  const x = Math.max(0, Math.min(facts.width - w, Math.round(at * facts.width - w / 2)));
   return { x, y: 0, w, h: facts.height, found };
 }
 
@@ -60,6 +72,36 @@ export function cropsFor(facts, ranges, stills, every = EVERY) {
 /** The size of a Reel and of a Story, in pixels. */
 const WIDTH = 1080;
 const HEIGHT = 1920;
+
+/** The same frame, for whoever lays an upright page out themselves (project.js, a Reel's page). */
+export const UPRIGHT = Object.freeze({ width: WIDTH, height: HEIGHT });
+
+/** How wide a video's picture is on the upright frame when it fills it (`object-fit: cover`), in the frame's pixels, to the
+    thousandth of one: it is scaled until it covers 1080 by 1920, and no more. `facts` is the picture's {width, height}. A wide
+    picture is far wider than the frame (a 16:9 one is 3413.333 pixels wide on it), and an upright one, or one narrower than 9:16,
+    is as wide as the frame and no narrower. The thousandth is because a sum leaves 1064 times (1080 over 1064) a hair over 1080,
+    and a picture exactly as wide as the frame would be taken for a wider one. Not a number for a picture whose size is not known. */
+export function shownWidth(facts) {
+  const width = Number(facts?.width);
+  return Math.round(width * Math.max(WIDTH / width, HEIGHT / Number(facts?.height)) * 1000) / 1000;
+}
+
+/** Where `object-position` puts a picture across an upright frame it fills (`object-fit: cover`) so that the speaker is in the
+    middle of the frame: a percentage from 0 to 100, to two places at most. `facts` is the picture's {width, height}, and `at` is
+    where the speaker is across it, as a fraction of its width from its left (speakerPlace's; anything that is not a number is the
+    middle).
+    The picture is `shown` wide on the frame (shownWidth). An `object-position` of x% puts the point x% of the way across the
+    picture at the point x% of the way across the frame, so the picture's left side is (1080 - shown) times x% from the frame's,
+    and the speaker is `at` times `shown` further on. For the speaker to be at 540, the middle of the frame, x is (540 - at times
+    shown) over (1080 - shown), and no less than 0 or more than 100: the picture's own edges, where the crop is stopped. A picture
+    that is no wider than the frame has nothing cropped across, and one place is as good as another: 50. */
+export function uprightPosition(facts, at) {
+  const shown = shownWidth(facts);
+  if (!(shown > WIDTH)) return 50;
+  const speaker = Number.isFinite(at) ? at : 0.5;
+  const across = Math.min(1, Math.max(0, (WIDTH / 2 - speaker * shown) / (WIDTH - shown)));
+  return Math.round(across * 10000) / 100;
+}
 
 /** The quality an upright file is written at: QUALITY, and 2 more for each doubling of the crop's height to 1920. An enlarged
     picture has no more detail than its source, and at QUALITY x264 spends its bits keeping the enlarged grain and blocks of
