@@ -789,6 +789,44 @@ describe("what guide tell says", () => {
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
     assert.equal(stillLine(arriving), 'A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
   });
+  it("keeps waiting while a finish copies, and says in one line that its hand-off is ready as soon as it is written, not when its late check has been made", () => {
+    const RAW_HANDOFF = { ...OPS_HANDOFF, kind: "raw" };
+    const exported = { ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exported: true }) }) };
+    const CHECKING = { due: NOW + 900000, took: ["Downloads"] };
+    const first = at({ ...exported, finishRunning: true });
+    const second = at({ ...exported, finishRunning: true, handoff: RAW_HANDOFF });
+    const stage = (item) => item.next.stage;
+    assert.deepEqual([first, second].map(stage), ["finish-running", "finish-running"]);
+    // The hand-off the finish wrote: a revision above the one before, or the first.
+    const written = { ...RAW_HANDOFF, revision: 2, at: RAW_HANDOFF.at + 600000 };
+    const READY = (text) => `Pricing talk (3fa9c1): Its hand-off is ready. On the BRIMM Ops page: ${text}`;
+    const TAKE = OPS_TEXTS.taken + OPS_TEXTS.online;
+    const FAILED = 'Pricing talk (3fa9c1): Its finish did not write a hand-off. Say "how far is it?" to see why.';
+    for (const [was, seen, now, want] of [
+      // Still copying, as the first finish or a second one.
+      [first, first, first, null],
+      [second, second, second, null],
+      [first, first, second, null],
+      // The hand-off is written and the finish waits for its late check: it is ready, now.
+      [first, first, at({ ...exported, finishRunning: true, handoff: { ...RAW_HANDOFF, revision: 1 }, checking: CHECKING }), READY(TAKE)],
+      [second, second, at({ ...exported, finishRunning: true, handoff: written, checking: CHECKING }), READY(TAKE)],
+      // Its marker says it wrote the hand-off, whatever the hand-off the guide read is.
+      [second, second, at({ ...exported, finishRunning: true, handoff: RAW_HANDOFF, checking: CHECKING }), READY(TAKE)],
+      // The run has ended well, and was not looked at while it waited.
+      [first, first, at({ ...exported, handoff: RAW_HANDOFF }), READY(TAKE)],
+      [second, first, at({ ...exported, handoff: written }), READY(TAKE)],
+      // The run has ended without a hand-off: the first finish wrote none, the second the hand-off it had.
+      [first, first, at(exported), FAILED],
+      [second, second, at({ ...exported, handoff: RAW_HANDOFF }), FAILED],
+      [first, first, at({ ...exported, offersAnswered: false }), FAILED],
+      // Not under way any more.
+      [first, first, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
+      // A finish she is not waiting for (it was not running when she asked) is its next step at once, as for any video.
+      [at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), `Pricing talk (3fa9c1): On the BRIMM Ops page: ${TAKE}`]
+    ]) assert.equal(told(was, seen, now), want, JSON.stringify([stage(was), now && stage(now)]));
+    // Past an hour a finish still copying is still on its way, with its step, and says where to see how far it is.
+    assert.equal(stillLine(first), 'Pricing talk (3fa9c1): It is still on its way after 60 minutes. Its finish is running. The panel shows how far it is.');
+  });
   it("keeps waiting while the video for HyperFrames is made, and says the next step in one line when it is done", () => {
     const making = at({ ...BASE, ...APP({ copy: { left: 90, usual: null } }) });
     const later = at({ ...BASE, ...APP({ copy: { left: 30, usual: null } }) });

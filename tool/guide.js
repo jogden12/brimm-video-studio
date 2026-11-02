@@ -197,6 +197,8 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const SESSION_MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
+/** What `guide tell` says of a finish that ended with no hand-off written: why is in the status, which is what she is told to say. */
+const FINISH_FAILED = 'Its finish did not write a hand-off. Say "how far is it?" to see why.';
 /** What every answer for a video leads with, ahead of its step, once the late check of its last finish found a problem after she had
     been told she could go on (facts.lateProblem): why is in the status, which is what she is told to say. */
 const LATE_PROBLEM = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
@@ -491,7 +493,8 @@ export const POLL_MS = 5000;
 
 /** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
     Claude's reading, and the video for HyperFrames being made. `guide wait` and `guide tell` wait only while a video is at one. A
-    running finish is not among them: the guide cannot tell a finish that failed from one not begun. */
+    running finish is not among them, for `guide wait`: that answers at once, and cannot tell a finish that failed from one not
+    begun. `guide tell` waits for a finish it was asked about while it ran (told), and knows how it ended by the hand-off. */
 export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"];
 
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
@@ -537,17 +540,26 @@ const READ_IT = "Claude has read it.";
 /** What `guide tell` says once its video has reached its next point, or null while it is still on its way. `was` is the video
     when the wait began, `seen` as it was last found, and `now` as it is found now, or null when it is not under way any more.
     It is on its way while it is at the stage it was at (COMING): in a drop folder, coming in or being imported; or Claude's
-    reading. Then: it is ready, once it has left the drop folder for Episodes; Claude has read it, once its reading is in; and
-    otherwise its next step, as the guide says it, which says when an import or a reading did not finish. At the start (all
-    three the same) a video with nothing on its way gets its next step at once. Its file's name is never said. */
+    reading; or its finish copying, which `guide wait` does not wait for. Then: it is ready, once it has left the drop folder for
+    Episodes; Claude has read it, once its reading is in; its hand-off is ready, as soon as its finish has written it (the
+    finish then only waits for its late check, which she need not wait for) or has ended with one, and that the finish wrote
+    none, saying how to see why, when it has ended without; and otherwise its next step, as the guide says it, which says when an
+    import or a reading did not finish. At the start (all three the same) a video with nothing on its way gets its next step at
+    once. Its file's name is never said. */
 export function told(was, seen, now) {
   if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
   if (now.next.done) return videoLines(now)[0];
-  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
+  const on = (item) => (item.next.stage === "finish-running" ? "finish" : !COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
   if (on(now) && on(now) === on(was)) return null;
   const { facts, next } = now;
   if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;
   if (on(was) === "reading" && facts.reading === "done") return `${facts.name}: ${next.text.startsWith(READ_IT) ? next.text : `${READ_IT} ${next.text}`}`;
+  if (on(was) === "finish") {
+    // A finish that wrote its hand-off has left its marker, while it waits for its late check (`checking`), or has changed the video's
+    // hand-off, once it has ended: its first, or another revision of it.
+    const wrote = Boolean(facts.checking) || (Boolean(facts.handoff) && (!was.facts.handoff || ["id", "revision", "at"].some((key) => facts.handoff[key] !== was.facts.handoff[key])));
+    return `${facts.name}: ${wrote ? `Its hand-off is ready. ${next.text}` : FINISH_FAILED}`;
+  }
   return `${facts.name}: ${next.text}`;
 }
 

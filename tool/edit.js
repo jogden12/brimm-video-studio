@@ -6871,11 +6871,13 @@ async function waitForChange(ctx) {
 }
 
 /** `guide "<video>" tell`: the video's next point (guide.js told), waited for in the background (her skill runs it with the Bash
-    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, or its import or its
-    reading did not finish. What the guide says is read again every TELL_POLL_MS, for up to TELL_MS, following the video from its
-    drop folder into Episodes (follow). A video with nothing on its way gets its next step at once, and one still on its way
-    after TELL_MS gets that said, with its next step. Nothing is said before the end, and no notice is posted: the import and the
-    reading post their own. */
+    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, its hand-off is ready, or its
+    import or its reading did not finish, or its finish wrote no hand-off. What the guide says is read again every TELL_POLL_MS, for
+    up to TELL_MS, following the video from its drop folder into Episodes (follow). A finish it was asked about while it ran is
+    waited for until its hand-off is written, which is when the finish only waits for its late check, and not until that check is
+    made. A video with nothing on its way gets its next step at once, and one still on its way after TELL_MS gets that said, with
+    its next step. Nothing is said before the end, and no notice is posted: the import, the reading and a finish's late check that
+    fails post their own. */
 async function tellWhen(ctx, item) {
   const wait = sleepOf(ctx);
   const start = ctx.now();

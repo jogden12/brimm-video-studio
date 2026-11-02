@@ -6,7 +6,7 @@
 // Dropbox or a program. The guide writes nothing, but her note when she says she has done a step.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { finishNow } from "../finish.js";
@@ -27,6 +27,7 @@ const KIT = 'Press "Write what’s next" and read the "Brief". In "Before postin
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
 const POST_TEXT = 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
+const AGAIN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
 
 describe("the guide while a raw video's finish waits for its late check", () => {
   it("gives the BRIMM Ops page's step, and after its lines the line of when Studio checks Dropbox's copies and then takes the export out of Downloads", async () => {
@@ -207,6 +208,88 @@ describe("the guide after a late check found a problem that she had been told sh
     assert.deepEqual((await on(seeing(reels), "guide", "3fa9c1")).said, [`${NAMED}: ${LEAD} ${TAKEN}`, `Then: ${KIT}`, "Step: taken"]);
     clip.t.done();
     reels.t.done();
+  });
+});
+
+describe("`guide … tell` for a video whose finish is running", () => {
+  const READY = `${NAMED}: Its hand-off is ready. ${TAKEN}${ONLINE}`;
+  const FAILED = `${NAMED}: Its finish did not write a hand-off. Say "how far is it?" to see why.`;
+  /** A raw video whose first finish has ended (revision 1), and a second finish at work: its lock is held by this process, and it has
+      written nothing yet. `took.nonce` is the nonce of that lock. */
+  async function secondFinish() {
+    const w = await exported();
+    assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
+    const took = takeEpisodeLock(lockOf(w.t.home, FOLDER), "finish", () => true);
+    return { w, took };
+  }
+  it("waits while the finish copies, and says its hand-off is ready as soon as the finish has written it: the run is still at its late check", async () => {
+    const { w, took } = await secondFinish();
+    const waits = [];
+    const wait = async (ms) => {
+      waits.push(ms);
+      // The second look: the finish has written its hand-off, and waits for its late check.
+      if (waits.length === 2) markChecking(w.t.home, FOLDER, { nonce: took.nonce, revision: reread(w.found).finished.revision, due: w.t.now() + LATE_CHECK_MS, took: ["Downloads"] });
+    };
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual([said.code, said.said, waits], [0, [READY], [15000, 15000]]);
+    assert.ok(existsSync(lockOf(w.t.home, FOLDER)), "the finish still holds the lock: it has not made its late check");
+    w.t.done();
+  });
+  it("says its hand-off is ready when the finish ended well while it waited", async () => {
+    const { w } = await secondFinish();
+    const wait = async () => {
+      // The finish is over: the lock goes, and a finish of its own, which keeps both parts, writes the next revision.
+      rmSync(lockOf(w.t.home, FOLDER));
+      assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { yes: true }), 0, w.t.said());
+      assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
+    };
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual(said.said, [READY]);
+    assert.equal(reread(w.found).finished.revision, 2);
+    w.t.done();
+  });
+  it("says the finish wrote no hand-off, and what to say to see why, when it ended without one", async () => {
+    const { w } = await secondFinish();
+    const wait = async () => rmSync(lockOf(w.t.home, FOLDER));
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual([said.code, said.said], [0, [FAILED]]);
+    w.t.done();
+  });
+  it("says it too of a first finish that ended without a hand-off, where the step it leaves is to hand it off again", async () => {
+    const w = await exported();
+    takeEpisodeLock(lockOf(w.t.home, FOLDER), "finish", () => true);
+    const wait = async () => rmSync(lockOf(w.t.home, FOLDER));
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual(said.said, [FAILED]);
+    w.t.done();
+  });
+  it("answers at once with the step for a video whose finish is not running, as it did", async () => {
+    const w = await exported();
+    let waits = 0;
+    const said = await on(seeing(w, { wait: async () => { waits += 1; } }), "guide", "3fa9c1", "tell");
+    assert.deepEqual([said.said, waits], [[`${NAMED}: You have exported it from HyperFrames. Say "hand it off" to write its hand-off.`], 0]);
+    w.t.done();
+  });
+  it("waits for the finish that hands off the Reels of a finished video too, and says the new revision is ready", async () => {
+    const w = await finishedWorld();
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true }), 0, w.t.said());
+    takeEpisodeLock(lockOf(w.t.home, FOLDER), "finish", () => true);
+    const wait = async () => {
+      rmSync(lockOf(w.t.home, FOLDER));
+      assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
+    };
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual(said.said, [`${NAMED}: Its hand-off is ready. ${AGAIN}`]);
+    assert.equal(reread(w.found).finished.revision, 2);
+    w.t.done();
+  });
+  it("is still on its way after 60 minutes of a finish that has not written its hand-off, and says where to see how far it is", async () => {
+    const { w } = await secondFinish();
+    let clock = w.t.now();
+    const said = await on(seeing(w, { now: () => clock, wait: async (ms) => { clock += ms; } }), "guide", "3fa9c1", "tell");
+    assert.deepEqual(said.said, [`${NAMED}: It is still on its way after 60 minutes. ${FINISH_RUNNING}`]);
+    w.t.done();
   });
 });
 
