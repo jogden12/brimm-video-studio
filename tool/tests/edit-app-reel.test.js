@@ -17,7 +17,6 @@ import { HELD } from "../gate.js";
 import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { layoutOf, localStamp, recordFile, recordText } from "../episode.js";
 import { PIN } from "../hyperframes.js";
-import { notMadeWords } from "../reels.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { reelCopyKey, reelCopyPaths, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { probed } from "./fixtures.js";
@@ -70,6 +69,9 @@ const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "t
 const REEL_COPY = "the Reel's bytes";
 const PROJECT = "Pricing- what to charge- reel 2 3fa9c1";
 const AGAIN = openReelWords(2, NAME);
+/** What a Mac that is not set up for HyperFrames says of the Reels it cannot make: Reels are made in HyperFrames (OpusClip is no longer used:
+    Jason, 2 November 2026). `them` is "Reels", "Reel 2" or "Reels 1 and 2". */
+const CANNOT_MAKE = (them) => `brimm-video cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
 const MAKING = `The video for Reel 2 is being made. Say "${AGAIN}" again when it is done; "how far is it?" shows how far it has got.`;
 const STILL = `Claude is still reading it. Say "${AGAIN}" again when it has finished; "how far is it?" shows how far it has got.`;
 /** What is said while a video is being made already and Reel 2's is not started: the run at work holds the one lock, so it may be
@@ -630,7 +632,7 @@ describe("title: a Reel that HyperFrames opened has a title on screen", () => {
     assert.deepEqual([setting.code, setting.said, reread(found).rev], [1, [NOT_MADE(2)], 2]);
     const off = suggested({ set: false });
     const elsewhere = await on(off.t.ctx.deps, "title", FOLDER, "reel", "2");
-    assert.deepEqual([elsewhere.code, elsewhere.said], [1, [notMadeWords(2)]]);
+    assert.deepEqual([elsewhere.code, elsewhere.said], [1, [CANNOT_MAKE("Reel 2")]]);
     t.done();
     off.t.done();
   });
@@ -643,13 +645,13 @@ describe("title: a Reel that HyperFrames opened has a title on screen", () => {
 
 describe("reels: how to make one", () => {
   const MAKE_ONE = `To make one, say "${openReelWords(1, NAME)}", with the number of the one you want.`;
-  it("ends the list of an answered video, on a Mac set up for HyperFrames, with how to make one, and not with the line that sends her to OpusClip", async () => {
+  it("ends the list of an answered video, on a Mac set up for HyperFrames, with how to make one, and not with the line that says brimm-video cannot make Reels on this Mac", async () => {
     const { t } = suggested();
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.equal(r.code, 0, r.text);
     assert.match(r.said[0], /^Reel suggestions of /);
     assert.equal(r.said.at(-1), MAKE_ONE);
-    assert.doesNotMatch(r.text, /OpusClip|cannot make Reels/);
+    assert.doesNotMatch(r.text, /cannot make Reel|on this Mac/);
     assert.doesNotMatch(r.said.at(-1), PLAIN);
     t.done();
   });
@@ -667,13 +669,13 @@ describe("reels: how to make one", () => {
     writeFileSync(recordFile(found.folder, 3), recordText({ ...base, rev: 3, reels: base.reels.map((r) => ({ ...r, status: "dropped" })) }));
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.match(r.said.at(-1), /Dropped\./);
-    assert.doesNotMatch(r.text, /To make|OpusClip/);
+    assert.doesNotMatch(r.text, /To make|cannot make Reel/);
     t.done();
   });
-  it("sends her to OpusClip, as it always did, on a Mac that is not set up for HyperFrames", async () => {
+  it("tells her brimm-video cannot make Reels on a Mac that is not set up for HyperFrames, and to ask Jason", async () => {
     const { t } = suggested({ set: false });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
-    assert.equal(r.said.at(-1), notMadeWords());
+    assert.equal(r.said.at(-1), CANNOT_MAKE("Reels"));
     assert.doesNotMatch(r.text, /To make/);
     t.done();
   });
@@ -702,32 +704,32 @@ describe("reels: how to make one", () => {
     const both = suggested();
     withMade(both.found, [1, 2]);
     const all = await on(both.t.ctx.deps, "reels", FOLDER, "--no-play");
-    assert.doesNotMatch(all.text, /To make|OpusClip/);
+    assert.doesNotMatch(all.text, /To make|cannot make Reel/);
     // One made and the other dropped.
     const mixed = suggested();
     withMade(mixed.found, [2], (r) => (r.n === 1 ? { ...r, status: "dropped" } : r));
-    assert.doesNotMatch((await on(mixed.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    assert.doesNotMatch((await on(mixed.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     // Made, and dropped since: still not one to make.
     const dropped = suggested();
     withMade(dropped.found, [1, 2], (r) => ({ ...r, status: "dropped" }));
-    assert.doesNotMatch((await on(dropped.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    assert.doesNotMatch((await on(dropped.t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     both.t.done();
     mixed.t.done();
     dropped.t.done();
   });
-  it("does not send her to OpusClip for a Reel another Mac made, on a Mac that is not set up for HyperFrames, and still does for one that is not made", async () => {
+  it("does not say brimm-video cannot make a Reel another Mac made, on a Mac that is not set up for HyperFrames, and still says it for one that is not made", async () => {
     const { t, found } = suggested({ set: false });
     withMade(found, [2]);
-    assert.equal((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).said.at(-1), notMadeWords());
+    assert.equal((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).said.at(-1), CANNOT_MAKE("Reels"));
     const base = reread(found);
     writeFileSync(recordFile(found.folder, base.rev + 1), recordText({ ...base, rev: base.rev + 1, reels: base.reels.map((r) => (r.n === 1 ? { ...r, status: "dropped" } : r)) }));
-    assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|OpusClip/);
+    assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     t.done();
   });
   it("says nothing of making one for a video whose Reels are not suggestions, which brimm-video still makes in Final Cut", async () => {
     const { t } = world({ set: true });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
-    assert.doesNotMatch(r.text, /To make|OpusClip/);
+    assert.doesNotMatch(r.text, /To make|cannot make Reel/);
     t.done();
   });
 });
@@ -735,7 +737,7 @@ describe("reels: how to make one", () => {
 describe("push and the changes on a Reel: one HyperFrames opened is a project there, not a timeline in Final Cut", () => {
   const IN_HYPERFRAMES = `Reel 2 is a project in HyperFrames, not in Final Cut: say "${AGAIN}" to work on it there.`;
   const FINAL_CUT_WORDS = [["push", FOLDER, "reel", "2"], ["captions", FOLDER, "reel", "2", "on"], ["text", FOLDER, "reel", "2"], ["graphic", FOLDER, "reel", "2"], ["preset", FOLDER, "reel", "2", "--look", "bright"], ["cut", FOLDER, "remove", "reel", "2", "--words", "welcome"]];
-  it("says so for `push` and for each change on a Reel, in place of sending her to OpusClip, and writes and opens nothing", async () => {
+  it("says so for `push` and for each change on a Reel, in place of the line for a Reel nobody made, and writes and opens nothing", async () => {
     const { t, found } = suggested();
     assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
     const before = [reread(found).rev, listAll(found.folder), t.opened];
@@ -754,16 +756,16 @@ describe("push and the changes on a Reel: one HyperFrames opened is a project th
     assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).said, [IN_HYPERFRAMES]);
     t.done();
   });
-  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and sends her where it did on one that is not", async () => {
-    // On a Mac set up for the app the way to make it is to open it; the line to OpusClip is for a Mac that cannot.
+  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and that brimm-video cannot make it on one that is not", async () => {
+    // On a Mac set up for the app the way to make it is to open it; the line that brimm-video cannot make it on this Mac is for a Mac that is not set up.
     const NOT_MADE_YET = `Reel 2 isn't made yet. Say "${AGAIN}" to make it.`;
-    for (const [set, said] of [[true, NOT_MADE_YET], [false, notMadeWords(2)]]) {
+    for (const [set, said] of [[true, NOT_MADE_YET], [false, CANNOT_MAKE("Reel 2")]]) {
       const { t, found } = suggested({ set });
       const before = [reread(found).rev, listAll(found.folder)];
       for (const words of FINAL_CUT_WORDS) {
         const r = await on(t.ctx.deps, ...words);
         assert.deepEqual([r.code, r.said], [1, [said]], `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, set ? /OpusClip|cannot make Reels/ : /isn't made yet/, `${set} ${words.join(" ")}`);
+        assert.doesNotMatch(r.text, set ? /cannot make Reel|on this Mac/ : /isn't made yet/, `${set} ${words.join(" ")}`);
         assert.doesNotMatch(r.text, PLAIN);
       }
       assert.deepEqual([reread(found).rev, listAll(found.folder)], before, "nothing is written");

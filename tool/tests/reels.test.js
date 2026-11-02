@@ -6,7 +6,7 @@ import { wordsOf, pausesOf, phrasesOf, cutPlan, keptSpans, framesASecond } from 
 import { stretchesOf, fitReel } from "../reframe.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
 import { TOLD, PAUSES } from "./fixtures.js";
-import { PREVIEW, previewSteps, previewLimits, reelCandidates, REELS_FILE, previewPath, reelsFile, readReels, reelEntries, reelProject, REEL_FRAME, reelsText, mergeCandidates } from "../reels.js";
+import { PREVIEW, previewSteps, previewLimits, reelCandidates, REELS_FILE, previewPath, reelsFile, readReels, reelEntries, reelProject, REEL_FRAME, reelsText, mergeCandidates, notMadeWords } from "../reels.js";
 import { fcpxml, checkFcpxml } from "../fcpxml.js";
 
 /** A crop of a 1920x1080 picture, 606 wide, that starts `x` pixels in. */
@@ -183,6 +183,21 @@ describe("the limits a preview is made under", () => {
     // Measured on the Mac Studio: a preview of 40 stretches of 1080 lines took 1.29 GB at its peak and 3.9 seconds.
     assert.deepEqual(previewLimits(40), { most: 2 * 1024 * 1024 * 1024, limit: 260000 });
     assert.deepEqual(previewLimits(90.5), { most: 2 * 1024 * 1024 * 1024, limit: 512500 });
+  });
+});
+
+describe("what brimm-video says of a Reel it cannot make on a Mac that is not set up for HyperFrames", () => {
+  // Reels are made in HyperFrames, so a Mac that is not set up for it cannot make one. OpusClip is no longer used (Jason, 2 November 2026).
+  it("is said of no number, of one, of several joined with the last after \"and\", with the words written out", () => {
+    assert.equal(notMadeWords(), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([]), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords(2), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([2]), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2]), "brimm-video cannot make Reels 1 and 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2, 3]), "brimm-video cannot make Reels 1, 2 and 3 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+  });
+  it("sends her to OpusClip nowhere, and says nothing of cutting a Reel for now or of BRIMM Ops writing its post text", () => {
+    for (const n of [undefined, 3, [1, 2], [1, 2, 3]]) assert.doesNotMatch(notMadeWords(n), /OpusClip|for now|cut |post text|New short video/i, String(n));
   });
 });
 

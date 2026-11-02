@@ -659,12 +659,12 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
       "   Why: It makes one point and stands alone.",
       "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
       "",
-      // brimm-video makes no Reel from a suggestion yet (phase V): where she makes them for now (Sallie's walkthrough, 25 Oct).
-      'brimm-video cannot make Reels from this video yet: for now, cut them in OpusClip. BRIMM Ops writes their post text: on the episode\'s "Reels" card, press "New short video from a clip".'
+      // Reels are made in HyperFrames, and this Mac is not set up for it: brimm-video cannot make them here. OpusClip is no longer used (Jason, 2 November 2026).
+      "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
     ].join("\n"));
     t.done();
   });
-  it("says where she makes them last, after the line on the other Mac's newer version, which belongs with the list's times", async () => {
+  it("says that brimm-video cannot make them last, after the line on the other Mac's newer version, which belongs with the list's times", async () => {
     const later = { v: 1, how: "render", at: AT, on: "Sallie's laptop", file: "edit/main.v1.fcpxml", opened: AT };
     const { t, found } = episode({ ...raw([rough, later]), editing: { by: "Mac Studio", since: AT } }, {}, suggested());
     writeFileSync(join(found.folder, later.file), EPISODE.files["edit/main.v0.fcpxml"]);
@@ -672,7 +672,7 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(r.text.split("\n").slice(-2), [
       'The other Mac has a newer version (v1, on Sallie\'s laptop): say "render it here" to see it.',
-      'brimm-video cannot make Reels from this video yet: for now, cut them in OpusClip. BRIMM Ops writes their post text: on the episode\'s "Reels" card, press "New short video from a clip".'
+      "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
     ]);
     t.done();
   });

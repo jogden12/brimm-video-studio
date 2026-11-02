@@ -114,8 +114,10 @@ const SAYS = {
       ? "Post it on Instagram, and as a YouTube Short."
       : 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: () => 'Correct the form to what is live, then press "This is what is live".',
+  // The page's "Reels" card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text".
+  // The step names no "Clip to cut": the page (version 10) stops writing them. OpusClip is no longer used (Jason, 2 November 2026).
   cascade: () =>
-    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. Cut each "Clip to cut" in OpusClip. Then make it a short video with "New short video from a clip", on the episode\'s "Reels" card.',
+    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
   posttext: () => 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   checked: () => 'Check each principle marked "Check it", then press "Use in drafts".',
   // "the hand-off", not "the empty session revision": once the session's own hand-off is written, final/ holds that one in its place.

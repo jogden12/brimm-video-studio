@@ -295,13 +295,13 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     assert.deepEqual(t.opened, []);
     t.done();
   });
-  it("sends her to OpusClip for none of an episode imported before the switch, whose Reels brimm-video still makes", async () => {
+  it("never says brimm-video cannot make a Reel of an episode imported before the switch, whose Reels brimm-video still makes", async () => {
     const p = phase3();
     const { t } = p;
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 0);
     assert.equal(await pick(p, 1), 0, t.said());
     assert.equal(await editMain(["captions", "Pricing", "reel", "1", "off"], t.ctx.deps), 0, t.said());
-    assert.doesNotMatch(t.said(), /OpusClip|cannot make Reels/);
+    assert.doesNotMatch(t.said(), /cannot make Reel|on this Mac/);
     t.done();
   });
   it("says why, in one sentence, when the list cannot be read, as one a newer brimm-video wrote", async () => {
