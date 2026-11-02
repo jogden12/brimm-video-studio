@@ -144,6 +144,16 @@ export function opsText(handoff, step, again) {
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning` (an iPhone clip's too);
       and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
       them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
+    - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
+      and is otherwise `finishRunning`: { due, took }, `due` the time the check is made (ms) and `took` the places the finish took
+      originals from ("Downloads", "From Final Cut"); null for any other. She need not wait for the check, so a raw video or an iPhone
+      clip is not at its finish running then: the stage is the one it is once the finish has ended. What Studio is still to do is said
+      in a line edit.js adds of its own (Item `also`).
+    - `lateProblem`, when the late check of the video's last finish found a problem after its hand-off was written and a later finish has
+      not ended well since (finish-check.js flagProblem): every answer for it then leads with the problem (nextFor).
+    - `finishFailed`, when the finish her last yes started has ended without writing a hand-off (finish-ended.js): its run ended and did
+      not end well, and the hand-off on file is older than her yes. `guide … tell` says so at its first look (told), in place of the step
+      from before the finish; no other answer of the guide does.
     - `gated`, when the gate holds a video as a session whose mark is not cleared, though its kind is not a session's (a record of
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
@@ -172,7 +182,9 @@ export function opsText(handoff, step, again) {
     The next step (Next): { done: true }, or { done: false, stage, text, step, after }. `stage` names where it has got, `text` is
     the step in her words, `step` the BRIMM Ops step's word ("" for any other), and `after` what comes once that step is noted
     ("" when nothing does).
-    A video in the guide's lists (Item): { facts, next, folder, record }, its folder and record as edit.js read them, or null. */
+    A video in the guide's lists (Item): { facts, next, folder, record, also }, its folder and record as edit.js read them, or null; and
+    `also`, the lines edit.js adds of its own to say after the guide's, or none (what Studio is still to do for it, which she need not
+    wait for). */
 
 /** How long a hand-off stays under way while its BRIMM Ops steps are not all noted: 60 days after it was written. */
 export const OLD_DAYS = 60;
@@ -188,6 +200,11 @@ const READING_FAILED = 'Claude\'s reading of it did not finish. Say "how far is 
 const SESSION_MARK = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const WAITS_V2 = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
+/** What `guide tell` says of a finish that ended with no hand-off written: why is in the status, which is what she is told to say. */
+const FINISH_FAILED = 'Its finish did not write a hand-off. Say "how far is it?" to see why.';
+/** What every answer for a video leads with, ahead of its step, once the late check of its last finish found a problem after she had
+    been told she could go on (facts.lateProblem): why is in the status, which is what she is told to say. */
+const LATE_PROBLEM = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
 /** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
@@ -333,7 +350,9 @@ function videoNext(facts, notes, now) {
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
-  if ((raw || clip) && facts.finishRunning) return toDo("finish-running", FINISH_RUNNING);
+  // A finish that has written its hand-off and only waits for its late check (`checking`) is not at work as far as she is concerned: the
+  // hand-off is ready, and the page's step is hers to do.
+  if ((raw || clip) && facts.finishRunning && !facts.checking) return toDo("finish-running", FINISH_RUNNING);
   if (facts.handoff) {
     if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
@@ -387,11 +406,20 @@ const withdrawalOwed = (facts, notes) => {
   return Boolean(next) && next.step === "withdrawn";
 };
 
-/** The one next step for a video, from what edit.js read of it, her notes on this Mac, and the time now (ms). A file in a drop
-    folder first; then what holds any video up (a conflict, her answer, a version that was a session after all); then a video she
-    said was finished, which is done, unless it is a session after all whose withdrawal is still owed, which nothing noted can
-    skip; then a session's steps, or any other video's. */
+/** The one next step for a video, from what edit.js read of it, her notes on this Mac, and the time now (ms): stepFor's, led by the
+    problem the late check of its last finish found (`lateProblem`), when it found one that a later finish has not put right. That is
+    said of a video with a hand-off written that is not a session and is not done, and not while a finish runs: a later finish is
+    what puts it right, and it is at work. The stage, the step and what comes after it are the step's own. */
 export function nextFor(facts, notes, now) {
+  const next = stepFor(facts, notes, now);
+  const leads = facts.lateProblem === true && Boolean(facts.handoff) && facts.kind !== "session" && !facts.finishRunning && !next.done;
+  return leads ? { ...next, text: `${LATE_PROBLEM} ${next.text}` } : next;
+}
+
+/** The step for a video, without what it may be led with. A file in a drop folder first; then what holds any video up (a conflict,
+    her answer, a version that was a session after all); then a video she said was finished, which is done, unless it is a session
+    after all whose withdrawal is still owed, which nothing noted can skip; then a session's steps, or any other video's. */
+function stepFor(facts, notes, now) {
   if (facts.drop) return dropNext(facts.drop, facts.mac);
   if (facts.conflicted) return toDo("conflicted", 'Dropbox kept two copies of a change to it. Say "sort out the conflict".');
   if (facts.waiting) return facts.elsewhere ? toDo("answering-elsewhere", `It is being answered on ${spokenMac(facts.mac)}. Carry on there.`) : toDo("waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.');
@@ -442,22 +470,23 @@ export function findIn(items, said) {
   return { why: NO_FIT };
 }
 
-/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and, when there are
-    any, how many videos from before the switch it does not guide. */
+/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and the lines edit.js adds of
+    its own for it (`also`) under that, and, when there are any, how many videos from before the switch it does not guide. */
 export function overviewLines({ drop, items, old }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
-    ...(under.length ? ["Under way:", ...under.map(({ facts, next }) => `  ${facts.name}: ${next.text}`)] : [NOTHING_UNDER_WAY]),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }
 
-/** One video's lines: its next step, and for a BRIMM Ops step the one after it and the step's word, which she notes it by. */
-export function videoLines({ facts, next }) {
+/** One video's lines: its next step, and for a BRIMM Ops step the one after it and the step's word, which she notes it by; then the
+    lines edit.js adds of its own for the video (`also`), none for one that is done. */
+export function videoLines({ facts, next, also = [] }) {
   if (next.done) return [`${facts.name} is done: nothing is left to do for it.`];
   const lines = [`${facts.name}: ${next.text}`];
-  return next.stage === "ops" ? [...lines, `Then: ${next.after || "that is the last step."}`, `Step: ${next.step}`] : lines;
+  return [...(next.stage === "ops" ? [...lines, `Then: ${next.after || "that is the last step."}`, `Step: ${next.step}`] : lines), ...also];
 }
 
 /** How long `guide wait` waits at most for a change in what the guide says, under the Code tab's two minutes, and how often it
@@ -467,7 +496,8 @@ export const POLL_MS = 5000;
 
 /** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
     Claude's reading, and the video for HyperFrames being made. `guide wait` and `guide tell` wait only while a video is at one. A
-    running finish is not among them: the guide cannot tell a finish that failed from one not begun. */
+    running finish is not among them, for `guide wait`: that answers at once, and cannot tell a finish that failed from one not
+    begun. `guide tell` waits for a finish it was asked about while it ran (told), and knows how it ended by the hand-off. */
 export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"];
 
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
@@ -513,17 +543,30 @@ const READ_IT = "Claude has read it.";
 /** What `guide tell` says once its video has reached its next point, or null while it is still on its way. `was` is the video
     when the wait began, `seen` as it was last found, and `now` as it is found now, or null when it is not under way any more.
     It is on its way while it is at the stage it was at (COMING): in a drop folder, coming in or being imported; or Claude's
-    reading. Then: it is ready, once it has left the drop folder for Episodes; Claude has read it, once its reading is in; and
-    otherwise its next step, as the guide says it, which says when an import or a reading did not finish. At the start (all
-    three the same) a video with nothing on its way gets its next step at once. Its file's name is never said. */
+    reading; or its finish copying, which `guide wait` does not wait for. Then: it is ready, once it has left the drop folder for
+    Episodes; Claude has read it, once its reading is in; its hand-off is ready, as soon as its finish has written it (the
+    finish then only waits for its late check, which she need not wait for) or has ended with one, and that the finish wrote
+    none, saying how to see why, when it has ended without; and otherwise its next step, as the guide says it, which says when an
+    import or a reading did not finish. At the start (all three the same) a video with nothing on its way gets its next step at
+    once, unless the finish her last yes started has ended without a hand-off already (`finishFailed`): that is said instead, as it
+    is said of a finish waited for. Its file's name is never said. */
 export function told(was, seen, now) {
   if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
   if (now.next.done) return videoLines(now)[0];
-  const on = (item) => (!COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
+  const on = (item) => (item.next.stage === "finish-running" ? "finish" : !COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
   if (on(now) && on(now) === on(was)) return null;
   const { facts, next } = now;
   if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;
   if (on(was) === "reading" && facts.reading === "done") return `${facts.name}: ${next.text.startsWith(READ_IT) ? next.text : `${READ_IT} ${next.text}`}`;
+  if (on(was) === "finish") {
+    // A finish that wrote its hand-off has left its marker, while it waits for its late check (`checking`), or has changed the video's
+    // hand-off, once it has ended: its first, or another revision of it.
+    const wrote = Boolean(facts.checking) || (Boolean(facts.handoff) && (!was.facts.handoff || ["id", "revision", "at"].some((key) => facts.handoff[key] !== was.facts.handoff[key])));
+    return `${facts.name}: ${wrote ? `Its hand-off is ready. ${next.text}` : FINISH_FAILED}`;
+  }
+  // A video with nothing on its way, whose finish ended without a hand-off before this look (a run that began and ended at once): that is
+  // said in place of the step from before the finish, which would send her to say yes again as if nothing had been tried.
+  if (!on(was) && facts.finishFailed === true) return `${facts.name}: ${FINISH_FAILED}`;
   return `${facts.name}: ${next.text}`;
 }
 

@@ -13,6 +13,7 @@ import { CLAIM_WAIT_MS, contextFor, editMain, findEpisode } from "../edit.js";
 import { askBlocked, clockAt } from "../unedited.js";
 import { claimed, layoutOf, localStamp, newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
 import { PIN } from "../hyperframes.js";
+import { addRates, progressFolder } from "../progress.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
@@ -888,6 +889,19 @@ describe("kind: a raw reading waits for the import's late check", () => {
     assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${due}, when the import has checked its copies.`]]);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
     assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
+    t.done();
+  });
+  it("says when its rough cut is ready too, as the guide does, once this Mac has measured the speeds of Claude's call and of the rough cut", async () => {
+    const t = setup();
+    appOn(t);
+    waiting(t);
+    owe(t, 5 * 60 * 1000);
+    // 10 seconds for each second of video, twice, for a video of 23.423 seconds: 468 seconds from the time Claude starts.
+    addRates(progressFolder(t.home), { "Asking Claude": 10, "Making the rough cut": 10 });
+    const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
+    const due = Date.parse(AT) - 5 * 60 * 1000 + LATE_CHECK_MS;
+    const rough = clockAt(Math.round((due + 468000) / 60000) * 60000);
+    assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${clockAt(due)}, when the import has checked its copies. Its rough cut is ready about ${rough}.`]]);
     t.done();
   });
   it("says the time of a check that is already due as the time now, since the import makes it within a minute", async () => {

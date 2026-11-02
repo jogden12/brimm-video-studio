@@ -89,7 +89,7 @@ describe("finish … reels from the project `app … reel N` makes of a finished
     const first = await on(w.t.ctx.deps, "finish", FOLDER, "reels");
     assert.deepEqual([first.code, first.said], [0, [`Reel 2: ${named(w.names["reel 2"], "14.03")}, from Downloads, exported 2026-10-20 14:03.`, 'Say "yes, hand off the Reels" to start.']]);
     const started = await on(w.t.ctx.deps, "finish", FOLDER, "reels", "--yes");
-    assert.deepEqual([started.code, started.said.at(-1)], [0, "Started. The panel shows how far it is."]);
+    assert.deepEqual([started.code, started.said.at(-1)], [0, "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is."]);
     assert.deepEqual(w.asked().parts.map((p) => [p.key, p.project, p.fromSuggestion, p.expected]), [["reel 2", w.names["reel 2"], 2, REEL2_OPENING]]);
     assert.deepEqual(w.asked().base, { handoff: HANDOFF_REL, revision: 1 });
     const found = { ...w.found, record: reread(w.found) };

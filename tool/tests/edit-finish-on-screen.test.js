@@ -26,7 +26,7 @@ async function on(deps, ...argv) {
 const MAIN_LINE = `The main video: ${named(MAIN, "13.56")}, from Downloads, exported 2026-10-20 13:56.`;
 const REEL_LINE = `Reel 2: ${named(REEL2, "14.03")}, from Downloads, exported 2026-10-20 14:03.`;
 const START = 'Say "yes, hand it off" to start.';
-const STARTED = "Started. The panel shows how far it is.";
+const STARTED = "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is.";
 const NONE_FOUND = "I found no words on the main video's picture. Say what is on screen, or say that nothing is.";
 const NOT_HERE = "I could not look at the main video's project on this Mac, so I do not know what is on its picture. Say what is on screen, or say that nothing is.";
 const NOT_ALL_READ = "I could not read all the words on the main video's picture. Say what is on screen, or say that nothing is.";

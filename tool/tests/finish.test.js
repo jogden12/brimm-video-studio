@@ -337,6 +337,7 @@ describe("finish, the detached part", () => {
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, true, result.failed.join(" "));
     assert.ok(existsSync(join(fromFinalCutFolder(t.home), `${PROJECT.main}.fcpxmld`, "Info.fcpxml")));
+    assert.match(result.next, /Pricing- what to charge- main v5 3fa9c1\.fcpxmld changed in From Final Cut after it was taken, so it is kept there\./);
     t.done();
   });
   it("puts a copy that went missing back from what it took, never from a file made again since", async () => {

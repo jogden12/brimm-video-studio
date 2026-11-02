@@ -4,11 +4,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDetached, runDetached, resultFile, readResult, runningCommand, lockOf } from "../detached.js";
+import { startDetached, runDetached, resultFile, readResult, runningCommand, runningRun, lockOf } from "../detached.js";
 
 const FOLDER = "2026-10-13 Talk (Mac Studio)";
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
@@ -119,6 +119,35 @@ describe("a command run detached", () => {
   it("has no result before it has run, and no running command without a lock", () => {
     const t = setup();
     assert.deepEqual([readResult(t.home, FOLDER, "bring"), runningCommand(t.home, FOLDER, () => true)], [null, ""]);
+    t.done();
+  });
+});
+
+describe("a run's nonce", () => {
+  it("is given to the work, and is the one the lock holds, which runningRun names", async () => {
+    const t = setup();
+    let seen = null;
+    await runDetached({ ...t.opts, command: "finish" }, async ({ nonce }) => {
+      const held = JSON.parse(readFileSync(lockOf(t.home, FOLDER), "utf8"));
+      seen = { nonce, held: held.nonce, run: runningRun(t.home, FOLDER, () => true) };
+      return { ok: true, made: [], failed: [], next: "" };
+    });
+    assert.equal(typeof seen.nonce, "string");
+    assert.notEqual(seen.nonce, "");
+    assert.equal(seen.held, seen.nonce);
+    assert.deepEqual(seen.run, { pid: process.pid, command: "finish", nonce: seen.nonce });
+  });
+  it("is another one for each run", async () => {
+    const t = setup();
+    const nonces = [];
+    for (let run = 0; run < 2; run++) await runDetached({ ...t.opts, command: "finish" }, async ({ nonce }) => (nonces.push(nonce), { ok: true, made: [], failed: [], next: "" }));
+    assert.notEqual(nonces[0], nonces[1]);
+  });
+  it("is empty for a lock written without one, as an older run's was", () => {
+    const t = setup();
+    mkdirSync(join(t.home, "BRIMM Video Work", FOLDER), { recursive: true });
+    writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "finish" }));
+    assert.deepEqual(runningRun(t.home, FOLDER, (pid) => pid === 4242), { pid: 4242, command: "finish", nonce: "" });
     t.done();
   });
 });

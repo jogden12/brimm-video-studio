@@ -62,14 +62,17 @@ import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
+import { copyIn as copyTakes } from "./guide.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
+import { aboutLeft, progressFolder, readRates } from "./progress.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
 import { ASIDE_DIR, asidePlace, makerOf, markedOlder, momentText, olderThan, rebuildProject, snapshotOf, snapshotsOf } from "./snapshot.js";
 import { studioFolder } from "./studio.js";
+import { clockAt } from "./unedited.js";
 import { requestWorkCopy, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
 
 /** What is said of a Mac that is not set up for the app (settings.js appOf). edit.js says it before it goes any further, so
@@ -85,7 +88,14 @@ export const KEPT = "kept for an earlier kind";
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
 export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
-const beingMade = (name) => `The video for HyperFrames is being made. Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+/** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
+    this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
+    the clock shows it now. Nothing while it has measured none, so that no time is named that cannot be backed. */
+function readyAt(ctx, record) {
+  const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
+}
 const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 export const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
@@ -446,7 +456,7 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const reading = runningCommand(home, found.name, ctx.alive) === "read";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text));
+    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
   if (reading) {
@@ -604,7 +614,7 @@ function putVideoBack(ctx, { found, record, project, dir, kept = null }, { renam
       return { workingCopy: keeps.workingCopy };
     }
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(beingMade(name));
+    ctx.say(beingMade(name, readyAt(ctx, record)));
     return { code: 0 };
   }
   // The copy's own facts say how large it is when the job puts it in place whole; a file of another size is not that copy.

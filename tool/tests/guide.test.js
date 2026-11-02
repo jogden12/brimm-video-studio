@@ -520,6 +520,104 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
   });
 });
 
+describe("the next step while a finish waits for its late check (the BRIMM Ops page does not wait for it)", () => {
+  const CHECKING = { due: Date.parse("2026-10-20T15:20:00-05:00"), took: ["Downloads"] };
+  const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
+  const noted = (step, kind = "episode") => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } });
+  it("is the BRIMM Ops page's step for a raw video, as it is once the finish has ended, and not that its finish is running", () => {
+    for (const [what, over] of [
+      ["on the HyperFrames way", APP({ way: "hyperframes", project: PROJECT({ exported: true }) })],
+      ["on the HyperFrames way, whose project is not known to be exported", APP({ way: "hyperframes" })],
+      ["on the Final Cut way", RAW({ way: "final cut", shownInFinalCut: true })]
+    ]) {
+      const facts = { ...BASE, ...over, handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
+      const ended = nextFor({ ...facts, finishRunning: false, checking: null }, NONE, NOW);
+      const n = nextFor(facts, NONE, NOW);
+      assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken + OPS_TEXTS.online}`], what);
+      assert.deepEqual(n, ended, what);
+    }
+  });
+  it("is the BRIMM Ops page's step for an iPhone clip too", () => {
+    const facts = { ...BASE, ...CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), handoff: handoffOf("short video"), finishRunning: true, checking: CHECKING };
+    const n = nextFor(facts, NONE, NOW);
+    assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken}`]);
+  });
+  it("goes on through the page's steps as she notes them, and is done when she has said the video is finished, as at any other time", () => {
+    const facts = { ...BASE, ...APP({ way: "hyperframes" }), handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
+    assert.deepEqual([nextFor(facts, noted("taken"), NOW).stage, nextFor(facts, noted("taken"), NOW).step], ["ops", "kit"]);
+    assert.deepEqual(nextFor(facts, { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } }, NOW), { done: true });
+    assert.deepEqual(nextFor(facts, noted("cascade"), NOW), { done: true });
+  });
+  it("is still its finish is running while the finish copies, with no check to wait for yet: a hand-off an earlier finish wrote does not change that", () => {
+    for (const over of [APP({ way: "hyperframes" }), CLIP({ way: "hyperframes" }), RAW({ way: "final cut", shownInFinalCut: true })]) {
+      const n = nextFor({ ...BASE, ...over, handoff: handoffOf(over.kind === "short video" ? "short video" : "raw"), finishRunning: true, checking: null }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], ["finish-running", "Its finish is running. The panel shows how far it is."], JSON.stringify(over));
+    }
+  });
+  it("is nothing different for a finished video's Reels: the page's step where none waits, and its finish is running where a Reel waits, since that command refuses another finish beside the check", () => {
+    const waiting = (over = {}) => ({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], finishRunning: true, checking: CHECKING, ...over });
+    const running = nextFor(waiting(), NONE, NOW);
+    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const quiet = nextFor(waiting({ reelsExported: [] }), NONE, NOW);
+    assert.deepEqual([quiet.stage, quiet.step], ["ops", "taken"]);
+  });
+  it("is no stage to wait for: the page's step needs her, and the check needs nothing of hers", () => {
+    assert.ok(!COMING.includes("ops"));
+    assert.ok(!COMING.includes("finish-running"));
+  });
+});
+
+describe("what the guide leads with once a late check found a problem after she was told she could go on", () => {
+  const LEAD = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
+  const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
+  const problem = (over = {}) => ({ ...BASE, ...APP({ way: "hyperframes" }), handoff: handoffOf("raw"), lateProblem: true, ...over });
+  it("is the problem in one plain sentence and what to say, ahead of the step it would say, whose stage and step stay", () => {
+    const plain = nextFor(problem({ lateProblem: false }), NONE, NOW);
+    const n = nextFor(problem(), NONE, NOW);
+    assert.deepEqual(n, { ...plain, text: `${LEAD} ${plain.text}` });
+    assert.deepEqual([n.stage, n.step], ["ops", "taken"]);
+    assert.ok(n.text.startsWith(`${LEAD} On the BRIMM Ops page: `));
+  });
+  it("leads every kind of video with a hand-off: a clip, a finished video, a raw video on the Final Cut way, and a stage that is not the page's", () => {
+    for (const over of [
+      CLIP({ way: "hyperframes", handoff: handoffOf("short video") }),
+      { kind: "finished", handoff: OPS_HANDOFF },
+      RAW({ way: "final cut", shownInFinalCut: true, handoff: handoffOf("raw") }),
+      { kind: "finished", handoff: OPS_HANDOFF, reelsExported: [2] },
+      APP({ way: "hyperframes", handoff: handoffOf("raw"), conflicted: true })
+    ]) {
+      const plain = nextFor({ ...BASE, ...over }, NONE, NOW);
+      const n = nextFor({ ...BASE, ...over, lateProblem: true }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], [plain.stage, `${LEAD} ${plain.text}`], JSON.stringify(over));
+    }
+  });
+  it("is said by every answer that says the step: the list, the video, and the line `tell` says", () => {
+    const facts = problem();
+    const item = { facts, next: nextFor(facts, NONE, NOW), folder: null, record: null };
+    assert.ok(overviewLines({ drop: "D", items: [item], old: 0 })[2].startsWith(`  ${facts.name}: ${LEAD} On the BRIMM Ops page: `));
+    assert.equal(videoLines(item)[0], `${facts.name}: ${item.next.text}`);
+    assert.equal(told(item, item, item), `${facts.name}: ${item.next.text}`);
+    assert.ok(told(item, item, item).startsWith(`${facts.name}: ${LEAD} `));
+  });
+  it("is not said while a finish runs, with or without a check to wait for: a later finish is what puts it right", () => {
+    const running = nextFor(problem({ finishRunning: true }), NONE, NOW);
+    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const checking = nextFor(problem({ finishRunning: true, checking: { due: NOW, took: [] } }), NONE, NOW);
+    assert.deepEqual([checking.stage, checking.step], ["ops", "taken"]);
+    assert.ok(!checking.text.includes(LEAD));
+  });
+  it("is not said for a video with no hand-off, for a session, or for one that is done", () => {
+    assert.ok(!nextFor(problem({ handoff: null, offersAnswered: false }), NONE, NOW).text.includes(LEAD));
+    assert.ok(!nextFor({ ...BASE, ...SESSION({ choice: null }), lateProblem: true }, NONE, NOW).text.includes(LEAD));
+    assert.deepEqual(nextFor(problem(), { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } }, NOW), { done: true });
+    assert.deepEqual(nextFor(problem(), { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-24T09:00:00-05:00" } } }, NOW), { done: true });
+  });
+  it("is said in sentences under 25 words, with no path or flag", () => {
+    assert.doesNotMatch(LEAD, /\/|\\|--|\.js\b/);
+    for (const sentence of LEAD.split(/(?<=[.;])\s+/)) assert.ok(sentence.split(/\s+/).length < 25, sentence);
+  });
+});
+
 describe("the guide's lists", () => {
   const item = (name, over = {}, next = { done: false, stage: "spellings", text: "T.", step: "", after: "" }) => ({ facts: { ...BASE, name, ...over }, next, folder: null, record: null });
   const waiting = { done: false, stage: "waiting", text: "W.", step: "", after: "" };
@@ -547,6 +645,16 @@ describe("the guide's lists", () => {
     ]);
     assert.deepEqual(overviewLines({ drop, items: [], old: 1 }), [`Your drop folder: ${drop}`, NOTHING_UNDER_WAY, "1 video from before the switch is not guided."]);
     assert.equal(NOTHING_UNDER_WAY, "Nothing is under way. To start, put the video in your drop folder.");
+  });
+  it("say after a video's own lines the lines edit.js adds of its own for it, and none for a video that is done", () => {
+    const ops = { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." };
+    const also = ["Studio checks Dropbox's copies at 15:20. You do not need to wait for it."];
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also }), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit", ...also]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)"), also }), ["A (aaaaaa): T.", ...also]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, { done: true }), also }), ["A (aaaaaa) is done: nothing is left to do for it."]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also: [] }), videoLines(item("A (aaaaaa)", {}, ops)));
+    const drop = "Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
+    assert.deepEqual(overviewLines({ drop, items: [{ ...item("Old", { at: 1 }), also }, item("New", { at: 2 })], old: 0 }), [`Your drop folder: ${drop}`, "Under way:", "  New: T.", "  Old: T.", `    ${also[0]}`]);
   });
   it("say one video's step, and for a BRIMM Ops step the one after it and its word", () => {
     assert.deepEqual(videoLines(item("A (aaaaaa)")), ["A (aaaaaa): T."]);
@@ -681,6 +789,48 @@ describe("what guide tell says", () => {
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
     assert.equal(stillLine(arriving), 'A video of 5 bytes: It is still on its way after 60 minutes. It is coming into your drop folder. Wait for the "Ready" notice.');
   });
+  it("keeps waiting while a finish copies, and says in one line that its hand-off is ready as soon as it is written, not when its late check has been made", () => {
+    const RAW_HANDOFF = { ...OPS_HANDOFF, kind: "raw" };
+    const exported = { ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exported: true }) }) };
+    const CHECKING = { due: NOW + 900000, took: ["Downloads"] };
+    const first = at({ ...exported, finishRunning: true });
+    const second = at({ ...exported, finishRunning: true, handoff: RAW_HANDOFF });
+    const stage = (item) => item.next.stage;
+    assert.deepEqual([first, second].map(stage), ["finish-running", "finish-running"]);
+    // The hand-off the finish wrote: a revision above the one before, or the first.
+    const written = { ...RAW_HANDOFF, revision: 2, at: RAW_HANDOFF.at + 600000 };
+    const READY = (text) => `Pricing talk (3fa9c1): Its hand-off is ready. On the BRIMM Ops page: ${text}`;
+    const TAKE = OPS_TEXTS.taken + OPS_TEXTS.online;
+    const FAILED = 'Pricing talk (3fa9c1): Its finish did not write a hand-off. Say "how far is it?" to see why.';
+    for (const [was, seen, now, want] of [
+      // Still copying, as the first finish or a second one.
+      [first, first, first, null],
+      [second, second, second, null],
+      [first, first, second, null],
+      // The hand-off is written and the finish waits for its late check: it is ready, now.
+      [first, first, at({ ...exported, finishRunning: true, handoff: { ...RAW_HANDOFF, revision: 1 }, checking: CHECKING }), READY(TAKE)],
+      [second, second, at({ ...exported, finishRunning: true, handoff: written, checking: CHECKING }), READY(TAKE)],
+      // Its marker says it wrote the hand-off, whatever the hand-off the guide read is.
+      [second, second, at({ ...exported, finishRunning: true, handoff: RAW_HANDOFF, checking: CHECKING }), READY(TAKE)],
+      // The run has ended well, and was not looked at while it waited.
+      [first, first, at({ ...exported, handoff: RAW_HANDOFF }), READY(TAKE)],
+      [second, first, at({ ...exported, handoff: written }), READY(TAKE)],
+      // The run has ended without a hand-off: the first finish wrote none, the second the hand-off it had.
+      [first, first, at(exported), FAILED],
+      [second, second, at({ ...exported, handoff: RAW_HANDOFF }), FAILED],
+      [first, first, at({ ...exported, offersAnswered: false }), FAILED],
+      // A finish her yes started that ended without a hand-off before the first look (a run that began and ended at once): that is said
+      // at the first look, in place of the step from before it. A finish at work is waited for all the same.
+      [at({ ...exported, finishFailed: true }), at({ ...exported, finishFailed: true }), at({ ...exported, finishFailed: true }), FAILED],
+      [first, first, at({ ...exported, finishRunning: true, finishFailed: true }), null],
+      // Not under way any more.
+      [first, first, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
+      // A finish she is not waiting for (it was not running when she asked) is its next step at once, as for any video.
+      [at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), `Pricing talk (3fa9c1): On the BRIMM Ops page: ${TAKE}`]
+    ]) assert.equal(told(was, seen, now), want, JSON.stringify([stage(was), now && stage(now)]));
+    // Past an hour a finish still copying is still on its way, with its step, and says where to see how far it is.
+    assert.equal(stillLine(first), 'Pricing talk (3fa9c1): It is still on its way after 60 minutes. Its finish is running. The panel shows how far it is.');
+  });
   it("keeps waiting while the video for HyperFrames is made, and says the next step in one line when it is done", () => {
     const making = at({ ...BASE, ...APP({ copy: { left: 90, usual: null } }) });
     const later = at({ ...BASE, ...APP({ copy: { left: 30, usual: null } }) });
@@ -692,6 +842,8 @@ describe("what guide tell says", () => {
       [making, making, making, null],
       [making, making, later, null],
       [making, later, open, 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
+      // A finish that failed before it is none of what has happened since the first look: the step is said, as the guide says it.
+      [making, making, at({ ...BASE, ...APP(), finishFailed: true }), 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
       [making, making, editing, 'Pricing talk (3fa9c1): Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
       [making, making, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
       // A video with nothing on its way gets its next step at once.

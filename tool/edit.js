@@ -48,7 +48,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
-import { progressFolder, readRates, reporter } from "./progress.js";
+import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
@@ -60,6 +60,9 @@ import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
+import { checkingNow, problemFlagged } from "./finish-check.js";
+import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
+import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
@@ -109,13 +112,16 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
-                                        and once it is exported, to hand it off. On a Mac that Jason has not set up for
-                                        HyperFrames it says that this Mac is not set up, where it would say to open the
-                                        video there or that its video is being made. A finished video whose hand-off is
-                                        written is told to hand off the Reels once a Reel is exported from HyperFrames
-                                        that the hand-off does not hold. A raw video that goes the Final Cut way keeps
-                                        its Final Cut steps. Only on a Mac that does the light import: on any other,
-                                        every form says to ask Jason
+                                        and once it is exported, to hand it off. Once its finish has written the hand-off
+                                        it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
+                                        copies (a spelling, handing it off again and handing it over wait until then),
+                                        though the finish goes on checking them for a quarter of an hour. On a Mac
+                                        that Jason has not set up for HyperFrames it says that this Mac is not set up,
+                                        where it would say to open the video there or that its video is being made. A
+                                        finished video whose hand-off is written is told to hand off the Reels once a Reel
+                                        is exported from HyperFrames that the hand-off does not hold. A raw video that
+                                        goes the Final Cut way keeps its Final Cut steps. Only on a Mac that does the
+                                        light import: on any other, every form says to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
@@ -125,8 +131,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs.
                                         With tell, wait up to 60 minutes for its next point (ready, read by Claude, its
-                                        video for HyperFrames made, or an import or reading that did not finish), then say
-                                        it in one line. Her skill runs it in the background
+                                        video for HyperFrames made, its finish's hand-off written, or an import, a reading
+                                        or a finish that did not finish), then say it in one line. Her skill runs it in the
+                                        background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
@@ -230,7 +237,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         exported, and ask what it must. --final says an export is the final one though the
                                         project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
-                                        detached. An iPhone clip she answered that was not opened in HyperFrames is asked
+                                        detached. It says when the hand-off will be ready, and returns once the run has begun
+                                        (at most five seconds; it says so if none does). An iPhone clip she answered that was
+                                        not opened in HyperFrames is asked
                                         about once; --as-it-is writes its hand-off from the import's captions. For a main
                                         video taken from an export it reads the words on its picture out of the HyperFrames
                                         project and asks if they are right (a --yes takes them only after a call has shown
@@ -244,8 +253,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         HyperFrames (app … reel <n>), and ask what it must. With --yes and nothing left to
                                         ask, it transcribes them again, copies them into final/ and writes the next revision
                                         of the hand-off the video has already, under the same id: main, its suggestions and
-                                        the Reels it holds as they were, with these Reels added, detached. It never writes its
-                                        first hand-off (the spellings do), and a Reel number is never given twice
+                                        the Reels it holds as they were, with these Reels added, detached. It says when the
+                                        hand-off will be ready, and returns once the run has begun (at most five seconds; it
+                                        says so if none does). It never writes its first hand-off (the spellings do), and a
+                                        Reel number is never given twice
   node edit.js show "<episode>" transcript|notes|plan
                                         print its transcript (a raw video's she has answered: its rough cut's, or, with a
                                         HyperFrames project in use, the recording's own), Claude's notes or its cut plan,
@@ -1759,7 +1770,9 @@ const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames" };
     say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
     session, by its label and short id, and what its runs left with nothing of its video's names in it (cleanFor), a result
     left before it became one included, and with nothing said of what to say next. Words fit such an episode only when they
-    are its label or its id, and a light import's status only by its label. */
+    are its label or its id, and a light import's status only by its label. A finish at work that has written its hand-off and only
+    waits for its late check (finish-check.js) is said so, in place of that it is running: that the hand-off is written, and when
+    Studio checks Dropbox's copies and then takes away the originals it took. */
 export async function status(ctx, rest) {
   const { say } = ctx;
   const words = plainly(rest.join(" ")).split(/\s+/).filter(Boolean);
@@ -1807,7 +1820,11 @@ export async function status(ctx, rest) {
     // The working copy is made under a lock of its own, beside whatever holds the episode's (workcopy.js workCopyLockOf): its run
     // is looked for there, and its progress is in the panel's files with the others', by its process.
     const copying = runningRun(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder)) !== null;
-    if (command) lines.push(`${shown}: ${command} is running.`);
+    // A finish whose hand-off is written and shown only waits for its late check (finish-check.js): that is said in place of that it is
+    // running, with when Studio checks Dropbox's copies and then takes away what it took.
+    const checking = command === "finish" && e.inForce ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
+    if (checking) lines.push(`${shown}: the hand-off is written. ${checkSentence(checking)}`);
+    else if (command) lines.push(`${shown}: ${command} is running.`);
     if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
     let results = [];
     try {
@@ -2010,7 +2027,16 @@ const refuse = (ctx, why) => {
   ctx.say(why);
   return 1;
 };
-const oneLine = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+/** What a command says when the run at work on the episode stops it: `generic`, the words it has always said, unless that run is a finish
+    whose hand-off is written and which only waits for its late check (finish-check.js checkingNow). She was told she need not wait for that
+    check, so the stop says that the hand-off is written and when Studio checks Dropbox's copies, and `again`, what she does then, in the
+    command's own words; `of` is " of <the video>" where the command names it. A stop that comes while the finish still copies is the
+    generic one: nothing is written yet, and the finish is what she waits for. `record` is the episode's record in force. */
+function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
+  const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
+  return checking ? `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}` : generic;
+}
+const oneLine =(v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 
 /** Record the episode's name as it is given (spec section 1, "The episode's name"). Nothing is renamed: the folder keeps its
     name, and a project keeps the name it was pushed with. */
@@ -2299,9 +2325,19 @@ function keepShownWords(work, lines, at) {
 }
 const sameLines = (kept, lines) => Array.isArray(kept) && kept.length === lines.length && kept.every((line, i) => line === lines[i]);
 
+/** What `finish` says when it starts the detached part: when the hand-off will be ready, as a clock time and in minutes, from the speed
+    this Mac measured of the finishes before it (finish-time.js) and the seconds of video this one takes (`parts`, the record's own
+    lengths), and that she can carry on meanwhile. With no speed measured yet, or no video to take, it names no time it cannot back. */
+function startedWords(ctx, record, parts) {
+  const seconds = handoffIn(readRates(progressFolder(ctx.home)), videoSeconds(record, parts));
+  if (seconds === null) return "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is.";
+  return `Started. The hand-off is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}. You can carry on meanwhile.`;
+}
+
 /** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
     exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
-    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once.
+    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns once that run holds the
+    episode's lock, a moment later (runStarted): it says if the run did not begin in five seconds, or began and stopped at once.
     For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
     (plan PR 8, on-screen.js): `answers.onScreen` are the lines she gave instead, and `answers.noOnScreen` that there are none. A yes
     takes the words found only if they are the lines the last call showed (finish.shown.json); otherwise it shows them, and starts nothing. */
@@ -2350,7 +2386,9 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) stops.push(`${running} is running for this episode. Say "how far is it?"`);
+  // What she says to hand it off, in the words of the way it goes: the Reels', HyperFrames' or Final Cut's.
+  const sayIt = forReels ? '"hand off the Reels"' : app ? '"hand it off"' : "finish";
+  if (running) stops.push(stoppedWords(ctx, found, record, { generic: `${running} is running for this episode. Say "how far is it?"`, again: `Say ${sayIt} again then.` }));
   const noHandEdits = answers.noHandEdits || [];
   // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
   const plan = (() => {
@@ -2486,8 +2524,39 @@ export async function finishEpisode(ctx, found, answers = {}) {
     // Whatever stands in its place is not a file it kept: it is read as nothing shown.
   }
   startDetached(ctx, { command: "finish", folder: found.name });
-  ctx.say("Started. The panel shows how far it is.");
+  // It returns once the run it started has taken hold of the episode (its lock), so that what is asked of the guide next, `guide … tell`,
+  // finds the finish at work and not the step from before it: the process takes a moment to begin.
+  const up = await runStarted(ctx, found);
+  if (up === "stopped") return refuse(ctx, STOPPED_AT_ONCE);
+  if (up === "") return refuse(ctx, `The finish did not start: nothing is running for this episode after ${START_WAIT_MS / 1000} seconds. Say "how far is it?" to see, and say ${sayIt} again if nothing is.`);
+  ctx.say(startedWords(ctx, record, looked.parts));
   return 0;
+}
+
+/** How long `finish … --yes` waits, at most, for the run it started to hold the episode's lock, and how often it looks. A test that
+    gives `startWaitMs` waits that long instead, none at all with 0: its stand-in for the process starts nothing. */
+const START_WAIT_MS = 5000;
+const START_LOOK_MS = 100;
+/** What `finish … --yes` says when the run it started began and ended before the first look, and wrote no hand-off: why is in the status. */
+const STOPPED_AT_ONCE = 'The finish stopped as soon as it started, and wrote no hand-off. Say "how far is it?" to see why.';
+
+/** Wait for the finish `startDetached` just started: "running" once the episode's lock is held by a finish run, "ended" once a run of
+    this yes has begun and ended well already, "stopped" once one has ended without a hand-off, and "" when none has begun after the time
+    to wait, which is START_WAIT_MS unless a test gives another (0 does not look: "running"). Looks every START_LOOK_MS, by the clock's
+    wait. */
+async function runStarted(ctx, found) {
+  const within = ctx.deps.startWaitMs ?? START_WAIT_MS;
+  if (within <= 0) return "running";
+  const wait = sleepOf(ctx);
+  const began = ctx.now();
+  for (;;) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) === "finish") return "running";
+    const ended = endedSinceYes(ctx.home, found.name);
+    if (ended) return ended.result.ok === false ? "stopped" : "ended";
+    const left = within - (ctx.now() - began);
+    if (left <= 0) return "";
+    await wait(Math.min(START_LOOK_MS, left));
+  }
 }
 
 /** `finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"]… [--final "<part>"]…
@@ -2513,7 +2582,7 @@ async function finish(ctx, rest) {
     }
     // The progress panel shows the finish as it shows an import (phase P).
     const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
-    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress }));
+    const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ nonce }) => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress, nonce, notify: ctx.deps.notify || banner }));
     if (result.taking || result.running) {
       ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
       // The finish never ran: a claim its quick part took for it is let go (the P1 check, T17).
@@ -2630,7 +2699,7 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
+  if (running && running !== "bring") return refuse(ctx, stoppedWords(ctx, found, record, { generic: `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`, again: "Hand it over then. Nothing was handed over.", of: ` of ${name}` }));
   // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes, of the
   // parts this Mac pushed last alone: those are the ones checked below. A part the other Mac pushed last is not this Mac's to
   // hand over, and an older Share and export of it copied from here would look newer there than that Mac's own.
@@ -4019,7 +4088,7 @@ function layerStart(ctx, words, { writes = true } = {}) {
   if (!writes) return { found, part, target, words: left };
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return { code: refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`) };
+  if (running && running !== "bring") return { code: refuse(ctx, stoppedWords(ctx, found, got.record, { generic: `${running} is running for this episode. Say "how far is it?", and try again when it is done.`, again: "Try again then." })) };
   if (target.base) return { code: refuse(ctx, "This timeline was changed by hand in Final Cut and taken in. brimm-video does not change a hand-edited timeline yet: make this change by hand in Final Cut.") };
   if (part !== "main" && piecesOf(found, part, ctx).old) return { code: refuse(ctx, `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so brimm-video cannot change it: make this change by hand in Final Cut.`) };
   return { found, part, target, words: left };
@@ -4528,7 +4597,7 @@ async function spell(ctx, rest) {
   // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes; but only
   // once the record holds the current reading: one from before her answer is one a new reading is still to replace.
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, stoppedWords(ctx, found, got.record, { generic: `${running} is running for this episode. Say "how far is it?", and try again when it is done.`, again: "Try again then." }));
   const fc = hasFinalCut(got.record);
   if (verb === "drop") {
     const heard = more[0];
@@ -5161,7 +5230,7 @@ function answerWhy(ctx, found, record, plan) {
   const held = heldElsewhere(record, ctx.machine);
   if (held) return beingAnswered(name, held.by);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+  if (running) return stoppedWords(ctx, found, record, { generic: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`, again: "Say it again then.", of: ` of ${calledAs(ctx, found)}` });
   return "";
 }
 
@@ -5510,7 +5579,10 @@ async function answerKind(ctx, found, plan, began) {
   // `app`, which asks for it when it is not there.
   if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
-    say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.`);
+    // When its rough cut is ready too, as the guide says it (guideReading), once this Mac has measured the speeds of Claude's call and of
+    // the rough cut.
+    const rough = roughIn(readRates(progressFolder(ctx.home)), wrote.record.video && wrote.record.video.seconds);
+    say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.${rough === null ? "" : ` Its rough cut is ready about ${clockNear(holdsUntil + rough * 1000)}.`}`);
     return 0;
   }
   return waitForReading(ctx, found, name, previous, began);
@@ -6562,6 +6634,15 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
   // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems). The
   // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
   const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
+  // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
+  // asked only of a finish at work, and of no video the gate holds.
+  const checking = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
+  // The late check of its last finish found a problem after she was told she could go on, and no later finish has ended well since (the
+  // note finish.js leaves): asked only of a video with a hand-off that is not a session's, and of none the gate holds.
+  const lateProblem = !hidden && Boolean(handoff) && kind !== "session" && problemFlagged(ctx.home, e.name);
+  // The finish her last yes started has ended without a hand-off (finish-ended.js), which `guide … tell` says at its first look: asked only
+  // when no finish is at work now, of no session and no video the gate holds.
+  const finishFailed = !hidden && kind !== "session" && running !== "finish" && endedWithoutHandoff(ctx.home, e.name, handoff ? handoff.at : null);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6582,6 +6663,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
     placeholder: r.name.placeholder === true,
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
+    checking,
+    lateProblem,
+    finishFailed,
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     gated: kind !== "session" && sessionNotCleared(r),
     way,
@@ -6668,6 +6752,18 @@ function guideDrops(ctx) {
   return apart(videos, clockAt);
 }
 
+/** What Studio does at the late check of a finish, as one sentence: when it checks Dropbox's copies (`due`, ms, as this Mac's clock
+    shows it) and then takes away the originals it took, from the places it took them (`took`: Downloads, From Final Cut). A finish that
+    took none says only when it checks. */
+function checkSentence({ due, took }) {
+  const out = took.map((place) => (place === "Downloads" ? "the export out of Downloads" : "what it took out of From Final Cut"));
+  return `Studio checks Dropbox's copies at ${clockAt(due)}${out.length ? `, and then takes ${listed(out)}` : ""}.`;
+}
+
+/** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode are
+    stopped until it is made (stoppedWords): a spelling, handing the video off again and handing it over. */
+const ON_THE_CHECK = "You do not need to wait for it. A spelling, handing it off again and handing it over wait until then.";
+
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
@@ -6675,7 +6771,9 @@ function guideDrops(ctx) {
     Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
     is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
-    again since its finish) stays. Her notes, the versions of every video and this Mac's measured speeds are read once. */
+    again since its finish) stays. A video whose finish only waits for its late check (`facts.checking`) says after the guide's lines
+    when Studio checks Dropbox's copies and what it then takes away, and that she need not wait for it (`also`). Her notes, the
+    versions of every video and this Mac's measured speeds are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
@@ -6695,7 +6793,7 @@ function guideItems(ctx) {
       continue;
     }
     const facts = guideFacts(ctx, e, links, rates, notes, downloads);
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [] });
   }
   const newest = new Map();
   for (const item of items) {
@@ -6833,11 +6931,14 @@ async function waitForChange(ctx) {
 }
 
 /** `guide "<video>" tell`: the video's next point (guide.js told), waited for in the background (her skill runs it with the Bash
-    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, or its import or its
-    reading did not finish. What the guide says is read again every TELL_POLL_MS, for up to TELL_MS, following the video from its
-    drop folder into Episodes (follow). A video with nothing on its way gets its next step at once, and one still on its way
-    after TELL_MS gets that said, with its next step. Nothing is said before the end, and no notice is posted: the import and the
-    reading post their own. */
+    tool's run_in_background), and said in one line when it comes: it is ready, Claude has read it, its hand-off is ready, or its
+    import or its reading did not finish, or its finish wrote no hand-off. What the guide says is read again every TELL_POLL_MS, for
+    up to TELL_MS, following the video from its drop folder into Episodes (follow). A finish it was asked about while it ran is
+    waited for until its hand-off is written, which is when the finish only waits for its late check, and not until that check is
+    made; a finish her last yes started that ended without a hand-off before the first look (`finishFailed`) is said so at once, in place
+    of the step from before it. A video with nothing on its way gets its next step at once, and one still on its way after TELL_MS gets that said, with
+    its next step. Nothing is said before the end, and no notice is posted: the import, the reading and a finish's late check that
+    fails post their own. */
 async function tellWhen(ctx, item) {
   const wait = sleepOf(ctx);
   const start = ctx.now();

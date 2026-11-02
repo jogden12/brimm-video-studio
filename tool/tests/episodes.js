@@ -46,6 +46,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
   const clones = [];
   const calls = [];
   const waits = [];
+  const notices = [];
   let clock = Date.parse("2026-10-20T15:00:00-05:00");
   // A clone never writes over a file: the rule deletes one first (replaceIn). This stand-in refuses, so a test fails if
   // anything is ever written in place. And it keeps the file's times, as cp -c (clonefile) does.
@@ -93,6 +94,11 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
     // No test asks launchctl whether this Mac's launch agent is at work: it is not, unless a test says it is.
     agentRunning: () => false,
+    // No test posts a notice on the Mac's screen (unedited.js banner runs osascript): the notices a run posts are written down.
+    notify: (text) => notices.push(text),
+    // No test waits for the process `finish … --yes` starts: the stand-in for it starts nothing, so there is no lock to wait for. A test of
+    // that wait takes this away, and the command's own five seconds stand (finish-start-wait.test.js).
+    startWaitMs: 0,
     run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
@@ -106,7 +112,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     }
   });
   return {
-    dir, root, home, work, ctx, opened, started, clones, calls, waits,
+    dir, root, home, work, ctx, opened, started, clones, calls, waits, notices,
     said: () => said.join("\n"),
     now: () => clock,
     /** A file Final Cut wrote into From Final Cut, `ms` after the clock's start. An export is a bundle, a folder with its

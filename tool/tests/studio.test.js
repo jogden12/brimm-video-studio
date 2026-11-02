@@ -697,7 +697,34 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "`guide page` the first time in this chat"
     ]) assert.ok(guide.includes(words), words);
     assert.ok(!guide.includes("the first time in a session"), guide);
-    assert.ok(sectionOf(skill, "## The card").includes("offer to tell her here when Claude has read it"));
+    assert.ok(sectionOf(skill, "## The card").includes('tell her here when Claude has read it, as "Guide her" says for work in the background'));
+  });
+  it("tells her how long a command that works in the background takes and, without asking her, tells her here when it is done: finish, kind, app and ask (Jason, 2 November 2026)", () => {
+    const guide = sectionOf(skill, "## Guide her");
+    assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+    // It follows the bullet for "Tell me when it's ready", on the very line: the skill keeps its length.
+    const rule = guide.split("\n").find((line) => line.includes(" After a command that starts work in the background"));
+    assert.ok(rule && rule.startsWith('- "Tell me when it\'s ready"'), guide);
+    for (const words of [
+      "(`finish` once she has said yes, `kind` when Claude reads on, opening an episode in HyperFrames when its video is being made, `ask`)",
+      "tell her in plain words how long it takes, as the command says, with its time, and that she can carry on; never send her to the progress panel to watch it",
+      'Then, without asking her, run `guide "<video>" tell` in the background (the Bash tool\'s run_in_background), once per video, never Monitor, and say "I\'ll tell you here when it is done."',
+      "When it ends, tell her its one line in plain words, and its next step",
+      "For a finish that is that the hand-off is ready, which is shown in Finder, and then the BRIMM Ops page's step",
+      "the finish goes on checking Dropbox's copies for a quarter of an hour, which she need not wait for",
+      "If it says the finish wrote no hand-off, or that Claude's reading did not finish, tell her so, and offer to run `status` to see why",
+      'Making a Reel ("Make Reel 2") is the exception: the guide does not see a Reel\'s video being made, so tell her what it says, and that "how far is it?" says when it is done'
+    ]) assert.ok(rule.includes(words), words);
+    // Her yes is not asked for it, and the offers of the other bullets stay: a video the guide says is being made, and an import.
+    assert.ok(!/ask(?:ing)? her (?:whether|if) to (?:wait|tell)/i.test(rule), rule);
+    assert.ok(guide.includes("If it is still on its way, offer to tell her here when it's ready."));
+    // The rows and the steps that start such work point to it.
+    assert.ok(rowOf('"Hand it off" / "Finish the episode"').includes('When `--yes` starts it, tell her what it says of when the hand-off will be ready, and go on as "Guide her" says for work in the background.'));
+    assert.ok(rowOf('"Hand off the Reels" / "Add the Reels to the hand-off"').includes('When `--yes` starts it, tell her what it says of when the hand-off will be ready, and go on as "Guide her" says for work in the background.'));
+    assert.ok(rowOf('"Ask Claude again for Reels"').includes('go on as "Guide her" says for work in the background'));
+    const step = sectionOf(skill, "## In HyperFrames, to hand it off").split("\n").find((line) => line.startsWith("4. "));
+    assert.ok(step.includes('Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox\'s copies a quarter of an hour longer, which she need not wait for.'), step);
+    assert.ok(step.includes("When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page."), "the old sentence stays");
   });
   it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and keeps the Final Cut offer for a raw video edited there (plan PR 10)", () => {
     const guide = sectionOf(skill, "## Guide her");
@@ -1040,6 +1067,13 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
       assert.ok(lines[0].endsWith(sentence), lines[0]);
       assert.ok(lines[0].includes("Afterwards tell her to keep the laptop open and online until Dropbox shows the folder is up to date."));
     }
+  });
+  it("has the skill's rule for work in the background in the very section the strict skill has (Jason, 2 November 2026)", () => {
+    for (const heading of ["## Guide her", "## In HyperFrames, to hand it off"]) assert.equal(sectionOf(openSkill(), heading), sectionOf(strictSkill, heading), heading);
+    for (const start of ['| "Hand it off" / "Finish the episode" |', '| "Hand off the Reels" / "Add the Reels to the hand-off" |', '| "Ask Claude again for Reels" |']) {
+      assert.equal(openSkill().split("\n").find((line) => line.startsWith(start)), strictSkill.split("\n").find((line) => line.startsWith(start)), start);
+    }
+    assert.ok(sectionOf(openSkill(), "## The card").includes('tell her here when Claude has read it, as "Guide her" says for work in the background'));
   });
   it("has the skill's hand-off from HyperFrames the very section the strict skill has (plan PR 7 and 8)", () => {
     const heading = "## In HyperFrames, to hand it off";
