@@ -208,12 +208,26 @@ export const HDR_LOOK_COLOUR = 1.12;
 /** The look as ffmpeg's lutyuv filter, for samples of 8 bits in limited range (luma 16 to 235, the colours 16 to 240 about their
     grey, 128): the luma is 16 + 219 × (t − contrast × sin(2πt) ÷ 2π), where t is its place from black (0) to white (1), and each
     colour is 128 + (colour − 128) × `colour`. The filter has no comma in it and no quote, so that the chain, cut at its commas,
-    still has one piece for each filter and needs no quoting. For that it has no clip(), and needs none: with a contrast from 0
-    to 1 and a colour up to 1.13, no sample a picture of 8 bits can have comes out of 0 to 255, and ffmpeg holds what did to it.
-    (ffmpeg cuts what a lut computes down to a whole number, so the filter at the strengths 0 and 1 is the identity in arithmetic
-    only: the tests use a step that is `val` itself for one that changes nothing.) */
+    still has one piece for each filter and needs no quoting. For that it has no clip() either, which the look Jason chose was
+    measured with (the luma clipped to 16 to 235, the colours to 16 to 240). ffmpeg holds what a lut makes only to 0 and 255, and
+    cuts it down to a whole number: a luma of 0 comes out of the filter as 4 and one of 255 as 249, and the fullest colours come out
+    below 16 (a colour of 16 as 2) and above 240 (240 as 253). The two limiters after it (HDR_LOOK_LIMITS) do the clip, which is
+    the part of it a comma would have broken. (And since ffmpeg cuts what a lut computes down to a whole number, the filter at
+    the strengths 0 and 1 is the identity in arithmetic only: the tests use a step that is `val` itself for one that changes
+    nothing.) */
 export const hdrLook = (contrast = HDR_LOOK_CONTRAST, colour = HDR_LOOK_COLOUR) =>
   `lutyuv=y=16+219*(((val-16)/219)-${contrast}*sin(2*PI*((val-16)/219))/(2*PI)):u=128+(val-128)*${colour}:v=128+(val-128)*${colour}`;
+
+/** The two limiters that follow the look, the chain's last two pieces: the luma held to 16 to 235 (plane 1) and the two colours to
+    16 to 240 (planes 2 and 3, which is 6 as a mask), the legal range of an 8-bit picture. They change nothing the look keeps inside
+    it: every luma from 16 to 235 and every colour within 99 of the grey comes out of the look where they leave it, and they hold the
+    samples the look pushes out (25 of the 225 legal colours, the fullest). Each has no comma and no quote, as the look has none. */
+export const HDR_LOOK_LIMITS = Object.freeze(["limiter=min=16:max=235:planes=1", "limiter=min=16:max=240:planes=6"]);
+
+/** What is written of the look in the facts of a copy made with it: its name and its two strengths. A copy of an HDR video made
+    before 2 November 2026 has no `look` there, and is Apple's plain conversion, so that a copy made with the look can be told from
+    one made before it. A new object each time. */
+export const hdrLookFacts = () => ({ name: "mild", contrast: HDR_LOOK_CONTRAST, colour: HDR_LOOK_COLOUR });
 
 /** The filters that make an HDR picture standard, from the rate and the size it is made at (workCopySize, as it is shown) and
     how it is stored (storedOf), in this order:
@@ -231,13 +245,14 @@ export const hdrLook = (contrast = HDR_LOOK_CONTRAST, colour = HDR_LOOK_COLOUR) 
       (workCopyArgs): with no tags to say so, ffmpeg's scaler converts the colour between the frames' tags and the file's as well,
       which does not dither, and a gradient comes out in bands (tried: a ramp of 16 steps went from a few hundred changes along a
       row to three). workcopy-real.test.js looks at a gradient;
-    - the look (hdrLook), last of all, in the 8 bits that are left. It is there, and not in 10 bits before the drop, because of
-      what was measured on a real iPhone recording against Apple's own conversion of the same pictures. The colours of the copy are
-      Apple's only through what ffmpeg does with the frames' tags at the encoder: the frames leave this chain tagged bt2020nc,
-      though scale_vt was asked for bt709, and the file is tagged bt709. A step in 10 bits before the drop moved the colours two
-      levels of luma and a hundredth of saturation from Apple's, and cost seven tenths more of the processor's time; the look
-      here costs about a tenth, and a step in its place that changes nothing leaves every picture exactly as it is
-      (workcopy-real.test.js checks that).
+    - the look (hdrLook) and its two limiters (HDR_LOOK_LIMITS), last of all, in the 8 bits that are left. They are there, and not
+      in 10 bits before the drop, because of what was measured on a real iPhone recording against Apple's own conversion of the
+      same pictures. The colours of the copy are Apple's only through what ffmpeg does with the frames' tags at the encoder: the
+      frames leave this chain tagged bt2020nc, though scale_vt was asked for bt709, and the file is tagged bt709. A step in 10 bits
+      before the drop moved the colours two levels of luma and a hundredth of saturation from Apple's, and cost seven tenths more
+      of the processor's time; the look here costs about a tenth, and a step in its place that changes nothing leaves every
+      picture exactly as it is (workcopy-real.test.js checks that). The limiters hold the look inside 16 to 235 and 16 to 240, as
+      the look Jason chose was measured to be.
     ANY CHANGE TO THIS CHAIN IS CHECKED AGAINST APPLE'S OWN CONVERSION of the same pictures (AVAssetImageGenerator, or `avconvert
     --preset Preset1920x1080`, whose frames a picture of the copy must equal to within the encoder's noise) before it is trusted.
     There is no comma in any of them but the ones between filters. */
@@ -251,7 +266,8 @@ const hdrChain = ({ rate, width, height, stored }) => {
     `format=${stored.bits > 8 ? "p010le" : "nv12"}`,
     ...turnFilters(stored.turn),
     "format=yuv420p",
-    hdrLook()
+    hdrLook(),
+    ...HDR_LOOK_LIMITS
   ];
 };
 
@@ -328,8 +344,8 @@ export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeB
     - An HDR picture is made standard with the Mac's hardware instead (hdrChain, HDR_INPUT): VideoToolbox decodes it, sizes it and
       converts its colour, and ffmpeg's own turning of a stored-on-its-side picture, which hardware frames skip, is off. The
       picture is turned by hand in software after it is downloaded, by the note it is stored with (`stored.turn`), and the file
-      is left with no note, so that it is never turned twice. It is then given the look (hdrLook), as the chain's last step; a
-      video in standard colour is given none.
+      is left with no note, so that it is never turned twice. It is then given the look (hdrLook) and its two limiters, as the
+      chain's last steps; a video in standard colour is given none.
     - The picture is H.264 High at 8 bits and 4:2:0 (encodeArgs' own settings, at WORK_COPY_CRF and WORK_COPY_PRESET), with a
       keyframe every second, so that a place in the video is reached by decoding a second of it at most when it is scrubbed.
     - It is tagged BT.709 in limited range: what a video in standard colour is, and what an HDR one is once VideoToolbox has
@@ -552,6 +568,9 @@ async function keepFaces({ faces, paths, work, shown, write, rename, log }) {
       has one. The facts are put in place first and the video last, so that a video that is there always has its facts beside it;
       should the video fail to go in place, the facts are taken away again, and a folder this run made with them. A run that is
       killed in the moment between the two renames can leave the facts alone, which is no copy: the next run makes it.
+    - The facts are workCopyFacts' ({ seconds, fps, width, height, bytes }) and, for an HDR video, `look`: what the copy was given
+      (hdrLookFacts), so that a copy made with the look can be told from one made before it, which has none and is Apple's plain
+      conversion. A copy made before is not made again for that: the key is the raw video's size and time, and the look is not in it.
     - Only then are the copies for other keys taken away, each by its whole name and never by a pattern, so that a copy that is
       better than none is kept until its replacement is whole. One that cannot be taken away is said in the log and left.
     - It says nothing to a person that holds a path, a flag or the name of a program: Done, or "It can't be used" and why. What
@@ -565,7 +584,8 @@ async function keepFaces({ faces, paths, work, shown, write, rename, log }) {
       is refused: "Reel 2 is not in the video". The key is of the stretch as it was asked for;
     - the length it is made for, the limits it runs under and the length checked afterwards are the stretch's, and so is the room
       it asks for, twice the stretch's share of the raw video's size;
-    - the facts hold the stretch that was cut, { start, end }, as the project's writer needs it;
+    - the facts hold the stretch that was cut, { start, end }, as the project's writer needs it, besides the look an HDR recording's
+      Reel was given, as the whole copy's do;
     - once the copy is in place and the copies it replaces are gone, `faces` (a function from the placed video and the run's own
       folder to what the face finder found, unedited.js facesIn: { stills } or { why }) is asked, as a second step. The faces are
       kept beside the copy, in `reel-<n>-<key>.faces.json` as { every, stills }, only when a still holds a face; none found, no
@@ -700,7 +720,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     const placed = [];
     let madeDir = false;
     try {
-      write(madeFacts, `${JSON.stringify(stretch ? { ...shape, stretch } : shape, null, 2)}\n`);
+      write(madeFacts, `${JSON.stringify({ ...shape, ...(hdr ? { look: hdrLookFacts() } : {}), ...(stretch ? { stretch } : {}) }, null, 2)}\n`);
       if (!stat(paths.dir)) {
         mkdir(paths.dir, { recursive: true });
         madeDir = true;
