@@ -273,17 +273,17 @@ describe("a Reel's words and clock (architecture 4.3 and 5.2; plan PR 5)", () =>
     assert.deepEqual(json(projectFiles(reel()), "brimm/facts.json").reel, { n: 2, offset: 1.15 });
     for (const files of [projectFiles(main()), projectFiles(clip())]) assert.equal("reel" in json(files, "brimm/facts.json"), false);
   });
-  it("tell the agent in the notes where the Reel's clock starts, what its video is, and that it is exported upright", () => {
+  it("tell the agent in the notes where the Reel's clock starts, what its video is, and that Studio made it upright", () => {
     const notes = projectFiles(reel({ stretch: { start: 312.4, end: 340 } })).get("CLAUDE.md");
     assert.ok(notes.includes("- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/recording.mp4`, which starts at 5:12 (312.4 seconds) into the episode's recording: this Reel is that stretch of it, and nothing was cut from the stretch."), notes);
     assert.ok(notes.includes("`media/recording.mp4`: the Reel's stretch of the recording, made ready for HyperFrames and not cut inside it."), notes);
-    assert.match(notes, /exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker/);
+    assert.match(notes, /Studio made it upright, 1080 by 1920/);
     // A main project's and a clip's lines are as they were.
     for (const files of [projectFiles(main()), projectFiles(clip())]) {
       const own = files.get("CLAUDE.md");
       assert.ok(own.includes("is on the clock of `media/recording.mp4`, which is the recording's own: nothing was cut from it."), own);
       assert.ok(own.includes("`media/recording.mp4`: the video: the recording, made ready for HyperFrames and not cut."), own);
-      assert.doesNotMatch(own, /exported upright|which starts at/);
+      assert.doesNotMatch(own, /This Reel|Studio made it upright|which starts at/);
     }
   });
   it("name an offset an hour in as an hour, as the lists of Reels do", () => {
@@ -435,6 +435,54 @@ describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jaso
     assert.deepEqual(wordsOnScreen((rel) => (rel === "index.html" ? html : null)), []);
     assert.deepEqual(recordingPlacements(html), [{ start: 0, duration: 6, mediaStart: 0, rate: 1 }]);
     assert.deepEqual(recordingPlacements(html), recordingPlacements(projectFiles(main()).get("index.html")));
+  });
+
+  describe("the Reel's notes say what Studio did to its page, and what stays", () => {
+    const rulesOf = (files) => {
+      const notes = files.get("CLAUDE.md");
+      return notes.slice(notes.indexOf("# The BRIMM: rules for this project"), notes.indexOf("\n# ", notes.indexOf("# The BRIMM: rules for this project") + 1));
+    };
+    const lineOf = (over) => rulesOf(projectFiles(reel(over))).split("\n").find((line) => line.startsWith("- **This Reel.**"));
+    /** The bold label that starts each rule, in the order they stand. */
+    const labels = (rules) => rules.split("\n").filter((line) => line.startsWith("- **")).map((line) => line.match(/^- \*\*([^*]+)\*\*/)[1]);
+    const SIDES = "(0% shows the picture's left edge, 100% its right)";
+    const STAYS = "Keep it upright, 1080 by 1920: it is exported and handed off at that size. `brimm/face-track.json`, when it is there, says where the faces are, to move the crop by or to follow the speaker with.";
+
+    it("say that Studio made it upright and cropped it on the speaker, with the place it chose and where the speaker was found, that it stays upright for the hand-off, and what the face track is for", () => {
+      assert.equal(lineOf({ faces: seen([0.25]) }), `- **This Reel.** Studio made it upright, 1080 by 1920, and cropped it on the speaker: \`#a-roll\` fills the frame (\`object-fit: cover\`) and \`object-position: 13.43% 50%\` puts the speaker, found 25% of the way across the picture, in the middle ${SIDES}. ${STAYS}`);
+      assert.equal(lineOf({ faces: seen([0.75]) }), `- **This Reel.** Studio made it upright, 1080 by 1920, and cropped it on the speaker: \`#a-roll\` fills the frame (\`object-fit: cover\`) and \`object-position: 86.57% 50%\` puts the speaker, found 75% of the way across the picture, in the middle ${SIDES}. ${STAYS}`);
+    });
+    it("say, when no face was found, that it is cropped on the middle of the picture for that reason", () => {
+      for (const faces of [undefined, seen([])]) {
+        assert.equal(lineOf({ faces }), `- **This Reel.** Studio made it upright, 1080 by 1920, and cropped it on the middle of the picture, as it found no face to crop on: \`#a-roll\` fills the frame (\`object-fit: cover\`) and \`object-position: 50% 50%\` shows the middle ${SIDES}. ${STAYS}`);
+      }
+    });
+    it("say, when the video is upright already, that nothing is cropped across", () => {
+      assert.equal(lineOf({ facts: { ...FACTS, width: 1080, height: 1920 }, faces: seen([0.25]) }), `- **This Reel.** Studio made it upright, 1080 by 1920. Its picture is upright already, so nothing is cropped across: \`#a-roll\` fills the frame (\`object-fit: cover\`, \`object-position: 50% 50%\`). ${STAYS}`);
+    });
+    it("no longer tell the agent to make the composition upright and crop it itself", () => {
+      for (const faces of [undefined, seen([0.25])]) {
+        const notes = projectFiles(reel({ faces })).get("CLAUDE.md");
+        assert.doesNotMatch(notes, /if its picture is wide|make the composition upright|crop it on the speaker\. `brimm|It is exported upright/);
+      }
+    });
+    it("keep the rest of the Reel's rules, in their order, and the main project's and a clip's rules as they were", () => {
+      const reelLabels = ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "Reels.", "This Reel.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
+      assert.deepEqual(labels(rulesOf(projectFiles(reel({ faces: seen([0.25]) })))), reelLabels);
+      assert.deepEqual(labels(rulesOf(projectFiles(main()))), reelLabels.filter((label) => label !== "This Reel."));
+      assert.ok(!labels(rulesOf(projectFiles(clip()))).includes("This Reel."));
+      // The rule that a Reel is made by Studio only, the captions' clear areas and the way out are the lines they were.
+      const rules = rulesOf(projectFiles(reel({ faces: seen([0.25]) })));
+      assert.match(rules, /\*\*Reels\.\*\* Never make a Reel as a new project yourself/);
+      assert.match(rules, /Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear\./);
+      assert.match(rules, /- \*\*When she is done\.\*\* Export on This Mac\. Then she says "hand it off" in her Claude chat\./);
+    });
+    it("are the same text in CLAUDE.md and AGENTS.md, and name the object-position the page has", () => {
+      const files = projectFiles(reel({ faces: seen([0.25]) }));
+      assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+      assert.equal(positionOf(files.get("index.html")), "13.43% 50%");
+      assert.ok(files.get("CLAUDE.md").includes("`object-position: 13.43% 50%`"));
+    });
   });
 
   describe("reelCrop: how a Reel's page is cropped", () => {

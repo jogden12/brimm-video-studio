@@ -382,11 +382,28 @@ const REELS_ARE_STUDIOS = `Never make a Reel as a new project yourself: the app 
     no Reel and no new project from it, in the voice of a session clip's rule (CLIP_RULES). */
 const SHORT_VIDEO_NO_NEW_PROJECTS = "- **No new projects.** Never make a Reel or any other new project from this video: a new project holds a second copy of the recording outside Studio's care, and a short video has no Reels. Say a short video has no Reels.";
 
+/** The rule of a Reel's own page (Jason, 2 November): what Studio did to it, and what stays. Studio made it upright, 1080 by 1920,
+    and cropped it on the speaker, so the agent is told which `object-position` the video was given and how to move it; the Reel
+    stays upright for the hand-off (`finish` refuses one that is not); and the face track, when it is there, is for moving the crop
+    or following the speaker with. `crop` is reelCrop's, and the rule says the page as it is: cropped on the speaker found, on the
+    middle of the picture when no face was found, or not cropped across when the video is upright already. */
+function thisReel(crop) {
+  const frame = "`#a-roll` fills the frame (`object-fit: cover`)";
+  const position = `\`object-position: ${crop.position}% 50%\``;
+  const sides = "(0% shows the picture's left edge, 100% its right)";
+  const made = !crop.across
+    ? `Studio made it upright, 1080 by 1920. Its picture is upright already, so nothing is cropped across: \`#a-roll\` fills the frame (\`object-fit: cover\`, ${position}).`
+    : crop.found
+      ? `Studio made it upright, 1080 by 1920, and cropped it on the speaker: ${frame} and ${position} puts the speaker, found ${Math.round(crop.at * 100)}% of the way across the picture, in the middle ${sides}.`
+      : `Studio made it upright, 1080 by 1920, and cropped it on the middle of the picture, as it found no face to crop on: ${frame} and ${position} shows the middle ${sides}.`;
+  return `- **This Reel.** ${made} Keep it upright, 1080 by 1920: it is exported and handed off at that size. \`brimm/face-track.json\`, when it is there, says where the faces are, to move the crop by or to follow the speaker with.`;
+}
+
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
     to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
-    (SHORT_VIDEO_NO_NEW_PROJECTS). */
-function brimmRules(kind, short = false) {
+    (SHORT_VIDEO_NO_NEW_PROJECTS). A Reel's project has a line about its own page (thisReel), from the `crop` it was made with. */
+function brimmRules(kind, short = false, crop = null) {
   const episode = kind !== "clip";
   return [
     "# The BRIMM: rules for this project",
@@ -401,7 +418,7 @@ function brimmRules(kind, short = false) {
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
     ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
-    ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, "- **This Reel.** It is exported upright, 1080 by 1920: if its picture is wide, make the composition upright and crop it on the speaker. `brimm/face-track.json`, when it is there, says where the faces are."] : []),
+    ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, thisReel(crop)] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
     "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.",
@@ -461,10 +478,10 @@ function thisProject({ kind, what, name, offset, files }) {
 
 /** The notes for the agent (5.4), the text of both CLAUDE.md and AGENTS.md: a session clip's own rules first, then BRIMM's rules,
     then what the project is, then HyperFrames' own guidance without what conflicts. */
-function notesText({ kind, what, name, offset, files, guidance, short }) {
+function notesText({ kind, what, name, offset, files, guidance, short, crop }) {
   return [
     ...(kind === "clip" ? [CLIP_RULES] : []),
-    brimmRules(kind, short),
+    brimmRules(kind, short, crop),
     thisProject({ kind, what, name, offset, files }),
     "# HyperFrames' own guidance\n\nWhat follows is the guidance the pinned HyperFrames ships, without what the rules above forbid.",
     hyperframesGuidance(guidance).trim()
@@ -552,7 +569,7 @@ export function projectFiles(input) {
     ...(kind === "reel" ? { reel: { n: input.part.reel, offset: input.stretch.start } } : {}),
     files: Object.fromEntries(paths.map((path) => [path, aboutOf(kind, path) ?? ""]))
   }));
-  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && input.short === true });
+  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && input.short === true, crop });
   files.set("CLAUDE.md", notes);
   files.set("AGENTS.md", notes);
   return files;

@@ -507,6 +507,9 @@ describe("app … reel: the project, the record and the app", () => {
     // The page is upright; the video in it is the Reel's own, 1280 by 720, and its facts say so (a video put back is held to them).
     const facts = JSON.parse(readFileSync(join(work, PROJECT, "brimm", "facts.json"), "utf8"));
     assert.deepEqual([facts.width, facts.height], [1280, 720]);
+    // The agent is told what Studio did, and the place it chose.
+    const notes = readFileSync(join(work, PROJECT, "CLAUDE.md"), "utf8");
+    assert.match(notes, /Studio made it upright, 1080 by 1920, and cropped it on the speaker: `#a-roll` fills the frame \(`object-fit: cover`\) and `object-position: 13\.43% 50%` puts the speaker, found 25% of the way across the picture, in the middle/);
     t.done();
   });
   it("opens the Reel upright and cropped on the middle of the picture when the finder found no face", async () => {
@@ -516,6 +519,7 @@ describe("app … reel: the project, the record and the app", () => {
     const page = readFileSync(join(work, PROJECT, "index.html"), "utf8");
     assert.match(page, /data-width="1080"[\s\S]*data-height="1920"/);
     assert.match(page, /object-fit: cover; object-position: 50% 50%"/);
+    assert.match(readFileSync(join(work, PROJECT, "CLAUDE.md"), "utf8"), /cropped it on the middle of the picture, as it found no face to crop on/);
     t.done();
   });
   it("keeps the project when HyperFrames will not open, records no time it opened, and still marks the Reel picked", async () => {
