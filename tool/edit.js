@@ -111,13 +111,15 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
-                                        and once it is exported, to hand it off. On a Mac that Jason has not set up for
-                                        HyperFrames it says that this Mac is not set up, where it would say to open the
-                                        video there or that its video is being made. A finished video whose hand-off is
-                                        written is told to hand off the Reels once a Reel is exported from HyperFrames
-                                        that the hand-off does not hold. A raw video that goes the Final Cut way keeps
-                                        its Final Cut steps. Only on a Mac that does the light import: on any other,
-                                        every form says to ask Jason
+                                        and once it is exported, to hand it off. Once its finish has written the hand-off
+                                        it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
+                                        copies, though the finish goes on checking them for a quarter of an hour. On a Mac
+                                        that Jason has not set up for HyperFrames it says that this Mac is not set up,
+                                        where it would say to open the video there or that its video is being made. A
+                                        finished video whose hand-off is written is told to hand off the Reels once a Reel
+                                        is exported from HyperFrames that the hand-off does not hold. A raw video that
+                                        goes the Final Cut way keeps its Final Cut steps. Only on a Mac that does the
+                                        light import: on any other, every form says to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
@@ -127,8 +129,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         note on this Mac that she did its step on the BRIMM Ops page (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs.
                                         With tell, wait up to 60 minutes for its next point (ready, read by Claude, its
-                                        video for HyperFrames made, or an import or reading that did not finish), then say
-                                        it in one line. Her skill runs it in the background
+                                        video for HyperFrames made, its finish's hand-off written, or an import, a reading
+                                        or a finish that did not finish), then say it in one line. Her skill runs it in the
+                                        background
   node edit.js kind "<video>" finished|raw|clip|session --private yes|no [--version-of <id>|none] [--not-a-session]
                      [--again] [--clear-session] [--here]
                                         her answer to what a video is: both answers are needed, and they must agree (a
