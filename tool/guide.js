@@ -202,7 +202,7 @@ const FINISH_FAILED = 'Its finish did not write a hand-off. Say "how far is it?"
 /** What every answer for a video leads with, ahead of its step, once the late check of its last finish found a problem after she had
     been told she could go on (facts.lateProblem): why is in the status, which is what she is told to say. */
 const LATE_PROBLEM = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
-const TEACHINGS_OFF ="Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
+const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
 /** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
     rough cut stays among them until the retirement's wave 2 stops the reading making one (spec section 10). */
