@@ -10,11 +10,13 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { colourOf, factsOf, streamsOf } from "../cuts.js";
+import { runGuarded } from "../guard.js";
 import { findTools } from "../run.js";
-import { hasFilters, hasHwaccel, makeWorkCopy } from "../workcopy.js";
+import { hasFilters, hasHwaccel, makeWorkCopy, storedOf, workCopyArgs } from "../workcopy.js";
 
 const ffmpeg = findTools().ffmpeg;
 const ffprobe = ffmpeg ? join(dirname(ffmpeg), "ffprobe") : "";
@@ -90,10 +92,11 @@ function halves(file, width, height) {
 
 let homes = 0;
 /** Make the working copy of a made-up clip, the real job with the real programs, on a home folder of its own in the test's folder.
-    `more` is more for the job to be given: a Reel's stretch of the clip (`reel`), for the copy of one Reel. */
-async function made(video, more = {}) {
+    `more` is more for the job to be given: a Reel's stretch of the clip (`reel`), for the copy of one Reel. `deps` is more for what it
+    touches, to stand in for one of the real things (the watchdog, for the look's tests). */
+async function made(video, more = {}, deps = {}) {
   const logs = [];
-  const result = await makeWorkCopy({ home: join(dir, `home-${(homes += 1)}`), folder: "2026-10-28 Made-up HDR", video, name: "a made-up HDR clip", ...more }, { tools: { ffmpeg, ffprobe }, log: (line) => logs.push(line) });
+  const result = await makeWorkCopy({ home: join(dir, `home-${(homes += 1)}`), folder: "2026-10-28 Made-up HDR", video, name: "a made-up HDR clip", ...more }, { tools: { ffmpeg, ffprobe }, log: (line) => logs.push(line), ...deps });
   assert.deepEqual([result.ok, result.failed], [true, []], logs.join("\n"));
   return result;
 }
@@ -262,5 +265,178 @@ describe("a Reel's video of an HDR recording, made with the real ffmpeg", { skip
     const means = pictures(result.paths.video, 9, 16).map((p) => regionMean(p, 9, 16, "top"));
     const wentDark = means.findIndex((m) => m < (means[0] + means[means.length - 1]) / 2);
     assert.ok(Math.abs(wentDark / 30 - (CHANGE - 1.5)) < 0.06, `the picture went dark at ${wentDark / 30} seconds in`);
+  });
+});
+
+// --- The look of an HDR copy (Jason's choice of 2 November 2026) ---
+//
+// An HDR picture is made standard by Apple's own conversion (VideoToolbox's scale_vt), and then given a mild S-curve on its luma and a
+// little more colour, in 8 bits, as the last step of the chain. These tests make copies of a made-up clip with the look, without it,
+// and with a step in its place that changes nothing, by having the watchdog run ffmpeg with the chain the job built and only its last
+// piece changed. What the look does is looked at in the pictures that come out.
+//
+// WARNING for anyone who changes the HDR chain (workcopy.js hdrChain): check it against Apple's own conversion of the same pictures
+// (AVAssetImageGenerator, or `avconvert` to Preset1920x1080), as the colours of the copy match Apple's only through what ffmpeg does with
+// the tags of the frames at the encoder. A step in 10 bits before the drop to 8 moved them by two levels of luma and a hundredth of
+// saturation, and the identity test below is what shows a step at the end moves nothing.
+
+/** Every tone, grey: a smooth ramp across the width from black to the peak of HLG, 10-bit luma 64 to 940. */
+const WIDE = "color=c=black:s=640x360:r=30:d=1,format=yuv420p10le,geq=lum='64+876*X/W':cb=512:cr=512";
+/** A picture of colour and no grey: its blue-yellow runs across the width and its red-green down the height, round a middle tone. */
+const COLOURS = "color=c=black:s=640x360:r=30:d=1,format=yuv420p10le,geq=lum='500':cb='512+200*X/W':cr='512-200*Y/H'";
+
+/** The working copy of a made-up clip, made as `made` makes it, with the real programs, but with the look and its two limiters, the
+    chain's last three pieces, taken off (`instead` is null) or swapped for the filter `instead`. It says so when the job's chain has
+    no look to change, or when the look and its limiters are not the chain's last three pieces. `more` is what `made` is given
+    besides: a Reel's stretch. */
+async function madeInstead(video, instead, more = {}) {
+  let swapped = 0;
+  let notLast = null;
+  const watchdog = (program, args, ...rest) => runGuarded(program, args.map((a) => {
+    const at = a.lastIndexOf(",lutyuv=");
+    if (at < 0 || !a.includes("hwdownload")) return a;
+    const tail = a.slice(at + 1).split(",");
+    if (tail.length !== 3 || !tail.slice(1).every((piece) => piece.startsWith("limiter="))) {
+      notLast = a;
+      return a;
+    }
+    swapped += 1;
+    return `${a.slice(0, at)}${instead ? `,${instead}` : ""}`;
+  }), ...rest);
+  const result = await made(video, more, { runGuarded: watchdog });
+  assert.equal(notLast, null, "the look and its two limiters are not the last three pieces of the chain");
+  assert.equal(swapped, 1, "the chain the job built has no look to change");
+  return result;
+}
+
+/** The look and its limiters as the HDR chain ends with them, as one chain of filters, read from the arguments the module makes for
+    an iPhone's HLG clip: its pieces from the lutyuv filter on. */
+function lookChain() {
+  const printed = JSON.stringify({
+    streams: [{ index: 0, codec_type: "video", codec_name: "hevc", width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "30/1", pix_fmt: "yuv420p10le",
+      color_range: "tv", color_space: "bt2020nc", color_transfer: "arib-std-b67", color_primaries: "bt2020", disposition: { attached_pic: 0 } }],
+    format: { duration: "1.000000" }
+  });
+  const args = workCopyArgs("/in/a.mov", "/out/a.mp4", { facts: factsOf(printed), streams: streamsOf(printed), colour: colourOf(printed), rate: "30", stored: storedOf(printed) });
+  const vf = args[args.indexOf("-vf") + 1];
+  assert.ok(vf.includes(",lutyuv="), `the chain has no look: ${vf}`);
+  return vf.slice(vf.lastIndexOf(",lutyuv=") + 1);
+}
+/** The first picture of a made-up 8-bit picture `source` (a lavfi graph) as ffmpeg makes it through `chain`, as its three planes: { y, u, v }. */
+function through(source, chain, width, height) {
+  const r = spawnSync(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", source, "-vf", chain, "-frames:v", "1", "-pix_fmt", "yuv420p", "-f", "rawvideo", "-"], { maxBuffer: 1 << 26 });
+  assert.equal(r.status, 0, String(r.stderr));
+  const size = width * height;
+  assert.equal(r.stdout.length, (size * 3) / 2);
+  return { y: r.stdout.subarray(0, size), u: r.stdout.subarray(size, (size * 5) / 4), v: r.stdout.subarray((size * 5) / 4) };
+}
+
+/** The first picture of a video as its three planes of 8-bit 4:2:0, `width` by `height`: { y, u, v }, each a Buffer. */
+function planesOf(file, width, height) {
+  const r = spawnSync(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", file, "-frames:v", "1", "-vf", "format=yuv420p", "-f", "rawvideo", "-"], { maxBuffer: 1 << 26 });
+  assert.equal(r.status, 0, String(r.stderr));
+  const size = width * height;
+  assert.equal(r.stdout.length, (size * 3) / 2, "the picture is not the size ffprobe says");
+  return { y: r.stdout.subarray(0, size), u: r.stdout.subarray(size, (size * 5) / 4), v: r.stdout.subarray((size * 5) / 4) };
+}
+const mean = (plane) => plane.reduce((sum, x) => sum + x, 0) / plane.length;
+/** How widely the samples of a plane are spread: their standard deviation. */
+const spread = (plane) => {
+  const middle = mean(plane);
+  return Math.sqrt(plane.reduce((sum, x) => sum + (x - middle) ** 2, 0) / plane.length);
+};
+/** How far the samples of a colour plane are from the grey, 128, on average. */
+const fromGrey = (plane) => plane.reduce((sum, x) => sum + Math.abs(x - 128), 0) / plane.length;
+/** Every picture of a video, decoded as 8-bit 4:2:0 and put end to end: two videos are the same where this is the same. */
+function everyPicture(file) {
+  const r = spawnSync(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", file, "-an", "-vf", "format=yuv420p", "-f", "rawvideo", "-"], { maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, String(r.stderr));
+  return r.stdout;
+}
+
+describe("the look of an HDR video's working copy, made with the real ffmpeg", { skip }, () => {
+  it("spreads the luma of a picture with every tone in it further than the same picture made without the look", async () => {
+    const video = clip("wide", { picture: WIDE });
+    const without = spread(planesOf((await madeInstead(video, null)).paths.video, 640, 360).y);
+    const looked = spread(planesOf((await made(video)).paths.video, 640, 360).y);
+    assert.ok(looked > without * 1.04, `the luma is spread ${looked} with the look and ${without} without it`);
+    // It is a mild look: not a stretch to twice the contrast.
+    assert.ok(looked < without * 1.2, `the luma is spread ${looked} with the look and ${without} without it`);
+  });
+  it("makes the colours of a picture further from the grey than the same picture made without the look, by about the 1.12 the look gives", async () => {
+    const video = clip("colours", { picture: COLOURS });
+    const without = planesOf((await madeInstead(video, null)).paths.video, 640, 360);
+    const looked = planesOf((await made(video)).paths.video, 640, 360);
+    for (const plane of ["u", "v"]) {
+      const times = fromGrey(looked[plane]) / fromGrey(without[plane]);
+      // The look gives 1.12; the pictures that come out show 1.10 for the blue-yellow and 1.13 for the red-green (seen on the Mac Studio).
+      assert.ok(times > 1.06 && times < 1.18, `${plane}: the colour is ${times} times as far from the grey with the look`);
+    }
+  });
+  it("gives a Reel's video the look too, as the whole copy has it", async () => {
+    const video = clip("wide-reel", { picture: WIDE });
+    const reel = { n: 2, start: 0.2, end: 0.8 };
+    const without = spread(planesOf((await madeInstead(video, null, { reel })).paths.video, 640, 360).y);
+    const looked = spread(planesOf((await made(video, { reel })).paths.video, 640, 360).y);
+    assert.ok(looked > without * 1.04, `the Reel's luma is spread ${looked} with the look and ${without} without it`);
+  });
+  it("is the last step, after the drop to 8 bits: a step in its place that changes nothing leaves every picture exactly as it is without the look", async () => {
+    // lutyuv=y=val:u=val:v=val gives each sample the value it has. The look at no strength is not used, as ffmpeg cuts what it
+    // computes down to a whole number and the sums of the look at no strength can come out a hair under one.
+    const nothing = "lutyuv=y=val:u=val:v=val";
+    for (const [name, picture, matrix] of [["wide", WIDE, null], ["colours", COLOURS, null], ["turned", HALVES, -90]]) {
+      const video = clip(`same-${name}`, { picture, matrix });
+      const without = everyPicture((await madeInstead(video, null)).paths.video);
+      const same = everyPicture((await madeInstead(video, nothing)).paths.video);
+      assert.ok(without.length > 0);
+      assert.ok(same.equals(without), `${name}: a step that changes nothing, in the look's place, changed the pictures`);
+    }
+  });
+  it("holds the colours of the fullest pictures inside 16 to 240, which the look would push out of it, and the luma inside 16 to 235", async () => {
+    // Flat pictures at four corners of the colour range, 10 bits, HLG. Made standard and without the look their red colour (V) comes out
+    // 240, 230, 26 and 16; the look makes each 1.12 times as far from the grey, which is 253, 242, 13 and 2, outside what an 8-bit
+    // picture may have. The limiters bring them back to 240, 240, 16 and 16, and the encoder may add a level.
+    const corners = [["red", 200, 64, 960, 240], ["magenta", 500, 960, 960, 240], ["green", 800, 64, 64, 16], ["cyan", 800, 960, 64, 16]];
+    for (const [name, lum, cb, cr, held] of corners) {
+      const video = clip(`corner-${name}`, { picture: `color=c=black:s=640x360:r=30:d=1,format=yuv420p10le,geq=lum='${lum}':cb='${cb}':cr='${cr}'` });
+      const { y, u, v } = planesOf((await made(video)).paths.video, 640, 360);
+      const seen = (plane) => [Math.min(...new Set(plane)), Math.max(...new Set(plane))];
+      const inside = (plane, low, high) => seen(plane)[0] >= low - 1 && seen(plane)[1] <= high + 1;
+      assert.ok(inside(y, 16, 235), `${name}: the luma is ${seen(y)}`);
+      assert.ok(inside(u, 16, 240), `${name}: the blue colour is ${seen(u)}`);
+      assert.ok(inside(v, 16, 240), `${name}: the red colour is ${seen(v)}`);
+      // It is held at the limit, and not brought down below it.
+      assert.ok(Math.abs(seen(v)[0] - held) <= 1 && Math.abs(seen(v)[1] - held) <= 1, `${name}: the red colour is ${seen(v)}, and is held to ${held}`);
+    }
+  });
+  it("writes the look the copy was given in its facts, so that a copy made with it can be told from one made before the look", async () => {
+    const result = await made(clip("facts", { picture: HALVES }));
+    assert.deepEqual(JSON.parse(readFileSync(result.paths.facts, "utf8")).look, { name: "mild", contrast: 0.3, colour: 1.12 });
+    const reel = await made(clip("facts-reel", { picture: HALVES }), { reel: { n: 2, start: 0.2, end: 0.8 } });
+    assert.deepEqual(JSON.parse(readFileSync(reel.paths.facts, "utf8")).look, { name: "mild", contrast: 0.3, colour: 1.12 });
+  });
+});
+
+describe("the look and its limiters, run by the real ffmpeg on every value an 8-bit picture can have", { skip: ffmpeg && existsSync(ffprobe) ? false : "ffmpeg and ffprobe are not installed" }, () => {
+  // 512 by 16: the luma is 0 to 255 along the row, each value twice, and the two colour planes (256 by 8) hold every value, the one
+  // the other way round.
+  const EVERY_VALUE = "color=c=black:s=512x16:r=30:d=1,format=yuv420p,geq=lum='floor(X/2)':cb='X':cr='255-X'";
+  const held = (value, low, high) => Math.min(high, Math.max(low, value));
+  it("keeps the luma inside 16 to 235 and the colours inside 16 to 240, changing nothing the look makes inside them and holding what it makes outside", () => {
+    const chain = lookChain();
+    const pieces = chain.split(",");
+    const looked = through(EVERY_VALUE, chain, 512, 16);
+    const lutOnly = through(EVERY_VALUE, pieces[0], 512, 16);
+    const planes = [["y", 16, 235], ["u", 16, 240], ["v", 16, 240]];
+    for (const [plane, low, high] of planes) {
+      let changed = 0;
+      for (let i = 0; i < looked[plane].length; i++) {
+        assert.ok(looked[plane][i] >= low && looked[plane][i] <= high, `${plane}[${i}] is ${looked[plane][i]}, outside ${low} to ${high}`);
+        assert.equal(looked[plane][i], held(lutOnly[plane][i], low, high), `${plane}[${i}]: the lut made ${lutOnly[plane][i]}`);
+        if (looked[plane][i] !== lutOnly[plane][i]) changed += 1;
+      }
+      // The look does push some samples out of the range, so that the limiters have something to do.
+      assert.ok(changed > 0, `${plane}: the limiters changed nothing, and the look makes samples outside the range`);
+    }
   });
 });

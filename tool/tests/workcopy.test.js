@@ -46,6 +46,21 @@ const TURNED_ROUND = {
   side_data_list: [{ side_data_type: "DOVI configuration record", dv_profile: 8, dv_bl_signal_compatibility_id: 4 }, { side_data_type: "Display Matrix", rotation: -180 }]
 };
 
+/** The look an HDR picture is given as the last step of its chain, written out in full so that a slip in the filter would show: an
+    S-curve on the luma (0.3 of it) and 1.12 times the colour, both in 8 bits, Jason's choice of 2 November ("mild"). It has no
+    comma and no quote in it, so the chain still splits at its commas into one piece for each filter. */
+const LOOK = "lutyuv=y=16+219*(((val-16)/219)-0.3*sin(2*PI*((val-16)/219))/(2*PI)):u=128+(val-128)*1.12:v=128+(val-128)*1.12";
+/** The two limiters that follow it, the chain's last two pieces: they hold the luma to 16 to 235 and the two colours to 16 to 240,
+    the legal range of an 8-bit picture, as the look was measured and chosen (with a clip() in the filter itself, which a comma would
+    have broken). Plane 1 is the luma, and 6 the two colour planes. */
+const LIMITS = "limiter=min=16:max=235:planes=1,limiter=min=16:max=240:planes=6";
+const LOOK_AND_LIMITS = `${LOOK},${LIMITS}`;
+/** Say that an HDR video's chain, as ffmpeg is given it, ends in `head`, then the drop to 8 bits, then the look and its limiters. */
+const assertLookLast = (vf, head) => {
+  const tail = `${head},format=yuv420p,${LOOK_AND_LIMITS}`;
+  assert.equal(vf.slice(-tail.length), tail, vf);
+};
+
 /** Everything the module decides from what ffprobe printed, as the job asks for it. */
 const factsFrom = (printed) => ({ facts: factsOf(printed), streams: streamsOf(printed), colour: colourOf(printed), rate: rateOf(printed).rate, stored: storedOf(printed) });
 const argsFor = (printed, more = {}, input = "/in/a b.mov", output = "/out/work/key.mp4") => workCopyArgs(input, output, { ...factsFrom(printed), ...more });
@@ -291,23 +306,35 @@ describe("the arguments ffmpeg is given for a working copy", () => {
     // The picture and the sound are mapped by their numbers, as they are for any video.
     assert.deepEqual(a.slice(14, 18), ["-map", "0:0", "-map", "0:1"]);
   });
-  it("size an HLG video and make its colour BT.709 in VideoToolbox, download it as 10 bits, and write it as 8-bit 4:2:0", () => {
+  it("size an HLG video and make its colour BT.709 in VideoToolbox, download it as 10 bits, write it as 8-bit 4:2:0, and give it the look", () => {
     const a = argsFor(printedOf({ picture: HLG }));
-    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,format=yuv420p`);
+    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,format=yuv420p,${LOOK_AND_LIMITS}`);
     // What is written is tagged BT.709, limited range, as any working copy is.
     assert.deepEqual(a.slice(a.indexOf("-colorspace"), a.indexOf("-colorspace") + 8), ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]);
     assert.deepEqual([after(a, "-pix_fmt"), after(a, "-profile:v")], ["yuv420p", "high"]);
   });
-  it("end in 8 bits last, after the picture is turned and nothing else is done to its colour, so that it is ffmpeg's scaler that drops the 10 bits, which dithers", () => {
-    // VideoToolbox makes the colour standard in 10 bits. The step to 8 is ffmpeg's own, the chain's last, and the scaler adds an
-    // ordered dither whenever it drops from more than 8 bits to 8, where the software chain dithered by error diffusion. That a
-    // smooth gradient comes out unbanded is checked for real in workcopy-real.test.js.
+  it("drop to 8 bits before the look and its limiters, after the picture is turned and nothing else is done to its colour, so that it is ffmpeg's scaler that drops the 10 bits, which dithers", () => {
+    // VideoToolbox makes the colour standard in 10 bits. The step to 8 is ffmpeg's own, the chain's last but three, and the
+    // scaler adds an ordered dither whenever it drops from more than 8 bits to 8, where the software chain dithered by error
+    // diffusion. The look and its two limiters come after it, in the 8 bits that are left. That a smooth gradient comes out
+    // unbanded is checked for real in workcopy-real.test.js.
     for (const picture of [HLG, PQ, TURNED_ROUND, { ...HLG, ...UPRIGHT }]) {
       const pieces = after(argsFor(printedOf({ picture })), "-vf").split(",");
-      assert.equal(pieces.at(-1), "format=yuv420p");
+      assert.deepEqual(pieces.slice(-4), ["format=yuv420p", LOOK, "limiter=min=16:max=235:planes=1", "limiter=min=16:max=240:planes=6"]);
       assert.equal(pieces.filter((p) => p.startsWith("format=")).length, 2);
       assert.equal(pieces.indexOf("hwdownload"), pieces.findIndex((p) => p.startsWith("scale_vt=")) + 1);
       assert.equal(pieces[pieces.indexOf("hwdownload") + 1], "format=p010le");
+    }
+  });
+  it("give every HDR picture the look as its last three pieces, the look and then the limiter of the luma and the limiter of the colours, whatever way up it is stored, however deep its colour is and at whatever size", () => {
+    const odd = { ...HLG, width: 1920, height: 1080, side_data_list: [{ side_data_type: "Display Matrix", rotation: -45 }] };
+    for (const picture of [HLG, PQ, { ...HLG, ...UPRIGHT }, TURNED_ROUND, odd, { ...HLG, pix_fmt: "yuv420p" }]) {
+      for (const fourK of [false, true]) {
+        const pieces = after(argsFor(printedOf({ picture }), { fourK }), "-vf").split(",");
+        assert.deepEqual(pieces.slice(-3), [LOOK, "limiter=min=16:max=235:planes=1", "limiter=min=16:max=240:planes=6"], JSON.stringify(picture));
+        assert.equal(pieces.filter((p) => p.startsWith("lutyuv=")).length, 1, JSON.stringify(picture));
+        assert.equal(pieces.filter((p) => p.startsWith("limiter=")).length, 2, JSON.stringify(picture));
+      }
     }
   });
   it("make a PQ video the same way: VideoToolbox reads the transfer from the picture's own tags", () => {
@@ -317,25 +344,25 @@ describe("the arguments ffmpeg is given for a working copy", () => {
     // Shown 1080 by 1920 (stored on its side as 1920 by 1080 after the size is made): VideoToolbox makes it 1920 by 1080, and
     // ffmpeg then turns it a quarter clockwise.
     const a = argsFor(printedOf({ picture: { ...HLG, ...UPRIGHT } }));
-    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=clock,format=yuv420p`);
+    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=clock,format=yuv420p,${LOOK_AND_LIMITS}`);
     assert.deepEqual([a.includes("-noautorotate"), after(a, "-display_rotation")], [true, "0"]);
   });
   it("turn a clip stored turned round by a half turn, and one turned the other way a quarter the other way", () => {
-    assert.equal(after(argsFor(printedOf({ picture: TURNED_ROUND })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,hflip,vflip,format=yuv420p`);
+    assert.equal(after(argsFor(printedOf({ picture: TURNED_ROUND })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,hflip,vflip,format=yuv420p,${LOOK_AND_LIMITS}`);
     const left = { ...HLG, side_data_list: [{ side_data_type: "Display Matrix", rotation: 90 }] };
-    assert.equal(after(argsFor(printedOf({ picture: left })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=cclock,format=yuv420p`);
+    assert.equal(after(argsFor(printedOf({ picture: left })), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=cclock,format=yuv420p,${LOOK_AND_LIMITS}`);
   });
   it("turn a picture stored at an odd angle as ffmpeg's own turning would, by that angle", () => {
     const odd = { ...HLG, width: 1920, height: 1080, side_data_list: [{ side_data_type: "Display Matrix", rotation: -45 }] };
-    assert.match(after(argsFor(printedOf({ picture: odd })), "-vf"), /,hwdownload,format=p010le,rotate=45\*PI\/180,format=yuv420p$/);
+    assertLookLast(after(argsFor(printedOf({ picture: odd })), "-vf"), ",hwdownload,format=p010le,rotate=45*PI/180");
   });
   it("leave a picture that is not turned alone, whether it says so or says nothing", () => {
     for (const picture of [HLG, { ...HLG, side_data_list: [{ side_data_type: "Display Matrix", rotation: 0 }] }]) {
-      assert.match(after(argsFor(printedOf({ picture })), "-vf"), /,hwdownload,format=p010le,format=yuv420p$/);
+      assertLookLast(after(argsFor(printedOf({ picture })), "-vf"), ",hwdownload,format=p010le");
     }
   });
   it("download an 8-bit HDR picture as the 8 bits VideoToolbox gives it, which is not the 10-bit format", () => {
-    assert.match(after(argsFor(printedOf({ picture: { ...HLG, pix_fmt: "yuv420p" } })), "-vf"), /,hwdownload,format=nv12,format=yuv420p$/);
+    assertLookLast(after(argsFor(printedOf({ picture: { ...HLG, pix_fmt: "yuv420p" } })), "-vf"), ",hwdownload,format=nv12");
   });
   it("make a 4K HDR copy 3840 on its longer side with the 4K switch, and never larger than the picture", () => {
     assert.match(after(argsFor(printedOf({ picture: HLG }), { fourK: true }), "-vf"), new RegExp(`,${SCALE_VT(3840, 2160)},`));
@@ -364,11 +391,12 @@ describe("the arguments ffmpeg is given for a working copy", () => {
     // A video in standard colour has no need of it.
     assert.ok(workCopyArgs("/in/a.mov", "/out/a.mp4", { ...factsFrom(printedOf()), stored: undefined }));
   });
-  it("do not touch a video in standard colour: no hardware, no VideoToolbox, no turning by hand, whatever way up it is stored", () => {
+  it("do not touch a video in standard colour: no hardware, no VideoToolbox, no turning by hand, no look, whatever way up it is stored", () => {
     for (const picture of [{}, UPRIGHT, { color_primaries: "bt2020", color_transfer: "bt2020-10" }, { color_primaries: undefined, color_transfer: undefined }]) {
       const a = argsFor(printedOf({ picture }));
       const vf = after(a, "-vf");
-      assert.ok(!/scale_vt|hwdownload|p010le|transpose|flip|rotate/.test(vf), vf);
+      assert.ok(!/scale_vt|hwdownload|p010le|transpose|flip|rotate|lutyuv|limiter/.test(vf), vf);
+      assert.ok(!/lutyuv|limiter/.test(after(argsFor(printedOf({ picture }), { fourK: true }), "-vf")));
       assert.match(vf, /,format=yuv420p$/);
       for (const flag of ["-hwaccel", "-hwaccel_output_format", "-noautorotate", "-display_rotation", "-autorotate"]) assert.ok(!a.includes(flag), flag);
       assert.deepEqual(a.slice(0, 7), ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "/in/a b.mov"]);
@@ -380,7 +408,7 @@ describe("the arguments ffmpeg is given for a working copy", () => {
     for (const picture of [{}, HLG, PQ, UPRIGHT, { ...HLG, ...UPRIGHT }, TURNED_ROUND, odd, { ...HLG, pix_fmt: "yuv420p" }]) {
       for (const fourK of [false, true]) {
         const pieces = after(argsFor(printedOf({ picture }), { fourK }), "-vf").split(",");
-        for (const piece of pieces) assert.match(piece, /^(fps|scale|scale_vt|hwdownload|format|transpose|hflip|vflip|rotate)(=|$)/, piece);
+        for (const piece of pieces) assert.match(piece, /^(fps|scale|scale_vt|hwdownload|format|transpose|hflip|vflip|rotate|lutyuv|limiter)(=|$)/, piece);
       }
     }
   });
@@ -874,18 +902,29 @@ describe("making the working copy", () => {
     assert.deepEqual(listings.map((x) => x.args.filter((a) => a === "-filters" || a === "-hwaccels")), [["-filters"], ["-hwaccels"]]);
     const args = t.guarded[0].args;
     assert.deepEqual(args.slice(args.indexOf("-noautorotate"), args.indexOf("-i")), ["-noautorotate", "-display_rotation", "0", "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]);
-    assert.match(after(args, "-vf"), /^fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p$/);
+    assert.equal(after(args, "-vf"), `fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p,${LOOK_AND_LIMITS}`);
   });
   it("turns an upright HDR clip by the note it is stored with, as ffprobe says it of the raw video, and leaves the file with none", async (c) => {
     const t = setup({ source: printedOf({ picture: { ...HLG, ...UPRIGHT } }) });
     c.after(t.done);
     assert.equal((await t.job()).ok, true);
-    assert.match(after(t.guarded[0].args, "-vf"), /,scale_vt=w=1920:h=1080:[^,]*,hwdownload,format=p010le,transpose=clock,format=yuv420p$/);
+    assert.match(after(t.guarded[0].args, "-vf"), /,scale_vt=w=1920:h=1080:[^,]*,hwdownload,/);
+    assertLookLast(after(t.guarded[0].args, "-vf"), ",hwdownload,format=p010le,transpose=clock");
     assert.equal(after(t.guarded[0].args, "-display_rotation"), "0");
     const stored = setup({ source: printedOf({ picture: TURNED_ROUND }) });
     c.after(stored.done);
     assert.equal((await stored.job()).ok, true);
-    assert.match(after(stored.guarded[0].args, "-vf"), /,hwdownload,format=p010le,hflip,vflip,format=yuv420p$/);
+    assertLookLast(after(stored.guarded[0].args, "-vf"), ",hwdownload,format=p010le,hflip,vflip");
+  });
+  it("writes the look an HDR video was given in the facts of its copy, so that a copy made with it can be told from one made before, and writes none for a video in standard colour", async (c) => {
+    const hdr = setup({ source: printedOf({ picture: HLG }) });
+    c.after(hdr.done);
+    assert.equal((await hdr.job()).ok, true);
+    assert.deepEqual(JSON.parse(readFileSync(hdr.paths.facts, "utf8")), { seconds: 23.436, fps: 30, width: 1920, height: 1080, bytes: 16, look: { name: "mild", contrast: 0.3, colour: 1.12 } });
+    const sdr = setup();
+    c.after(sdr.done);
+    assert.equal((await sdr.job()).ok, true);
+    assert.deepEqual(JSON.parse(readFileSync(sdr.paths.facts, "utf8")), { seconds: 23.436, fps: 30, width: 1920, height: 1080, bytes: 16 });
   });
   it("does not ask which filters or hardware decoders it has for a video in standard colour", async (c) => {
     const t = setup();
@@ -1303,8 +1342,8 @@ describe("the arguments ffmpeg is given for a Reel's stretch of the recording", 
     assert.deepEqual(without(without(argsFor(printedOf({ picture: HLG }), { stretch: STRETCH, fourK: true }), "-ss"), "-t"), argsFor(printedOf({ picture: HLG }), { fourK: true }));
     // A made-up colour chain would show: an HDR video's is the working copy's own, made standard on the hardware, and one in standard
     // colour has none of it.
-    assert.match(after(argsFor(printedOf({ picture: HLG }), { stretch: STRETCH }), "-vf"), /^fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p$/);
-    assert.doesNotMatch(after(argsFor(printedOf(), { stretch: STRETCH }), "-vf"), /scale_vt|hwdownload|tonemap|zscale/);
+    assert.equal(after(argsFor(printedOf({ picture: HLG }), { stretch: STRETCH }), "-vf"), `fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p,${LOOK_AND_LIMITS}`);
+    assert.doesNotMatch(after(argsFor(printedOf(), { stretch: STRETCH }), "-vf"), /scale_vt|hwdownload|tonemap|zscale|lutyuv|limiter/);
     assert.ok(!argsFor(printedOf(), { stretch: STRETCH }).includes("-hwaccel"));
   });
   // An HDR recording's Reel is made with VideoToolbox, as the whole copy is (the working copy's HDR change, PR #9): the hardware's
@@ -1324,8 +1363,8 @@ describe("the arguments ffmpeg is given for a Reel's stretch of the recording", 
     const upright = printedOf({ picture: { ...HLG, ...UPRIGHT } });
     const a = argsFor(upright, { stretch: STRETCH });
     // Stored on its side as 1920 by 1080 and shown 1080 by 1920: VideoToolbox makes it the size it is stored at, and the turn, by hand,
-    // comes after the colour is standard.
-    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=clock,format=yuv420p`);
+    // comes after the colour is standard, and the look last of all, as it is for the whole video.
+    assert.equal(after(a, "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=clock,format=yuv420p,${LOOK_AND_LIMITS}`);
     assert.equal(after(a, "-vf"), after(argsFor(upright), "-vf"));
     assert.deepEqual([after(a, "-display_rotation"), a.includes("-noautorotate"), after(a, "-ss"), after(a, "-t")], ["0", true, "312.4", "27.75"]);
     // Every one of the input options, the start among them, is before the input; the length is not.
@@ -1336,8 +1375,8 @@ describe("the arguments ffmpeg is given for a Reel's stretch of the recording", 
   });
   it("turn a recording stored turned round by a half turn, and one turned the other way a quarter the other way, with the stretch as without it", () => {
     const left = { ...HLG, side_data_list: [{ side_data_type: "Display Matrix", rotation: 90 }] };
-    assert.equal(after(argsFor(printedOf({ picture: TURNED_ROUND }), { stretch: STRETCH }), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,hflip,vflip,format=yuv420p`);
-    assert.equal(after(argsFor(printedOf({ picture: left }), { stretch: STRETCH }), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=cclock,format=yuv420p`);
+    assert.equal(after(argsFor(printedOf({ picture: TURNED_ROUND }), { stretch: STRETCH }), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,hflip,vflip,format=yuv420p,${LOOK_AND_LIMITS}`);
+    assert.equal(after(argsFor(printedOf({ picture: left }), { stretch: STRETCH }), "-vf"), `fps=30:start_time=0,${SCALE_VT(1920, 1080)},hwdownload,format=p010le,transpose=cclock,format=yuv420p,${LOOK_AND_LIMITS}`);
   });
   it("are refused for an HDR recording not told how it is stored, with a stretch as without one: a Reel must not come out on its side", () => {
     const printed = printedOf({ picture: { ...HLG, ...UPRIGHT } });
@@ -1513,11 +1552,13 @@ describe("a Reel's video, made from the recording", () => {
     const { args } = t.guarded[0];
     // The hardware's input options, then the start of the stretch, then the input; and the length after the picture is made.
     assert.deepEqual(args.slice(args.indexOf("-noautorotate"), args.indexOf("-i") + 1), ["-noautorotate", "-display_rotation", "0", "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld", "-ss", "5", "-i"]);
-    assert.match(after(args, "-vf"), /^fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,transpose=clock,format=yuv420p$/);
+    assert.equal(after(args, "-vf"), `fps=30:start_time=0,scale_vt=w=1920:h=1080:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,transpose=clock,format=yuv420p,${LOOK_AND_LIMITS}`);
     assert.deepEqual([after(args, "-display_rotation"), after(args, "-t")], ["0", "7"]);
     // Its facts say the stretch that was cut, and the words say the colours were made standard.
     assert.deepEqual(result.made, ["the video for Reel 2", "its HDR colours made standard"]);
     assert.deepEqual(JSON.parse(readFileSync(reelPaths(t).facts, "utf8")).stretch, { start: 5, end: 12 });
+    // And the look it was given, beside the stretch, as the whole copy's facts say it: a Reel made before the look has none.
+    assert.deepEqual(JSON.parse(readFileSync(reelPaths(t).facts, "utf8")).look, { name: "mild", contrast: 0.3, colour: 1.12 });
   });
   it("does not ask which filters or hardware decoders it has for a Reel of a recording in standard colour, and gives ffmpeg no hardware", async (c) => {
     const t = reelSetup({ filters: filtersOf9(), hwaccels: hwaccelsOf() });
