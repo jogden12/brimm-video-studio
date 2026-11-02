@@ -6635,8 +6635,10 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
   // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
   const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
   // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
-  // asked only of a finish at work, and of no video the gate holds.
-  const checking = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
+  // asked only of a finish at work, and of no video the gate holds. It is given the time of the check as this Mac's clock says it (`at`), for
+  // the step of the Reels that wait for it.
+  const checked = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
+  const checking = checked ? { ...checked, at: clockAt(checked.due) } : null;
   // The late check of its last finish found a problem after she was told she could go on, and no later finish has ended well since (the
   // note finish.js leaves): asked only of a video with a hand-off that is not a session's, and of none the gate holds.
   const lateProblem = !hidden && Boolean(handoff) && kind !== "session" && problemFlagged(ctx.home, e.name);

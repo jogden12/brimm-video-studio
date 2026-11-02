@@ -54,11 +54,12 @@ export async function exported(kind = "raw") {
 }
 /** Run the finish as the command line runs it. While it waits for its late check, run each of `asks` (a name for the ask, and the words
     of an edit.js run, with `over` laid over the deps it sees the finish by), and give back what each said, with `due`, the time the
-    check is made. */
-export async function whileChecking(w, asks, over = {}) {
+    check is made. `before`, when it is given, is called first, as what happens meanwhile (a Reel exported, say). */
+export async function whileChecking(w, asks, over = {}, before = null) {
   const heard = {};
   atWait(w.t, async () => {
     heard.due = w.t.now() + LATE_CHECK_MS;
+    if (before) await before();
     for (const [name, argv] of Object.entries(asks)) heard[name] = await on(seeing(w, over), ...argv);
   });
   assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());

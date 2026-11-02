@@ -506,7 +506,7 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
       assert.notEqual(n.stage, "reels-exported", JSON.stringify(over));
     }
   });
-  it("is a finish at work's stage while one runs, where a Reel waits, and the page's step where none does (ruling 4)", () => {
+  it("is a finish at work's stage while one copies, where a Reel waits, and the page's step where none does (ruling 4)", () => {
     const running = nextFor(waiting({ finishRunning: true }), NONE, NOW);
     assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
     const quiet = nextFor(waiting({ finishRunning: true, reelsExported: [] }), NONE, NOW);
@@ -521,7 +521,7 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
 });
 
 describe("the next step while a finish waits for its late check (the BRIMM Ops page does not wait for it)", () => {
-  const CHECKING = { due: Date.parse("2026-10-20T15:20:00-05:00"), took: ["Downloads"] };
+  const CHECKING = { due: Date.parse("2026-10-20T15:20:00-05:00"), took: ["Downloads"], at: "15:20" };
   const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
   const noted = (step, kind = "episode") => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } });
   it("is the BRIMM Ops page's step for a raw video, as it is once the finish has ended, and not that its finish is running", () => {
@@ -554,12 +554,32 @@ describe("the next step while a finish waits for its late check (the BRIMM Ops p
       assert.deepEqual([n.stage, n.text], ["finish-running", "Its finish is running. The panel shows how far it is."], JSON.stringify(over));
     }
   });
-  it("is nothing different for a finished video's Reels: the page's step where none waits, and its finish is running where a Reel waits, since that command refuses another finish beside the check", () => {
+  it("is the Reels step for a finished video's Reels exported meanwhile, to say after the check, and its finish is running only while the finish copies", () => {
     const waiting = (over = {}) => ({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], finishRunning: true, checking: CHECKING, ...over });
-    const running = nextFor(waiting(), NONE, NOW);
-    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const reels = nextFor(waiting(), NONE, NOW);
+    assert.deepEqual(shown(reels), { stage: "reels-exported", text: 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" after 15:20 to add it to the hand-off.' });
+    const more = nextFor(waiting({ reelsExported: [1, 3] }), NONE, NOW);
+    assert.deepEqual(shown(more), { stage: "reels-exported", text: 'You have exported Reel 1 and Reel 3 from HyperFrames. Say "hand off the Reels" after 15:20 to add them to the hand-off.' });
+    // With no check to wait for yet the finish still copies, and that command refuses another beside it.
+    const copying = nextFor(waiting({ checking: null }), NONE, NOW);
+    assert.deepEqual(shown(copying), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    // Where no Reel waits it is the page's step, as at any other time.
     const quiet = nextFor(waiting({ reelsExported: [] }), NONE, NOW);
     assert.deepEqual([quiet.stage, quiet.step], ["ops", "taken"]);
+    // The Reels step is said as it is said with no finish at work, but for when to say it.
+    const none = nextFor(waiting({ finishRunning: false, checking: null }), NONE, NOW);
+    assert.deepEqual(shown(none), { stage: "reels-exported", text: 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.' });
+  });
+  it("is no finish at work's stage for `guide … tell` either: a tell that waited for the Reels finish says its hand-off is ready, with the Reels step for a Reel exported meanwhile", () => {
+    const at = (over) => ({ facts: { ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], ...over }, next: nextFor({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], ...over }, NONE, NOW), folder: null, record: null });
+    const copying = at({ finishRunning: true });
+    const checking = at({ finishRunning: true, checking: CHECKING });
+    assert.deepEqual([copying, checking].map((item) => item.next.stage), ["finish-running", "reels-exported"]);
+    // Still copying: it goes on waiting. At the check: the hand-off is written, and the step is the Reels, after the check.
+    assert.equal(told(copying, copying, copying), null);
+    assert.equal(told(copying, copying, checking), 'Pricing talk (3fa9c1): Its hand-off is ready. You have exported Reel 2 from HyperFrames. Say "hand off the Reels" after 15:20 to add it to the hand-off.');
+    // Asked at the check, it waits for nothing: the Reels step at once.
+    assert.equal(told(checking, checking, checking), 'Pricing talk (3fa9c1): You have exported Reel 2 from HyperFrames. Say "hand off the Reels" after 15:20 to add it to the hand-off.');
   });
   it("is no stage to wait for: the page's step needs her, and the check needs nothing of hers", () => {
     assert.ok(!COMING.includes("ops"));

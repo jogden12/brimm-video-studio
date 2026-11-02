@@ -413,7 +413,7 @@ describe("B5. where finish would go no further, the guide says nothing new", () 
     exportOf(w, "reel 2");
     assert.equal(await line(w, { settings: { ...w.t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 1 } }), says(REEL_2));
   });
-  it("says its finish is running while one runs, where a Reel waits, and the page's step where none does (ruling 4)", async () => {
+  it("says its finish is running while one copies, where a Reel waits, and the page's step where none does (ruling 4)", async () => {
     const waiting = await W();
     exportOf(waiting, "reel 2");
     assert.equal(takeEpisodeLock(lockOf(waiting.t.home, FOLDER), "finish", () => true).taken, true);

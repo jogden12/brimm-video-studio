@@ -15,6 +15,7 @@ import { lockOf, takeEpisodeLock } from "../detached.js";
 import { CHECKING_FILE, markChecking } from "../finish-check.js";
 import { OPS_PAGE } from "../guide.js";
 import { episodeWork } from "../settings.js";
+import { clockAt } from "../unedited.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
 import { ANSWERED, exportOf } from "./exports-world.js";
 import { OFFERS, READ } from "./guide-world.js";
@@ -27,6 +28,9 @@ const KIT = 'Press "Write what’s next" and read the "Brief". In "Before postin
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
 const POST_TEXT = 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
+const DROP = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
+/** What the guide says of a Reel exported while the finish of the Reels before it waits for its late check at `due`: to hand it off after. */
+const REEL_AFTER = (n, due) => `You have exported Reel ${n} from HyperFrames. Say "hand off the Reels" after ${clockAt(due)} to add it to the hand-off.`;
 const AGAIN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
 
 describe("the guide while a raw video's finish waits for its late check", () => {
@@ -124,6 +128,60 @@ describe("the guide while the Reels of a finished video are handed off, and the 
     assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true }), 0, w.t.said());
     const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
     assert.equal(heard.next.code, 0, heard.next.text);
+    assert.deepEqual(heard.next.said, [`${NAMED}: ${TAKEN}`, `Then: ${KIT}`, "Step: taken", check(heard.due)]);
+    w.t.done();
+  });
+});
+
+describe("the guide while the Reels of a finished video are handed off, the finish waits for its late check, and another Reel is exported meanwhile", () => {
+  /** The Reels of the finished video: Reel 2 is exported and asked for, so that its finish takes it; Reel 1 is exported later, by `before`. */
+  async function reelsAsked() {
+    const w = await finishedWorld({ projects: ["reel 1", "reel 2"] });
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true, without: ["reel 1"] }), 0, w.t.said());
+    return w;
+  }
+  it("gives the Reels step to say after the check, and not that its finish is running, and after its lines the line of when Studio checks Dropbox's copies", async () => {
+    const w = await reelsAsked();
+    const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] }, {}, () => exportOf(w, "reel 1"));
+    assert.equal(heard.next.code, 0, heard.next.text);
+    assert.deepEqual(heard.next.said, [`${NAMED}: ${REEL_AFTER(1, heard.due)}`, check(heard.due)]);
+    w.t.done();
+  });
+  it("lists the video among those under way with the Reels step, and the line under it", async () => {
+    const w = await reelsAsked();
+    const heard = await whileChecking(w, { all: ["guide"] }, {}, () => exportOf(w, "reel 1"));
+    assert.deepEqual(heard.all.said, [DROP, "Under way:", `  ${NAMED}: ${REEL_AFTER(1, heard.due)}`, `    ${check(heard.due)}`]);
+    w.t.done();
+  });
+  it("says its finish is running while the Reels finish still copies, though another Reel is exported, and the Reels step once it waits for its check", async () => {
+    const w = await reelsAsked();
+    let copying = null;
+    atWait(w.t, async () => {
+      exportOf(w, "reel 1");
+      copying = await on(seeing(w), "guide", "3fa9c1");
+    }, 5000);
+    const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
+    assert.deepEqual(copying.said, [`${NAMED}: ${FINISH_RUNNING}`]);
+    assert.deepEqual(heard.next.said, [`${NAMED}: ${REEL_AFTER(1, heard.due)}`, check(heard.due)]);
+    w.t.done();
+  });
+  it("answers `tell` at once with the Reels step, and waits for nothing", async () => {
+    const w = await reelsAsked();
+    let waits = 0;
+    // A tell that waited for a finish at its check would wait for ever on this clock: it is stopped, and fails.
+    const wait = async () => {
+      waits += 1;
+      if (waits > 3) throw new Error("tell is waiting for a finish that only waits for its check");
+    };
+    const heard = await whileChecking(w, { tell: ["guide", "3fa9c1", "tell"] }, { wait }, () => exportOf(w, "reel 1"));
+    assert.deepEqual([heard.tell.code, heard.tell.said], [0, [`${NAMED}: ${REEL_AFTER(1, heard.due)}`]]);
+    assert.equal(waits, 0);
+    w.t.done();
+  });
+  it("is the page's step, as it was, where no Reel is exported meanwhile", async () => {
+    const w = await reelsAsked();
+    const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
     assert.deepEqual(heard.next.said, [`${NAMED}: ${TAKEN}`, `Then: ${KIT}`, "Step: taken", check(heard.due)]);
     w.t.done();
   });
@@ -282,6 +340,27 @@ describe("`guide … tell` for a video whose finish is running", () => {
     const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
     assert.deepEqual(said.said, [`${NAMED}: Its hand-off is ready. ${AGAIN}`]);
     assert.equal(reread(w.found).finished.revision, 2);
+    w.t.done();
+  });
+  it("waits for the finish that hands off the Reels while it copies, and says its hand-off is ready, with the Reels step for a Reel it does not hold, once it only waits for its check", async () => {
+    const w = await finishedWorld({ projects: ["reel 1", "reel 2"] });
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true, without: ["reel 1"] }), 0, w.t.said());
+    assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
+    exportOf(w, "reel 1");
+    // A finish at work again, its lock this process's: it has written nothing yet, and Reel 1 is exported and not in the hand-off.
+    const took = takeEpisodeLock(lockOf(w.t.home, FOLDER), "finish", () => true);
+    const due = w.t.now() + LATE_CHECK_MS;
+    const waits = [];
+    const wait = async (ms) => {
+      waits.push(ms);
+      // The second look: the finish has written its hand-off, and waits for its late check.
+      if (waits.length === 2) markChecking(w.t.home, FOLDER, { nonce: took.nonce, revision: reread(w.found).finished.revision, due, took: ["Downloads"] });
+      // A tell that still waits for a finish that only waits for its check would wait for ever on this clock: it fails instead.
+      if (waits.length > 4) throw new Error("tell is waiting for a finish that only waits for its check");
+    };
+    const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
+    assert.deepEqual([said.code, said.said, waits], [0, [`${NAMED}: Its hand-off is ready. ${REEL_AFTER(1, due)}`], [15000, 15000]]);
     w.t.done();
   });
   it("is still on its way after 60 minutes of a finish that has not written its hand-off, and says where to see how far it is", async () => {
