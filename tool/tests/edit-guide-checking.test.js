@@ -22,7 +22,7 @@ import { OFFERS, READ } from "./guide-world.js";
 import { finishedWorld } from "./reels-world.js";
 import { HANDOFF, NAMED, atWait, check, exported, on, seeing, whileChecking } from "./checking-world.js";
 
-const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
 const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 const KIT = 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.';
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
@@ -31,7 +31,6 @@ const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const DROP = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
 /** What the guide says of a Reel exported while the finish of the Reels before it waits for its late check at `due`: to hand it off after. */
 const REEL_AFTER = (n, due) => `You have exported Reel ${n} from HyperFrames. Say "hand off the Reels" after ${clockAt(due)} to add it to the hand-off.`;
-const AGAIN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
 
 describe("the guide while a raw video's finish waits for its late check", () => {
   it("gives the BRIMM Ops page's step, and after its lines the line of when Studio checks Dropbox's copies and then takes the export out of Downloads", async () => {
@@ -338,7 +337,8 @@ describe("`guide … tell` for a video whose finish is running", () => {
       assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
     };
     const said = await on(seeing(w, { wait }), "guide", "3fa9c1", "tell");
-    assert.deepEqual(said.said, [`${NAMED}: Its hand-off is ready. ${AGAIN}`]);
+    // Revision 2, but she has no note on this hand-off, and her note is the guide's only record of what she took on the page: it is a first take.
+    assert.deepEqual(said.said, [`${NAMED}: Its hand-off is ready. ${TAKEN}`]);
     assert.equal(reread(w.found).finished.revision, 2);
     w.t.done();
   });

@@ -27,7 +27,7 @@ const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video �
 const EXPORTED = 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.';
 const IN_APP = 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".';
 const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
+const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
 const CLEAR = 'It is held as a client or group session. If it is not one, say "clear the session mark".';
 const MARKED = { marked: "2026-10-20T08:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
 

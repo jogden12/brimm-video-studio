@@ -29,8 +29,8 @@ const says = (text) => `${NAMED}: ${text}`;
 /** What the guide says of Reels exported and not in the hand-off: `names` are the Reels, said together, and `them` is true for more than one. */
 const reelLine = (names, them = false) => `You have exported ${names} from HyperFrames. Say "hand off the Reels" to add ${them ? "them" : "it"} to the hand-off.`;
 const REEL_2 = reelLine("Reel 2");
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".';
-const TAKE_AGAIN = 'On the BRIMM Ops page: Drag the new hand-off onto the same episode, then press "Take the hand-off".';
+const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE_AGAIN = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const HANDOFF_OWED = 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.';
 const AT = "2026-10-20T15:00:00-05:00";

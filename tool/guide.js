@@ -96,14 +96,18 @@ export function noteAfter(handoff, note, step, at) {
 const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 
 /** Each step in the page's own words, by what the hand-off is (noteKindOf) where it matters. The labels are the page's own
-    buttons and cards. */
+    buttons and cards. A step is given whether it is taken `again` for a newer revision, the hand-off's `revision`, and `have`, the
+    revision the page holds, which is the one her note holds: the page's button for a newer revision names both. A hand-off dropped
+    on Episodes opens the episode that holds its video; when none does, the page offers "Add it as a new episode", which opens a
+    form whose button is "Add the episode", and the file goes into that episode's transcript. A session's form has one button,
+    "Take the session", for a new revision and a newer one. */
 const SAYS = {
-  taken: (family, again) =>
+  taken: (family, again, revision, have) =>
     family === "session"
       ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
       : again
-        ? 'Drag the new hand-off onto the same episode, then press "Take the hand-off".'
-        : 'Drag the hand-off onto Episodes, then press "Take the hand-off".',
+        ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`
+        : 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
     family === "short video"
@@ -118,11 +122,12 @@ const SAYS = {
   withdrawn: () => 'Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.'
 };
 
-/** A BRIMM Ops step for a hand-off, in the page's own words: `again` when it is taken again for a newer revision. Taking a raw
-    episode ends with freeing its space in Dropbox. */
-export function opsText(handoff, step, again) {
+/** A BRIMM Ops step for a hand-off, in the page's own words: `again` when it is taken again for a newer revision, and then `have`,
+    the revision her note holds, which is the one she last took on the page (a first take names none). Taking a raw episode ends
+    with freeing its space in Dropbox. */
+export function opsText(handoff, step, again, have) {
   const family = noteKindOf(handoff.kind);
-  const text = SAYS[step](family, again);
+  const text = SAYS[step](family, again, handoff.revision, have);
   return step === "taken" && handoff.kind === "raw" ? text + ONLINE_ONLY : text;
 }
 
@@ -278,8 +283,9 @@ function opsStep(facts, notes, now) {
   const noted = { ...notes, handoffs: { ...notes.handoffs, [handoff.id]: noteAfter(handoff, note, next.step, "") } };
   const then = opsNext(handoff, noted.handoffs[handoff.id]);
   const own = !then && handoff.revision === handoff.emptyAt ? nextFor(facts, noted, now) : null;
-  const after = then ? opsText(handoff, then.step, then.again) : own && !own.done ? own.text : "";
-  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again)}`, step: next.step, after };
+  // `have` is the revision her note holds. Only a hand-off taken again names it, and that is one for a revision newer than the note's.
+  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id].revision) : own && !own.done ? own.text : "";
+  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note?.revision)}`, step: next.step, after };
 }
 
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes

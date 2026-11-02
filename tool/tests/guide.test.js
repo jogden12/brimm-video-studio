@@ -15,8 +15,10 @@ const LATER = "2026-10-26T09:00:00-05:00";
 const HANDOFF = (over = {}) => ({ id: "e-20261020-3fa9c1", revision: 1, kind: "finished", emptyAt: null, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "Talk.mp4", ...over });
 const NOTE = (over = {}) => ({ kind: "episode", step: "taken", revision: 1, at: AT, ...over });
 const OPS_TEXTS = {
-  taken: 'Drag the hand-off onto Episodes, then press "Take the hand-off".',
-  takenAgain: 'Drag the new hand-off onto the same episode, then press "Take the hand-off".',
+  // The first take: when no episode holds the video yet, the page offers "Add it as a new episode" (and its form "Add the episode") before "Take the hand-off".
+  taken: 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
+  // A newer revision: the page's button names the revision of the hand-off and the one the page holds, which is the one her note holds.
+  takenAgain: (revision, have) => `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`,
   online: ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".',
   sessionTaken: 'Choose "Principles", drop the hand-off, then press "Take the session".',
   sessionAgain: 'Choose "Principles", drop the new hand-off, then press "Take the session".',
@@ -91,14 +93,21 @@ describe("the BRIMM Ops page's steps", () => {
   });
   it("says each step in the page's own words", () => {
     const T = OPS_TEXTS;
-    for (const [handoff, step, again, want] of [
+    // `have` is the revision her note holds, which a hand-off taken again names beside its own: "Take revision 2 in place of revision 1".
+    for (const [handoff, step, again, want, have] of [
       [HANDOFF(), "taken", false, T.taken],
       [HANDOFF({ kind: "short video" }), "taken", false, T.taken],
       [HANDOFF({ kind: "raw" }), "taken", false, T.taken + T.online],
-      [HANDOFF(), "taken", true, T.takenAgain],
-      [HANDOFF({ kind: "raw" }), "taken", true, T.takenAgain + T.online],
+      // A first take is told nothing of a revision, though one is given: a note that does not count (it is for another kind of hand-off) holds one.
+      [HANDOFF({ revision: 2 }), "taken", false, T.taken, 1],
+      [HANDOFF({ kind: "raw", revision: 2 }), "taken", false, T.taken + T.online, 1],
+      [HANDOFF({ revision: 2 }), "taken", true, T.takenAgain(2, 1), 1],
+      [HANDOFF({ revision: 4 }), "taken", true, T.takenAgain(4, 2), 2],
+      [HANDOFF({ kind: "short video", revision: 3 }), "taken", true, T.takenAgain(3, 1), 1],
+      [HANDOFF({ kind: "raw", revision: 2 }), "taken", true, T.takenAgain(2, 1) + T.online, 1],
       [HANDOFF({ kind: "session" }), "taken", false, T.sessionTaken],
-      [HANDOFF({ kind: "session" }), "taken", true, T.sessionAgain],
+      // A session's words are the session form's, which is the same button for a new revision and a newer one: they name no revision.
+      [HANDOFF({ kind: "session", revision: 2 }), "taken", true, T.sessionAgain, 1],
       [HANDOFF(), "kit", false, T.kit],
       [HANDOFF(), "posted", false, T.posted],
       [HANDOFF(), "live", false, T.live],
@@ -108,7 +117,7 @@ describe("the BRIMM Ops page's steps", () => {
       [HANDOFF({ kind: "session" }), "checked", false, T.checked],
       [HANDOFF({ kind: "session", emptyAt: 1 }), "withdrawn", false, T.withdrawn],
       [HANDOFF({ kind: "session", emptyAt: 2, revision: 3 }), "withdrawn", false, T.withdrawn]
-    ]) assert.equal(opsText(handoff, step, again), want, `${handoff.kind} ${step} ${again}`);
+    ]) assert.equal(opsText(handoff, step, again, have), want, `${handoff.kind} ${step} ${again} ${have}`);
   });
 });
 
@@ -282,6 +291,14 @@ describe("the next step for a video", () => {
     // Not in the plan's test: the page's step is hers on this Mac too, while the video is open on the other one.
     assert.equal(nextFor({ ...BASE, elsewhere: true, mac: "Mac Studio", handoff: OPS_HANDOFF }, NONE, NOW).stage, "ops");
   });
+  it("is, for a newer revision than her note holds, the page's button for it, which names both revisions", () => {
+    const held = (kind, revision) => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step: "kit", revision, at: "2026-10-24T09:00:00-05:00" } } });
+    const n = nextFor({ ...BASE, handoff: { ...OPS_HANDOFF, revision: 3 } }, held("episode", 2), NOW);
+    assert.deepEqual(n, { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(3, 2)}`, step: "taken", after: OPS_TEXTS.posted });
+    // A note for another kind of hand-off does not count: it is a first take, whatever revision that note holds.
+    const first = nextFor({ ...BASE, handoff: { ...OPS_HANDOFF, revision: 3 } }, held("short video", 2), NOW);
+    assert.deepEqual([first.step, first.text], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken}`]);
+  });
   it("is none for a video that is done: transcript only, finished by her word, every step noted, or a hand-off 60 days old", () => {
     const sixty = OPS_HANDOFF.at + 60 * 86400000;
     for (const [over, notes, now] of [
@@ -334,7 +351,7 @@ describe("the next step for a video", () => {
     assert.equal(nextFor({ ...BASE, ...SESSION({ choice: null }), handoff: EMPTY }, NONE, NOW).after, CHOOSE);
   });
   it("says every text in sentences under 25 words, with no path or flag", () => {
-    const texts = [...STAGE_ROWS.map(([, , text]) => text), ...Object.values(OPS_TEXTS)];
+    const texts = [...STAGE_ROWS.map(([, , text]) => text), ...Object.values(OPS_TEXTS).filter((text) => typeof text === "string"), OPS_TEXTS.takenAgain(2, 1)];
     for (const text of texts) {
       assert.doesNotMatch(text, /\/|\\|--|\.js\b/, text);
       for (const sentence of text.split(/(?<=[.;])\s+/)) assert.ok(sentence.split(/\s+/).length < 25, sentence);
@@ -465,7 +482,7 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
       assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
     }
     const again = nextFor(waiting({ reelsExported: [], handoff: { ...OPS_HANDOFF, revision: 2 } }), noted("kit"), NOW);
-    assert.deepEqual([again.stage, again.step, again.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain}`]);
+    assert.deepEqual([again.stage, again.step, again.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`]);
   });
   it("comes after a drop folder, a conflict, her answer and a version held as a session, as every stage of a video does", () => {
     for (const [over, stage] of [[{ conflicted: true }, "conflicted"], [{ kind: null, waiting: true }, "waiting"], [{ heldAsSession: true }, "held-session"]]) {
@@ -803,7 +820,7 @@ describe("what guide tell says", () => {
       // Nothing on its way: its next step at once, as the guide says it.
       [waiting, waiting, waiting, 'Video of 20 Oct, 15:00 (Mac Studio) (3fa9c1): It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
       [read, read, read, 'Pricing talk (3fa9c1): Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
-      [ops, ops, ops, 'Pricing talk (3fa9c1): On the BRIMM Ops page: Drag the hand-off onto Episodes, then press "Take the hand-off".'],
+      [ops, ops, ops, `Pricing talk (3fa9c1): On the BRIMM Ops page: ${OPS_TEXTS.taken}`],
       [retry, retry, retry, 'A video of 5 bytes: Its import did not finish. Say "try it again".'],
       [done, done, done, "Pricing talk (3fa9c1) is done: nothing is left to do for it."]
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
