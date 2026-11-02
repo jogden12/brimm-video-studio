@@ -129,7 +129,9 @@ export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, frac
       ffmpeg is given, and stop(), to call when ffmpeg has ended. Meanwhile its progress is read once a second;
     - end(finished): the video is done, or the work on it stopped. The file is taken away. When the work on it finished,
       what each of its steps took is kept in RATES. A run that stopped part-way, as when ffmpeg stopped at once, is not
-      measured: its steps would make the time left look shorter than it is.
+      measured: its steps would make the time left look shorter than it is. A run may end its bar before its work is over, as
+      a finish does once its hand-off is written and only the late check is left: until the next begin, every call after the
+      end does nothing, so that the bar does not come back.
     No call ever throws. */
 export function reporter({ folder, swift = "", log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, bootedAt = Date.now() - uptime() * 1000, timer = { every: setInterval, cancel: clearInterval } }) {
   const file = join(folder, `${pid}.json`);

@@ -143,6 +143,31 @@ describe("a run's progress file", () => {
     assert.deepEqual(readdirSync(t.folder), []);
     t.done();
   });
+  it("is not written again once the video is ended, as a finish's is when its hand-off is written and only a late check is left: no call brings the bar back, until the next video is begun", () => {
+    const t = setup();
+    t.r.begin("talk.mov");
+    t.r.length(100);
+    t.r.steps(["Making the rough cut", "Filing"]);
+    t.r.step("Making the rough cut");
+    t.r.end(true);
+    assert.deepEqual(readdirSync(t.folder), []);
+    t.clock.t += 5000;
+    t.r.steps(["Making the rough cut", "Filing"]);
+    t.r.step("Filing", "Filing it");
+    t.r.length(200);
+    t.r.fraction(0.5);
+    t.clock.t += 5000;
+    t.r.fraction(1);
+    assert.deepEqual(t.r.encoding(100).args, []);
+    t.r.end(true);
+    t.r.end(false);
+    assert.deepEqual(readdirSync(t.folder), []);
+    assert.equal(t.ticks.length, 0);
+    // The next video is another bar.
+    t.r.begin("next.mov");
+    assert.deepEqual(readdirSync(t.folder), ["4242.json"]);
+    t.done();
+  });
   it("never stops a run: when it cannot be written the log says so once, and nothing is thrown", () => {
     const t = setup({ swift: "/usr/bin/swift" });
     // A file is where the folder would be.
@@ -226,18 +251,18 @@ describe("the time left in all", () => {
     assert.equal(t.file().total, 3);
     t.done();
   });
-  it("is measured under a step's name, whatever the step is shown as: the finish's last step says she can go on, and is still Checking the copies", () => {
+  it("is measured under a step's name, whatever the step is shown as: a clip's step says which clip, and is still Cutting the short clips", () => {
     const t = setup();
     t.r.begin("a.mov");
     t.r.length(100);
-    t.r.steps(["Copying into the episode", "Checking the copies"]);
-    t.r.step("Copying into the episode");
+    t.r.steps(["Making the rough cut", "Cutting the short clips"]);
+    t.r.step("Making the rough cut");
     t.clock.t += 2000;
-    t.r.step("Checking the copies", "Checking the copies (you can go on)");
-    assert.deepEqual([t.file().step, t.file().n, t.file().of, t.file().detail], ["Checking the copies (you can go on)", 2, 2, "Checking the copies (you can go on) (step 2 of 2)"]);
-    t.clock.t += 900_000;
+    t.r.step("Cutting the short clips", "Cutting short clip 1 of 3");
+    assert.deepEqual([t.file().step, t.file().n, t.file().of, t.file().detail], ["Cutting short clip 1 of 3", 2, 2, "Cutting short clip 1 of 3 (step 2 of 2)"]);
+    t.clock.t += 9_000;
     t.r.end(true);
-    assert.deepEqual(readRates(t.folder), { "Copying into the episode": 0.02, "Checking the copies": 9 });
+    assert.deepEqual(readRates(t.folder), { "Making the rough cut": 0.02, "Cutting the short clips": 0.09 });
     t.done();
   });
   it("is not measured from a video whose work did not finish, as when ffmpeg stopped at once, which would make it look shorter", () => {

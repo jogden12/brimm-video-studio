@@ -2,8 +2,9 @@
 // (exports.js), and asked what it had to; it wrote what it was told in finish.asked.json, on this Mac's own disk, and started this. This
 // part waits until each finished video is whole, checks its shape, transcribes it again as the transcript tool does, cuts the parts of a
 // Story from a finished Reel of more than a minute, and copies everything into the episode's final/ folder by the Dropbox rule, the
-// hand-off last. Then it writes the record, shows the hand-off in Finder, and at least 15 minutes after the last copy checks the copies
-// again; only when they are whole does it delete from From Final Cut, or from Downloads, what it took from there.
+// hand-off last. Then it writes the record, shows the hand-off in Finder (its bar then leaves the progress panel: she need not wait for
+// what follows), and at least 15 minutes after the last copy checks the copies again; only when they are whole does it delete from
+// From Final Cut, or from Downloads, what it took from there.
 // A part is HyperFrames' when its entry in finish.asked.json names a `project`: its video is the export (no export of the edit goes with
 // it), a Dropbox placeholder is brought over, its sound and colour are checked too, and what is removed after the late check is only a
 // file in Downloads that has an export's name for that project (architecture 8.1 and 8.2). The other parts are Final Cut's, as they were.
@@ -696,6 +697,14 @@ export async function finishNow(ctx, found, deps = {}) {
   let letGoneAlready = false;
   let marked = false;
   let named = "";
+  // Its bar in the progress panel is ended once. It leaves the panel when the hand-off is written and the marker is down (below), and
+  // from then on the panel is told nothing, so that the end the run makes however it ends is none.
+  let barGone = false;
+  const endBar = (finished) => {
+    if (barGone) return;
+    barGone = true;
+    progress.end(finished);
+  };
   try {
     const asked = readJson(join(episodeWork(ctx.home, found.name), "finish.asked.json"));
     if (!asked) {
@@ -1082,8 +1091,8 @@ export async function finishNow(ctx, found, deps = {}) {
 
     // She need not wait for the late check: the record holds this finish, and the hand-off is written and shown. So that the guide and
     // `status` can say so, the run leaves a marker on this Mac's own disk from here until it ends, however it ends (finish-check.js),
-    // and the panel's last step says she can go on (a step of its own, none of the five, so it has no number). A finish whose record
-    // was not written leaves no marker and says nothing of the kind: there is nothing for her to go on to, and she waits for it as she did.
+    // and its bar leaves the progress panel (below). A finish whose record was not written leaves no marker and says nothing of the
+    // kind: there is nothing for her to go on to, and she waits for it as she did.
     if (written) {
       try {
         markChecking(ctx.home, found.name, { nonce: deps.nonce, revision, due: lastCopy + LATE_CHECK_MS, took: taken.map((file) => file.place) });
@@ -1097,10 +1106,16 @@ export async function finishNow(ctx, found, deps = {}) {
       measured(ctx.home, ctx.now() - began, videoSeconds(record, parts));
     }
 
+    // Its bar leaves the progress panel here, as the bar of a run that did its visible work: the hand-off is written and shown, she is
+    // told she can go on, and the late check after it goes on with no bar, telling the panel nothing (Jason, 2 November 2026). A run that
+    // left no marker has told her nothing of the kind and keeps its bar to the end, with the check as a step of its own, none of the
+    // five and so with no number.
+    if (marked) endBar(true);
+    else progress.step("Checking the copies");
+
     // The late check, at least 15 minutes after the last copy. Only when it finds every copy whole, and the record says what
     // was finished, are the files this finish took from From Final Cut deleted there; and only those still as they were
     // when taken. One made again since is kept, and named.
-    progress.step("Checking the copies", marked ? "Checking the copies (you can go on)" : undefined);
     await my.wait(Math.max(0, lastCopy + LATE_CHECK_MS - ctx.now()));
     // Once the other Mac has the episode, nothing is copied into it again: what is not whole is said, for that Mac's own
     // finish to put right (the P1 check, T20).
@@ -1180,7 +1195,7 @@ export async function finishNow(ctx, found, deps = {}) {
       const gone = letGoClaim(ctx, found);
       if (gone) failed.push(gone);
     }
-    progress.end(ended);
+    endBar(ended);
     rmSync(work, { recursive: true, force: true });
   }
 }

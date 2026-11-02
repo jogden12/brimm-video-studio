@@ -737,8 +737,8 @@ describe("E7. again, and the run", () => {
     assert.equal(result.ok, true, result.failed.join(" "));
     const named_ = ["Waiting for HyperFrames' exports", "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode"];
     assert.deepEqual(steps, named_);
-    // The check of the copies is begun after them, as a step of its own that the five do not count.
-    assert.deepEqual(stepped, [...named_, "Checking the copies"]);
+    // Each is begun in turn, and the check of the copies is none of them: its bar has left the panel by then.
+    assert.deepEqual(stepped, named_);
     w.t.done();
   });
   it("says in the end only what applies to HyperFrames: how to free space, and nothing of Final Cut", async () => {

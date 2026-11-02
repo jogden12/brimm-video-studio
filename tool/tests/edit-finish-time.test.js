@@ -9,7 +9,7 @@ import { writeFileSync } from "node:fs";
 import { editMain, finishEpisode } from "../edit.js";
 import { finishNow } from "../finish.js";
 import { recordFile, recordText } from "../episode.js";
-import { aboutLeft, addRates, progressFolder, readRates } from "../progress.js";
+import { aboutLeft, addRates, progressFolder, readRates, reporter } from "../progress.js";
 import { HANDOFF_STEP, handoffIn } from "../finish-time.js";
 import { clockAt } from "../unedited.js";
 import { FOLDER, reread } from "./episodes.js";
@@ -112,6 +112,18 @@ describe("what a finish measures of its own hand-off", () => {
     const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) });
     assert.equal(result.ok, true, result.failed.join(" "));
     // The one look at the export, five seconds, is the finish waiting for the file to be whole: it is none of the work, which is the seven.
+    assert.deepEqual(readRates(progressFolder(w.t.home)), { [HANDOFF_STEP]: 7 / SECONDS });
+    w.t.done();
+  });
+  it("is the same with the run's bar in the panel, which leaves when the hand-off is written: the panel keeps no time of its steps for a finish, nor of the wait for the late check", async () => {
+    const w = mainOnly();
+    takes(w, 7);
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
+    const progress = reporter({ folder: progressFolder(w.t.home), now: () => w.t.now() });
+    const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) }, { progress });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    // Only the hand-off's own speed: the seven seconds of work for the recording, and no step of the panel's, the quarter of an hour of
+    // the late check least of all.
     assert.deepEqual(readRates(progressFolder(w.t.home)), { [HANDOFF_STEP]: 7 / SECONDS });
     w.t.done();
   });

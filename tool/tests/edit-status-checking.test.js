@@ -64,7 +64,7 @@ describe("status while a finish waits for its late check", () => {
     assert.equal(heard.status.said[1], `${FOLDER}: bring ended 5 minutes ago. Every file of Pricing is here. Say "open Pricing".`);
     w.t.done();
   });
-  it("shows the panel's last step as one she can go on from, with no number among the five steps before it, and its earlier steps as they were out of five", async () => {
+  it("lists the finish's bar while it copies, out of five steps, and lists none once the hand-off is written: the check goes on with no bar", async () => {
     const w = await exported();
     w.t.ctx.deps.progress = reporter({ folder: progressFolder(w.t.home), now: () => w.t.now() });
     let copying = null;
@@ -73,7 +73,7 @@ describe("status while a finish waits for its late check", () => {
     }, 5000);
     const heard = await whileChecking(w, { status: ["status"] });
     assert.deepEqual(copying.said, ["Running on this Mac:", "  Pricing: what to charge?: Waiting for HyperFrames' exports (step 1 of 5)", RUNNING]);
-    assert.deepEqual(heard.status.said, ["Running on this Mac:", "  Pricing: what to charge?: Checking the copies (you can go on)", `${WRITTEN} ${studio(heard.due)}`]);
+    assert.deepEqual(heard.status.said, [`${WRITTEN} ${studio(heard.due)}`]);
     w.t.done();
   });
 });
