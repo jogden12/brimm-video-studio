@@ -151,6 +151,9 @@ export function opsText(handoff, step, again) {
       in a line edit.js adds of its own (Item `also`).
     - `lateProblem`, when the late check of the video's last finish found a problem after its hand-off was written and a later finish has
       not ended well since (finish-check.js flagProblem): every answer for it then leads with the problem (nextFor).
+    - `finishFailed`, when the finish her last yes started has ended without writing a hand-off (finish-ended.js): its run ended and did
+      not end well, and the hand-off on file is older than her yes. `guide … tell` says so at its first look (told), in place of the step
+      from before the finish; no other answer of the guide does.
     - `gated`, when the gate holds a video as a session whose mark is not cleared, though its kind is not a session's (a record of
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
@@ -545,7 +548,8 @@ const READ_IT = "Claude has read it.";
     finish then only waits for its late check, which she need not wait for) or has ended with one, and that the finish wrote
     none, saying how to see why, when it has ended without; and otherwise its next step, as the guide says it, which says when an
     import or a reading did not finish. At the start (all three the same) a video with nothing on its way gets its next step at
-    once. Its file's name is never said. */
+    once, unless the finish her last yes started has ended without a hand-off already (`finishFailed`): that is said instead, as it
+    is said of a finish waited for. Its file's name is never said. */
 export function told(was, seen, now) {
   if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
   if (now.next.done) return videoLines(now)[0];
@@ -560,6 +564,9 @@ export function told(was, seen, now) {
     const wrote = Boolean(facts.checking) || (Boolean(facts.handoff) && (!was.facts.handoff || ["id", "revision", "at"].some((key) => facts.handoff[key] !== was.facts.handoff[key])));
     return `${facts.name}: ${wrote ? `Its hand-off is ready. ${next.text}` : FINISH_FAILED}`;
   }
+  // A video with nothing on its way, whose finish ended without a hand-off before this look (a run that began and ended at once): that is
+  // said in place of the step from before the finish, which would send her to say yes again as if nothing had been tried.
+  if (!on(was) && facts.finishFailed === true) return `${facts.name}: ${FINISH_FAILED}`;
   return `${facts.name}: ${next.text}`;
 }
 

@@ -819,6 +819,10 @@ describe("what guide tell says", () => {
       [first, first, at(exported), FAILED],
       [second, second, at({ ...exported, handoff: RAW_HANDOFF }), FAILED],
       [first, first, at({ ...exported, offersAnswered: false }), FAILED],
+      // A finish her yes started that ended without a hand-off before the first look (a run that began and ended at once): that is said
+      // at the first look, in place of the step from before it. A finish at work is waited for all the same.
+      [at({ ...exported, finishFailed: true }), at({ ...exported, finishFailed: true }), at({ ...exported, finishFailed: true }), FAILED],
+      [first, first, at({ ...exported, finishRunning: true, finishFailed: true }), null],
       // Not under way any more.
       [first, first, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
       // A finish she is not waiting for (it was not running when she asked) is its next step at once, as for any video.
@@ -838,6 +842,8 @@ describe("what guide tell says", () => {
       [making, making, making, null],
       [making, making, later, null],
       [making, later, open, 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
+      // A finish that failed before it is none of what has happened since the first look: the step is said, as the guide says it.
+      [making, making, at({ ...BASE, ...APP(), finishFailed: true }), 'Pricing talk (3fa9c1): Say "open it in HyperFrames" to edit it there.'],
       [making, making, editing, 'Pricing talk (3fa9c1): Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
       [making, making, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
       // A video with nothing on its way gets its next step at once.

@@ -96,6 +96,9 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     agentRunning: () => false,
     // No test posts a notice on the Mac's screen (unedited.js banner runs osascript): the notices a run posts are written down.
     notify: (text) => notices.push(text),
+    // No test waits for the process `finish … --yes` starts: the stand-in for it starts nothing, so there is no lock to wait for. A test of
+    // that wait takes this away, and the command's own five seconds stand (finish-start-wait.test.js).
+    startWaitMs: 0,
     run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,

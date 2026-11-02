@@ -61,6 +61,7 @@ import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
+import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
@@ -2330,7 +2331,8 @@ function startedWords(ctx, record, parts) {
 
 /** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
     exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
-    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once.
+    it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns once that run holds the
+    episode's lock, a moment later (runStarted): it says if the run did not begin in five seconds, or began and stopped at once.
     For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
     (plan PR 8, on-screen.js): `answers.onScreen` are the lines she gave instead, and `answers.noOnScreen` that there are none. A yes
     takes the words found only if they are the lines the last call showed (finish.shown.json); otherwise it shows them, and starts nothing. */
@@ -2379,7 +2381,9 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) stops.push(stoppedWords(ctx, found, record, { generic: `${running} is running for this episode. Say "how far is it?"`, again: `${forReels ? 'Say "hand off the Reels"' : app ? 'Say "hand it off"' : "Say finish"} again then.` }));
+  // What she says to hand it off, in the words of the way it goes: the Reels', HyperFrames' or Final Cut's.
+  const sayIt = forReels ? '"hand off the Reels"' : app ? '"hand it off"' : "finish";
+  if (running) stops.push(stoppedWords(ctx, found, record, { generic: `${running} is running for this episode. Say "how far is it?"`, again: `Say ${sayIt} again then.` }));
   const noHandEdits = answers.noHandEdits || [];
   // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
   const plan = (() => {
@@ -2515,8 +2519,39 @@ export async function finishEpisode(ctx, found, answers = {}) {
     // Whatever stands in its place is not a file it kept: it is read as nothing shown.
   }
   startDetached(ctx, { command: "finish", folder: found.name });
+  // It returns once the run it started has taken hold of the episode (its lock), so that what is asked of the guide next, `guide … tell`,
+  // finds the finish at work and not the step from before it: the process takes a moment to begin.
+  const up = await runStarted(ctx, found);
+  if (up === "stopped") return refuse(ctx, STOPPED_AT_ONCE);
+  if (up === "") return refuse(ctx, `The finish did not start: nothing is running for this episode after ${START_WAIT_MS / 1000} seconds. Say "how far is it?" to see, and say ${sayIt} again if nothing is.`);
   ctx.say(startedWords(ctx, record, looked.parts));
   return 0;
+}
+
+/** How long `finish … --yes` waits, at most, for the run it started to hold the episode's lock, and how often it looks. A test that
+    gives `startWaitMs` waits that long instead, none at all with 0: its stand-in for the process starts nothing. */
+const START_WAIT_MS = 5000;
+const START_LOOK_MS = 100;
+/** What `finish … --yes` says when the run it started began and ended before the first look, and wrote no hand-off: why is in the status. */
+const STOPPED_AT_ONCE = 'The finish stopped as soon as it started, and wrote no hand-off. Say "how far is it?" to see why.';
+
+/** Wait for the finish `startDetached` just started: "running" once the episode's lock is held by a finish run, "ended" once a run of
+    this yes has begun and ended well already, "stopped" once one has ended without a hand-off, and "" when none has begun after the time
+    to wait, which is START_WAIT_MS unless a test gives another (0 does not look: "running"). Looks every START_LOOK_MS, by the clock's
+    wait. */
+async function runStarted(ctx, found) {
+  const within = ctx.deps.startWaitMs ?? START_WAIT_MS;
+  if (within <= 0) return "running";
+  const wait = sleepOf(ctx);
+  const began = ctx.now();
+  for (;;) {
+    if (runningCommand(ctx.home, found.name, ctx.alive) === "finish") return "running";
+    const ended = endedSinceYes(ctx.home, found.name);
+    if (ended) return ended.result.ok === false ? "stopped" : "ended";
+    const left = within - (ctx.now() - began);
+    if (left <= 0) return "";
+    await wait(Math.min(START_LOOK_MS, left));
+  }
 }
 
 /** `finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"]… [--final "<part>"]…
@@ -6600,6 +6635,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
   // The late check of its last finish found a problem after she was told she could go on, and no later finish has ended well since (the
   // note finish.js leaves): asked only of a video with a hand-off that is not a session's, and of none the gate holds.
   const lateProblem = !hidden && Boolean(handoff) && kind !== "session" && problemFlagged(ctx.home, e.name);
+  // The finish her last yes started has ended without a hand-off (finish-ended.js), which `guide … tell` says at its first look: asked only
+  // when no finish is at work now, of no session and no video the gate holds.
+  const finishFailed = !hidden && kind !== "session" && running !== "finish" && endedWithoutHandoff(ctx.home, e.name, handoff ? handoff.at : null);
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6622,6 +6660,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
     finishRunning: running === "finish",
     checking,
     lateProblem,
+    finishFailed,
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     gated: kind !== "session" && sessionNotCleared(r),
     way,
@@ -6891,7 +6930,8 @@ async function waitForChange(ctx) {
     import or its reading did not finish, or its finish wrote no hand-off. What the guide says is read again every TELL_POLL_MS, for
     up to TELL_MS, following the video from its drop folder into Episodes (follow). A finish it was asked about while it ran is
     waited for until its hand-off is written, which is when the finish only waits for its late check, and not until that check is
-    made. A video with nothing on its way gets its next step at once, and one still on its way after TELL_MS gets that said, with
+    made; a finish her last yes started that ended without a hand-off before the first look (`finishFailed`) is said so at once, in place
+    of the step from before it. A video with nothing on its way gets its next step at once, and one still on its way after TELL_MS gets that said, with
     its next step. Nothing is said before the end, and no notice is posted: the import, the reading and a finish's late check that
     fails post their own. */
 async function tellWhen(ctx, item) {
