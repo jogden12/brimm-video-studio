@@ -33,8 +33,9 @@ const GB = 1024 ** 3;
 /** The step of the work, as the progress panel says it. The job has this one only: the run is the copy being made. */
 export const WORK_COPY_STEP = "Making the video for HyperFrames";
 export const WORK_COPY_STEPS = [WORK_COPY_STEP];
-/** The second step of a Reel's copy (architecture 4.3, plan PR 5): once the video is in place, the faces are looked for in it, to be
-    offered to the app for the upright crop. A copy that is given no finder has the first step alone. */
+/** The second step of a Reel's copy (architecture 4.3, plan PR 5): once the video is in place, the faces are looked for in it, to
+    crop the Reel's page upright on the speaker (project.js reelCrop) and to be offered to the app's agent to move that crop by. A
+    copy that is given no finder has the first step alone. */
 export const FACES_STEP = "Finding the faces";
 export const REEL_COPY_STEPS = [WORK_COPY_STEP, FACES_STEP];
 /** How long each of the face finder's two programs, the ffmpeg that cuts the stills and the finder that looks in them (unedited.js

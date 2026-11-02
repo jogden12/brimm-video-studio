@@ -32,7 +32,8 @@
 //     it the run keeps the faces it found in it, if it found any;
 //   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words,
 //     placed by the cut plan's phrases as the main project's are and then chosen and put on the Reel's own clock, no cut or Reel
-//     suggestions (the plan cuts nothing of a Reel), and the face positions only when the finder found some;
+//     suggestions (the plan cuts nothing of a Reel), and the face positions only when the finder found some; its page is upright,
+//     1080 by 1920, cropped on the speaker those faces show, or on the middle of the picture when there are none (project.js reelCrop);
 //   - the app is opened on it (app.js openProjectInApp), and one record write holds the project (`key` "reel <n>", `fromSuggestion` <n>)
 //     and the Reel marked picked, which is what `reel pick` did and what parts.js and the hand-off read.
 // A project that was made is kept, whether or not the app opened.
