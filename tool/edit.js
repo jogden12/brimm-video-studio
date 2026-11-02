@@ -2021,7 +2021,16 @@ const refuse = (ctx, why) => {
   ctx.say(why);
   return 1;
 };
-const oneLine = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+/** What a command says when the run at work on the episode stops it: `generic`, the words it has always said, unless that run is a finish
+    whose hand-off is written and which only waits for its late check (finish-check.js checkingNow). She was told she need not wait for that
+    check, so the stop says that the hand-off is written and when Studio checks Dropbox's copies, and `again`, what she does then, in the
+    command's own words; `of` is " of <the video>" where the command names it. A stop that comes while the finish still copies is the
+    generic one: nothing is written yet, and the finish is what she waits for. `record` is the episode's record in force. */
+function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
+  const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
+  return checking ? `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}` : generic;
+}
+const oneLine =(v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 
 /** Record the episode's name as it is given (spec section 1, "The episode's name"). Nothing is renamed: the folder keeps its
     name, and a project keeps the name it was pushed with. */
@@ -2370,7 +2379,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) stops.push(`${running} is running for this episode. Say "how far is it?"`);
+  if (running) stops.push(stoppedWords(ctx, found, record, { generic: `${running} is running for this episode. Say "how far is it?"`, again: `${forReels ? 'Say "hand off the Reels"' : app ? 'Say "hand it off"' : "Say finish"} again then.` }));
   const noHandEdits = answers.noHandEdits || [];
   // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
   const plan = (() => {
@@ -2650,7 +2659,7 @@ export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
   if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
   // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return refuse(ctx, `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`);
+  if (running && running !== "bring") return refuse(ctx, stoppedWords(ctx, found, record, { generic: `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`, again: "Hand it over then. Nothing was handed over.", of: ` of ${name}` }));
   // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes, of the
   // parts this Mac pushed last alone: those are the ones checked below. A part the other Mac pushed last is not this Mac's to
   // hand over, and an older Share and export of it copied from here would look newer there than that Mac's own.
@@ -4039,7 +4048,7 @@ function layerStart(ctx, words, { writes = true } = {}) {
   if (!writes) return { found, part, target, words: left };
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return { code: refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`) };
+  if (running && running !== "bring") return { code: refuse(ctx, stoppedWords(ctx, found, got.record, { generic: `${running} is running for this episode. Say "how far is it?", and try again when it is done.`, again: "Try again then." })) };
   if (target.base) return { code: refuse(ctx, "This timeline was changed by hand in Final Cut and taken in. brimm-video does not change a hand-edited timeline yet: make this change by hand in Final Cut.") };
   if (part !== "main" && piecesOf(found, part, ctx).old) return { code: refuse(ctx, `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so brimm-video cannot change it: make this change by hand in Final Cut.`) };
   return { found, part, target, words: left };
@@ -4548,7 +4557,7 @@ async function spell(ctx, rest) {
   // reading that has put in what it read is at its copies' late check only, which touches nothing a spelling writes; but only
   // once the record holds the current reading: one from before her answer is one a new reading is still to replace.
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, `${running} is running for this episode. Say "how far is it?", and try again when it is done.`);
+  if (running && running !== "bring" && !(running === "read" && currentReading(got.record))) return refuse(ctx, stoppedWords(ctx, found, got.record, { generic: `${running} is running for this episode. Say "how far is it?", and try again when it is done.`, again: "Try again then." }));
   const fc = hasFinalCut(got.record);
   if (verb === "drop") {
     const heard = more[0];
@@ -5181,7 +5190,7 @@ function answerWhy(ctx, found, record, plan) {
   const held = heldElsewhere(record, ctx.machine);
   if (held) return beingAnswered(name, held.by);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running) return `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`;
+  if (running) return stoppedWords(ctx, found, record, { generic: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`, again: "Say it again then.", of: ` of ${calledAs(ctx, found)}` });
   return "";
 }
 
@@ -6707,8 +6716,9 @@ function checkSentence({ due, took }) {
   return `Studio checks Dropbox's copies at ${clockAt(due)}${out.length ? `, and then takes ${listed(out)}` : ""}.`;
 }
 
-/** What is said after it, in the guide's answers: the check needs nothing of hers. */
-const NO_NEED_TO_WAIT = "You do not need to wait for it.";
+/** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode are
+    stopped until it is made (stoppedWords): a spelling, handing the video off again and handing it over. */
+const ON_THE_CHECK = "You do not need to wait for it. A spelling, handing it off again and handing it over wait until then.";
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
@@ -6739,7 +6749,7 @@ function guideItems(ctx) {
       continue;
     }
     const facts = guideFacts(ctx, e, links, rates, notes, downloads);
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${NO_NEED_TO_WAIT}`] : [] });
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [] });
   }
   const newest = new Map();
   for (const item of items) {
