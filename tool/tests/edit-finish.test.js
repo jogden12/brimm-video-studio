@@ -49,7 +49,7 @@ describe("finish, the part that looks and asks", () => {
       ["reel 1", `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 1"]}.fcpxmld`, false],
       ["reel 2", `${PROJECT["reel 2"]}.mov`, null, true]
     ]);
-    assert.match(t.said(), /Started\. The panel shows how far it is\./);
+    assert.match(t.said(), /Started\. This Mac has not timed a hand-off yet, so there is no time to give\. You can carry on meanwhile; the panel shows how far it is\./);
     t.done();
   });
   it("asks which Share is final when two files are of the highest version, and starts nothing even with a yes while anything is left to ask", async () => {

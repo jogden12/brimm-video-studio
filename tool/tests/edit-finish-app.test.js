@@ -115,7 +115,7 @@ describe("D2. what finish says of a part, and what it starts", () => {
     ]);
     assert.deepEqual(asked.parts[0].video, { name: main.name, dir: w.downloads, where: "Downloads", bytes: statSync(main.path).size, mtimeMs: statSync(main.path).mtimeMs });
     assert.deepEqual(asked.parts[1].video, { name: reel.name, dir: w.downloads, where: "Downloads", bytes: statSync(reel.path).size, mtimeMs: statSync(reel.path).mtimeMs });
-    assert.match(w.t.said(), /Started\. The panel shows how far it is\.$/);
+    assert.match(w.t.said(), /Started\. This Mac has not timed a hand-off yet, so there is no time to give\. You can carry on meanwhile; the panel shows how far it is\.$/);
     w.t.done();
   });
   it("writes a part kept from the last finish with no file, and starts the finish all the same", async () => {

@@ -48,7 +48,7 @@ import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
-import { progressFolder, readRates, reporter } from "./progress.js";
+import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
@@ -61,6 +61,7 @@ import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
+import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
@@ -2306,6 +2307,15 @@ function keepShownWords(work, lines, at) {
 }
 const sameLines = (kept, lines) => Array.isArray(kept) && kept.length === lines.length && kept.every((line, i) => line === lines[i]);
 
+/** What `finish` says when it starts the detached part: when the hand-off will be ready, as a clock time and in minutes, from the speed
+    this Mac measured of the finishes before it (finish-time.js) and the seconds of video this one takes (`parts`, the record's own
+    lengths), and that she can carry on meanwhile. With no speed measured yet, or no video to take, it names no time it cannot back. */
+function startedWords(ctx, record, parts) {
+  const seconds = handoffIn(readRates(progressFolder(ctx.home)), videoSeconds(record, parts));
+  if (seconds === null) return "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is.";
+  return `Started. The hand-off is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}. You can carry on meanwhile.`;
+}
+
 /** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
     exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
     it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns at once.
@@ -2493,7 +2503,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     // Whatever stands in its place is not a file it kept: it is read as nothing shown.
   }
   startDetached(ctx, { command: "finish", folder: found.name });
-  ctx.say("Started. The panel shows how far it is.");
+  ctx.say(startedWords(ctx, record, looked.parts));
   return 0;
 }
 

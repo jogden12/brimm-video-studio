@@ -20,6 +20,7 @@ import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
 import { clearChecking, clearProblem, flagProblem, markChecking } from "./finish-check.js";
+import { videoSeconds, measured } from "./finish-time.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, isExportOf, shapeFault, soundFault } from "./exports.js";
 import { suggestionsFor } from "./suggestions-in-main.js";
@@ -669,6 +670,8 @@ export function letGoClaim(ctx, found) {
 }
 
 export async function finishNow(ctx, found, deps = {}) {
+  // When it began, for how long it takes until its hand-off is ready (finish-time.js).
+  const began = ctx.now();
   const progress = deps.progress || noProgress;
   const check = deps.lateCheck || lateCheck;
   const made = [];
@@ -1085,6 +1088,9 @@ export async function finishNow(ctx, found, deps = {}) {
       } catch (e) {
         // The marker could not be written: the check goes on, and the guide says what it said while a finish runs.
       }
+      // How long it took until the hand-off was ready, for the line the next finish says when it starts. Nothing is kept for a finish
+      // that took no video now, or that failed before this point.
+      measured(ctx.home, ctx.now() - began, videoSeconds(record, parts));
     }
 
     // The late check, at least 15 minutes after the last copy. Only when it finds every copy whole, and the record says what

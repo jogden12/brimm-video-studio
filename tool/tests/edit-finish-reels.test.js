@@ -345,7 +345,7 @@ describe("5. what it starts", () => {
     const reel2 = exportOf(w, "reel 2");
     const had = reread(w.found).rev;
     const r = await ask(w, { yes: true });
-    assert.deepEqual([r.code, r.lines.at(-1)], [0, "Started. The panel shows how far it is."]);
+    assert.deepEqual([r.code, r.lines.at(-1)], [0, "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is."]);
     assert.deepEqual(started(w), [["finish", "--now", FOLDER]]);
     const asked = w.asked();
     assert.deepEqual([asked.version, asked.source, asked.rev, asked.claimed], [1, "hyperframes", had + 1, true]);
