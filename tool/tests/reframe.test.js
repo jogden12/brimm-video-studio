@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTools } from "../run.js";
-import { stillsArgs, needsReframe, speakerPlace, cropFor, cropsFor, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
+import { stillsArgs, needsReframe, speakerPlace, cropFor, cropsFor, UPRIGHT, shownWidth, uprightPosition, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
 
 const WIDE = { width: 1920, height: 1080 };
 /** A face box whose middle is `centre` of the way across the picture. `size` is its width, as a share of the picture's. */
@@ -142,6 +142,65 @@ describe("a crop for each kept range", () => {
   it("cuts every range from the middle when no face was found anywhere", () => {
     assert.deepEqual(cropsFor(WIDE, [{ start: 0, end: 3 }, { start: 5, end: 10 }], [{ file: "0001.jpg", faces: [] }]), [at(657, false), at(657, false)]);
     assert.deepEqual(cropsFor(WIDE, [{ start: 0, end: 3 }], []), [at(657, false)]);
+  });
+});
+
+describe("where an upright frame puts a picture so that the speaker is in its middle", () => {
+  /** Pictures no wider than the frame once they fill it: upright ones, and ones narrower than 9:16. */
+  const UPRIGHTS = [{ width: 1080, height: 1920 }, { width: 720, height: 1280 }, { width: 540, height: 960 }, { width: 1080, height: 2400 }, { width: 1000, height: 2000 }, { width: 1064, height: 1892 }];
+  it("is the frame of a Reel and of a Story, 1080 by 1920", () => {
+    assert.deepEqual({ ...UPRIGHT }, { width: 1080, height: 1920 });
+  });
+  it("shows a picture as wide as it is once it is scaled to fill the frame: until it covers 1080 by 1920, and no more", () => {
+    for (const facts of [WIDE, { width: 1280, height: 720 }, { width: 3840, height: 2160 }, { width: 640, height: 360 }]) assert.equal(shownWidth(facts), 3413.333, JSON.stringify(facts));
+    assert.equal(shownWidth({ width: 1440, height: 1080 }), 2560);
+    assert.equal(shownWidth({ width: 1080, height: 1080 }), 1920);
+  });
+  it("shows an upright picture, or one narrower than 9:16, as wide as the frame, never narrower", () => {
+    for (const facts of UPRIGHTS) assert.equal(shownWidth(facts), 1080, JSON.stringify(facts));
+  });
+  it("is not made a hair wider than the frame by a sum: 1064 times (1080 over 1064) comes to 1080.0000000000002", () => {
+    assert.equal(1064 * (1080 / 1064) > 1080, true, "the sum that leaves it a hair over");
+    assert.equal(shownWidth({ width: 1064, height: 1892 }), 1080);
+  });
+
+  it("is 50% when the speaker is in the middle of the picture", () => {
+    assert.equal(uprightPosition(WIDE, 0.5), 50);
+    assert.equal(uprightPosition({ width: 1080, height: 1080 }, 0.5), 50);
+  });
+  it("is 0% for a speaker so far to the left, and 100% for one so far to the right, that the picture's own edge stops the crop", () => {
+    for (const at of [0, 0.05, 0.1, 0.15]) assert.equal(uprightPosition(WIDE, at), 0, String(at));
+    for (const at of [0.85, 0.9, 0.95, 1]) assert.equal(uprightPosition(WIDE, at), 100, String(at));
+  });
+  it("is between them for a speaker to one side, to two places: a quarter of the way across a wide picture is 13.43%, and 65% of the way is 71.94%", () => {
+    assert.equal(uprightPosition(WIDE, 0.25), 13.43);
+    assert.equal(uprightPosition(WIDE, 0.65), 71.94);
+    assert.equal(uprightPosition({ width: 1080, height: 1080 }, 0.3), 4.29);
+  });
+  it("puts the speaker in the middle of the frame, 540 pixels across, wherever the picture's edges allow", () => {
+    for (const facts of [WIDE, { width: 1280, height: 720 }, { width: 1080, height: 1080 }, { width: 1440, height: 1080 }]) {
+      const shown = shownWidth(facts);
+      for (const at of [0.3, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7]) {
+        // The picture's left side is (1080 - shown) x position from the frame's; the speaker is at x shown from the picture's.
+        const speaker = (1080 - shown) * uprightPosition(facts, at) / 100 + at * shown;
+        assert.ok(Math.abs(speaker - 540) < 0.15, `${JSON.stringify(facts)} at ${at}: ${speaker}`);
+      }
+    }
+  });
+  it("is 50% for a picture no wider than the frame, wherever the speaker is: there is nothing to crop across", () => {
+    for (const facts of UPRIGHTS) for (const at of [0, 0.2, 0.5, 0.9, 1]) assert.equal(uprightPosition(facts, at), 50, `${JSON.stringify(facts)} at ${at}`);
+  });
+  it("is the middle for a speaker whose place is not a number, and 50% for a picture whose size is not known", () => {
+    for (const at of [NaN, undefined, null, "0.2", Infinity]) assert.equal(uprightPosition(WIDE, at), 50, String(at));
+    for (const facts of [{}, undefined, { width: 0, height: 0 }, { width: "wide", height: 1080 }]) assert.equal(uprightPosition(facts, 0.2), 50, JSON.stringify(facts));
+  });
+  it("is a plain percentage between 0 and 100 with at most two places, never negative zero", () => {
+    for (let at = 0; at <= 1.0001; at += 0.0137) {
+      const position = uprightPosition(WIDE, at);
+      assert.match(String(position), /^(?:\d{1,2}|100)(?:\.\d{1,2})?$/, String(at));
+      assert.ok(position >= 0 && position <= 100, String(at));
+    }
+    assert.equal(Object.is(uprightPosition(WIDE, 0), 0), true);
   });
 });
 

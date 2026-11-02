@@ -73,6 +73,36 @@ export function cropsFor(facts, ranges, stills, every = EVERY) {
 const WIDTH = 1080;
 const HEIGHT = 1920;
 
+/** The same frame, for whoever lays an upright page out themselves (project.js, a Reel's page). */
+export const UPRIGHT = Object.freeze({ width: WIDTH, height: HEIGHT });
+
+/** How wide a video's picture is on the upright frame when it fills it (`object-fit: cover`), in the frame's pixels, to the
+    thousandth of one: it is scaled until it covers 1080 by 1920, and no more. `facts` is the picture's {width, height}. A wide
+    picture is far wider than the frame (a 16:9 one is 3413.333 pixels wide on it), and an upright one, or one narrower than 9:16,
+    is as wide as the frame and no narrower. The thousandth is because a sum leaves 1064 times (1080 over 1064) a hair over 1080,
+    and a picture exactly as wide as the frame would be taken for a wider one. Not a number for a picture whose size is not known. */
+export function shownWidth(facts) {
+  const width = Number(facts?.width);
+  return Math.round(width * Math.max(WIDTH / width, HEIGHT / Number(facts?.height)) * 1000) / 1000;
+}
+
+/** Where `object-position` puts a picture across an upright frame it fills (`object-fit: cover`) so that the speaker is in the
+    middle of the frame: a percentage from 0 to 100, to two places at most. `facts` is the picture's {width, height}, and `at` is
+    where the speaker is across it, as a fraction of its width from its left (speakerPlace's; anything that is not a number is the
+    middle).
+    The picture is `shown` wide on the frame (shownWidth). An `object-position` of x% puts the point x% of the way across the
+    picture at the point x% of the way across the frame, so the picture's left side is (1080 - shown) times x% from the frame's,
+    and the speaker is `at` times `shown` further on. For the speaker to be at 540, the middle of the frame, x is (540 - at times
+    shown) over (1080 - shown), and no less than 0 or more than 100: the picture's own edges, where the crop is stopped. A picture
+    that is no wider than the frame has nothing cropped across, and one place is as good as another: 50. */
+export function uprightPosition(facts, at) {
+  const shown = shownWidth(facts);
+  if (!(shown > WIDTH)) return 50;
+  const speaker = Number.isFinite(at) ? at : 0.5;
+  const across = Math.min(1, Math.max(0, (WIDTH / 2 - speaker * shown) / (WIDTH - shown)));
+  return Math.round(across * 10000) / 100;
+}
+
 /** The quality an upright file is written at: QUALITY, and 2 more for each doubling of the crop's height to 1920. An enlarged
     picture has no more detail than its source, and at QUALITY x264 spends its bits keeping the enlarged grain and blocks of
     the source. Tried on ffmpeg 9 with a made-up 640x360 recording like a Zoom one, at 0.67 Mbit: the crop, 202x360 made
