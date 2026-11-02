@@ -38,12 +38,14 @@ function holder(home, folder, lock = lockOf(home, folder)) {
   }
 }
 
-/** The detached run at work on an episode on this Mac, { pid, command }, or null when none is: a lock whose run is no longer
-    running was left by a run that died, and counts as none. It is the run that holds the episode's lock, or `lock` when one is
-    given: a run with a lock of its own, as the working copy's (workcopy.js), runs beside the episode's. */
+/** The detached run at work on an episode on this Mac, { pid, command, nonce }, or null when none is: a lock whose run is no
+    longer running was left by a run that died, and counts as none. It is the run that holds the episode's lock, or `lock` when
+    one is given: a run with a lock of its own, as the working copy's (workcopy.js), runs beside the episode's. The nonce is the
+    one the run took its lock with, which names that run alone (a process number can be used again): "" for a lock written
+    without one. */
 export function runningRun(home, folder, alive = isRunning, lock = lockOf(home, folder)) {
   const held = holder(home, folder, lock);
-  return held && alive(held.pid) ? { pid: held.pid, command: held.command } : null;
+  return held && alive(held.pid) ? { pid: held.pid, command: held.command, nonce: typeof held.nonce === "string" ? held.nonce : "" } : null;
 }
 
 /** The command a detached run is at for an episode on this Mac, or "" when none is (runningRun), by the episode's lock or `lock`. */
@@ -84,14 +86,15 @@ const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 
 /** How old a takeover guard may be before it counts as left by a run that died inside it: it is held for a moment only. */
 const GUARD_STALE_MS = 10000;
 
-/** Take the episode's lock for this run: { taken: true, text } with the lock's text, or { running } naming the command of the
-    live run that holds it. Safe for any number of runs at once:
+/** Take the episode's lock for this run: { taken: true, text, nonce } with the lock's text and the nonce in it, or { running }
+    naming the command of the live run that holds it. Safe for any number of runs at once:
     - the lock is taken by a hard link of a file of this run's own to the lock's name, which fails when the lock is there,
       so one run alone takes a free lock;
     - a lock whose run is not running is taken away only by the run that holds the takeover guard (taken by a hard link too),
       and only when its text is still, word for word, the dead run's: no live run's lock is ever taken away. */
 export function takeEpisodeLock(lock, command, alive) {
-  const text = JSON.stringify({ pid: process.pid, command, nonce: randomUUID() });
+  const nonce = randomUUID();
+  const text = JSON.stringify({ pid: process.pid, command, nonce });
   const mine = `${lock}.${process.pid}.${randomUUID().slice(0, 8)}`;
   const guard = `${lock}.takeover`;
   writeFileSync(mine, text);
@@ -102,7 +105,7 @@ export function takeEpisodeLock(lock, command, alive) {
       guarded = false;
       try {
         linkSync(mine, lock);
-        return { taken: true, text };
+        return { taken: true, text, nonce };
       } catch (e) {
         if (e.code !== "EEXIST") throw e;
       }
@@ -131,7 +134,7 @@ export function takeEpisodeLock(lock, command, alive) {
         if (textOf(lock) === seen) rmSync(lock, { force: true });
         try {
           linkSync(mine, lock);
-          return { taken: true, text };
+          return { taken: true, text, nonce };
         } catch (e) {
           if (e.code !== "EEXIST") throw e;
         }
@@ -163,10 +166,11 @@ export function releaseEpisodeLock(lock, text) {
     the line with nothing of the video's names in it (edit.js), and for any other the line as it is. An error of its own, as a
     folder in BRIMM Video Work that cannot be made or a result that cannot be written, names the episode's folder: it is thrown
     said through `clean` too, so that nothing of it reaches the log or the chat otherwise.
-    `work` is given { early }: a run whose own work is done before it ends (a reading, whose copies have their late check still
-    to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and with
-    this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the run
-    ends. An early result that cannot be written costs nothing: the final one is still written. */
+    `work` is given { early, nonce }: a run whose own work is done before it ends (a reading, whose copies have their late check
+    still to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and
+    with this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the
+    run ends. An early result that cannot be written costs nothing: the final one is still written. `nonce` is the one in the lock
+    this run holds, for a run that leaves a note of its own on the disk to be believed only while that lock is its own. */
 export async function runDetached({ home, folder, command, lock: own, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
   // The episode's lock, or a lock of the command's own (`lock`), for a run that writes no record and so may run beside the others.
   const lock = own ?? lockOf(home, folder);
@@ -197,7 +201,7 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
   let done;
   try {
     keepAwake(process.pid);
-    done = await work({ early });
+    done = await work({ early, nonce: took.nonce });
   } catch (e) {
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
