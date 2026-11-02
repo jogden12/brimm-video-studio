@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RATES, progressFolder, readRates } from "../progress.js";
+import { RATES, aboutLeft, progressFolder, readRates } from "../progress.js";
 import { HANDOFF_STEP, handoffIn, videoSeconds, measured } from "../finish-time.js";
 
 const RECORD = { video: { seconds: 600 }, reels: [{ n: 1, from: 100, to: 130 }, { n: 2, from: 200, to: 290 }, { n: 3, from: 0, to: 0 }, { n: 4 }] };
@@ -65,6 +65,43 @@ describe("the measuring of a finish's hand-off", () => {
     const t = home();
     for (const [ms, length] of [[1000, 0], [0, 600], [-5, 600], [Number.NaN, 600], [1000, Number.NaN]]) assert.equal(measured(t.dir, ms, length), false, `${ms} ${length}`);
     assert.deepEqual(readRates(progressFolder(t.dir)), {});
+    t.done();
+  });
+});
+
+describe("one slow run does not make the speed run away", () => {
+  function home() {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-finish-time-"));
+    return { dir, rates: () => readRates(progressFolder(dir)), done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  it("counts a hand-off that took longer than the video is long as taking that long: a 25-second Reel that took 185 seconds is 1 for each second, not 7.4", () => {
+    const t = home();
+    assert.equal(measured(t.dir, 185000, 25), true);
+    assert.deepEqual(t.rates(), { [HANDOFF_STEP]: 1 });
+    // The next recording, half an hour long, is told as the video is long: not in hours (7.4 would say "about 3 hours 42 minutes").
+    assert.equal(aboutLeft(handoffIn(t.rates(), 1800)), "about 30 minutes");
+    t.done();
+  });
+  it("keeps a speed at the video's length or below as it was measured, and blends it as before", () => {
+    const t = home();
+    assert.equal(measured(t.dir, 25000, 25), true);
+    assert.deepEqual(t.rates(), { [HANDOFF_STEP]: 1 });
+    assert.equal(measured(t.dir, 5000, 25), true);
+    assert.deepEqual(t.rates(), { [HANDOFF_STEP]: 0.6 });
+    t.done();
+  });
+  it("is back near the truth after five clean runs of 0.2 following a slow first one: about 7 minutes for half an hour, where the slow run's own 7.4 would still say about 13", () => {
+    const t = home();
+    measured(t.dir, 185000, 25);
+    for (let run = 0; run < 5; run++) measured(t.dir, 5000, 25);
+    assert.equal(aboutLeft(handoffIn(t.rates(), 1800)), "about 7 minutes");
+    t.done();
+  });
+  it("counts a slow run after a good history as one at the most: 0.2 and a slow 7.4 make 0.6, not 3.8", () => {
+    const t = home();
+    measured(t.dir, 5000, 25);
+    measured(t.dir, 185000, 25);
+    assert.deepEqual(t.rates(), { [HANDOFF_STEP]: 0.6 });
     t.done();
   });
 });

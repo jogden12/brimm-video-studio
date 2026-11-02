@@ -670,8 +670,9 @@ export function letGoClaim(ctx, found) {
 }
 
 export async function finishNow(ctx, found, deps = {}) {
-  // When it began, for how long it takes until its hand-off is ready (finish-time.js).
-  const began = ctx.now();
+  // When its own work began, for how long it takes until its hand-off is ready (finish-time.js): once the files it takes are whole and
+  // taken into its own folder, since how long HyperFrames or Final Cut or Dropbox takes to finish a file is none of its work. Set below.
+  let began = ctx.now();
   const progress = deps.progress || noProgress;
   const check = deps.lateCheck || lateCheck;
   const made = [];
@@ -776,6 +777,8 @@ export async function finishNow(ctx, found, deps = {}) {
       }
     }
     if (failed.length) return result();
+    // Every file is whole and taken: the waiting is over, and what is left is the work that takes so long for each second of video.
+    began = ctx.now();
 
     // Its shape, before anything is transcribed; for an export of HyperFrames', its sound too, which is stopped, and its colour, which is
     // said for a person to look at and stops nothing (architecture 8.2).
@@ -1088,8 +1091,8 @@ export async function finishNow(ctx, found, deps = {}) {
       } catch (e) {
         // The marker could not be written: the check goes on, and the guide says what it said while a finish runs.
       }
-      // How long it took until the hand-off was ready, for the line the next finish says when it starts. Nothing is kept for a finish
-      // that took no video now, or that failed before this point.
+      // How long its work took until the hand-off was ready, for the line the next finish says when it starts. Nothing is kept for a
+      // finish that took no video now, or that failed before this point.
       measured(ctx.home, ctx.now() - began, videoSeconds(record, parts));
     }
 
