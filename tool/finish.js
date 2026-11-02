@@ -43,10 +43,11 @@ import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFil
     finish stops: ten minutes. */
 const LOOK_MS = 5000;
 const MOST_LOOKS = 120;
-/** The steps of a finish, as the progress panel counts them. The first says what is waited for: Final Cut's files, HyperFrames' exports,
-    or, when a finish takes both, the finished videos. */
+/** The steps of a finish, as the progress panel counts them: five, the work she can watch, up to the hand-off written. The first says
+    what is waited for: Final Cut's files, HyperFrames' exports, or, when a finish takes both, the finished videos. The late check that
+    follows the hand-off is none of them: she is told she need not wait for it (README, "What she is told, and when"). */
 const WAITING = { "final cut": "Waiting for Final Cut's files", hyperframes: "Waiting for HyperFrames' exports", both: "Waiting for the finished videos" };
-const stepsFor = (waiting) => [WAITING[waiting], "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"];
+const stepsFor = (waiting) => [WAITING[waiting], "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode"];
 
 /** The notice a finish posts on this Mac when its late check fails after it said she could go on: the video, and what to say to see
     why (the result says the same). */
@@ -1081,8 +1082,8 @@ export async function finishNow(ctx, found, deps = {}) {
 
     // She need not wait for the late check: the record holds this finish, and the hand-off is written and shown. So that the guide and
     // `status` can say so, the run leaves a marker on this Mac's own disk from here until it ends, however it ends (finish-check.js),
-    // and the panel's last step says she can go on. A finish whose record was not written leaves no marker and says nothing of the
-    // kind: there is nothing for her to go on to, and she waits for it as she did.
+    // and the panel's last step says she can go on (a step of its own, none of the five, so it has no number). A finish whose record
+    // was not written leaves no marker and says nothing of the kind: there is nothing for her to go on to, and she waits for it as she did.
     if (written) {
       try {
         markChecking(ctx.home, found.name, { nonce: deps.nonce, revision, due: lastCopy + LATE_CHECK_MS, took: taken.map((file) => file.place) });

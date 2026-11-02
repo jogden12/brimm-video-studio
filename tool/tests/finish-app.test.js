@@ -725,7 +725,7 @@ describe("E7. again, and the run", () => {
     assert.equal(reread(found).finished, null);
     w.t.done();
   });
-  it("shows the steps of a finish from HyperFrames' exports, with their own first step", async () => {
+  it("shows the steps of a finish from HyperFrames' exports, with their own first step, and five of them: the check of the copies is none", async () => {
     const w = fw();
     exportOf(w, "main");
     exportOf(w, "reel 2");
@@ -735,9 +735,10 @@ describe("E7. again, and the run", () => {
     const progress = { begin() {}, length() {}, steps: (list) => (steps = list), step: (name) => stepped.push(name), fraction() {}, encoding: () => ({ args: [], stop() {} }), end() {} };
     const result = await finishNow(w.t.ctx, found, { progress });
     assert.equal(result.ok, true, result.failed.join(" "));
-    const named_ = ["Waiting for HyperFrames' exports", "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"];
+    const named_ = ["Waiting for HyperFrames' exports", "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode"];
     assert.deepEqual(steps, named_);
-    assert.deepEqual(stepped, named_);
+    // The check of the copies is begun after them, as a step of its own that the five do not count.
+    assert.deepEqual(stepped, [...named_, "Checking the copies"]);
     w.t.done();
   });
   it("says in the end only what applies to HyperFrames: how to free space, and nothing of Final Cut", async () => {

@@ -55,11 +55,13 @@ async function finalCut() {
   assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
   return { t, found: { ...found, record: reread(found) } };
 }
-/** A progress reporter that writes down each step with how it was shown, and how the video ended. */
+/** A progress reporter that writes down the steps it was told (`listed`), each step with how it was shown, and how the video ended. */
 function panel() {
-  const seen = { steps: [], ended: [] };
-  return { seen, begin() {}, length() {}, steps() {}, step: (name, shown) => seen.steps.push([name, shown]), fraction() {}, encoding: () => ({ args: [], stop() {} }), end: (finished) => seen.ended.push(finished) };
+  const seen = { listed: [], steps: [], ended: [] };
+  return { seen, begin() {}, length() {}, steps: (names) => seen.listed.push(names), step: (name, shown) => seen.steps.push([name, shown]), fraction() {}, encoding: () => ({ args: [], stop() {} }), end: (finished) => seen.ended.push(finished) };
 }
+/** The five steps a finish tells the panel: what it waits for first, then the work. The check of the copies is none of them. */
+const FIVE = (first) => [first, "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode"];
 
 describe("the marker of a finish that waits for its late check", () => {
   it("is left after the record is written and the hand-off shown, before the wait: the run's nonce, the hand-off's revision, when the check is due, and where the originals are", async () => {
@@ -237,8 +239,30 @@ describe("the marker is taken away when the run ends, however it ends", () => {
   });
 });
 
-describe("the panel's last step, once she can go on", () => {
-  it("says so, and is still the step Checking the copies, which the steps and the rates go by", async () => {
+describe("the panel's steps for a finish, and its last step once she can go on", () => {
+  it("are five, whether the finish waits for HyperFrames' exports, for Final Cut's files or for both: the check of the copies is none of them", async () => {
+    const { w, found } = await hyperframes();
+    const exports = panel();
+    assert.equal((await finishNow(w.t.ctx, found, { nonce: NONCE, progress: exports })).ok, true);
+    const cut = await finalCut();
+    const files = panel();
+    assert.equal((await finishNow(cut.t.ctx, cut.found, { nonce: NONCE, progress: files })).ok, true);
+    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
+    const both = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, pushed: pushes } } });
+    both.t.shared(`${PROJECT.main}.mp4`, 2000);
+    both.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    exportOf(both, "reel 2");
+    assert.equal(await finishEpisode(both.t.ctx, both.found, { yes: true }), 0, both.t.said());
+    const mixed = panel();
+    assert.equal((await finishNow(both.t.ctx, { ...both.found, record: reread(both.found) }, { nonce: NONCE, progress: mixed })).ok, true);
+    assert.deepEqual(exports.seen.listed, [FIVE("Waiting for HyperFrames' exports")]);
+    assert.deepEqual(files.seen.listed, [FIVE("Waiting for Final Cut's files")]);
+    assert.deepEqual(mixed.seen.listed, [FIVE("Waiting for the finished videos")]);
+    w.t.done();
+    cut.t.done();
+    both.t.done();
+  });
+  it("says in the last that she can go on, and that is the step Checking the copies, which is none of the five and so has no number", async () => {
     const { w, found } = await hyperframes();
     const progress = panel();
     const result = await finishNow(w.t.ctx, found, { nonce: NONCE, progress });
@@ -246,7 +270,7 @@ describe("the panel's last step, once she can go on", () => {
     assert.deepEqual(progress.seen.steps.at(-1), ["Checking the copies", "Checking the copies (you can go on)"]);
     // Every step before it is begun by its name alone, as it was.
     assert.deepEqual(progress.seen.steps.slice(0, -1).map(([, shown]) => shown), Array(progress.seen.steps.length - 1).fill(undefined));
-    assert.deepEqual(progress.seen.steps.map(([name]) => name), ["Waiting for HyperFrames' exports", "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode", "Checking the copies"]);
+    assert.deepEqual(progress.seen.steps.map(([name]) => name), [...FIVE("Waiting for HyperFrames' exports"), "Checking the copies"]);
     assert.deepEqual(progress.seen.ended, [true]);
     w.t.done();
   });
