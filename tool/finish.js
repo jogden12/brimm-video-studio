@@ -958,7 +958,7 @@ export async function finishNow(ctx, found, deps = {}) {
         if (part.export) {
           if (statSync(part.exportCopy).isDirectory()) for (const inside of filesIn(part.exportCopy)) put(join(part.exportCopy, inside), join(part.export.name, inside));
           else put(part.exportCopy, part.export.name);
-          if (part.export.where === "From Final Cut") taken.push({ path: part.exportPath, snap: part.exportSnap, name: part.export.name });
+          if (part.export.where === "From Final Cut") taken.push({ path: part.exportPath, snap: part.exportSnap, name: part.export.name, place: "From Final Cut" });
         }
       }
       put(join(work, handoffName), handoffName);
