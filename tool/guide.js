@@ -144,6 +144,11 @@ export function opsText(handoff, step, again) {
     - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning` (an iPhone clip's too);
       and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
       them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
+    - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
+      and is otherwise `finishRunning`: { due, took }, `due` the time the check is made (ms) and `took` the places the finish took
+      originals from ("Downloads", "From Final Cut"); null for any other. She need not wait for the check, so a raw video or an iPhone
+      clip is not at its finish running then: the stage is the one it is once the finish has ended. What Studio is still to do is said
+      in a line edit.js adds of its own (Item `also`).
     - `gated`, when the gate holds a video as a session whose mark is not cleared, though its kind is not a session's (a record of
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
@@ -172,7 +177,9 @@ export function opsText(handoff, step, again) {
     The next step (Next): { done: true }, or { done: false, stage, text, step, after }. `stage` names where it has got, `text` is
     the step in her words, `step` the BRIMM Ops step's word ("" for any other), and `after` what comes once that step is noted
     ("" when nothing does).
-    A video in the guide's lists (Item): { facts, next, folder, record }, its folder and record as edit.js read them, or null. */
+    A video in the guide's lists (Item): { facts, next, folder, record, also }, its folder and record as edit.js read them, or null; and
+    `also`, the lines edit.js adds of its own to say after the guide's, or none (what Studio is still to do for it, which she need not
+    wait for). */
 
 /** How long a hand-off stays under way while its BRIMM Ops steps are not all noted: 60 days after it was written. */
 export const OLD_DAYS = 60;
@@ -333,7 +340,9 @@ function videoNext(facts, notes, now) {
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
-  if ((raw || clip) && facts.finishRunning) return toDo("finish-running", FINISH_RUNNING);
+  // A finish that has written its hand-off and only waits for its late check (`checking`) is not at work as far as she is concerned: the
+  // hand-off is ready, and the page's step is hers to do.
+  if ((raw || clip) && facts.finishRunning && !facts.checking) return toDo("finish-running", FINISH_RUNNING);
   if (facts.handoff) {
     if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
@@ -442,22 +451,23 @@ export function findIn(items, said) {
   return { why: NO_FIT };
 }
 
-/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and, when there are
-    any, how many videos from before the switch it does not guide. */
+/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and the lines edit.js adds of
+    its own for it (`also`) under that, and, when there are any, how many videos from before the switch it does not guide. */
 export function overviewLines({ drop, items, old }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
-    ...(under.length ? ["Under way:", ...under.map(({ facts, next }) => `  ${facts.name}: ${next.text}`)] : [NOTHING_UNDER_WAY]),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }
 
-/** One video's lines: its next step, and for a BRIMM Ops step the one after it and the step's word, which she notes it by. */
-export function videoLines({ facts, next }) {
+/** One video's lines: its next step, and for a BRIMM Ops step the one after it and the step's word, which she notes it by; then the
+    lines edit.js adds of its own for the video (`also`), none for one that is done. */
+export function videoLines({ facts, next, also = [] }) {
   if (next.done) return [`${facts.name} is done: nothing is left to do for it.`];
   const lines = [`${facts.name}: ${next.text}`];
-  return next.stage === "ops" ? [...lines, `Then: ${next.after || "that is the last step."}`, `Step: ${next.step}`] : lines;
+  return [...(next.stage === "ops" ? [...lines, `Then: ${next.after || "that is the last step."}`, `Step: ${next.step}`] : lines), ...also];
 }
 
 /** How long `guide wait` waits at most for a change in what the guide says, under the Code tab's two minutes, and how often it

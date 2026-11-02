@@ -520,6 +520,53 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
   });
 });
 
+describe("the next step while a finish waits for its late check (the BRIMM Ops page does not wait for it)", () => {
+  const CHECKING = { due: Date.parse("2026-10-20T15:20:00-05:00"), took: ["Downloads"] };
+  const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
+  const noted = (step, kind = "episode") => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } });
+  it("is the BRIMM Ops page's step for a raw video, as it is once the finish has ended, and not that its finish is running", () => {
+    for (const [what, over] of [
+      ["on the HyperFrames way", APP({ way: "hyperframes", project: PROJECT({ exported: true }) })],
+      ["on the HyperFrames way, whose project is not known to be exported", APP({ way: "hyperframes" })],
+      ["on the Final Cut way", RAW({ way: "final cut", shownInFinalCut: true })]
+    ]) {
+      const facts = { ...BASE, ...over, handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
+      const ended = nextFor({ ...facts, finishRunning: false, checking: null }, NONE, NOW);
+      const n = nextFor(facts, NONE, NOW);
+      assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken + OPS_TEXTS.online}`], what);
+      assert.deepEqual(n, ended, what);
+    }
+  });
+  it("is the BRIMM Ops page's step for an iPhone clip too", () => {
+    const facts = { ...BASE, ...CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), handoff: handoffOf("short video"), finishRunning: true, checking: CHECKING };
+    const n = nextFor(facts, NONE, NOW);
+    assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken}`]);
+  });
+  it("goes on through the page's steps as she notes them, and is done when she has said the video is finished, as at any other time", () => {
+    const facts = { ...BASE, ...APP({ way: "hyperframes" }), handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
+    assert.deepEqual([nextFor(facts, noted("taken"), NOW).stage, nextFor(facts, noted("taken"), NOW).step], ["ops", "kit"]);
+    assert.deepEqual(nextFor(facts, { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } }, NOW), { done: true });
+    assert.deepEqual(nextFor(facts, noted("cascade"), NOW), { done: true });
+  });
+  it("is still its finish is running while the finish copies, with no check to wait for yet: a hand-off an earlier finish wrote does not change that", () => {
+    for (const over of [APP({ way: "hyperframes" }), CLIP({ way: "hyperframes" }), RAW({ way: "final cut", shownInFinalCut: true })]) {
+      const n = nextFor({ ...BASE, ...over, handoff: handoffOf(over.kind === "short video" ? "short video" : "raw"), finishRunning: true, checking: null }, NONE, NOW);
+      assert.deepEqual([n.stage, n.text], ["finish-running", "Its finish is running. The panel shows how far it is."], JSON.stringify(over));
+    }
+  });
+  it("is nothing different for a finished video's Reels: the page's step where none waits, and its finish is running where a Reel waits, since that command refuses another finish beside the check", () => {
+    const waiting = (over = {}) => ({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], finishRunning: true, checking: CHECKING, ...over });
+    const running = nextFor(waiting(), NONE, NOW);
+    assert.deepEqual(shown(running), { stage: "finish-running", text: "Its finish is running. The panel shows how far it is." });
+    const quiet = nextFor(waiting({ reelsExported: [] }), NONE, NOW);
+    assert.deepEqual([quiet.stage, quiet.step], ["ops", "taken"]);
+  });
+  it("is no stage to wait for: the page's step needs her, and the check needs nothing of hers", () => {
+    assert.ok(!COMING.includes("ops"));
+    assert.ok(!COMING.includes("finish-running"));
+  });
+});
+
 describe("the guide's lists", () => {
   const item = (name, over = {}, next = { done: false, stage: "spellings", text: "T.", step: "", after: "" }) => ({ facts: { ...BASE, name, ...over }, next, folder: null, record: null });
   const waiting = { done: false, stage: "waiting", text: "W.", step: "", after: "" };
@@ -547,6 +594,16 @@ describe("the guide's lists", () => {
     ]);
     assert.deepEqual(overviewLines({ drop, items: [], old: 1 }), [`Your drop folder: ${drop}`, NOTHING_UNDER_WAY, "1 video from before the switch is not guided."]);
     assert.equal(NOTHING_UNDER_WAY, "Nothing is under way. To start, put the video in your drop folder.");
+  });
+  it("say after a video's own lines the lines edit.js adds of its own for it, and none for a video that is done", () => {
+    const ops = { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." };
+    const also = ["Studio checks Dropbox's copies at 15:20. You do not need to wait for it."];
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also }), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit", ...also]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)"), also }), ["A (aaaaaa): T.", ...also]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, { done: true }), also }), ["A (aaaaaa) is done: nothing is left to do for it."]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also: [] }), videoLines(item("A (aaaaaa)", {}, ops)));
+    const drop = "Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
+    assert.deepEqual(overviewLines({ drop, items: [{ ...item("Old", { at: 1 }), also }, item("New", { at: 2 })], old: 0 }), [`Your drop folder: ${drop}`, "Under way:", "  New: T.", "  Old: T.", `    ${also[0]}`]);
   });
   it("say one video's step, and for a BRIMM Ops step the one after it and its word", () => {
     assert.deepEqual(videoLines(item("A (aaaaaa)")), ["A (aaaaaa): T."]);

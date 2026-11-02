@@ -60,6 +60,7 @@ import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
+import { checkingNow } from "./finish-check.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
@@ -6562,6 +6563,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
   // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems). The
   // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
   const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
+  // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
+  // asked only of a finish at work, and of no video the gate holds.
+  const checking = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
   return {
     name: hidden ? listedAs(ctx, e) : withShortId(r.name.text, r),
     id: r.id,
@@ -6582,6 +6586,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
     placeholder: r.name.placeholder === true,
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
+    checking,
     shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     gated: kind !== "session" && sessionNotCleared(r),
     way,
@@ -6668,6 +6673,17 @@ function guideDrops(ctx) {
   return apart(videos, clockAt);
 }
 
+/** What Studio does at the late check of a finish, as one sentence: when it checks Dropbox's copies (`due`, ms, as this Mac's clock
+    shows it) and then takes away the originals it took, from the places it took them (`took`: Downloads, From Final Cut). A finish that
+    took none says only when it checks. */
+function checkSentence({ due, took }) {
+  const out = took.map((place) => (place === "Downloads" ? "the export out of Downloads" : "what it took out of From Final Cut"));
+  return `Studio checks Dropbox's copies at ${clockAt(due)}${out.length ? `, and then takes ${listed(out)}` : ""}.`;
+}
+
+/** What is said after it, in the guide's answers: the check needs nothing of hers. */
+const NO_NEED_TO_WAIT = "You do not need to wait for it.";
+
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
@@ -6675,7 +6691,9 @@ function guideDrops(ctx) {
     Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
     is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
-    again since its finish) stays. Her notes, the versions of every video and this Mac's measured speeds are read once. */
+    again since its finish) stays. A video whose finish only waits for its late check (`facts.checking`) says after the guide's lines
+    when Studio checks Dropbox's copies and what it then takes away, and that she need not wait for it (`also`). Her notes, the
+    versions of every video and this Mac's measured speeds are read once. */
 function guideItems(ctx) {
   const notes = readGuideNotes(ctx.home);
   const links = linksOf(ctx.root);
@@ -6695,7 +6713,7 @@ function guideItems(ctx) {
       continue;
     }
     const facts = guideFacts(ctx, e, links, rates, notes, downloads);
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r });
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${NO_NEED_TO_WAIT}`] : [] });
   }
   const newest = new Map();
   for (const item of items) {
