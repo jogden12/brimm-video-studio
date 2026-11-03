@@ -11,7 +11,7 @@ import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
 import { wordsOnScreen } from "../on-screen.js";
 import { recordingPlacements } from "../on-timeline.js";
-import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectFiles, projectName, reelCrop, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
+import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectCues, projectFiles, projectName, reelCrop, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -832,13 +832,19 @@ describe("the notes and facts of a main project, on its graphic cues (PR H1)", (
   };
   const RULE = "- **Graphic cues.** Studio's suggested graphics are in `brimm/graphic-cues.json`, each tied to the words it goes with: word ids and times on the recording's clock, so add the recording's `data-start` if it has moved. After the cuts, offer them to her, one at a time or all together, and build only the ones she takes: each short (its `seconds`), in the brand, with things and words and never people. A cue with no `at` was not found in her words: tell her, and place it only where she says. Never add a graphic she has not taken.";
   const ABOUT_FILE = "the graphics Studio suggests, each on the words it goes with, by word ids";
+  /** The sentence PR H3 adds to the end of the rule, in a main project's and in a Reel's: the pictures she chose are styles, not sources. */
+  const SENTENCE = " Files in `brimm/references/` are style references she chose: follow their look, and never copy what is in them.";
   it("have the rule for graphic cues, as it is written, right after the rule for cutting, in CLAUDE.md and AGENTS.md alike", () => {
     for (const files of [projectFiles(main()), projectFiles(main({ short: true }))]) {
       const lines = rulesOf(files).split("\n");
       assert.equal(lines.filter((line) => line.startsWith("- **Graphic cues.**")).length, 1);
-      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Cutting.**")) + 1], RULE);
+      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Cutting.**")) + 1], RULE + SENTENCE);
       assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
     }
+  });
+  it("end the rule with the sentence about the style references she chose, to follow their look and never to copy what is in them (PR H3)", () => {
+    assert.ok(rulesOf(projectFiles(main())).split("\n").some((line) => line.endsWith(`Never add a graphic she has not taken.${SENTENCE}`)));
+    assert.match(SENTENCE, /^ Files in `brimm\/references\/` are style references she chose: follow their look, and never copy what is in them\.$/);
   });
   it("name a graphic as something shown, in the brand, and never a person, and build only what she takes", () => {
     assert.match(RULE, /build only the ones she takes/);
@@ -856,7 +862,7 @@ describe("the notes and facts of a main project, on its graphic cues (PR H1)", (
       const files = projectFiles(reel());
       const lines = rulesOf(files).split("\n");
       assert.equal(lines.filter((line) => line.startsWith("- **Graphic cues.**")).length, 1);
-      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Cutting.**")) + 1], REEL_RULE);
+      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Cutting.**")) + 1], REEL_RULE + SENTENCE);
       assert.equal(REEL_RULE, `${RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.`);
       assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
     });
@@ -883,8 +889,115 @@ describe("the notes and facts of a main project, on its graphic cues (PR H1)", (
   });
 });
 
+describe("the reference pictures a project holds (PR H3)", () => {
+  const WORK = "/Users/sallie/BRIMM Video Work/.reference-x";
+  const BLUE = { name: "blue carousel.png", path: `${WORK}/blue carousel.png` };
+  /** A HEIC picture of the reference folder, as it is given once Claude can read it: the name is the folder's, the path the JPEG made of it. */
+  const HEIC = { name: "title style.heic", path: `${WORK}/title style.jpg` };
+  const ABOUT_REFERENCES = "style references she chose: follow their look, and never copy what is in them";
+  const cue = (n, words, style, over = {}) => ({ n, words, kind: "graphic", show: "A chart of costs.", seconds: 4, style, phrase: "p2", ...over });
+  const cuesOf = (files) => json(files, "brimm/graphic-cues.json").cues;
+
+  it("copies each picture it is given into brimm/references/ under its name, in a main project, a short video's and a Reel's", () => {
+    for (const over of [{}, { short: true }]) {
+      const files = projectFiles(main({ references: [BLUE], ...over }));
+      assert.deepEqual(files.get("brimm/references/blue carousel.png"), { copy: BLUE.path });
+    }
+    assert.deepEqual(projectFiles(reel({ references: [BLUE] })).get("brimm/references/blue carousel.png"), { copy: BLUE.path });
+  });
+  it("names a HEIC or TIFF picture for the JPEG that was made of it, which is the file Claude reads", () => {
+    const files = projectFiles(main({ references: [HEIC, { name: "scan.TIFF", path: `${WORK}/scan.jpg` }] }));
+    assert.deepEqual(files.get("brimm/references/title style.jpg"), { copy: HEIC.path });
+    assert.deepEqual(files.get("brimm/references/scan.jpg"), { copy: `${WORK}/scan.jpg` });
+    assert.deepEqual([...files.keys()].filter((path) => path.startsWith("brimm/references/")), ["brimm/references/title style.jpg", "brimm/references/scan.jpg"]);
+  });
+  it("holds none, and says nothing of the folder in its facts or its list of files, when it is given none", () => {
+    for (const over of [{}, { references: [] }, { references: undefined }]) {
+      const files = projectFiles(main(over));
+      assert.deepEqual([...files.keys()].filter((path) => path.startsWith("brimm/references")), []);
+      assert.ok(!("brimm/references/" in json(files, "brimm/facts.json").files));
+      assert.ok(!files.get("CLAUDE.md").includes("  - `brimm/references/`"));
+    }
+  });
+  it("says what the folder is in the facts and in the notes' list of the project's files, once, whatever the number of pictures, after the logos", () => {
+    for (const files of [projectFiles(main({ references: [BLUE] })), projectFiles(main({ references: [BLUE, HEIC] })), projectFiles(reel({ references: [BLUE, HEIC] }))]) {
+      const listed = Object.keys(json(files, "brimm/facts.json").files);
+      assert.equal(json(files, "brimm/facts.json").files["brimm/references/"], ABOUT_REFERENCES);
+      assert.equal(listed.filter((path) => path.startsWith("brimm/references")).length, 1);
+      assert.ok(listed.indexOf("brimm/references/") > listed.indexOf("assets/logos/"));
+      assert.equal(files.get("CLAUDE.md").split("\n").filter((line) => line.startsWith("  - `brimm/references/`")).length, 1);
+      assert.ok(files.get("CLAUDE.md").includes(`  - \`brimm/references/\`: ${ABOUT_REFERENCES}.`));
+      assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+    }
+  });
+  it("gives a session's clip none, whatever it is given: nothing of the reference folder is a clip's", () => {
+    const files = projectFiles(clip({ references: [BLUE] }));
+    assert.deepEqual([...files.keys()].filter((path) => path.startsWith("brimm/references")), []);
+    assert.ok(!files.has("brimm/graphic-cues.json"));
+  });
+  it("refuses a reference that is not a file name of its own, or whose copy is not named by a whole path: nothing leads out of the project", () => {
+    const bad = [{ name: "../x.png", path: BLUE.path }, { name: "a/b.png", path: BLUE.path }, { name: "a\\b.png", path: BLUE.path }, { name: ".hidden.png", path: BLUE.path }, { name: "", path: BLUE.path },
+      { name: "line\nbreak.png", path: BLUE.path }, { name: 7, path: BLUE.path }, { name: "x.png", path: "relative/x.png" }, { name: "x.png", path: "" }, { name: "x.png" }, null, "x.png"];
+    for (const reference of bad) assert.throws(() => projectFiles(main({ references: [reference] })), /references/, JSON.stringify(reference));
+    assert.throws(() => projectFiles(main({ references: "x.png" })), /references/);
+  });
+
+  describe("and the cues that name them", () => {
+    it("keeps a cue's style as it is whether or not the picture is given: a picture that is not in the folder leaves the cue its style", () => {
+      const cues = [cue(1, "says Hormozy", { ref: "blue carousel.png" }), cue(2, "is a skill", { ref: "gone.png" }), cue(3, "says", null), cue(4, "a skill", { inspiration: "Hormozi's reels" })];
+      for (const references of [[], [BLUE]]) {
+        assert.deepEqual(cuesOf(projectFiles(main({ graphicCues: cues, references }))).map((c) => c.style), [{ ref: "blue carousel.png" }, { ref: "gone.png" }, null, { inspiration: "Hormozi's reels" }]);
+      }
+    });
+    it("names the JPEG in a cue's style once a HEIC picture is made one, so that the cue names the file the project holds", () => {
+      const files = projectFiles(main({ graphicCues: [cue(1, "says Hormozy", { ref: "title style.heic" }), cue(2, "is a skill", { ref: "title style.heic" })], references: [HEIC] }));
+      assert.deepEqual(cuesOf(files).map((c) => c.style), [{ ref: "title style.jpg" }, { ref: "title style.jpg" }]);
+      assert.ok(files.has("brimm/references/title style.jpg"));
+    });
+    it("names the file as the project holds it when the cue spelled it with another case, and leaves a ref no picture is given for as it was spelled", () => {
+      const files = projectFiles(main({ graphicCues: [cue(1, "says Hormozy", { ref: "Blue Carousel.PNG" }), cue(2, "is a skill", { ref: "Gone.PNG" })], references: [BLUE] }));
+      assert.deepEqual(cuesOf(files).map((c) => c.style), [{ ref: "blue carousel.png" }, { ref: "Gone.PNG" }]);
+    });
+    it("does the same in a Reel's file of cues, whichever way the Reel has them", () => {
+      const RECORDING = Array.from({ length: 120 }, (_, i) => ({ w: `word${i}`, start: 300 + i / 2 - 0.2, end: 300 + i / 2 + 0.2 }));
+      const AT = { start: 312.4, end: 340 };
+      const onWords = (i, j, style) => ({ n: 1, words: RECORDING.slice(i, j + 1).map((w) => w.w).join(" "), kind: "graphic", show: "A stack of boxes.", seconds: 4, style });
+      const cut = (over = {}) => reel({ words: RECORDING, plan: undefined, stretch: AT, facts: { ...FACTS, seconds: 27.6 }, spellings: [], ...over });
+      const fromPlan = projectFiles(cut({ graphicCues: [onWords(40, 42, { ref: "title style.heic" })], references: [HEIC] }));
+      assert.deepEqual(cuesOf(fromPlan).map((c) => c.style), [{ ref: "title style.jpg" }]);
+      const fromRun = projectFiles(cut({ reelCues: [onWords(40, 42, { ref: "title style.heic" })], references: [HEIC] }));
+      assert.deepEqual(cuesOf(fromRun).map((c) => c.style), [{ ref: "title style.jpg" }]);
+    });
+    it("changes nothing else about the file of cues: it is the file the cues make without any picture, but for those names", () => {
+      const cues = [cue(1, "says Hormozy", { ref: "title style.heic" })];
+      const bare = json(projectFiles(main({ graphicCues: cues })), "brimm/graphic-cues.json");
+      const given = json(projectFiles(main({ graphicCues: cues, references: [HEIC] })), "brimm/graphic-cues.json");
+      assert.deepEqual({ ...given, cues: given.cues.map((c) => ({ ...c, style: bare.cues[0].style })) }, bare);
+      assert.equal(projectFiles(main({ graphicCues: cues, references: [HEIC] })).get("brimm/graphic-cues.json"), `${JSON.stringify(given, null, 2)}\n`);
+    });
+  });
+
+  describe("projectCues: the cues a project will hold, which tell which pictures it needs", () => {
+    it("is what the file of cues lists, for a main video, a short video and a Reel, before any picture is given", () => {
+      const cues = [cue(1, "says Hormozy", { ref: "blue carousel.png" }), cue(2, "the moon landing", { ref: "gone.png" })];
+      for (const input of [main({ graphicCues: cues }), main({ graphicCues: cues, short: true }), reel({ graphicCues: cues }), reel({ reelCues: cues })]) {
+        assert.deepEqual(projectCues(input), cuesOf(projectFiles(input)), input.kind);
+      }
+      assert.deepEqual(projectCues(main({ graphicCues: cues })).map((c) => [c.n, c.at === null]), [[1, false], [2, true]]);
+    });
+    it("is none for a session's clip, and for a project given no cues", () => {
+      assert.deepEqual(projectCues(clip({ graphicCues: [cue(1, "says", null)] })), []);
+      assert.deepEqual(projectCues(main()), []);
+      assert.deepEqual(projectCues(reel()), []);
+    });
+    it("is none for a kind that is none of the three, as projectFiles refuses it", () => {
+      assert.deepEqual(projectCues(main({ kind: "podcast" })), []);
+    });
+  });
+});
+
 describe("the file set of each kind of project (5.2)", () => {
-  const common = [".claude/settings.json", "AGENTS.md", "CLAUDE.md", ...FONTS, "brimm/brand.md", "brimm/facts.json", "hyperframes.json", "index.html", "media/recording.mp4", "meta.json", "node_modules/.bin/hyperframes", "package.json", "transcript.json", "vendor/gsap.min.js"];
+  const common =[".claude/settings.json", "AGENTS.md", "CLAUDE.md", ...FONTS, "brimm/brand.md", "brimm/facts.json", "hyperframes.json", "index.html", "media/recording.mp4", "meta.json", "node_modules/.bin/hyperframes", "package.json", "transcript.json", "vendor/gsap.min.js"];
   const logos = ["assets/logos/the-brimm-stacked-navy.svg", "assets/logos/the-brimm-stacked-white.svg"];
   const sorted = (paths) => [...paths].sort();
   it("is exactly this for a main project", () => {

@@ -38,6 +38,7 @@ import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
 import { UPRIGHT, shownWidth, speakerPlace, uprightPosition } from "./reframe.js";
 import { graphicCuesJson, keptIndexes, keptPhraseSpans, phraseSpans, placeGraphicCues, reelGraphicCues, REEL_CUES_MOST, REEL_EDGE_SLACK } from "./graphic-cues.js";
+import { projectNameOf, sameName } from "./references.js";
 
 /** A file of this tool's own, by its path from this file. */
 const own = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -342,6 +343,55 @@ function reelCues(input, { placed, transcript }) {
   return reelGraphicCues(onRecording, input.stretch, transcript, { spell, slack: REEL_EDGE_SLACK });
 }
 
+/** A main video's graphic cues, each placed on the transcript's own words (graphic-cues.js): in its own phrase when that phrase is kept, and
+    else in kept words before any cut, so a cue that names a phrase the plan cuts is placed as if it named none. The words of a cue are
+    spelled as the transcript's are. A short video's are the ones its reading kept in its record (PR H2), placed as a raw video's are. */
+function mainCues(input, transcript) {
+  const graphicCues = Array.isArray(input.graphicCues) ? input.graphicCues : [];
+  return placeGraphicCues(graphicCues, transcript, { spans: keptPhraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
+}
+
+/** The graphic cues that the project `input` makes (as projectFiles takes it) lists in brimm/graphic-cues.json, placed, with each cue's style as
+    it came: for a main project (from `graphicCues`) and a Reel's (from `graphicCues` or `reelCues`). A caller asks it which pictures the cues
+    name (references.js refNamesOf) before it makes the project, to have those pictures ready (PR H3). None for a session's clip, which has no
+    cues, and for any other kind. */
+export function projectCues(input) {
+  const { kind } = input ?? {};
+  if (kind === "main") return mainCues(input, transcriptJson(saidWords(input.words, input.plan?.phrases), input.spellings));
+  if (kind !== "reel" || !isStretch(input.stretch)) return [];
+  const placed = saidWords(input.words, input.plan?.phrases);
+  return reelCues(input, { placed, transcript: transcriptJson(reelWords(placed, input.stretch), input.spellings) });
+}
+
+// --- The reference pictures (PR H3) ---
+
+/** Whether a name is one file's name and leads nowhere else: no slash, backslash or control character in it, and no dot to begin it. */
+const bareFileName = (name) => name !== "" && !/[\\/\u0000-\u001f\u007f]/.test(name) && !name.startsWith(".");
+
+/** The reference pictures a project is given, [{ name, path }]: `name` is the file's name in the reference folder, and `path` the whole path
+    of the file to copy into the project, which for a HEIC or TIFF picture is the JPEG made of it (references.js). None for a session's
+    clip, whatever it is given. A reference of another shape throws: a name that is not a file name of its own would lead out of the project. */
+function referencesOf(input, episode) {
+  if (!episode || input.references === undefined || input.references === null) return [];
+  const sound = (r) => r !== null && typeof r === "object" && typeof r.name === "string" && bareFileName(r.name) && typeof r.path === "string" && isAbsolute(r.path);
+  if (!Array.isArray(input.references) || !input.references.every(sound)) {
+    throw new Error(`projectFiles: references are a list of { name, path }, each name a file name of its own and each path a whole path, and ${JSON.stringify(input.references)} are not`);
+  }
+  return input.references;
+}
+
+/** The cues with the name of each picture they name as the project holds it: a cue that names a picture the project was given (by a name that
+    is the same for a person, as sameName says) names the file in brimm/references/, which for a picture made a JPEG is the JPEG's name. A cue
+    that names a picture the project was not given keeps its style as it came. */
+function namedAsHeld(cues, references) {
+  if (!references.length) return cues;
+  return cues.map((cue) => {
+    const ref = cue?.style?.ref;
+    const given = typeof ref === "string" ? references.find((r) => sameName(r.name, ref)) : undefined;
+    return given && projectNameOf(given.name) !== ref ? { ...cue, style: { ref: projectNameOf(given.name) } } : cue;
+  });
+}
+
 // --- The notes for the agent ---
 
 /** HyperFrames' docs site, which the guidance links to: the agent is never sent to the network. */
@@ -451,11 +501,17 @@ function thisReel(crop) {
 /** The main project's rule for the graphic cues Studio suggests (PR H1; design 3 and 4): they are offered to her after the cuts and
     built only when she takes them, as a suggested cut is. The times in their file are on the recording's clock, which is the
     project's own until its video has moved (`data-start`). */
-const GRAPHIC_CUES_RULE = "- **Graphic cues.** Studio's suggested graphics are in `brimm/graphic-cues.json`, each tied to the words it goes with: word ids and times on the recording's clock, so add the recording's `data-start` if it has moved. After the cuts, offer them to her, one at a time or all together, and build only the ones she takes: each short (its `seconds`), in the brand, with things and words and never people. A cue with no `at` was not found in her words: tell her, and place it only where she says. Never add a graphic she has not taken.";
+const CUES_RULE = "- **Graphic cues.** Studio's suggested graphics are in `brimm/graphic-cues.json`, each tied to the words it goes with: word ids and times on the recording's clock, so add the recording's `data-start` if it has moved. After the cuts, offer them to her, one at a time or all together, and build only the ones she takes: each short (its `seconds`), in the brand, with things and words and never people. A cue with no `at` was not found in her words: tell her, and place it only where she says. Never add a graphic she has not taken.";
+
+/** The sentence that ends the rule in a main project and in a Reel (PR H3; design 7): the pictures she chose from the reference folder are
+    in brimm/references/. They are a style reference and not a source: nothing from someone else's post is copied into hers. */
+const REFERENCES_SENTENCE = " Files in `brimm/references/` are style references she chose: follow their look, and never copy what is in them.";
+
+const GRAPHIC_CUES_RULE = `${CUES_RULE}${REFERENCES_SENTENCE}`;
 
 /** A Reel's rule for the same (PR H2): the same line, but that its times are on the Reel's own clock, which starts where the Reel does
     and is never moved, and that the Reel's frame is upright, with the top 14% and the bottom 35% kept clear for its captions. */
-const REEL_GRAPHIC_CUES_RULE = `${GRAPHIC_CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.`;
+const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.${REFERENCES_SENTENCE}`;
 
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
@@ -505,12 +561,14 @@ const ABOUT = {
   "brimm/brand.md": "The BRIMM's brand: colours, typefaces, logos and how to use them",
   "assets/fonts/": "Josefin Sans and Allison",
   "assets/logos/": "the logos chosen for this project",
+  "brimm/references/": "style references she chose: follow their look, and never copy what is in them",
   "vendor/gsap.min.js": "GSAP, kept here so that nothing is fetched from the network",
   "CLAUDE.md": "these notes (AGENTS.md is the same text)",
   "node_modules/.bin/hyperframes": "a link to this Mac's pinned HyperFrames command line, which `npx hyperframes` runs"
 };
-/** The project's files as its notes and facts list them: a folder of assets once, every other file by its path. */
-const listed = (paths) => [...new Set(paths.filter((path) => path !== "AGENTS.md").map((path) => (path.startsWith("assets/") ? `${path.slice(0, path.indexOf("/", 7) + 1)}` : path)))];
+/** The project's files as its notes and facts list them: a folder of assets, and the folder of the reference pictures, once each, every
+    other file by its path. */
+const listed = (paths) => [...new Set(paths.filter((path) => path !== "AGENTS.md").map((path) => (path.startsWith("assets/") ? `${path.slice(0, path.indexOf("/", 7) + 1)}` : path.startsWith("brimm/references/") ? "brimm/references/" : path)))];
 
 /** What a file is, as a project of this kind says it: a Reel's video is a stretch of the recording, and any other project's is the
     recording itself. */
@@ -584,7 +642,11 @@ export const settingsText = (kind) => jsonText(settingsFor(kind));
       reelCrop). No cut or Reel suggestions are written, and the plan cuts nothing. Its brimm/graphic-cues.json is always written,
       with the Reel's clock (PR H2): of a raw episode's Reel from `graphicCues`, the cut plan's cues of the episode (reelGraphicCues
       takes those inside the stretch), and of a finished video's Reel from `reelCues`, the cues Claude read of the Reel itself;
-    - for a session's clip, `clip`, its number. A clip has no spellings, suggestions or logos, whatever it is given, and nothing
+    - for an episode's part (a main video's or a Reel's), `references` too (PR H3): [{ name, path }], the pictures its cues name (and any she chose)
+      from the reference folder, each `name` the file's name there and `path` the file to copy, which for a HEIC or TIFF picture is the JPEG made
+      of it (references.js). Each is copied to brimm/references/<name as Claude reads it> and listed as a folder, and a cue that names one names
+      that file (a cue that names a picture not given keeps its style as it came);
+    - for a session's clip, `clip`, its number. A clip has no spellings, suggestions, logos or references, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
     `cli` the toolchain's program (hyperframes.js cliPath), `guidance` the CLAUDE.md the pinned package ships, and `createdAt`
@@ -605,6 +667,7 @@ export function projectFiles(input) {
   const track = kind === "reel" ? faceTrack(input.faces) : null;
   // A Reel's page is upright and cropped on the speaker the finder found; a main video's and a clip's is the working copy's own shape.
   const crop = kind === "reel" ? reelCrop(input.facts, track) : null;
+  const references = referencesOf(input, episode);
 
   const files = new Map();
   files.set("index.html", indexHtml(input.facts, crop));
@@ -616,20 +679,18 @@ export function projectFiles(input) {
   if (kind === "main") {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
-    // The graphic cues, each placed on the transcript's own words (graphic-cues.js): in its own phrase when that phrase is kept, and
-    // else in kept words before any cut, so a cue that names a phrase the plan cuts is placed as if it named none. The words of a
-    // cue are spelled as the transcript's are. A short video's are the ones its reading kept in its record (PR H2), placed as a raw video's are.
-    const graphicCues = Array.isArray(input.graphicCues) ? input.graphicCues : [];
-    const placedGraphicCues = placeGraphicCues(graphicCues, transcript, { spans: keptPhraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
-    files.set("brimm/graphic-cues.json", graphicCuesJson(placedGraphicCues, "recording"));
+    // The graphic cues, each placed on the transcript's own words (mainCues), naming the pictures the project holds as it holds them.
+    files.set("brimm/graphic-cues.json", graphicCuesJson(namedAsHeld(mainCues(input, transcript), references), "recording"));
   }
-  if (kind === "reel") files.set("brimm/graphic-cues.json", graphicCuesJson(reelCues(input, { placed, transcript }), "reel"));
+  if (kind === "reel") files.set("brimm/graphic-cues.json", graphicCuesJson(namedAsHeld(reelCues(input, { placed, transcript }), references), "reel"));
   if (track) files.set("brimm/face-track.json", jsonText(track));
   if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: [...HOUSE_SPELLINGS, ...(input.spellings ?? [])].map(([wrong, right]) => ({ wrong, right })) }));
   files.set("brimm/brand.md", BRAND);
   files.set("vendor/gsap.min.js", { copy: GSAP });
   for (const font of FONTS) files.set(`assets/fonts/${font.file}`, { copy: own(`./brand/fonts/${font.file}`) });
   if (episode) for (const logo of input.logos ?? []) files.set(`assets/logos/${basename(logo)}`, { copy: logo });
+  // The pictures she chose from the reference folder, to follow and never to copy (the rule's last sentence): each under the name Claude reads it by.
+  for (const reference of references) files.set(`brimm/references/${projectNameOf(reference.name)}`, { copy: reference.path });
   files.set("node_modules/.bin/hyperframes", { link: input.cli });
   files.set("media/recording.mp4", { move: input.video });
 

@@ -11,10 +11,12 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { NOT_SET_UP } from "../app.js";
+import { reelStretch } from "../app-reel.js";
 import { listReferences } from "../references.js";
 import { PIN } from "../hyperframes.js";
-import { episodeWork, referencesFolder, writeSettings } from "../settings.js";
+import { episodeWork, referencesFolder, workFolder, writeSettings } from "../settings.js";
 import { guardDecision, studioFolder } from "../studio.js";
+import { reelCopyKey, reelCopyPaths, workCopyKey, workCopyPaths } from "../workcopy.js";
 import { FOLDER, NAME, listAll, reread } from "./episodes.js";
 import { episode, episodeFiles } from "./phase4.js";
 
@@ -642,4 +644,177 @@ describe("Studio never writes into the reference folder", () => {
       locked.t.done();
     }
   });
+});
+
+describe("a project made from cues that name a picture (PR H3)", () => {
+  const OPEN = "It's open in HyperFrames.";
+  const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+  /** The cut plan's cues: one in Reel 1's words (the welcome), and two in Reel 2's, which runs from p7 to p9. Their styles name a picture in the folder, a
+      HEIC one that is made a JPEG, and one that is not there. */
+  const CUES = [
+    { n: 1, words: "Welcome to the show", kind: "words", show: "The show's name.", seconds: 3, style: { ref: "blue carousel.png" }, phrase: "p4" },
+    { n: 2, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: { ref: "title style.heic" }, phrase: "p7" },
+    { n: 3, words: "very very important", kind: "words", show: "The words very important.", seconds: 3, style: { ref: "gone.png" }, phrase: "p8" }
+  ];
+  const CLAUDE = { decisions: [], graphicCues: CUES, ignored: [], clips: [] };
+  const NOT_THERE = '"gone.png" isn\'t in the reference folder, so the project has no copy of it.';
+  const WORKING_COPY = "the working copy's bytes";
+  const REEL_COPY = "the Reel's bytes";
+
+  /** The made-up episode with the working copy of its video made (or, with `reel`, Reel 2's video), the stand-in command line, and the reference
+      folder holding `pictures`. `cues`: the file of cues the run that made a finished video's Reel kept beside it. */
+  function appWorld({ record = RAW, claude = CLAUDE, reel = false, pictures = PICTURES, programs = {}, cues } = {}) {
+    const { t, found } = episode(record, programs, episodeFiles({ picked: false, ...(claude ? { claude } : {}) }));
+    writeSettings(t.home, { app: "hyperframes" });
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    const raw = statSync(join(found.folder, "Pricing talk.mp4"));
+    if (reel) {
+      const { stretch } = reelStretch(found.folder, 2);
+      const paths = reelCopyPaths(t.home, FOLDER, 2, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, stretch));
+      mkdirSync(dirname(paths.video), { recursive: true });
+      writeFileSync(paths.video, REEL_COPY);
+      writeFileSync(paths.facts, JSON.stringify({ seconds: Math.round((stretch.end - stretch.start) * 1000) / 1000, fps: 30, width: 1280, height: 720, bytes: REEL_COPY.length, stretch }));
+      if (cues) writeFileSync(paths.cues, JSON.stringify({ version: 1, cues }));
+    } else {
+      const paths = workCopyPaths(t.home, FOLDER, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+      mkdirSync(dirname(paths.video), { recursive: true });
+      writeFileSync(paths.video, WORKING_COPY);
+      writeFileSync(paths.facts, JSON.stringify({ seconds: 23.423, fps: 30, width: 1280, height: 720, bytes: WORKING_COPY.length }));
+    }
+    t.ctx.deps.app = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE };
+    const folder = referencesFolder(t.root);
+    if (pictures) {
+      mkdirSync(folder, { recursive: true });
+      for (const [name, bytes] of Object.entries(pictures)) writeFileSync(join(folder, name), bytes);
+    }
+    return { t, found, folder, work: episodeWork(t.home, FOLDER) };
+  }
+  const cuesIn = (work, project) => JSON.parse(readFileSync(join(work, project, "brimm", "graphic-cues.json"), "utf8")).cues;
+  const picturesIn = (work, project) => {
+    const dir = join(work, project, "brimm", "references");
+    return existsSync(dir) ? readdirSync(dir).sort() : [];
+  };
+  const staged = (t) => (existsSync(workFolder(t.home)) ? readdirSync(workFolder(t.home)).filter((name) => name.startsWith(".reference-")) : []);
+
+  it("copies the pictures the main video's cues name into brimm/references/ when the project is made, a HEIC one as a JPEG, and says what is not there", async () => {
+    const { t, folder, work } = appWorld();
+    const before = snapshotOf(folder);
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(r.said, [NOT_THERE, OPEN, BUTTONS]);
+    assert.deepEqual(picturesIn(work, MAIN_PROJECT), ["blue carousel.png", "title style.jpg"]);
+    assert.equal(readFileSync(join(work, MAIN_PROJECT, "brimm", "references", "blue carousel.png"), "utf8"), PICTURES["blue carousel.png"]);
+    assert.equal(readFileSync(join(work, MAIN_PROJECT, "brimm", "references", "title style.jpg"), "utf8"), "a JPEG made by sips");
+    // The cues name the files the project holds, and the cue whose picture is not in the folder keeps its style.
+    assert.deepEqual(cuesIn(work, MAIN_PROJECT).map((c) => c.style), [{ ref: "blue carousel.png" }, { ref: "title style.jpg" }, { ref: "gone.png" }]);
+    // The reference folder is as it was, and what was made on the way is gone.
+    assert.deepEqual(snapshotOf(folder), before);
+    assert.deepEqual(staged(t), []);
+    t.done();
+  });
+  it("lists the folder in the project's notes and facts, and has the rule's sentence about it", async () => {
+    const { t, work } = appWorld();
+    await on(t.ctx.deps, "app", FOLDER);
+    const notes = readFileSync(join(work, MAIN_PROJECT, "CLAUDE.md"), "utf8");
+    assert.ok(notes.includes("  - `brimm/references/`: style references she chose: follow their look, and never copy what is in them."));
+    assert.ok(notes.includes("Files in `brimm/references/` are style references she chose: follow their look, and never copy what is in them."));
+    const facts = JSON.parse(readFileSync(join(work, MAIN_PROJECT, "brimm", "facts.json"), "utf8"));
+    assert.equal(facts.files["brimm/references/"], "style references she chose: follow their look, and never copy what is in them");
+    t.done();
+  });
+  it("makes a project of cues that name no picture exactly as before: the folder is not looked at, nothing is said of it, and no folder is needed", async () => {
+    const { t, work } = appWorld({ claude: null, pictures: false });
+    const r = await app_(t);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
+    assert.deepEqual([picturesIn(work, MAIN_PROJECT), t.calls.filter((c) => c.cmd === "SIPS"), staged(t)], [[], [], []]);
+    const notes = readFileSync(join(work, MAIN_PROJECT, "CLAUDE.md"), "utf8");
+    assert.ok(!notes.includes("  - `brimm/references/`"));
+    t.done();
+  });
+  it("says there is no reference folder on this Mac, for each picture the cues name, when there is none, and makes the project without them", async () => {
+    const { t, work } = appWorld({ pictures: false });
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(r.said.slice(0, 3), ['blue carousel.png', 'title style.heic', 'gone.png'].map((ref) => `There's no reference folder on this Mac yet, so the project has no copy of "${ref}": ask Jason.`));
+    assert.deepEqual([picturesIn(work, MAIN_PROJECT), cuesIn(work, MAIN_PROJECT).map((c) => c.style)], [[], [{ ref: "blue carousel.png" }, { ref: "title style.heic" }, { ref: "gone.png" }]]);
+    t.done();
+  });
+  it("asks Dropbox to bring a picture that is online only, and makes the project without it, saying how to put it in, when it is still not here", async () => {
+    const { t, folder, work } = appWorld();
+    const online = join(folder, "blue carousel.png");
+    const reads = [];
+    const deps = { ...t.ctx.deps, isWhole: (path) => path !== online, readAll: async (path) => reads.push(path) };
+    const r = await on(deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(r.said.slice(0, 2), ['"blue carousel.png" is still coming down from Dropbox, so the project has no copy of it yet: once it is here, say "use blue carousel.png from the reference folder as a style reference".', NOT_THERE]);
+    assert.deepEqual([reads, picturesIn(work, MAIN_PROJECT)], [[online], ["title style.jpg"]]);
+    assert.deepEqual(cuesIn(work, MAIN_PROJECT).map((c) => c.style), [{ ref: "blue carousel.png" }, { ref: "title style.jpg" }, { ref: "gone.png" }]);
+    t.done();
+  });
+  it("makes the project without a HEIC picture sips cannot turn into a JPEG, saying so, and the cue keeps its style", async () => {
+    const { t, work } = appWorld({ programs: { SIPS: () => ({ code: 13, stderr: "Error 13" }) } });
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(r.said.slice(0, 2), ["It can't be used: Studio couldn't turn title style.heic into a picture it can read.", NOT_THERE]);
+    assert.deepEqual(picturesIn(work, MAIN_PROJECT), ["blue carousel.png"]);
+    assert.deepEqual(cuesIn(work, MAIN_PROJECT).map((c) => c.style), [{ ref: "blue carousel.png" }, { ref: "title style.heic" }, { ref: "gone.png" }]);
+    assert.deepEqual(staged(t), []);
+    t.done();
+  });
+  it("finds a picture by the name the cue spells it in any case, and the cue then names the file as the folder has it", async () => {
+    const claude = { ...CLAUDE, graphicCues: [{ ...CUES[0], style: { ref: "BLUE Carousel.PNG" } }] };
+    const { t, work } = appWorld({ claude });
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.deepEqual(r.said, [OPEN, BUTTONS]);
+    assert.deepEqual([picturesIn(work, MAIN_PROJECT), cuesIn(work, MAIN_PROJECT).map((c) => c.style)], [["blue carousel.png"], [{ ref: "blue carousel.png" }]]);
+    t.done();
+  });
+  it("takes a part of a name for no picture: a cue's ref is a file's name, and a picture that only holds it is not it", async () => {
+    const claude = { ...CLAUDE, graphicCues: [{ ...CUES[0], style: { ref: "carousel" } }] };
+    const { t, work } = appWorld({ claude });
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.deepEqual(r.said, ['"carousel" isn\'t in the reference folder, so the project has no copy of it.', OPEN, BUTTONS]);
+    assert.deepEqual(picturesIn(work, MAIN_PROJECT), []);
+    t.done();
+  });
+  it("copies into a Reel's project the pictures of the cues that fall in its stretch alone, on its own cues, and says only what is missing for those", async () => {
+    const { t, folder, work } = appWorld({ reel: true });
+    const before = snapshotOf(folder);
+    const r = await on(t.ctx.deps, "app", FOLDER, "reel", "2");
+    assert.equal(r.code, 0, r.text);
+    // Reel 2 holds cues 2 and 3: the picture of cue 1 is in Reel 1, so it is neither copied nor missed here.
+    assert.equal(r.said[0], NOT_THERE);
+    assert.ok(!r.text.includes("blue carousel"), r.text);
+    assert.deepEqual(picturesIn(work, REEL_PROJECT), ["title style.jpg"]);
+    assert.deepEqual(cuesIn(work, REEL_PROJECT).map((c) => c.style), [{ ref: "title style.jpg" }, { ref: "gone.png" }]);
+    assert.deepEqual([snapshotOf(folder), staged(t)], [before, []]);
+    t.done();
+  });
+  it("does so for a finished video's Reel too, from the cues the run that made its video kept", async () => {
+    const kept = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: { ref: "quote card.jpg" }, phrase: "p7" }];
+    const { t, work } = appWorld({ reel: true, record: FINISHED, cues: kept });
+    const r = await on(t.ctx.deps, "app", FOLDER, "reel", "2");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(picturesIn(work, REEL_PROJECT), ["quote card.jpg"]);
+    assert.equal(readFileSync(join(work, REEL_PROJECT, "brimm", "references", "quote card.jpg"), "utf8"), PICTURES["quote card.jpg"]);
+    assert.deepEqual(cuesIn(work, REEL_PROJECT).map((c) => c.style), [{ ref: "quote card.jpg" }]);
+    t.done();
+  });
+  it("does the same to the word with the folder and everything in it read-only: making a project never writes there", async () => {
+    for (const reel of [false, true]) {
+      const said = (w, r) => r.said.map((line) => line.split(w.t.dir).join("<dir>"));
+      const open = appWorld({ reel });
+      const was = await on(open.t.ctx.deps, "app", FOLDER, ...(reel ? ["reel", "2"] : []));
+      const locked = appWorld({ reel });
+      const before = snapshotOf(locked.folder);
+      const now = await readOnly(locked.folder, () => on(locked.t.ctx.deps, "app", FOLDER, ...(reel ? ["reel", "2"] : [])));
+      assert.deepEqual([now.code, said(locked, now)], [was.code, said(open, was)], `reel ${reel}`);
+      assert.deepEqual(snapshotOf(locked.folder), before);
+      assert.deepEqual(picturesIn(locked.work, reel ? REEL_PROJECT : MAIN_PROJECT), picturesIn(open.work, reel ? REEL_PROJECT : MAIN_PROJECT));
+      open.t.done();
+      locked.t.done();
+    }
+  });
+  /** `app` for the made-up episode, once the project is to be made. */
+  const app_ = (t) => on(t.ctx.deps, "app", FOLDER);
 });

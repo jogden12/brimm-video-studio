@@ -68,7 +68,8 @@ import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from 
 import { transcriptOf } from "./loosened.js";
 import { aboutLeft, progressFolder, readRates } from "./progress.js";
 import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
-import { projectFiles, projectName, writeProject } from "./project.js";
+import { projectCues, projectFiles, projectName, writeProject } from "./project.js";
+import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
 import { ASIDE_DIR, asidePlace, makerOf, markedOlder, momentText, olderThan, rebuildProject, snapshotOf, snapshotsOf } from "./snapshot.js";
@@ -440,11 +441,15 @@ function adoptProject(ctx, { found, record, at, projects }) {
       from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). The working copy
       is still asked for when it is not there, as above, and the one line she gets is the reading's: it is the one she waits for
       (the copy is made meanwhile), and what she says again is the same.
+    - The pictures its cues name by a `ref` in their style are copied from the reference folder into its brimm/references/ (references.js
+      withReferences, PR H3; a HEIC or TIFF picture as a JPEG, and the cue then names the JPEG). A picture that is not in the folder, not
+      whole yet, or that could not be turned into a JPEG is left out and said in her words, and its cue keeps its style. Cues that name
+      none look at no folder, say nothing and make nothing.
     The project is written whole or not at all (project.js writeProject), and a folder of that name that is there already is never
     written over: it throws. Its name is the first that no project the record keeps has (nextMain), so after a correction of the
     kind it is "main 2", and a folder the record does not know at that name is taken before this (adoptProject): what is left to
     throw is a folder that appeared between the two. */
-function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
+async function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
   const words = wordsIn(join(found.folder, `${stem}.words.json`));
@@ -472,10 +477,13 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
   const short = record.kind === "short video";
-  writeProject(join(episodeWork(home, found.name), name), projectFiles({
+  const input = {
     kind: "main", number, short, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan, graphicCues: short ? graphicCuesOfRecord(record) : graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
-  }));
+  };
+  // The pictures its cues name by a ref come from the reference folder into the project (references.js; PR H3): those that are not there are said, and
+  // their cues keep their styles. A project whose cues name none looks at no folder and says nothing of it.
+  await withReferences(ctx, refNamesOf(projectCues(input)), (references) => writeProject(join(episodeWork(home, found.name), name), projectFiles({ ...input, references })));
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
 }
 
@@ -776,7 +784,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
       ctx.say(recordingChanged(record.name.text));
     }
   } else {
-    const taken = adoptProject(ctx, { found, record, at, projects }) ?? makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
+    const taken = adoptProject(ctx, { found, record, at, projects }) ?? await makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
     if (taken.code !== undefined) return taken.code;
     ({ project } = taken);
   }

@@ -34,7 +34,9 @@
 //   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words,
 //     placed by the cut plan's phrases as the main project's are and then chosen and put on the Reel's own clock, no cut or Reel
 //     suggestions (the plan cuts nothing of a Reel), its graphic cues on the Reel's clock (a raw video's: the cut plan's cues that fall
-//     in its stretch; a finished video's: the cues the run that made its video kept beside it, when it kept any; PR H2), and the face
+//     in its stretch; a finished video's: the cues the run that made its video kept beside it, when it kept any; PR H2), the pictures of
+//     the reference folder that those cues, and no other, name by a `ref` in their style (brimm/references/<file>; references.js
+//     withReferences, PR H3: a picture that is not there is said, and its cue keeps its style), and the face
 //     positions only when the finder found some; its page is upright, 1080 by 1920, cropped on the speaker those faces show, or on
 //     the middle of the picture when there are none (project.js reelCrop);
 //   - the app is opened on it (app.js openProjectInApp), and one record write holds the project (`key` "reel <n>", `fromSuggestion` <n>)
@@ -50,7 +52,8 @@ import { runningCommand } from "./detached.js";
 import { kindOf, localStamp } from "./episode.js";
 import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST } from "./graphic-cues.js";
 import { cliPath } from "./hyperframes.js";
-import { projectFiles, projectName, writeProject } from "./project.js";
+import { projectCues, projectFiles, projectName, writeProject } from "./project.js";
+import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE, readReels, reelEntries } from "./reels.js";
 import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
@@ -194,7 +197,7 @@ function cuesFor(kind, { plan, file }) {
       for a finished video's Reel it then asks Claude for the Reel's graphic cues, which the project is made from.
     The project is written whole or not at all (project.js writeProject), and a folder at its name that is there already is never
     written over: it throws. adoptReel takes such a folder first, so what is left to throw is one that appeared between the two. */
-function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
+async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const { home } = ctx;
   const name = record.name.text;
   const stem = basename(record.video.file, extname(record.video.file));
@@ -236,11 +239,14 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   // The cut plan places the words' starts, as it does the main video's (project.js saidWords); it cuts nothing of the Reel, and with
   // none the words are only moved inside their time.
   const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
-  writeProject(dir, projectFiles({
+  const input = {
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
     plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues }),
     video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
-  }));
+  };
+  // The pictures that the cues of this Reel alone name by a ref come from the reference folder into its project (references.js; PR H3); a picture
+  // that is not there is said, and its cue keeps its style.
+  await withReferences(ctx, refNamesOf(projectCues(input)), (references) => writeProject(dir, projectFiles({ ...input, references })));
   const project = madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } });
   return { project, stretch, candidate: listed.candidate };
 }
@@ -401,7 +407,7 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
     }
   } else {
     const dir = join(work, projectName({ name: record.name.text, part: { reel: n }, id: record.id }));
-    const taken = adoptReel(ctx, { found, record, n, at, dir }) ?? makeReel(ctx, { found, record, n, at, dir }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
+    const taken = adoptReel(ctx, { found, record, n, at, dir }) ?? await makeReel(ctx, { found, record, n, at, dir }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
     if (taken.code !== undefined) return taken.code;
     ({ project, candidate = null } = taken);
     if (taken.stretch) ctx.say(reelMade(taken.stretch, n));
