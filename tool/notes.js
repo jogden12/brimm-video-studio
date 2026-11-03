@@ -10,7 +10,7 @@ import { readAnswer, parseReply, salvageReply } from "./shared/answers.js";
 import { SHOW, HOST } from "./shared/show.js";
 import { rangesOf, KEPT, KEPT_SIDE } from "./cuts.js";
 import { REEL_MIN, REEL_MAX, fitReel, storyParts } from "./reframe.js";
-import { graphicCuesOf, graphicCuesAsk, graphicCuesInPlan } from "./graphic-cues.js";
+import { graphicCuesAsk, graphicCuesInPlan, graphicCuesInReply } from "./graphic-cues.js";
 import { heardWords } from "./clock.js";
 
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -185,15 +185,10 @@ export function readNotes(reply) {
   if (data.notes === undefined) read.problems.push('Its reply has no "notes".');
   else if (typeof data.notes !== "string") read.problems.push('"notes" in its reply is not text, so it was left out.');
   else read.notes = data.notes.trim();
-  if (data.graphicCues === undefined) read.problems.push('Its reply has no "graphicCues".');
-  else if (!Array.isArray(data.graphicCues)) read.problems.push('"graphicCues" in its reply is not a list, so nothing was read from it.');
-  else {
-    // Only the five things asked for are read of a cue, and one with no id is no cue: the id is the phrase it was written for.
-    const given = data.graphicCues.map((g) => (g && typeof g === "object" && text(g.id) ? { phrase: text(g.id), words: g.words, kind: g.kind, show: g.show, seconds: g.seconds } : null));
-    const made = graphicCuesOf(given, { most: MAX_GRAPHIC_CUES });
-    read.graphicCues = made.cues;
-    read.problems.push(...made.problems);
-  }
+  // Only the five things asked for are read of a cue, and one with no id is no cue: the id is the phrase it was written for.
+  const cues = graphicCuesInReply(data, MAX_GRAPHIC_CUES);
+  read.graphicCues = cues.cues;
+  read.problems.push(...cues.problems);
   entries("clips", (c, n) => (text(c.from) && text(c.to) ? { n, from: text(c.from), to: text(c.to), hook: text(c.hook), why: text(c.why) } : null), (n) => `Clip ${n} could not be read: it needs a "from" and a "to", each the id of a phrase.`);
   // The title is the one thing a reply may leave out without a word said: a reply from before it was asked for is whole.
   if (typeof data.title === "string") {

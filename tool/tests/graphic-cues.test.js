@@ -5,8 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, graphicCuesOf, graphicCuesAsk, cueTokens, phraseSpans, keptPhraseSpans, keptIndexes, placeGraphicCues,
-  graphicCuesJson, legacyCues, graphicCuesOfPlan, graphicCuesInPlan, cueMarkers
+  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, REEL_CUES_MOST, REEL_EDGE_SLACK, graphicCuesOf, graphicCuesAsk, graphicCuesInReply, cueTokens, phraseSpans, keptPhraseSpans, keptIndexes, placeGraphicCues,
+  reelGraphicCues, graphicCuesJson, legacyCues, graphicCuesOfPlan, graphicCuesInPlan, cueMarkers
 } from "../graphic-cues.js";
 
 /** A cue as the brief writes one. */
@@ -534,5 +534,198 @@ describe("graphicCuesInPlan: where the cues of a plan are, among the plan's own 
     assert.deepEqual(graphicCuesInPlan(cues, planOf(), undefined).map((g) => [g.at, g.kept]), [[null, false]]);
     assert.deepEqual(graphicCuesInPlan([], planOf(), WORDS), []);
     assert.deepEqual(graphicCuesInPlan(undefined, planOf(), WORDS), []);
+  });
+});
+
+// --- PR H2: the cues in a reply, and a Reel's ---
+
+describe("graphicCuesInReply: the cues in what Claude replied", () => {
+  const reply = (graphicCues) => ({ graphicCues });
+  const given = (over = {}) => ({ id: "p7", words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, ...over });
+  it("reads each as a cue of the five things it was asked for, its id being the phrase it was written for, and numbers them from 1", () => {
+    const got = graphicCuesInReply(reply([given(), given({ id: "p9", words: "pricing", kind: "words", show: "The word pricing.", seconds: 3 })]), 3);
+    assert.deepEqual(got, {
+      cues: [
+        { n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null, phrase: "p7" },
+        { n: 2, words: "pricing", kind: "words", show: "The word pricing.", seconds: 3, style: null, phrase: "p9" }
+      ],
+      problems: []
+    });
+  });
+  it("reads no more than the most it is told, and keeps the first ones that can be read", () => {
+    const four = ["one", "two", "three", "four"].map((words) => given({ words }));
+    assert.deepEqual(graphicCuesInReply(reply(four), 3).cues.map((c) => c.words), ["one", "two", "three"]);
+    assert.deepEqual(graphicCuesInReply(reply(four), 12).cues.map((c) => c.words), ["one", "two", "three", "four"]);
+    assert.deepEqual(graphicCuesInReply(reply([given({ id: "" }), ...four]), 3).cues.map((c) => c.words), ["one", "two", "three"]);
+  });
+  it("leaves out an entry with no id, and says which by its place in the list", () => {
+    const got = graphicCuesInReply(reply([given({ id: undefined }), given(), null, "too many SKUs", given({ id: "  " }), given({ show: "" })]), 12);
+    assert.deepEqual(got.cues.map((c) => c.n), [1]);
+    assert.deepEqual(got.problems, [1, 3, 4, 5, 6].map((n) => `Graphic cue ${n} could not be read.`));
+  });
+  it("reads only the five things asked for: a style, a shot or a number of its own in the reply are not read", () => {
+    const [read] = graphicCuesInReply(reply([given({ style: { link: "https://example.com/a" }, shot: 2, n: 9, phrase: "p1" })]), 3).cues;
+    assert.deepEqual(read, { n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null, phrase: "p7" });
+  });
+  it("says the reply has none, or that none is a list, and reads nothing from either", () => {
+    assert.deepEqual(graphicCuesInReply({}, 3), { cues: [], problems: ['Its reply has no "graphicCues".'] });
+    assert.deepEqual(graphicCuesInReply({ spellings: [] }, 3), { cues: [], problems: ['Its reply has no "graphicCues".'] });
+    for (const odd of ["too many SKUs", {}, 3, null]) assert.deepEqual(graphicCuesInReply(reply(odd), 3), { cues: [], problems: ['"graphicCues" in its reply is not a list, so nothing was read from it.'] }, String(odd));
+    assert.deepEqual(graphicCuesInReply(reply([]), 3), { cues: [], problems: [] });
+  });
+});
+
+describe("reelGraphicCues: a Reel's cues, from the cues placed on the recording", () => {
+  /** A recording said from 300 s: word i is "word<i>", starts at 300 + i ÷ 2 and takes 0.4 s, with the id w<i>. */
+  const RECORDING = Array.from({ length: 120 }, (_, i) => ({ text: `word${i}`, start: 300 + i / 2, end: 300 + i / 2 + 0.4, id: `w${i}` }));
+  /** The Reel from 312.4 s to 340 s. Its words are the recording's whose middle is inside it, on its own clock from 0, with the ids w0, w1, …
+      (project.js reelWords and transcriptJson): the recording's words 25 to 79, as the Reel's w0 to w54. */
+  const STRETCH = { start: 312.4, end: 340 };
+  const thousandth = (t) => Math.round(t * 1000) / 1000;
+  /** The Reel's words as project.js reelWords makes them: a word that starts before the stretch starts at 0, and one that ends after it
+      ends at the Reel's length. */
+  const reelOf = (words, { start, end }) => words
+    .filter((w) => (w.start + w.end) / 2 >= start && (w.start + w.end) / 2 <= end)
+    .map((w, i) => ({ text: w.text, start: Math.max(0, thousandth(w.start - start)), end: Math.min(thousandth(end - start), thousandth(w.end - start)), id: `w${i}` }));
+  const REEL = reelOf(RECORDING, STRETCH);
+  /** A cue on words i to j of the recording. */
+  const on = (n, i, j, over = {}) => cue(RECORDING.slice(i, j + 1).map((w) => w.text).join(" "), { n, ...over });
+  const placedOn = (cues, words = RECORDING, options = {}) => placeGraphicCues(cues, words, options);
+
+  it("has the Reel's words as the words 25 to 79 of the recording", () => {
+    assert.deepEqual([REEL.length, REEL[0], REEL[54]], [55, { text: "word25", start: 0.1, end: 0.5, id: "w0" }, { text: "word79", start: 27.1, end: 27.5, id: "w54" }]);
+  });
+  it("puts a cue at 320 s on the Reel's own clock, at 7.6 s, with the Reel's ids", () => {
+    const placed = placedOn([on(1, 40, 42)]);
+    assert.deepEqual(placed[0].at, { from: "w40", to: "w42", start: 320, end: 321.4 });
+    const got = reelGraphicCues(placed, STRETCH, REEL);
+    assert.deepEqual(got, [{ ...on(1, 40, 42), at: { from: "w15", to: "w17", start: 7.6, end: 9 } }]);
+    assert.equal(got[0].at.start, REEL.find((w) => w.id === "w15").start);
+  });
+  it("leaves out a cue whose words start before the stretch, and one that runs past its end", () => {
+    const placed = placedOn([on(1, 22, 24), on(2, 40, 42), on(3, 78, 81), on(4, 24, 26), on(5, 77, 79)]);
+    // Word 22 starts at 311 s, and word 24 at 312, before the Reel does at 312.4; word 81 ends at 340.9, after it ends at 340.
+    assert.deepEqual(placed.map((c) => [c.at.start, c.at.end]), [[311, 312.4], [320, 321.4], [339, 340.9], [312, 313.4], [338.5, 339.9]]);
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, REEL).map((c) => [c.n, c.at.from, c.at.to]), [[2, "w15", "w17"], [5, "w52", "w54"]]);
+  });
+  it("keeps a cue whose first word starts at the stretch's start and a cue whose last word ends at its end", () => {
+    const stretch = { start: 312.5, end: 339.9 };
+    const words = reelOf(RECORDING, stretch);
+    const placed = placedOn([on(1, 25, 27), on(2, 77, 79)]);
+    assert.deepEqual([placed[0].at.start, placed[1].at.end], [312.5, 339.9]);
+    assert.deepEqual(reelGraphicCues(placed, stretch, words).map((c) => [c.n, c.at.from, c.at.to, c.at.start, c.at.end]), [[1, "w0", "w2", 0, 1.4], [2, "w52", "w54", 26, 27.4]]);
+  });
+  describe("with the slack of a Reel's ends, which are on pictures", () => {
+    // A Reel's ends are moved to the nearest picture (cuts.js keptSpans), so a word that starts where a phrase does can start a few
+    // thousandths before the stretch, and one that ends where a phrase does can end a few thousandths after it: the Reel holds both
+    // words (the middle of a word decides), and their times are cut to the Reel's ends (project.js reelWords).
+    const SLACK = 0.05;
+    const HAIR = { start: 312.51, end: 339.89 };
+    const hairReel = reelOf(RECORDING, HAIR);
+    it("is a twentieth of a second", () => {
+      assert.equal(REEL_EDGE_SLACK, SLACK);
+    });
+    it("leaves out a cue a hair outside the stretch unless it is told the slack, and takes it when it is", () => {
+      // Words 25 and 79 are the Reel's first and last: word 25 starts at 312.5 and word 79 ends at 339.9, outside by 0.01 s.
+      const placed = placedOn([on(1, 25, 26), on(2, 78, 79)]);
+      assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel), []);
+      assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel, { slack: 0 }), []);
+      assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel, { slack: SLACK }).map((c) => [c.n, c.at.from, c.at.to]), [[1, "w0", "w1"], [2, "w53", "w54"]]);
+    });
+    it("puts such a cue on the Reel's words by their clamped times: the first starts at 0, and the last ends at the Reel's length", () => {
+      const placed = placedOn([on(1, 25, 26), on(2, 78, 79)]);
+      const got = reelGraphicCues(placed, HAIR, hairReel, { slack: SLACK });
+      assert.deepEqual([got[0].at.start, got[0].at.end, got[1].at.start, got[1].at.end], [0, 0.89, 26.49, 27.38]);
+      assert.equal(got[1].at.end, hairReel[54].end);
+    });
+    it("lands such a cue on the take it was placed on when the same words are said again: the clamped times steer it", () => {
+      const words = RECORDING.map((w, i) => (i === 25 || i === 26 || i === 50 || i === 51 ? { ...w, text: `again${i % 25}` } : w));
+      const reel = reelOf(words, HAIR);
+      /** The words that are kept when the take at `a` and `b` is the one cut. */
+      const keptWithout = (a, b) => new Set(Array.from({ length: 120 }, (_, i) => i).filter((i) => i !== a && i !== b));
+      const first = placedOn([cue("again0 again1")], words, { kept: keptWithout(50, 51) });
+      assert.equal(first[0].at.from, "w25");
+      assert.deepEqual(reelGraphicCues(first, HAIR, reel, { slack: SLACK }).map((c) => [c.at.from, c.at.to, c.at.start]), [["w0", "w1", 0]]);
+      const second = placedOn([cue("again0 again1")], words, { kept: keptWithout(25, 26) });
+      assert.equal(second[0].at.from, "w50");
+      assert.deepEqual(reelGraphicCues(second, HAIR, reel, { slack: SLACK }).map((c) => [c.at.from, c.at.to]), [["w25", "w26"]]);
+    });
+    it("still leaves out a cue that starts well before the stretch, or ends well after it, as a cue far from its edges", () => {
+      const placed = placedOn([on(1, 22, 24), on(2, 80, 81), on(3, 24, 26), on(4, 79, 80)]);
+      // Word 24 starts at 312 s, 0.51 s before the stretch; word 80 ends at 340.4 s, 0.51 s after it.
+      assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel, { slack: SLACK }), []);
+    });
+    it("counts the cues it takes in the three, as it does without the slack", () => {
+      const placed = placedOn([on(1, 25, 26), on(2, 30, 31), on(3, 35, 36), on(4, 40, 41)]);
+      assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel, { slack: SLACK }).map((c) => c.n), [1, 2, 3]);
+    });
+    it("takes a slack that is none as none", () => {
+      const placed = placedOn([on(1, 25, 26)]);
+      for (const slack of [undefined, null, -1, NaN, "0.05", Infinity]) assert.deepEqual(reelGraphicCues(placed, HAIR, hairReel, { slack }), [], String(slack));
+    });
+  });
+  it("takes the first three of five cues inside the stretch, in the order given", () => {
+    const placed = placedOn([30, 35, 40, 45, 50].map((i, k) => on(k + 1, i, i + 1)));
+    const got = reelGraphicCues(placed, STRETCH, REEL);
+    assert.deepEqual(got.map((c) => [c.n, c.at.from]), [[1, "w5"], [2, "w10"], [3, "w15"]]);
+    assert.equal(REEL_CUES_MOST, 3);
+  });
+  it("counts the three among the cues that are inside the stretch, so a cue outside it takes no place", () => {
+    const placed = placedOn([on(1, 22, 23), on(2, 30, 31), on(3, 35, 36), on(4, 40, 41), on(5, 45, 46)]);
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, REEL).map((c) => c.n), [2, 3, 4]);
+  });
+  it("leaves out a cue that was not found on the recording", () => {
+    const placed = placedOn([cue("the moon landing", { n: 1 }), on(2, 40, 42)]);
+    assert.equal(placed[0].at, null);
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, REEL).map((c) => c.n), [2]);
+  });
+  it("lands on the time the cue was said at when the same words are said twice in the Reel, as on the recording", () => {
+    // The words are said at 7.6 s into the Reel and again at 17.6 s. On the recording the cue was placed on the take that is kept.
+    const words = RECORDING.map((w, i) => (i >= 40 && i <= 42 ? { ...w, text: `again${i - 40}` } : i >= 60 && i <= 62 ? { ...w, text: `again${i - 60}` } : w));
+    const reel = reelOf(words, STRETCH);
+    const keeping = (cut) => new Set(Array.from({ length: 120 }, (_, i) => i).filter((i) => i < cut || i > cut + 2));
+    const secondKept = placedOn([cue("again0 again1 again2")], words, { kept: keeping(40) });
+    assert.equal(secondKept[0].at.from, "w60");
+    assert.deepEqual(reelGraphicCues(secondKept, STRETCH, reel).map((c) => [c.at.from, c.at.to, c.at.start]), [["w35", "w37", 17.6]]);
+    const firstKept = placedOn([cue("again0 again1 again2")], words, { kept: keeping(60) });
+    assert.equal(firstKept[0].at.from, "w40");
+    assert.deepEqual(reelGraphicCues(firstKept, STRETCH, reel).map((c) => [c.at.from, c.at.to, c.at.start]), [["w15", "w17", 7.6]]);
+  });
+  it("places a cue by its words, on the Reel's own words, when none of them starts where it did", () => {
+    const placed = placedOn([on(1, 40, 42)]);
+    // A Reel whose clock is not the stretch's: no word starts where the cue did on its clock.
+    const odd = REEL.map((w) => ({ ...w, start: w.start + 0.25, end: w.end + 0.25 }));
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, odd).map((c) => [c.at.from, c.at.to, c.at.start]), [["w15", "w17", 7.85]]);
+  });
+  it("is null for a cue whose words the Reel's words do not hold, and still gives the others", () => {
+    const placed = placedOn([on(1, 40, 42), on(2, 50, 51)]);
+    const without = REEL.map((w) => (w.id === "w25" || w.id === "w26" ? { ...w, text: "gone" } : w));
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, without).map((c) => [c.n, c.at && c.at.from]), [[1, "w15"], [2, null]]);
+  });
+  it("spells the cue's words as the Reel's words are spelled, so a cue from an unspelled phrase finds its words", () => {
+    const words = RECORDING.map((w, i) => (i === 40 ? { ...w, text: "BRIMM" } : w));
+    const reel = reelOf(words, STRETCH);
+    const spell = (text) => text.replace(/\bbrim\b/gi, "BRIMM");
+    const placed = placedOn([cue("brim word41", { n: 1 })], words, { spell });
+    assert.equal(placed[0].at.from, "w40");
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, reel, { spell }).map((c) => [c.at.from, c.at.to]), [["w15", "w16"]]);
+  });
+  it("gives each cue back as it was, its number and phrase and style among them, with the Reel's `at`, and changes none of what it is given", () => {
+    const cues = [on(7, 40, 42, { phrase: "p7", style: { inspiration: "Calm" } }), on(9, 50, 51)];
+    const placed = placedOn(cues);
+    const before = JSON.stringify([placed, REEL, STRETCH]);
+    const got = reelGraphicCues(placed, STRETCH, REEL);
+    assert.deepEqual(got.map(({ at, ...rest }) => rest), cues);
+    assert.deepEqual(got.map((c) => c.n), [7, 9]);
+    assert.equal(JSON.stringify([placed, REEL, STRETCH]), before);
+    assert.ok(got.every((c) => Object.keys(c.at).join() === "from,to,start,end"));
+  });
+  it("is none for no cues, none placed, no words, and a stretch that is none", () => {
+    const placed = placedOn([on(1, 40, 42)]);
+    assert.deepEqual(reelGraphicCues([], STRETCH, REEL), []);
+    for (const given of [undefined, null, "cues", {}]) assert.deepEqual(reelGraphicCues(given, STRETCH, REEL), [], String(given));
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, []).map((c) => c.at), [null]);
+    assert.deepEqual(reelGraphicCues(placed, STRETCH, undefined).map((c) => c.at), [null]);
+    for (const stretch of [undefined, null, {}, { start: 5 }, { start: 340, end: 312.4 }, { start: "a", end: "b" }]) assert.deepEqual(reelGraphicCues(placed, stretch, REEL), [], JSON.stringify(stretch));
   });
 });

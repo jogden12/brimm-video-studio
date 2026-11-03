@@ -1,10 +1,11 @@
 // Graphic cues (the HyperFrames-led path, design 3 and 4; PR H1): one of Sallie's points made visible with a short animated graphic
 // or words on screen, tied to the words it goes with. In code it is a "graphic cue" (graphicCues, graphic-cues.js), because cuts.js
 // already uses the kind "cue" for a spoken start-over.
-// A cue is read from Claude's reply or from a package (graphicCuesOf), and is placed by its words, never by a time written in advance
-// (placeGraphicCues): Studio finds the words in the recording's word times, so a cue lands where she says them, even when she says
-// them a little differently. What a project holds of them is brimm/graphic-cues.json (graphicCuesJson). A cue is a suggestion and
-// is built only when she takes it, in the app, as a suggested cut is.
+// A cue is read from Claude's reply or from a package (graphicCuesOf, graphicCuesInReply), and is placed by its words, never by a time
+// written in advance (placeGraphicCues): Studio finds the words in the recording's word times, so a cue lands where she says them, even
+// when she says them a little differently. What a project holds of them is brimm/graphic-cues.json (graphicCuesJson). A Reel of an
+// episode holds the cues that fall in its stretch, on its own clock and with its own word ids (reelGraphicCues; PR H2). A cue is a
+// suggestion and is built only when she takes it, in the app, as a suggested cut is.
 // Nothing here touches a disk or runs a program. It takes plain data and gives back plain data.
 import { plain } from "./shared/text.js";
 
@@ -252,6 +253,76 @@ export function placeGraphicCues(cues, words, { spans = null, kept = null, spell
   const places = placesOf(given, list, { spans, kept, spell });
   const idOf = (i) => (typeof list[i].id === "string" && list[i].id ? list[i].id : `w${i}`);
   return given.map((cue, i) => ({ ...cue, at: places[i] ? { from: idOf(places[i].first), to: idOf(places[i].last), start: list[places[i].first].start, end: list[places[i].last].end } : null }));
+}
+
+// --- A Reel's cues (PR H2) ---
+
+/** How many cues a Reel has at most: a Reel is a minute or so, and a few short graphics are all it holds (PR H2, ruling 2). */
+export const REEL_CUES_MOST = 3;
+
+/** How far outside a Reel's stretch a cue's words may be and still be the Reel's, in seconds, for a caller to give reelGraphicCues as its
+    `slack`: a twentieth of a second. A Reel's ends are moved to the nearest picture (cuts.js keptSpans), up to half a picture, so a word
+    that starts where a phrase does can start a few thousandths before the stretch, and one that ends where a phrase does can end a few
+    thousandths after it, though the Reel holds both (a word is the Reel's when its middle is inside: project.js reelWords). */
+export const REEL_EDGE_SLACK = 0.05;
+
+/** A time to the thousandth of a second, as a Reel's words have theirs (project.js reelWords), and how near two such times must be to
+    be the same one. */
+const thousandth = (seconds) => Math.round(seconds * 1000) / 1000;
+const SAME_TIME = 0.0005;
+
+/** The cues of a recording, placed on its words (placeGraphicCues), as a Reel of it holds them: those whose words are wholly inside the
+    Reel's `stretch` ({ start, end } in seconds of the recording, the ends included), at most the first REEL_CUES_MOST of them in the order
+    given, each placed again on the Reel's own `words` ([{text, start, end, id}], its transcript.json's: on the Reel's clock, from 0, with
+    the ids w0, w1, …), so that its `at` has the Reel's ids and times. A cue that was not found on the recording is not inside anything,
+    and a cue whose words start before the stretch, or run past its end, is left out, and takes none of the places.
+    A cue is put back where it was said, and not on the first time its words are said: the words of the Reel that start where the cue's
+    first word did and end where its last did, on the Reel's clock, are its place, and placeGraphicCues looks for it there first. So
+    the same words said again in the Reel, as in a retake, do not move a cue off the take it was placed on. Where no word of the Reel starts
+    there it is placed by its words alone, as placeGraphicCues places any cue; and a cue the Reel's words do not hold has an `at` of null.
+    The times are the Reel's words' own: one that starts before the stretch starts at 0 and one that ends after it ends at the Reel's
+    length (project.js reelWords), so a cue at the Reel's edge is found where the Reel puts it.
+    `spell` is the speller the Reel's words were spelled with. `slack` is how far outside the stretch, in seconds, a cue's words may
+    be and still be inside it (REEL_EDGE_SLACK says why a caller gives one): none unless it is a number above 0. Each cue comes back as
+    it was given, with its number, but for its `at`; what is given is not changed. */
+export function reelGraphicCues(placed, stretch, words, { spell = (text) => text, slack = 0 } = {}) {
+  const { start, end } = stretch !== null && typeof stretch === "object" ? stretch : {};
+  if (!(Number.isFinite(start) && Number.isFinite(end) && end > start)) return [];
+  const outside = Number.isFinite(slack) && slack > 0 ? slack : 0;
+  const inside = (Array.isArray(placed) ? placed : [])
+    .filter((cue) => cue && cue.at && Number.isFinite(cue.at.start) && Number.isFinite(cue.at.end) && cue.at.start >= start - outside && cue.at.end <= end + outside)
+    .slice(0, REEL_CUES_MOST);
+  const list = Array.isArray(words) ? words : [];
+  const same = (a, b) => Math.abs(a - b) < SAME_TIME;
+  // A time of the recording on the Reel's clock, as reelWords has it: not before 0, and not after the Reel's length.
+  const length = thousandth(end - start);
+  const onReel = (t) => Math.min(length, Math.max(0, thousandth(t - start)));
+  // Where the cue was said, on the Reel's own words: from the word that starts when its first word did to the last that ends when its last did.
+  const spans = new Map();
+  const steered = inside.map(({ at, ...cue }, i) => {
+    const first = list.findIndex((word) => same(word.start, onReel(at.start)));
+    const last = list.findLastIndex((word, k) => k >= first && same(word.end, onReel(at.end)));
+    if (first === -1 || last === -1) return cue;
+    spans.set(`reel cue ${i}`, [first, last]);
+    return { ...cue, phrase: `reel cue ${i}` };
+  });
+  const again = placeGraphicCues(steered, list, { spans, spell });
+  return inside.map(({ at, ...cue }, i) => ({ ...cue, at: again[i].at }));
+}
+
+/** The cues in an object read from Claude's reply to graphicCuesAsk, { cues, problems }, at most `most` of them. Of an entry only the five
+    things that were asked for are read (`id`, `words`, `kind`, `show`, `seconds`), its `id` being the phrase it was written for (its
+    `phrase`): one with no id is no cue, and a style, a shot or a number of its own in a reply are not read. They are numbered from 1 and
+    named, when one cannot be read, by its place in the reply's list (graphicCuesOf). A reply with no `graphicCues`, or one that is
+    not a list, is said so in plain words, and nothing is read from it. */
+export function graphicCuesInReply(data, most) {
+  if (data.graphicCues === undefined) return { cues: [], problems: ['Its reply has no "graphicCues".'] };
+  if (!Array.isArray(data.graphicCues)) return { cues: [], problems: ['"graphicCues" in its reply is not a list, so nothing was read from it.'] };
+  const given = data.graphicCues.map((g) => {
+    const id = g !== null && typeof g === "object" ? plain(g.id).trim() : "";
+    return id ? { phrase: id, words: g.words, kind: g.kind, show: g.show, seconds: g.seconds } : null;
+  });
+  return graphicCuesOf(given, { most });
 }
 
 /** brimm/graphic-cues.json: version 1, the clock the times are on ("recording" for the main video, "reel" for a Reel), and the

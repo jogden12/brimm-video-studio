@@ -328,11 +328,15 @@ const nothingIn = (read) => !read.decisions.length && !read.notes && !read.graph
     `nothing` nothingIn, unless the caller gives others, as a reading does for its kind (reading.js).
     With `quote` (as the import has it), why says what Claude Code last printed, and what could not be read of the reply.
     Without it, why is in fixed words only, and holds nothing Claude Code or Claude wrote: a reading's log and result never
-    quote a reply (spec 2026-10-22, section 2). */
-export async function askOnce(request, folder, { run, tools }, { read: readAs = readNotes, nothing = nothingIn, quote = true } = {}) {
+    quote a reply (spec 2026-10-22, section 2).
+    `limit` is how long Claude Code may take, in milliseconds: CLAUDE_MS, ten minutes, unless a caller gives a shorter one, as the
+    run that makes a Reel's video does for the Reel's cues (workcopy.js), which holds the working copy's lock for as long as it works.
+    A limit that is not a number above 0 is none. Why says the time that ran out. */
+export async function askOnce(request, folder, { run, tools }, { read: readAs = readNotes, nothing = nothingIn, quote = true, limit = CLAUDE_MS } = {}) {
+  const time = Number.isFinite(limit) && limit > 0 ? limit : CLAUDE_MS;
   mkdirSync(folder, { recursive: true });
-  const ended = await run(tools.claude, CLAUDE_ARGS, { input: request, cwd: folder, limit: CLAUDE_MS, out: CLAUDE_PRINTED });
-  if (ended.outOfTime) return { why: `it gave no answer in ${CLAUDE_MS / 60000} minutes` };
+  const ended = await run(tools.claude, CLAUDE_ARGS, { input: request, cwd: folder, limit: time, out: CLAUDE_PRINTED });
+  if (ended.outOfTime) return { why: `it gave no answer in ${limitText(time)}` };
   let told = null;
   try {
     told = JSON.parse(ended.stdout);

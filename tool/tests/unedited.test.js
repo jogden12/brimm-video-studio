@@ -9,7 +9,7 @@ import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFil
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude, importHold, importHolds, clockAt } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, videosFromPlan, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude, importHold, importHolds, clockAt, askOnce } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCutArgs, roughCaptions, roughRate } from "../cuts.js";
@@ -5251,5 +5251,48 @@ describe("importHold's state", () => {
     pendingOf(f, 35 * MIN);
     assert.equal(importHolds({ root: f.root, home: f.home, machine: "Mac Studio", record, now: NOW }), OWED);
     rmSync(f.dir, { recursive: true, force: true });
+  });
+});
+
+describe("askOnce: how long Claude may take (PR H2)", () => {
+  const PRINTED = { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: false, result: '{"graphicCues": []}' }) };
+  /** Claude Code as a stand-in that notes the options it is run with and ends as `ended` says. */
+  const asking = (ended = PRINTED) => {
+    const seen = [];
+    return { seen, deps: { run: async (cmd, args, options) => (seen.push({ cmd, args, options }), ended), tools: { claude: "CLAUDE" } } };
+  };
+  const folder = () => join(mkdtempSync(join(tmpdir(), "brimm-ask-once-")), "claude-1");
+  it("runs Claude Code for ten minutes at most when it is given no limit, as it always did, and says so when it is out of time", async () => {
+    const { seen, deps } = asking({ code: 1, stderr: "", signal: "SIGKILL", outOfTime: true, stdout: "" });
+    assert.deepEqual(await askOnce("the request", folder(), deps), { why: "it gave no answer in 10 minutes" });
+    assert.equal(seen[0].options.limit, 10 * 60 * 1000);
+  });
+  it("runs it for the limit it is given instead, and says that time when it is out of it: three minutes", async () => {
+    const { seen, deps } = asking({ code: 1, stderr: "", signal: "SIGKILL", outOfTime: true, stdout: "" });
+    assert.deepEqual(await askOnce("the request", folder(), deps, { limit: 3 * 60 * 1000 }), { why: "it gave no answer in 3 minutes" });
+    assert.equal(seen[0].options.limit, 3 * 60 * 1000);
+  });
+  it("says a limit that is not whole minutes in seconds, and one minute as one minute", async () => {
+    const out = { code: 1, stderr: "", signal: "SIGKILL", outOfTime: true, stdout: "" };
+    assert.deepEqual(await askOnce("the request", folder(), asking(out).deps, { limit: 90 * 1000 }), { why: "it gave no answer in 90 seconds" });
+    assert.deepEqual(await askOnce("the request", folder(), asking(out).deps, { limit: 60 * 1000 }), { why: "it gave no answer in 1 minute" });
+  });
+  it("runs Claude Code exactly as it is run without a limit but for that: the same arguments, the request on standard input, a folder of its own", async () => {
+    const plain = asking();
+    const limited = asking();
+    const where = folder();
+    await askOnce("the request", where, plain.deps);
+    await askOnce("the request", where, limited.deps, { limit: 3 * 60 * 1000 });
+    assert.deepEqual(limited.seen[0].args, plain.seen[0].args);
+    assert.deepEqual({ ...limited.seen[0].options, limit: 0 }, { ...plain.seen[0].options, limit: 0 });
+    assert.deepEqual([limited.seen[0].options.input, limited.seen[0].options.cwd], ["the request", where]);
+    assert.equal(limited.seen[0].args[limited.seen[0].args.indexOf("--model") + 1], CLAUDE_MODEL);
+  });
+  it("is given a limit that is none as no limit: the ten minutes stand", async () => {
+    for (const limit of [undefined, 0, -1, NaN, "3", null]) {
+      const { seen, deps } = asking();
+      await askOnce("the request", folder(), deps, { limit });
+      assert.equal(seen[0].options.limit, 10 * 60 * 1000, String(limit));
+    }
   });
 });
