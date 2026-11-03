@@ -17,8 +17,12 @@ import { recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 import { READ_LOOK_MS } from "../reading.js";
 import { STILL_EVERY } from "../reframe.js";
-import { pendingFolder } from "../settings.js";
-import { REEL_COPY_STEPS, REEL_FACES_MS, WORK_COPY_STEP, reelCopyKey, reelCopyPaths, workCopyLimits, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { pendingFolder, writeSettings } from "../settings.js";
+import { CUES_STEP, FACES_STEP, FINISHED_REEL_COPY_STEPS, REEL_COPY_STEPS, REEL_FACES_MS, WORK_COPY_STEP, reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLimits, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { REEL_CUES_MS } from "../reading.js";
+import { CLAUDE_MODEL } from "../unedited.js";
+import { reelCuesRequest, reelPhraseLines } from "../readings.js";
+import { graphicCuesAsk } from "../graphic-cues.js";
 import { probed } from "./fixtures.js";
 import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
 import { ANSWERED, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, world } from "./workcopy-world.js";
@@ -356,6 +360,244 @@ describe("workcopy --reel: \"how far is it?\" says it, as it says the working co
     const after = await on(w.t.ctx.deps, "status");
     assert.deepEqual(after.said, [`${FOLDER}: making the video for HyperFrames ended 0 minutes ago. Made: the video for Reel 2.`]);
     for (const line of [...mid.said, ...after.said]) assert.doesNotMatch(line.replace(FOLDER, "<episode>"), PLAIN, line);
+    w.t.done();
+  });
+});
+
+describe("workcopy --reel: the graphic cues of a Reel of a finished video, asked for as a third step (PR H2)", () => {
+  /** Claude Code's answer to a request that asks for cues: the cues of Reel 2 of the made-up episode, which is from p7 to p9. */
+  const REPLY = { graphicCues: [
+    { id: "p7", words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4 },
+    { id: "p8", words: "very, very important", kind: "words", show: "The words very important on screen", seconds: 3 }
+  ] };
+  const CUES = [
+    { n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" },
+    { n: 2, words: "very, very important", kind: "words", show: "The words very important on screen", seconds: 3, style: null, phrase: "p8" }
+  ];
+  const printed = (reply) => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: false, result: typeof reply === "string" ? reply : JSON.stringify(reply) }) });
+  /** The made-up world of a Reel's run for a record of `kind`, with Claude Code as a stand-in that notes every request, whether the
+      working copy's lock was held as it answered, and answers as `answer` says: a reply, or a function from the request to a run's end. */
+  function cueWorld({ record = FINISHED, answer = printed(REPLY), claude = true, settings = null } = {}) {
+    const asks = [];
+    const w = reelWorld({
+      record,
+      programs: {
+        CLAUDE: (args, asked) => {
+          const lock = existsSync(workCopyLockOf(w.t.home, FOLDER));
+          const episodeLock = existsSync(lockOf(w.t.home, FOLDER));
+          asks.push({ args, input: asked.input, cwd: asked.cwd, limit: asked.limit, lock, episodeLock });
+          return typeof answer === "function" ? answer(asked.input) : answer;
+        }
+      }
+    });
+    if (claude) w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, claude: "CLAUDE" };
+    if (settings) w.t.ctx.deps.settings = { ...w.t.ctx.settings, ...settings };
+    return { ...w, asks, cuesFile: w.copy.cues, saved: () => (existsSync(w.copy.cues) ? JSON.parse(readFileSync(w.copy.cues, "utf8")) : null) };
+  }
+  const steps = (w) => w.events.find(([what]) => what === "steps")[1];
+  const requestOf = (w) => {
+    const plan = JSON.parse(readFileSync(join(w.found.folder, "Pricing talk.cut-plan.json"), "utf8"));
+    return reelCuesRequest(reelPhraseLines(plan.phrases, w.stretch), { video: "Pricing talk.mp4", duration: w.stretch.end - w.stretch.start });
+  };
+
+  it("has the steps of the video, the faces and the graphics for a finished video's Reel, and the two of today for a raw video's", async () => {
+    const finished = cueWorld();
+    assert.equal((await on(finished.t.ctx.deps, ...ASK)).code, 0);
+    assert.deepEqual(steps(finished), FINISHED_REEL_COPY_STEPS);
+    assert.deepEqual(FINISHED_REEL_COPY_STEPS, ["Making the video for HyperFrames", "Finding the faces", "Suggesting graphics"]);
+    assert.deepEqual(finished.events.filter(([what]) => what === "step").map(([, said]) => said), [WORK_COPY_STEP, FACES_STEP, CUES_STEP]);
+    const raw = cueWorld({ record: RAW });
+    assert.equal((await on(raw.t.ctx.deps, ...ASK)).code, 0);
+    assert.deepEqual(steps(raw), REEL_COPY_STEPS);
+    assert.deepEqual(raw.asks, []);
+    finished.t.done();
+    raw.t.done();
+  });
+  it("asks Claude once, through the reading's own call, with the request for the Reel's cues: the stretch's phrases alone", async () => {
+    const w = cueWorld();
+    assert.equal((await on(w.t.ctx.deps, ...ASK)).code, 0);
+    assert.equal(w.asks.length, 1);
+    const [ask] = w.asks;
+    assert.deepEqual(ask.args.slice(0, 3), ["-p", "--model", CLAUDE_MODEL]);
+    assert.equal(ask.input, requestOf(w));
+    // Reel 2 is from p7 to p9: its three phrases are in the request, and no other.
+    const phrases = /<phrases>\n([\s\S]*)\n<\/phrases>/.exec(ask.input)[1].split("\n");
+    assert.deepEqual(phrases.map((line) => line.split(" | ")[0]), ["p7", "p8", "p9"]);
+    for (const outside of ["Welcome to the show", "Today we are", "Let me do that again"]) assert.ok(!ask.input.includes(outside), outside);
+    assert.ok(ask.input.split("\n").includes(graphicCuesAsk(3)));
+    // In a new folder of the run's own, which is taken away with the run, and with the three minutes a Reel's call is given.
+    assert.ok(ask.cwd.startsWith(join(w.t.home, "BRIMM Video Work", ".runs")) && ask.cwd.endsWith("claude-cues"), ask.cwd);
+    assert.equal(ask.limit, REEL_CUES_MS);
+    assert.equal(REEL_CUES_MS, 3 * 60 * 1000);
+    assert.ok(!existsSync(ask.cwd));
+    w.t.done();
+  });
+  it("saves the answer beside the faces, as { version, cues } with the cues numbered, and says nothing of it to her", async () => {
+    const w = cueWorld();
+    w.t.ctx.deps.faces = async () => FOUND;
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(w.saved(), { version: 1, cues: CUES });
+    assert.ok(existsSync(w.copy.faces) && existsSync(w.copy.video) && existsSync(w.copy.facts));
+    assert.deepEqual(readdirSync(w.copy.dir).sort(), [basename(w.copy.cues), basename(w.copy.faces), basename(w.copy.facts), basename(w.copy.video)].sort());
+    const result = readResult(w.t.home, FOLDER, "workcopy");
+    assert.deepEqual([result.ok, result.made, result.failed, result.next], [true, ["the video for Reel 2"], [], ""]);
+    for (const line of [...result.made, ...result.failed]) assert.doesNotMatch(line, PLAIN, line);
+    assert.doesNotMatch(r.text, /know your costs|chart of what it costs/);
+    w.t.done();
+  });
+  it("holds the working copy's lock while Claude is asked, and not the episode's, so another Reel's video waits for it", async () => {
+    const w = cueWorld();
+    assert.equal((await on(w.t.ctx.deps, ...ASK)).code, 0);
+    assert.deepEqual([w.asks[0].lock, w.asks[0].episodeLock], [true, false]);
+    // And while it is held, a second video is not started.
+    const during = cueWorld({ answer: () => {
+      const again = requestWorkCopy({ ...during.t.ctx, home: during.t.home, alive: () => true, start: (...started) => during.t.started.push(started) }, { folder: FOLDER, reel: 3 });
+      asked.push(again);
+      return printed(REPLY);
+    } });
+    const asked = [];
+    during.t.ctx.deps.alive = (pid) => pid === process.pid;
+    assert.equal((await on(during.t.ctx.deps, ...ASK)).code, 0);
+    assert.deepEqual(asked, [{ started: false, running: "workcopy" }]);
+    w.t.done();
+    during.t.done();
+  });
+  it("leaves no file, and makes the Reel all the same, when Claude cannot be asked, refuses, takes more than three minutes or gives nothing it can use", async () => {
+    const ends = [
+      ["Claude Code ends badly", { code: 1, stderr: "Error: connect ECONNREFUSED\n", stdout: "" }],
+      ["Claude Code says it is an error", { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: true, result: "Zebra could not go on" }) }],
+      ["Claude Code is out of its three minutes", { code: 1, stderr: "", signal: "SIGKILL", outOfTime: true, stdout: "" }],
+      ["Claude Code prints what is not its answer", { code: 0, stderr: "", stdout: "Welcome to Claude Code!\n" }],
+      ["Claude's reply is empty", printed("")],
+      ["Claude's reply has no JSON in it", printed("I cannot judge a video I have not seen.")],
+      ["Claude's reply has nothing that was asked for", printed({ answer: "I cannot judge a video I have not seen." })],
+      ["Claude's cues cannot be read", printed({ graphicCues: [{ id: "", words: "", kind: "movie", show: "" }, "x"] })],
+      ["Claude has no cue to suggest", printed({ graphicCues: [] })]
+    ];
+    for (const [what, answer] of ends) {
+      const w = cueWorld({ answer });
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 0, `${what}: ${r.text}`);
+      assert.equal(w.asks.length, 1, what);
+      assert.equal(w.saved(), null, what);
+      assert.deepEqual([existsSync(w.copy.video), existsSync(w.copy.facts)], [true, true], what);
+      const result = readResult(w.t.home, FOLDER, "workcopy");
+      assert.deepEqual([result.ok, result.made, result.failed], [true, ["the video for Reel 2"], []], what);
+      assert.doesNotMatch(r.text, /Zebra|Welcome to Claude Code|cannot judge/, what);
+      assert.ok(r.said.some((line) => /graphic cue/.test(line)), `${what}: ${r.text}`);
+      assert.deepEqual(readdirSync(join(w.t.home, "BRIMM Video Work", ".runs")), [], what);
+      w.t.done();
+    }
+  });
+  it("says in the log that Claude gave no answer in three minutes when that is why", async () => {
+    const w = cueWorld({ answer: { code: 1, stderr: "", signal: "SIGKILL", outOfTime: true, stdout: "" } });
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.match(r.text, /no graphic cue was suggested for the Reel \(it gave no answer in 3 minutes\), so none are offered\./);
+    w.t.done();
+  });
+  it("asks again of nothing once the video is made: a read that failed is not asked a second time, and the project is made without cues", async () => {
+    const w = cueWorld({ answer: { code: 1, stderr: "", stdout: "" } });
+    assert.equal((await on(w.t.ctx.deps, ...ASK)).code, 0);
+    assert.equal(w.asks.length, 1);
+    assert.equal(w.saved(), null);
+    const again = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(again.code, 0, again.text);
+    assert.equal(w.asks.length, 1, "the copy is made already: nothing is asked");
+    assert.equal(w.saved(), null);
+    w.t.done();
+  });
+  it("is asked of nothing when this Mac's readings are off: the two steps of a raw video's Reel, and no file", async () => {
+    const w = cueWorld({ settings: { readings: false } });
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([w.asks, steps(w), w.saved()], [[], REEL_COPY_STEPS, null]);
+    assert.ok(existsSync(w.copy.video));
+    w.t.done();
+  });
+  it("is asked of nothing when readings are turned off meanwhile, in the settings on this Mac's disk, before its turn comes", async () => {
+    const w = cueWorld();
+    // The face finder runs just before it: readings are turned off then.
+    w.t.ctx.deps.faces = async () => {
+      writeSettings(w.t.home, { machine: "Mac Studio", root: w.t.root, checkout: "/checkout", readings: false });
+      return FOUND;
+    };
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([w.asks, w.saved(), existsSync(w.copy.video)], [[], null, true]);
+    assert.match(r.text, /no graphic cue was suggested for the Reel \(readings are off on this Mac\)/);
+    w.t.done();
+  });
+  it("is asked of nothing on a Mac without Claude Code: the video and the faces, and no step for the graphics", async () => {
+    const w = cueWorld({ claude: false });
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([w.asks, steps(w), w.saved()], [[], REEL_COPY_STEPS, null]);
+    w.t.done();
+  });
+  it("is asked of nothing for a raw video, whose Reel takes the cues of its cut plan: no step, no file, no call", async () => {
+    for (const record of [RAW, WAS_SESSION, {}]) {
+      const w = cueWorld({ record });
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual([w.asks, steps(w), w.saved()], [[], REEL_COPY_STEPS, null], JSON.stringify(record));
+      w.t.done();
+    }
+  });
+  it("is never asked of a session, whatever its record says, nor of an iPhone clip: the gate and the kinds refuse them before any call", async () => {
+    for (const record of [SESSION, { ...SESSION, session: { ...SESSION_MARK, cleared: CLEARED } }, CLIP, UNANSWERED, LEFT]) {
+      const w = cueWorld({ record });
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 1, r.text);
+      assert.deepEqual([w.asks, w.guarded, w.saved()], [[], [], null]);
+      w.t.done();
+    }
+  });
+  it("is asked of nothing when she says meanwhile that it is a session, or something else: the record is read again right before the call", async () => {
+    for (const change of [{ kind: "session", session: { ...SESSION_MARK }, label: "Session, 2026-10-14" }, { kind: "raw" }, { kind: "short video" }, { kind: null, answer: UNANSWERED.answer, label: UNANSWERED.label }]) {
+      const w = cueWorld();
+      w.t.ctx.deps.faces = async () => {
+        writeFileSync(recordFile(w.found.folder, 2), recordText({ ...reread(w.found), rev: 2, ...change }));
+        return FOUND;
+      };
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual([w.asks, w.saved(), existsSync(w.copy.video)], [[], null, true], JSON.stringify(change));
+      w.t.done();
+    }
+  });
+  it("is asked of nothing when the cut plan has no phrase in the Reel or cannot be read, and says so in the log", async () => {
+    for (const [what, plan, why] of [
+      ["no phrases", (p) => ({ ...p, phrases: [] }), /the cut plan has no phrase in the Reel/],
+      ["a plan that is not JSON", () => "{ not json", /its cut plan cannot be read \(it is not JSON\)/],
+      ["no plan", null, /its cut plan cannot be read \(ENOENT\)/]
+    ]) {
+      const w = cueWorld();
+      const at = join(w.found.folder, "Pricing talk.cut-plan.json");
+      if (plan === null) rmSync(at);
+      else writeFileSync(at, typeof plan === "function" && plan.length ? JSON.stringify(plan(JSON.parse(readFileSync(at, "utf8")))) : plan());
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 0, `${what}: ${r.text}`);
+      assert.deepEqual([w.asks, w.saved()], [[], null], what);
+      assert.match(r.text, why, what);
+      w.t.done();
+    }
+  });
+  it("never writes into the episode's folder in Dropbox or its record: the cues are kept in the folder of copies on this Mac", async () => {
+    const w = cueWorld();
+    const before = dropbox(w.found);
+    assert.equal((await on(w.t.ctx.deps, ...ASK)).code, 0);
+    assert.deepEqual([dropbox(w.found), w.t.started], [before, []]);
+    assert.ok(w.copy.cues.startsWith(join(w.t.home, "BRIMM Video Work")));
+    w.t.done();
+  });
+  it("is asked of the working copy of a whole video never: only a Reel's run has the step", async () => {
+    const asks = [];
+    const w = world({ record: RAW, programs: { CLAUDE: () => (asks.push(1), printed(REPLY)) } });
+    w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, claude: "CLAUDE" };
+    const whole = await on(w.t.ctx.deps, "workcopy", "--now", FOLDER);
+    assert.equal(whole.code, 0, whole.text);
+    assert.deepEqual([asks, w.events.find(([what]) => what === "steps")], [[], ["steps", [WORK_COPY_STEP]]]);
     w.t.done();
   });
 });

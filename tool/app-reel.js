@@ -27,13 +27,16 @@
 //     has the working copy's lock. When it is not there it is asked for and she is told to say it again when it is done; this does
 //     not wait for it (a command has two minutes in the Code tab). While a run is at work on the episode, whichever video it makes,
 //     she is told a video is being made and to say it again, and the project is not written under a run that is still looking for
-//     the faces in the video it has put in place. It is cut from the recording and not from the working copy
+//     the faces in the video it has put in place, or (for a finished video's Reel) asking Claude for its graphic cues. It is cut from
+//     the recording and not from the working copy
 //     because the working copy is moved into the main project, which the app may hold open, and a finished video has none. Beside
-//     it the run keeps the faces it found in it, if it found any;
+//     it the run keeps the faces it found in it, if it found any, and a finished video's graphic cues, if Claude gave any;
 //   - the project is written (project.js, kind "reel") with the Reel's video moved in, as the main project's is: the Reel's words,
 //     placed by the cut plan's phrases as the main project's are and then chosen and put on the Reel's own clock, no cut or Reel
-//     suggestions (the plan cuts nothing of a Reel), and the face positions only when the finder found some; its page is upright,
-//     1080 by 1920, cropped on the speaker those faces show, or on the middle of the picture when there are none (project.js reelCrop);
+//     suggestions (the plan cuts nothing of a Reel), its graphic cues on the Reel's clock (a raw video's: the cut plan's cues that fall
+//     in its stretch; a finished video's: the cues the run that made its video kept beside it, when it kept any; PR H2), and the face
+//     positions only when the finder found some; its page is upright, 1080 by 1920, cropped on the speaker those faces show, or on
+//     the middle of the picture when there are none (project.js reelCrop);
 //   - the app is opened on it (app.js openProjectInApp), and one record write holds the project (`key` "reel <n>", `fromSuggestion` <n>)
 //     and the Reel marked picked, which is what `reel pick` did and what parts.js and the hand-off read.
 // A project that was made is kept, whether or not the app opened.
@@ -44,7 +47,8 @@ import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { clockText } from "./clock.js";
 import { runningCommand } from "./detached.js";
-import { localStamp } from "./episode.js";
+import { kindOf, localStamp } from "./episode.js";
+import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST } from "./graphic-cues.js";
 import { cliPath } from "./hyperframes.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE, readReels, reelEntries } from "./reels.js";
@@ -159,6 +163,22 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
   return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, statSync(join(found.folder, record.video.file))), workingCopy }) };
 }
 
+/** The graphic cues a Reel's project is given (PR H2), by what the video is that the Reel is of, as projectFiles takes them:
+    - a raw video's Reel is given `graphicCues`, the cues of the episode's cut plan (an older plan's ideas for graphics as cues
+      among them): the project places them on the words of the whole recording, as the main project does, and takes those that fall
+      in the Reel's stretch, three at most, onto the Reel's own clock;
+    - a video her editor finished is given `reelCues`: the cues the run that made the Reel's video kept beside it (workcopy.js
+      keepCues), read as cues are read, three at most. A file that is not there, is not whole JSON, or holds no list of cues is no cues,
+      and the Reel is made all the same. Its cut plan's cues are not the Reel's: a finished video is not edited whole.
+    No other kind has a Reel. */
+function cuesFor(kind, { plan, file }) {
+  if (kind === "finished") {
+    const held = factsIn(file);
+    return { reelCues: graphicCuesOf(Array.isArray(held?.cues) ? held.cues : [], { most: REEL_CUES_MOST }).cues };
+  }
+  return { graphicCues: graphicCuesOfPlan(plan) };
+}
+
 /** Make a Reel's project, if it can be made now: { project, stretch, candidate }, the record's entry for it (state "made", never
     opened), the stretch it was cut from and the suggestion it is, or { code }, when nothing was made and a line said why: the exit
     code to end with.
@@ -170,7 +190,8 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
       she is told a video is being made and to say it again when it is done (busyWith). The video is looked for by the key of the
       stretch the suggestion has now, so a copy made for another stretch of the Reel is none.
     - With the video in place and a run still at work (the lock is held), she is told the same and nothing is made: the run looks for
-      the faces in the video it has put in place, and a project written now would move the video out from under the finder.
+      the faces in the video it has put in place, and a project written now would move the video out from under the finder; and
+      for a finished video's Reel it then asks Claude for the Reel's graphic cues, which the project is made from.
     The project is written whole or not at all (project.js writeProject), and a folder at its name that is there already is never
     written over: it throws. adoptReel takes such a folder first, so what is left to throw is one that appeared between the two. */
 function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
@@ -201,8 +222,10 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
     return { code: 0 };
   }
   // The video is in place, but the run that put it there may be at work still: it looks for the faces in it, and a project written
-  // now would move the video out from under the finder, and the faces it finds would be beside a video that is gone. The lock is the
-  // run's whole life, so she is told to say it again when it has ended (a lock left by a run that died is none).
+  // now would move the video out from under the finder, and the faces it finds would be beside a video that is gone. For a finished
+  // video's Reel it then asks Claude for the Reel's cues, which the project is made from too, so a project written before they are kept
+  // would be made without them. The lock is the run's whole life, so she is told to say it again when it has ended (a lock left by a
+  // run that died is none).
   if (runningCommand(home, found.name, ctx.alive, workCopyLockOf(home, found.name))) {
     ctx.say(busyWith(n, name));
     return { code: 0 };
@@ -212,9 +235,11 @@ function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const stretch = facts.stretch ?? asked;
   // The cut plan places the words' starts, as it does the main video's (project.js saidWords); it cuts nothing of the Reel, and with
   // none the words are only moved inside their time.
+  const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
   writeProject(dir, projectFiles({
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
-    plan: jsonIn(join(found.folder, `${stem}.cut-plan.json`)), faces: factsIn(copy.faces), video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
+    plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues }),
+    video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   const project = madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } });
   return { project, stretch, candidate: listed.candidate };

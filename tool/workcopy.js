@@ -40,6 +40,10 @@ export const WORK_COPY_STEPS = [WORK_COPY_STEP];
     copy that is given no finder has the first step alone. */
 export const FACES_STEP = "Finding the faces";
 export const REEL_COPY_STEPS = [WORK_COPY_STEP, FACES_STEP];
+/** The third step of a Reel's copy, for a Reel of a finished video alone (PR H2; "Yes, at the Reel", Jason, 2026-11-03): once the faces
+    are looked for, Claude is asked for the graphic cues of the Reel's stretch. A copy that is given no reader has the steps it had. */
+export const CUES_STEP = "Suggesting graphics";
+export const FINISHED_REEL_COPY_STEPS = [WORK_COPY_STEP, FACES_STEP, CUES_STEP];
 /** How long each of the face finder's two programs, the ffmpeg that cuts the stills and the finder that looks in them (unedited.js
     facesIn), may run for a Reel's video, in milliseconds. A Reel is at most 90 seconds, so its stills are few and looking in them
     takes seconds. The run holds the working copy's lock for as long as it works, so a finder that hangs would hold it for good, and
@@ -438,17 +442,17 @@ export function reelCopyKey(file, stretch) {
   return `${base}-${Math.round(stretch.start * 1000)}-${Math.round(stretch.end * 1000)}`;
 }
 
-/** Where Reel `n`'s copy goes, for the episode in `folder` on this Mac: { dir, video, facts, faces }. They are in the folder of the
-    working copies, named for the Reel and its key: `reel-<n>-<key>.mp4`, the facts beside it, and the file of faces the face
-    finder found in it, if it found any. The working copy's own files are named by their keys alone, so neither is taken for the
-    other. Throws for a number that is not a whole number from 1, a key that reelCopyKey could not have made, and a folder that is
-    not one folder's name. */
+/** Where Reel `n`'s copy goes, for the episode in `folder` on this Mac: { dir, video, facts, faces, cues }. They are in the folder of the
+    working copies, named for the Reel and its key: `reel-<n>-<key>.mp4`, the facts beside it, the file of faces the face finder found
+    in it, if it found any, and the file of graphic cues Claude suggested for a Reel of a finished video, if it suggested any (PR H2).
+    The working copy's own files are named by their keys alone, so neither is taken for the other. Throws for a number that is not a
+    whole number from 1, a key that reelCopyKey could not have made, and a folder that is not one folder's name. */
 export function reelCopyPaths(home, folder, n, key) {
   if (!Number.isInteger(n) || n < 1) throw new Error(`A Reel's copy is of a Reel, a whole number from 1, and ${JSON.stringify(n)} is not one.`);
   if (typeof key !== "string" || !REEL_KEY.test(key)) throw new Error(`A Reel's copy has a key of its own, the file's size and time and the stretch's two ends, and ${JSON.stringify(key)} is not one.`);
   const dir = workCopyDir(home, folder);
   const stem = join(dir, `reel-${n}-${key}`);
-  return { dir, video: `${stem}.mp4`, facts: `${stem}.json`, faces: `${stem}.faces.json` };
+  return { dir, video: `${stem}.mp4`, facts: `${stem}.json`, faces: `${stem}.faces.json`, cues: `${stem}.cues.json` };
 }
 
 /** The facts of a finished working copy, read from what ffprobe printed of it, and its size on disk: { seconds, fps, width, height,
@@ -552,6 +556,32 @@ async function keepFaces({ faces, paths, work, shown, write, rename, log }) {
   }
 }
 
+/** Ask for the graphic cues of the Reel's stretch, once its video is in place, and keep them beside it, in `paths.cues`, when there are
+    some: { version: 1, cues }, the cues as `cues` (a function from the stretch that was cut and the run's own folder to { cues } or
+    { why }, reading.js askReelCues) gave them. The file is made whole in the run's own folder and renamed into place, as the copy is.
+    Nothing here can cost the copy anything: a read that gives none, says why, fails, is refused, takes too long or throws, and a file
+    that cannot be put in place, are said in the log and leave no file. The log says how many cues there are and never what they are
+    (it is not for her to read, but it holds nothing of the recording). */
+async function keepCues({ cues, stretch, paths, work, shown, write, rename, log }) {
+  let found = [];
+  try {
+    const got = await cues(stretch, work);
+    if (got && Array.isArray(got.cues) && got.cues.length > 0) found = got.cues;
+    else log(`${shown}: no graphic cue was suggested for the Reel${got && typeof got.why === "string" && got.why ? ` (${got.why})` : ""}, so none are offered.`);
+  } catch (e) {
+    log(`${shown}: the graphic cues could not be asked for (${e.code || e.message}), so none are offered.`);
+  }
+  if (!found.length) return;
+  try {
+    const made = join(work, basename(paths.cues));
+    write(made, `${JSON.stringify({ version: 1, cues: found }, null, 2)}\n`);
+    rename(made, paths.cues);
+    log(`${shown}: ${found.length} graphic cue${found.length === 1 ? "" : "s"} suggested for the Reel, kept beside its video.`);
+  } catch (e) {
+    log(`${shown}: the graphic cues could not be put in place (${e.code || e.message}), so none are offered.`);
+  }
+}
+
 /** Make the working copy of the raw video at `video`, of the episode in `folder`, on this Mac: resolves { ok, made, failed, next,
     words, key, paths }, which is the shape a detached run's work gives runDetached, with `words` the one line to say of it, and
     never throws. `name` is how the video is called in the progress panel and the log, its file's name when it is not given.
@@ -591,16 +621,22 @@ async function keepFaces({ faces, paths, work, shown, write, rename, log }) {
       folder to what the face finder found, unedited.js facesIn: { stills } or { why }) is asked, as a second step. The faces are
       kept beside the copy, in `reel-<n>-<key>.faces.json` as { every, stills }, only when a still holds a face; none found, no
       finder, a finder that fails or throws, or a file that cannot be put in place costs the copy nothing, and is said in the log.
-      A copy made already is not looked for faces again.
+      A copy made already is not looked for faces again;
+    - for a Reel of a finished video alone, which is given `cues` (a function from the stretch that was cut and the run's own folder to
+      { cues } or { why }, reading.js askReelCues), Claude's graphic cues for the stretch are asked for last, as a third step (PR H2),
+      and kept beside the copy in `reel-<n>-<key>.cues.json` as { version: 1, cues }, only when there is a cue. A read that gives none,
+      fails, is refused or takes too long, and a file that cannot be put in place, cost the copy nothing and are said in the log. The run
+      holds the working copy's lock meanwhile, so that no other video of the episode is made; and a copy made already is not asked
+      again, so a read that failed is not asked a second time and the project is made without cues.
     The `deps` are all what it touches: `run` (runProgram) for ffprobe and for ffmpeg's lists of filters and of hardware decoders
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
-    `progress`, `log`, `now`, `pid`, which names the run's own folder, and `faces`. */
+    `progress`, `log`, `now`, `pid`, which names the run's own folder, `faces` and `cues`. */
 export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
-    faces = null
+    faces = null, cues = null
   } = deps;
   const shown = name || (typeof video === "string" && video ? basename(video) : "a video");
   // What the video is called in what is logged: the Reel's, or HyperFrames'.
@@ -631,7 +667,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     mkdir(work, { recursive: true });
     progress.begin(shown);
     began = true;
-    progress.steps(reel && faces ? REEL_COPY_STEPS : WORK_COPY_STEPS);
+    progress.steps(reel ? [WORK_COPY_STEP, ...(faces ? [FACES_STEP] : []), ...(cues ? [CUES_STEP] : [])] : WORK_COPY_STEPS);
     progress.step(WORK_COPY_STEP);
     log(`${shown}: making the video for ${for_}.`);
 
@@ -755,7 +791,8 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
       log(`${shown}: the copies made before could not be looked at (${e.code || e.message}), so they are left.`);
     }
     // A Reel's copy replaces the same Reel's copies of other keys, and a working copy its own: each kind is known by its whole name.
-    const copyFile = reel ? new RegExp(`^reel-${reel.n}-(\\d+-\\d+-\\d+-\\d+)(?:\\.faces)?\\.(?:mp4|json)$`) : COPY_FILE;
+    // A Reel's are its video, its facts, its faces and its cues.
+    const copyFile = reel ? new RegExp(`^reel-${reel.n}-(\\d+-\\d+-\\d+-\\d+)(?:\\.mp4|\\.json|\\.faces\\.json|\\.cues\\.json)$`) : COPY_FILE;
     for (const entry of before) {
       const other = copyFile.exec(entry);
       if (!other || other[1] === key) continue;
@@ -771,6 +808,11 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     if (reel && faces) {
       progress.step(FACES_STEP);
       await keepFaces({ faces, paths, work, shown, write, rename, log });
+    }
+    // Then, for a Reel of a finished video, its graphic cues are asked for: a third step, and one the copy does without as well.
+    if (reel && cues) {
+      progress.step(CUES_STEP);
+      await keepCues({ cues, stretch, paths, work, shown, write, rename, log });
     }
     const notes = workCopyNotes({ steady, rate, hdr });
     log(`${shown}: the video for ${for_} is made${notes.length ? `, with ${notes.join(" and ")}` : ""}.`);

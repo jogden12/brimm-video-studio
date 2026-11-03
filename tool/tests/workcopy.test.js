@@ -18,7 +18,7 @@ import { STILL_EVERY } from "../reframe.js";
 import {
   rateOf, workCopySize, isHdr, storedOf, workCopyArgs, workCopyFault, workCopyKey, workCopyPaths, workCopyFacts, workCopyLimits, workCopyNotes,
   canNotBeUsed, hasFilters, hasHwaccel, makeWorkCopy, requestWorkCopy, workCopyLockOf, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET,
-  reelCopyKey, reelCopyPaths, FACES_STEP, REEL_COPY_STEPS
+  reelCopyKey, reelCopyPaths, FACES_STEP, REEL_COPY_STEPS, CUES_STEP, FINISHED_REEL_COPY_STEPS
 } from "../workcopy.js";
 
 /** What ffprobe writes of a video, cut down to what the tool reads: its picture (null for none), then its sounds in the order
@@ -1422,11 +1422,11 @@ describe("the key and the places of a Reel's copy", () => {
       assert.equal(reelCopyKey(file, stretch), "", JSON.stringify([file, stretch]));
     }
   });
-  it("is where the finished video goes, beside the working copy's, named for the Reel, with its facts and its faces", () => {
+  it("is where the finished video goes, beside the working copy's, named for the Reel, with its facts, its faces and its cues", () => {
     const key = reelCopyKey(RAW, STRETCH);
     const copies = workCopyPaths("/Users/sallie", "2026-10-27 Pricing talk", "1-1");
     const paths = reelCopyPaths("/Users/sallie", "2026-10-27 Pricing talk", 2, key);
-    assert.deepEqual(paths, { dir: copies.dir, video: join(copies.dir, `reel-2-${key}.mp4`), facts: join(copies.dir, `reel-2-${key}.json`), faces: join(copies.dir, `reel-2-${key}.faces.json`) });
+    assert.deepEqual(paths, { dir: copies.dir, video: join(copies.dir, `reel-2-${key}.mp4`), facts: join(copies.dir, `reel-2-${key}.json`), faces: join(copies.dir, `reel-2-${key}.faces.json`), cues: join(copies.dir, `reel-2-${key}.cues.json`) });
     assert.notEqual(paths.video, workCopyPaths("/Users/sallie", "2026-10-27 Pricing talk", "3300000000-1760000000123").video);
   });
   it("refuses a number that is not a whole number from 1, a key that is not safe, and an episode folder that is not one folder's name", () => {
@@ -1616,8 +1616,8 @@ describe("a Reel's video, made from the recording", () => {
   it("takes away the same Reel's copies for other stretches or files once it is whole, and nothing else: not the working copy, not another Reel's, not what is no copy", async (c) => {
     const t = reelSetup();
     c.after(t.done);
-    const mine = ["reel-2-4096-9-1000-2000.mp4", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.faces.json"];
-    const stays = [basename(workCopyPaths(t.home, t.folder, t.key).video), basename(workCopyPaths(t.home, t.folder, t.key).facts), "reel-3-4096-9-1000-2000.mp4", "reel-3-4096-9-1000-2000.json", "reel-12-4096-9-1000-2000.mp4", "reel-2.mp4", "reel-2-4096-9-1000-2000.mov", "reel-2-4096-9-1000-2000.mp4.writing", "reel-2-x-1000-2000.mp4", "reel-2-4096-9-1000-2000.json.bak", "notes.txt"];
+    const mine = ["reel-2-4096-9-1000-2000.mp4", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.faces.json", "reel-2-4096-9-1000-2000.cues.json"];
+    const stays = [basename(workCopyPaths(t.home, t.folder, t.key).video), basename(workCopyPaths(t.home, t.folder, t.key).facts), "reel-3-4096-9-1000-2000.mp4", "reel-3-4096-9-1000-2000.json", "reel-3-4096-9-1000-2000.cues.json", "reel-12-4096-9-1000-2000.mp4", "reel-2.mp4", "reel-2-4096-9-1000-2000.mov", "reel-2-4096-9-1000-2000.mp4.writing", "reel-2-x-1000-2000.mp4", "reel-2-4096-9-1000-2000.json.bak", "reel-2-4096-9-1000-2000.cues.json.bak", "reel-2-4096-9-1000-2000.cues.mp4", "notes.txt"];
     for (const name of [...mine, ...stays]) t.earlier(name);
     const removed = [];
     t.deps.rm = (path, options) => {
@@ -1633,9 +1633,9 @@ describe("a Reel's video, made from the recording", () => {
   it("is not what the working copy's job takes away: a working copy made beside a Reel's leaves the Reel's files", async (c) => {
     const t = setup();
     c.after(t.done);
-    for (const name of ["reel-2-4096-9-1000-2000.mp4", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.faces.json"]) t.earlier(name);
+    for (const name of ["reel-2-4096-9-1000-2000.mp4", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.faces.json", "reel-2-4096-9-1000-2000.cues.json"]) t.earlier(name);
     assert.equal((await t.job()).ok, true);
-    assert.deepEqual(entries(t.paths.dir), ["reel-2-4096-9-1000-2000.faces.json", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.mp4", basename(t.paths.facts), basename(t.paths.video)].sort());
+    assert.deepEqual(entries(t.paths.dir), ["reel-2-4096-9-1000-2000.cues.json", "reel-2-4096-9-1000-2000.faces.json", "reel-2-4096-9-1000-2000.json", "reel-2-4096-9-1000-2000.mp4", basename(t.paths.facts), basename(t.paths.video)].sort());
   });
   it("leaves nothing in the work folder, and says why in words, when it cannot be made: as the whole copy's rows have it", async (c) => {
     const rows = [
@@ -1735,5 +1735,160 @@ describe("the faces looked for in a Reel's video (architecture 4.3; plan PR 5)",
     t.earlier(basename(pathsOf(t).facts), "{}");
     assert.equal((await job(t)).words, "Done");
     assert.deepEqual(asked, []);
+  });
+});
+
+describe("the graphic cues asked for a Reel of a finished video, while its video is made (PR H2)", () => {
+  const REEL = { n: 2, start: 5, end: 12 };
+  const BOX = { x: 0.41, y: 0.22, w: 0.18, h: 0.3 };
+  const FOUND = { stills: [{ file: "0002.jpg", faces: [BOX] }] };
+  const CUES = [
+    { n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" },
+    { n: 2, words: "very important", kind: "words", show: "The words very important on screen", seconds: 3, style: null, phrase: "p8" }
+  ];
+  const reelSetup = (script = {}) => setup({ copy: copyOf({ duration: "7.020000" }), ...script });
+  const pathsOf = (t) => {
+    const raw = statSync(t.video);
+    return reelCopyPaths(t.home, t.folder, REEL.n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, REEL));
+  };
+  const job = (t, more = {}) => t.job({ name: "Pricing talk, Reel 2", reel: REEL, ...more });
+  /** The reader of the cues, as a Reel's run is given one, noting what it is asked. */
+  const reader = (answer, asked = []) => async (stretch, work) => {
+    asked.push({ stretch, work });
+    if (answer instanceof Error) throw answer;
+    return typeof answer === "function" ? answer() : answer;
+  };
+
+  it("has the steps of a Reel of a finished video: the video, the faces and the graphics, in this order", () => {
+    assert.equal(CUES_STEP, "Suggesting graphics");
+    assert.deepEqual(FINISHED_REEL_COPY_STEPS, ["Making the video for HyperFrames", "Finding the faces", "Suggesting graphics"]);
+    assert.deepEqual(REEL_COPY_STEPS, ["Making the video for HyperFrames", "Finding the faces"]);
+  });
+  it("tells the progress panel its three steps, and the third when the faces are done", async (c) => {
+    const t = reelSetup({ deps: { faces: async () => FOUND, cues: reader({ cues: CUES }) } });
+    c.after(t.done);
+    await job(t);
+    assert.deepEqual(t.events, [
+      ["begin", "Pricing talk, Reel 2"], ["steps", FINISHED_REEL_COPY_STEPS], ["step", WORK_COPY_STEP], ["length", 7], ["encoding", 7], ["stop"], ["step", FACES_STEP], ["step", CUES_STEP], ["end", true]
+    ]);
+  });
+  it("has the steps it had when it is given no reader: a raw video's Reel has the two of today, and the working copy its one", async (c) => {
+    const raw = reelSetup({ deps: { faces: async () => FOUND } });
+    c.after(raw.done);
+    await job(raw);
+    assert.deepEqual(raw.events.find(([what]) => what === "steps"), ["steps", REEL_COPY_STEPS]);
+    assert.ok(!raw.events.some(([, said]) => said === CUES_STEP));
+    const whole = setup({ deps: { faces: async () => FOUND, cues: reader({ cues: CUES }) } });
+    c.after(whole.done);
+    await whole.job();
+    assert.deepEqual(whole.events.find(([what]) => what === "steps"), ["steps", WORK_COPY_STEPS]);
+  });
+  it("asks the reader of the cues once the video and its facts are in place, after the faces, with the stretch as it was cut and the run's own folder to work in", async (c) => {
+    const asked = [];
+    const order = [];
+    const t = reelSetup({ deps: { faces: async () => (order.push("faces"), FOUND), cues: reader(() => (order.push("cues"), { cues: CUES }), asked) } });
+    c.after(t.done);
+    const paths = pathsOf(t);
+    t.deps.rename = (from, to) => (order.push(basename(to)), renameSync(from, to));
+    const result = await job(t);
+    assert.deepEqual([result.ok, result.failed, result.words], [true, [], "Done"]);
+    assert.deepEqual(asked, [{ stretch: { start: 5, end: 12 }, work: t.runFolder }]);
+    assert.deepEqual(order, [basename(paths.facts), basename(paths.video), "faces", basename(paths.faces), "cues", basename(paths.cues)]);
+  });
+  it("keeps the cues beside the faces, as { version, cues }, made whole in the run's own folder and renamed in, and leaves nothing of the run", async (c) => {
+    const t = reelSetup({ deps: { faces: async () => FOUND, cues: reader({ cues: CUES }) } });
+    c.after(t.done);
+    const paths = pathsOf(t);
+    const written = [];
+    t.deps.write = (path, text) => (written.push(path), writeFileSync(path, text));
+    await job(t);
+    assert.deepEqual(JSON.parse(readFileSync(paths.cues, "utf8")), { version: 1, cues: CUES });
+    assert.ok(readFileSync(paths.cues, "utf8").endsWith("}\n"));
+    assert.ok(written.includes(join(t.runFolder, basename(paths.cues))), "it was written in the run's own folder");
+    assert.deepEqual(t.inWork(), [t.shown(paths.cues), t.shown(paths.faces), t.shown(paths.facts), t.shown(paths.video)].sort());
+    assert.deepEqual(entries(runsFolder(t.home)), []);
+  });
+  it("is asked of the stretch that was cut, which is held to the video's length", async (c) => {
+    const asked = [];
+    const t = reelSetup({ copy: copyOf({ duration: "3.440000" }), deps: { cues: reader({ cues: CUES }, asked) } });
+    c.after(t.done);
+    await job(t, { reel: { n: 2, start: 20, end: 40 } });
+    assert.deepEqual(asked.map((x) => x.stretch), [{ start: 20, end: 23.423 }]);
+  });
+  it("leaves no file, and the copy Done all the same, when the read fails, is refused, is stopped, has no cue, throws, or answers in no form it knows", async (c) => {
+    const answers = [
+      { why: "Claude Code stopped (it was killed by SIGTERM)" }, { why: "it gave no answer in 3 minutes" }, { why: "readings are off on this Mac" }, { cues: [] }, { cues: "none" },
+      new Error("the reader fell over"), undefined, null, "cues", { why: "" }, {}
+    ];
+    for (const answer of answers) {
+      const t = reelSetup({ deps: { faces: async () => FOUND, cues: reader(answer) } });
+      c.after(t.done);
+      const result = await job(t);
+      const paths = pathsOf(t);
+      assert.deepEqual([result.ok, result.failed, result.words], [true, [], "Done"], String(answer && answer.message || JSON.stringify(answer)));
+      assert.equal(existsSync(paths.cues), false, JSON.stringify(answer));
+      assert.equal(readFileSync(paths.video, "utf8"), "THE WORKING COPY");
+      assert.deepEqual(t.inWork(), [t.shown(paths.faces), t.shown(paths.facts), t.shown(paths.video)].sort(), JSON.stringify(answer));
+      assert.deepEqual(entries(runsFolder(t.home)), []);
+    }
+  });
+  it("says in the log, which Sallie does not read, why there are none, and never a word of a cue or of what Claude wrote", async (c) => {
+    const failed = reelSetup({ deps: { cues: reader({ why: "Claude Code stopped (it was killed by SIGTERM)" }) } });
+    c.after(failed.done);
+    await job(failed);
+    assert.ok(failed.logs.some((line) => line.includes("graphic") && line.includes("Claude Code stopped (it was killed by SIGTERM)")), failed.logs.join("\n"));
+    const none = reelSetup({ deps: { cues: reader({ cues: [] }) } });
+    c.after(none.done);
+    await job(none);
+    assert.ok(none.logs.some((line) => /graphic/.test(line) && /none are offered|no graphic/.test(line)), none.logs.join("\n"));
+    const fell = reelSetup({ deps: { cues: reader(new Error("the reader fell over")) } });
+    c.after(fell.done);
+    await job(fell);
+    assert.ok(fell.logs.some((line) => line.includes("graphic") && line.includes("the reader fell over")), fell.logs.join("\n"));
+    const kept = reelSetup({ deps: { cues: reader({ cues: CUES }) } });
+    c.after(kept.done);
+    const result = await job(kept);
+    for (const text of [...kept.logs, ...result.made, ...result.failed, result.words]) assert.doesNotMatch(text, /know your costs|very important|chart of what it costs/, text);
+    assert.ok(kept.logs.some((line) => /2 graphic/.test(line)), kept.logs.join("\n"));
+  });
+  it("leaves the copy when the file of cues cannot be put in place", async (c) => {
+    const t = reelSetup({ deps: { cues: reader({ cues: CUES }), rename: failingRename(3) } });
+    c.after(t.done);
+    const result = await job(t);
+    const paths = pathsOf(t);
+    assert.deepEqual([result.ok, result.failed], [true, []]);
+    assert.equal(readFileSync(paths.video, "utf8"), "THE WORKING COPY");
+    assert.equal(existsSync(paths.cues), false);
+    assert.ok(t.logs.some((line) => line.includes("graphic")), t.logs.join("\n"));
+    assert.deepEqual(entries(runsFolder(t.home)), []);
+  });
+  it("is asked of no copy but a Reel's, and of none made already: the cues were asked for when it was made, and a read that failed is not asked again", async (c) => {
+    const asked = [];
+    const whole = setup({ deps: { cues: reader({ cues: CUES }, asked) } });
+    c.after(whole.done);
+    assert.equal((await whole.job()).ok, true);
+    assert.deepEqual(asked, []);
+    const t = reelSetup({ deps: { cues: reader({ cues: CUES }, asked) } });
+    c.after(t.done);
+    t.earlier(basename(pathsOf(t).video), "MADE BEFORE");
+    t.earlier(basename(pathsOf(t).facts), "{}");
+    assert.equal((await job(t)).words, "Done");
+    assert.deepEqual(asked, []);
+    assert.equal(existsSync(pathsOf(t).cues), false);
+  });
+  it("is not asked when the video could not be made: there is no stretch to read, and nothing is left", async (c) => {
+    const asked = [];
+    const t = reelSetup({ ffmpeg: "fail", deps: { cues: reader({ cues: CUES }, asked) } });
+    c.after(t.done);
+    const result = await job(t);
+    assert.equal(result.ok, false);
+    assert.deepEqual([asked, t.inWork()], [[], []]);
+  });
+  it("gives a step of its own when there are no faces to look for: the video, and the graphics", async (c) => {
+    const t = reelSetup({ deps: { cues: reader({ cues: CUES }) } });
+    c.after(t.done);
+    await job(t);
+    assert.deepEqual(t.events.find(([what]) => what === "steps"), ["steps", [WORK_COPY_STEP, CUES_STEP]]);
+    assert.deepEqual(JSON.parse(readFileSync(pathsOf(t).cues, "utf8")).cues, CUES);
   });
 });

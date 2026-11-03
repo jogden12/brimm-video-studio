@@ -80,7 +80,7 @@ import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf }
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, facesIn, importHold, keptList, banner } from "./unedited.js";
-import { readEpisodeNow, accountOf, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
+import { readEpisodeNow, accountOf, askReelCues, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
@@ -3990,9 +3990,12 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
     `--reel <n>` (a whole number from 1; anything else is the help and 2) makes the video of Reel `n` instead (plan PR 5;
     architecture 4.3): the stretch of the recording as filed that the suggestion has in reels.json (app-reel.js reelStretch), from
     its first moment to its last, made with the working copy's own chain and checks (workcopy.js makeWorkCopy with `reel`), and the
-    faces looked for in it. It runs for a raw video and a finished one (REEL_COPY_KINDS), and for no other: a finished video has no
-    working copy of its own, and an iPhone clip no Reels. It has the same lock, so that one copy of an episode is made at a time, a
-    Reel's or the video's, waits for the import's late check as the working copy does, and says what it cannot make in words. */
+    faces looked for in it. For a Reel of a finished video, on a Mac whose readings are on and that has Claude Code, Claude is then
+    asked once for the Reel's graphic cues, as a third step (reading.js askReelCues; PR H2): never for a raw video's Reel, which takes
+    the cues of its cut plan, and never for a session, which this command refuses. It runs for a raw video and a finished one
+    (REEL_COPY_KINDS), and for no other: a finished video has no working copy of its own, and an iPhone clip no Reels. It has the same
+    lock, so that one copy of an episode is made at a time, a Reel's or the video's, waits for the import's late check as the working
+    copy does, and says what it cannot make in words. */
 async function workcopy(ctx, rest) {
   if (rest[0] !== "--now" || !rest[1]) {
     ctx.say(HELP);
@@ -4044,7 +4047,12 @@ async function workcopy(ctx, rest) {
       return { ok: false, made: [], failed: [canNotBeUsed(why)], next: "" };
     }
     const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools, limit: REEL_FACES_MS }));
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces });
+    // A Reel of a video her editor finished is asked for its graphic cues as a third step (PR H2), and of no other kind: a raw video's
+    // Reel takes the cues of its cut plan, and a session is never read. Only on a Mac whose readings are on, and that has Claude Code.
+    const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
+      ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
+      : null;
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces, ...(cues ? { cues } : {}) });
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);

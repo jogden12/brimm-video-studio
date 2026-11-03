@@ -51,7 +51,7 @@ function standIn(c, { open = "opened" } = {}) {
     words and the list of Reel suggestions a reading wrote (`reels`: the candidates, or null for none); this Mac's home with the
     stand-in's answers; and a context that collects what is said, what is started and each record written. `copy` makes the Reel's
     video first, as the job would, and `faces` the faces found in it. */
-function episode(c, { open = "opened", copy = true, faces = false, words = true, plan = null, reels = CANDIDATES, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
+function episode(c, { open = "opened", copy = true, faces = false, cues, words = true, plan = null, reels = CANDIDATES, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
   const s = standIn(c, { open });
   const folder = join(s.home, "Dropbox", "BRIMM Video", "Episodes", FOLDER);
   const raw = join(folder, "Talk.mov");
@@ -70,6 +70,8 @@ function episode(c, { open = "opened", copy = true, faces = false, words = true,
     write(paths.video, "the Reel's bytes");
     write(paths.facts, JSON.stringify({ seconds: 1.45, fps: 30, width: 1920, height: 1080, bytes: 16, stretch: STRETCH }));
     if (faces) write(paths.faces, JSON.stringify(FACES));
+    // The cues the run that made the video kept beside it for a Reel of a finished video, as a text or as what it holds.
+    if (cues !== undefined) write(paths.cues, typeof cues === "string" ? cues : JSON.stringify(cues));
   }
   const said = [];
   const started = [];
@@ -113,8 +115,10 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
     assert.deepEqual(transcript.map((word) => [word.id, word.text, word.start, word.end]), [["w0", "says", 0.25, 0.45], ["w1", "Sallie.", 0.95, 1.35]]);
     assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "facts.json"), "utf8")).reel, { n: 2, offset: 1.15 });
     assert.deepEqual(e.runs(), [{ args: ["open", e.project, "--json"], env: PINNED_ENV }]);
-    // No cut or Reel suggestions, and no face track: none was found.
+    // No cut or Reel suggestions, and no face track: none was found. But a file of graphic cues, on the Reel's clock, with none in it.
     assert.ok(!existsSync(join(e.project, "brimm", "cut-suggestions.json")) && !existsSync(join(e.project, "brimm", "reel-suggestions.json")) && !existsSync(join(e.project, "brimm", "face-track.json")));
+    assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "reel", cues: [] });
+    assert.deepEqual(readdirSync(join(e.project, "brimm")).sort(), ["brand.md", "facts.json", "graphic-cues.json", "spellings.json"]);
     // One record write: the project, and the Reel picked, which is what `reel pick` did.
     assert.equal(e.saved.length, 1);
     const next = e.saved[0];
@@ -163,6 +167,86 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
     writeFileSync(broken.paths.faces, "{ not json");
     assert.equal(await run(broken), 0);
     assert.ok(!existsSync(join(broken.project, "brimm", "face-track.json")));
+  });
+  describe("its graphic cues (PR H2)", () => {
+    const cuesFile = (e) => JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8"));
+    /** The cues of an episode's cut plan: "says Sally" is in Reel 2's stretch (it is spelled "says Sallie" in the transcript), "Pricing" starts before it. */
+    const PLAN_CUES = [
+      { n: 1, words: "Pricing says", kind: "graphic", show: "The word pricing.", seconds: 3, style: null, phrase: "p1" },
+      { n: 2, words: "says Sally", kind: "words", show: "Her name.", seconds: 4, style: null, phrase: "p2" }
+    ];
+    const planWith = (graphicCues) => JSON.stringify({ by: "rules", phrases: [{ id: "p1", start: 0.4, end: 1.15 }, { id: "p2", start: 1.5, end: 2.6 }], claude: { decisions: [], graphicCues, ignored: [], clips: [] } });
+    /** What a finished video's Reel run kept beside its video. */
+    const KEPT = [
+      { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 4, style: null, phrase: "p2" },
+      { n: 2, words: "the moon", kind: "graphic", show: "The moon.", seconds: 3, style: null, phrase: "p2" }
+    ];
+
+    it("takes, for a raw video's Reel, the cut plan's cues that fall in the Reel's stretch, onto the Reel's clock and with its ids, and leaves out one that starts before it", async (c) => {
+      const e = episode(c, { plan: planWith(PLAN_CUES) });
+      assert.equal(await run(e), 0);
+      const transcript = JSON.parse(readFileSync(join(e.project, "transcript.json"), "utf8"));
+      assert.deepEqual(transcript.map((w) => [w.id, w.text]), [["w0", "says"], ["w1", "Sallie."]]);
+      // "Pricing says" starts at 0.8 s, before the Reel does at 1.15 s: it is not in this Reel. "says Sally" is: its words are placed by the
+      // phrase they end in, which starts at 1.5 s, so it is at 0.35 s of the Reel's clock, where the transcript has "says".
+      assert.deepEqual(cuesFile(e), { version: 1, clock: "reel", cues: [{ ...PLAN_CUES[1], at: { from: "w0", to: "w1", start: 0.35, end: 1.35 } }] });
+      assert.equal(cuesFile(e).cues[0].at.start, transcript[0].start);
+      assert.ok(!existsSync(join(e.project, "brimm", "reel-suggestions.json")));
+    });
+    it("takes no cue from the file beside a raw video's Reel, if one is there: its cues are the cut plan's", async (c) => {
+      const e = episode(c, { plan: planWith([]), cues: { version: 1, cues: KEPT } });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e).cues, []);
+    });
+    it("takes an older plan's ideas for graphics, as cues, as the main video's project does", async (c) => {
+      const plan = JSON.stringify({ by: "rules", phrases: [{ id: "p1", start: 0.4, end: 1.15, text: "Pricing,", words: [WORDS[0]] }, { id: "p2", start: 1.5, end: 2.6, text: "says Sally.", words: WORDS.slice(1) }], claude: { decisions: [], graphics: [{ id: "p2", idea: "A card with her name." }], ignored: [], clips: [] } });
+      const e = episode(c, { plan });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e).cues.map((cue) => [cue.words, cue.show, cue.phrase, cue.at && [cue.at.from, cue.at.to]]), [["says Sally.", "A card with her name.", "p2", ["w0", "w1"]]]);
+    });
+    it("takes, for a Reel of a video her editor finished, the cues its run kept beside its video, placed on the Reel's words, and leaves the file where it is", async (c) => {
+      const e = episode(c, { record: { kind: "finished" }, cues: { version: 1, cues: KEPT } });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e), { version: 1, clock: "reel", cues: [{ ...KEPT[0], at: { from: "w0", to: "w1", start: 0.25, end: 1.35 } }, { ...KEPT[1], at: null }] });
+      assert.ok(existsSync(e.paths.cues), "the file beside the copy stays, as the faces' does");
+    });
+    it("takes three of a finished video's cues at most, whatever the file holds", async (c) => {
+      const many = ["says", "Sally", "says Sally", "says"].map((words, i) => ({ n: i + 1, words, kind: "words", show: `Card ${i + 1}.`, seconds: 3, style: null }));
+      const e = episode(c, { record: { kind: "finished" }, cues: { version: 1, cues: many } });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e).cues.map((cue) => cue.n), [1, 2, 3]);
+    });
+    it("reads the file's cues as cues: one that is not one is left out, and the others are numbered from 1", async (c) => {
+      const e = episode(c, { record: { kind: "finished" }, cues: { version: 1, cues: [{ words: "", kind: "graphic", show: "x" }, { words: "says Sally", kind: "b-roll", show: "A shot.", shot: 1 }, "says", KEPT[0], null] } });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e).cues.map((cue) => [cue.n, cue.words, cue.kind]), [[1, "says Sally", "words"]]);
+    });
+    it("makes the Reel without cues when the file is not whole JSON, is not a list of cues, or is not there", async (c) => {
+      for (const cues of ["{ not json", "", "[1, 2", JSON.stringify(null), JSON.stringify("cues"), JSON.stringify([KEPT[0]]), JSON.stringify({ version: 1 }), JSON.stringify({ version: 1, cues: "none" }), JSON.stringify({ cues: { n: 1 } }), undefined]) {
+        const e = episode(c, { record: { kind: "finished" }, cues });
+        assert.equal(await run(e), 0, String(cues));
+        assert.deepEqual(cuesFile(e), { version: 1, clock: "reel", cues: [] }, String(cues));
+        assert.ok(e.saved.length === 1 && existsSync(e.project), String(cues));
+      }
+    });
+    it("takes no cue from the cut plan for a Reel of a video her editor finished: the cues of a plan are for a video she edits whole", async (c) => {
+      const e = episode(c, { record: { kind: "finished" }, plan: planWith(PLAN_CUES) });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(cuesFile(e).cues, []);
+    });
+    it("says nothing of them to her, and puts no cue in the record", async (c) => {
+      const e = episode(c, { plan: planWith(PLAN_CUES) });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["Reel 2 is made: the recording from 0:01 to 0:03.", "It's open in HyperFrames.", BUTTONS]);
+      assert.ok(!JSON.stringify(e.saved[0]).includes("says Sally"));
+    });
+    it("makes the project once, with the cues it was made with: opening it again changes nothing in it", async (c) => {
+      const e = episode(c, { plan: planWith(PLAN_CUES) });
+      await run(e);
+      const tree = treeOf(e.project);
+      assert.equal(await run(e, e.saved[0]), 0);
+      assert.deepEqual(treeOf(e.project), tree);
+    });
   });
   it("opens the same project again, and makes no second project or video", async (c) => {
     const e = episode(c);
