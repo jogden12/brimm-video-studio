@@ -37,7 +37,7 @@ import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
 import { UPRIGHT, shownWidth, speakerPlace, uprightPosition } from "./reframe.js";
-import { graphicCuesJson, keptIndexes, keptPhraseSpans, placeGraphicCues, reelGraphicCues, REEL_CUES_MOST, REEL_EDGE_SLACK } from "./graphic-cues.js";
+import { graphicCuesJson, keptIndexes, keptPhraseSpans, phraseSpans, placeGraphicCues, reelGraphicCues, REEL_CUES_MOST, REEL_EDGE_SLACK } from "./graphic-cues.js";
 
 /** A file of this tool's own, by its path from this file. */
 const own = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -304,16 +304,37 @@ export function reelSuggestions(candidates, transcript) {
   return { version: 1, clock: "recording", reels };
 }
 
+/** The phrases of a cut plan as places among the words of a Reel, for a cue Claude wrote for a phrase to be looked for there first: the
+    spans of the plan's phrases (graphic-cues.js phraseSpans, counted over all the recording's words, as the cut suggestions are),
+    moved by where the Reel's first word is among them and cut to the Reel's `count` words. The Reel's first word is the first of
+    the recording's `placed` words whose middle is not before the stretch's start (reelWords takes the words whose middle is
+    inside). A phrase that is wholly outside the Reel has no place in it, and nor has one the plan does not have. */
+function reelPhraseSpans(phrases, placed, stretch, count) {
+  const first = placed.findIndex((word) => (word.start + word.end) / 2 >= stretch.start);
+  const spans = new Map();
+  if (first === -1) return spans;
+  for (const [id, [from, to]] of phraseSpans(phrases)) {
+    const [a, b] = [from - first, to - first];
+    if (b >= 0 && a < count) spans.set(id, [Math.max(0, a), Math.min(count - 1, b)]);
+  }
+  return spans;
+}
+
 /** A Reel's graphic cues, placed on the Reel's own words (PR H2), whichever way it has them:
     - `input.reelCues`, for a Reel of a video her editor finished: the cues Claude read of the Reel's stretch alone (readings.js
-      readReelCues), placed on the Reel's own transcript as a main video's are, three at most, in the order given;
+      readReelCues), placed on the Reel's own transcript as a main video's are, three at most, in the order given. A cue written for a
+      phrase of the plan (its `phrase`) is looked for in that phrase first, as the plan's phrases fall among the Reel's words (all of
+      them, kept or not: a finished video keeps the whole of itself); the words alone, from the first, when it names none the Reel holds;
     - `input.graphicCues`, for a Reel of a raw episode: the episode's cues, placed first on the words of the whole recording as the main
       video's are (so a cue is on the take she keeps, and a cue that names a phrase the plan cuts counts as naming none), and then taken
       to the Reel (graphic-cues.js reelGraphicCues): those wholly inside its stretch, the first three, on its own clock and with its own ids.
     `placed` are the recording's words as they are said (saidWords), and `transcript` the Reel's own (transcriptJson of reelWords). */
 function reelCues(input, { placed, transcript }) {
   const spell = speller(input.spellings);
-  if (Array.isArray(input.reelCues)) return placeGraphicCues(input.reelCues.slice(0, REEL_CUES_MOST), transcript, { spell });
+  if (Array.isArray(input.reelCues)) {
+    const spans = reelPhraseSpans(input.plan?.phrases, placed, input.stretch, transcript.length);
+    return placeGraphicCues(input.reelCues.slice(0, REEL_CUES_MOST), transcript, { spans, spell });
+  }
   if (!Array.isArray(input.graphicCues)) return [];
   const phrases = input.plan?.phrases;
   const onRecording = placeGraphicCues(input.graphicCues, transcriptJson(placed, input.spellings), { spans: keptPhraseSpans(phrases), kept: keptIndexes(phrases), spell });

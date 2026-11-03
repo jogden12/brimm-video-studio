@@ -783,6 +783,32 @@ describe("what the app is given to start from (5.8)", () => {
       const files = projectFiles(cut({ words, reelCues: [{ ...onWords(40, 40), words: "pricing" }] }));
       assert.deepEqual(cuesOf(files).cues.map((c) => [c.at.from, c.at.to, c.at.start]), [["w15", "w15", 7.6]]);
     });
+    describe("a cue read for the Reel, for a phrase of the plan, is looked for in that phrase first", () => {
+      // The plan's phrases are 30 words each, p1 to p4, over the whole recording (words 0 to 119). The Reel holds words 25 to 79: the end
+      // of p1, all of p2 and the start of p3. "pricing" is said in p2 (word 35, the Reel's w10) and again in p3 (word 65, the Reel's w40).
+      const phrases = ["p1", "p2", "p3", "p4"].map((id, k) => {
+        const own = RECORDING.slice(k * 30, k * 30 + 30).map((w) => ({ ...w, w: w.w === "word35" || w.w === "word65" ? "pricing" : w.w }));
+        return { id, start: own[0].start, end: own[own.length - 1].end, text: own.map((w) => w.w).join(" "), words: own, keep: true, kind: "keep", why: "" };
+      });
+      const words = phrases.flatMap((p) => p.words);
+      const plan = { by: "rules", phrases };
+      const said = (phrase, over = {}) => ({ n: 1, words: "pricing", kind: "words", show: "The word.", seconds: 3, style: null, ...(phrase ? { phrase } : {}), ...over });
+      const landed = (cues) => cuesOf(projectFiles(cut({ words, plan, reelCues: cues }))).cues.map((c) => c.at && c.at.from);
+      it("lands a cue that names the later phrase on the later time its words are said, and one that names the earlier phrase on the earlier", () => {
+        assert.deepEqual(landed([said("p3")]), ["w40"]);
+        assert.deepEqual(landed([said("p2")]), ["w10"]);
+      });
+      it("lands a cue that names no phrase, a phrase the plan has not, or a phrase outside the Reel on the first time its words are said in the Reel", () => {
+        for (const phrase of [undefined, "p9", "p4", "p1"]) assert.deepEqual(landed([said(phrase)]), ["w10"], String(phrase));
+      });
+      it("keeps the order of the cues: the second cue with the same words lands on the second time when it names no phrase", () => {
+        assert.deepEqual(landed([said(undefined, { n: 1 }), said(undefined, { n: 2 })]), ["w10", "w40"]);
+      });
+      it("does the same for a phrase that is cut: a finished video keeps the whole of itself, so every phrase of its plan is there", () => {
+        const cutThird = { ...plan, phrases: phrases.map((p) => (p.id === "p3" ? { ...p, keep: false, kind: "retake", why: "said again" } : p)) };
+        assert.deepEqual(cuesOf(projectFiles(cut({ words, plan: cutThird, reelCues: [said("p3")] }))).cues.map((c) => c.at.from), ["w40"]);
+      });
+    });
     it("has a cue read for the Reel with no place when the Reel's words do not hold it, and still lists it", () => {
       const files = projectFiles(cut({ reelCues: [{ ...onWords(40, 42), words: "the moon landing" }, onWords(41, 42, { n: 2 })] }));
       assert.deepEqual(cuesOf(files).cues.map((c) => [c.n, c.at && c.at.from]), [[1, null], [2, "w16"]]);
