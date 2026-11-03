@@ -66,7 +66,8 @@ function notedStep(handoff, note) {
     at its empty revision itself there is nothing more for the page, as the session's own steps are brimm-video's until its own
     hand-off is written. Otherwise a note that does not count (none, or one of another kind of hand-off) starts the steps again at
     the first; a revision newer than the one noted brings back "taken", again; and after that comes the step after the one
-    noted. */
+    noted. With the note at an episode's last step, the cascade, none comes after "taken", again: its words (opsText) say what
+    the cascade would of the Reels that come with a newer revision. */
 export function opsNext(handoff, note) {
   if (Number.isInteger(handoff.emptyAt)) {
     if (!withdrawn(handoff, note)) return { step: "withdrawn", again: false };
@@ -95,18 +96,27 @@ export function noteAfter(handoff, note, step, at) {
 /** What follows taking a raw episode, which was edited in Final Cut: freeing the space its folder takes on this Mac. */
 const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 
+/** What follows taking a newer revision of an episode whose note is already at the cascade, the last step. The Reels of a video her
+    editor finished usually come later, through "Hand off the Reels", which writes a newer revision of the hand-off. The page's "Reels"
+    card lists them ("Reels from brimm-video"), each with a "Write its post text" button, or "Open its short video" once its post text
+    exists. The cascade step says so, but she has done it, and no step comes after "taken" to say it again. With the note before the
+    cascade that step is still to come, and it says it. A short video's page has no "Reels" card, and a session's words are the
+    session form's. */
+const LATE_REELS = ' Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
+
 /** Each step in the page's own words, by what the hand-off is (noteKindOf) where it matters. The labels are the page's own
-    buttons and cards. A step is given whether it is taken `again` for a newer revision, the hand-off's `revision`, and `have`, the
-    revision the page holds, which is the one her note holds: the page's button for a newer revision names both. A hand-off dropped
-    on Episodes opens the episode that holds its video; when none does, the page offers "Add it as a new episode", which opens a
-    form whose button is "Add the episode", and the file goes into that episode's transcript. A session's form has one button,
-    "Take the session", for a new revision and a newer one. */
+    buttons and cards. A step is given whether it is taken `again` for a newer revision, the hand-off's `revision`, and `note`, her
+    note on it: the revision the note holds is the one the page holds, which the page's button for a newer revision names beside the
+    hand-off's, and the step it holds is how far she has got (an episode's, at the cascade, is sent on to the "Reels" card:
+    LATE_REELS). A first take reads no note. A hand-off dropped on Episodes opens the episode that holds its video; when none does,
+    the page offers "Add it as a new episode", which opens a form whose button is "Add the episode", and the file goes into that
+    episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
 const SAYS = {
-  taken: (family, again, revision, have) =>
+  taken: (family, again, revision, note) =>
     family === "session"
       ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
       : again
-        ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`
+        ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
         : 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
@@ -124,12 +134,14 @@ const SAYS = {
   withdrawn: () => 'Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.'
 };
 
-/** A BRIMM Ops step for a hand-off, in the page's own words: `again` when it is taken again for a newer revision, and then `have`,
-    the revision her note holds, which is the one she last took on the page (a first take names none). Taking a raw episode ends
-    with freeing its space in Dropbox. */
-export function opsText(handoff, step, again, have) {
+/** A BRIMM Ops step for a hand-off, in the page's own words: `again` when it is taken again for a newer revision, and then `note`,
+    her note on it, which says the revision she last took on the page and how far she got with it (a first take reads no note). It
+    is the note that counts, as opsNext has it: the same kind of hand-off, with one of its steps. Taking an episode again when her
+    note is at the cascade, the last step, ends by sending her on to the "Reels" card (LATE_REELS). Taking a raw episode ends with
+    freeing its space in Dropbox, after that. */
+export function opsText(handoff, step, again, note) {
   const family = noteKindOf(handoff.kind);
-  const text = SAYS[step](family, again, handoff.revision, have);
+  const text = SAYS[step](family, again, handoff.revision, note);
   return step === "taken" && handoff.kind === "raw" ? text + ONLINE_ONLY : text;
 }
 
@@ -285,9 +297,9 @@ function opsStep(facts, notes, now) {
   const noted = { ...notes, handoffs: { ...notes.handoffs, [handoff.id]: noteAfter(handoff, note, next.step, "") } };
   const then = opsNext(handoff, noted.handoffs[handoff.id]);
   const own = !then && handoff.revision === handoff.emptyAt ? nextFor(facts, noted, now) : null;
-  // `have` is the revision her note holds. Only a hand-off taken again names it, and that is one for a revision newer than the note's.
-  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id].revision) : own && !own.done ? own.text : "";
-  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note?.revision)}`, step: next.step, after };
+  // Only a hand-off taken again reads her note (opsText), and that is one for a revision newer than the note's.
+  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id]) : own && !own.done ? own.text : "";
+  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note)}`, step: next.step, after };
 }
 
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes

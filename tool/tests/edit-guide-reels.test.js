@@ -10,12 +10,12 @@ import { syncBuiltinESMExports } from "node:module";
 import { join, sep } from "node:path";
 import { KEPT } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
-import { acceptRev, recordFile, recordText } from "../episode.js";
+import { acceptRev, localStamp, recordFile, recordText } from "../episode.js";
 import { finishEpisode } from "../edit.js";
 import { fixedZone } from "../exports.js";
 import { finishNow } from "../finish.js";
 import { NOTHING_UNDER_WAY } from "../guide.js";
-import { guideFile, writeGuideNotes } from "../guide-note.js";
+import { guideFile, readGuideNotes, writeGuideNotes } from "../guide-note.js";
 import { progressFolder } from "../progress.js";
 import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, REEL2, exportOf } from "./exports-world.js";
@@ -31,6 +31,8 @@ const reelLine = (names, them = false) => `You have exported ${names} from Hyper
 const REEL_2 = reelLine("Reel 2");
 const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
 const TAKE_AGAIN = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
+/** The same, when her note is already at the cascade, the last step: the Reels came after it, and the words go on to the page's "Reels" card. */
+const TAKE_AGAIN_LATE = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const HANDOFF_OWED = 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.';
 const AT = "2026-10-20T15:00:00-05:00";
@@ -216,6 +218,31 @@ describe("B3. a Reel in the hand-off", () => {
     assert.equal(reread(w.found).finished.revision, 2);
     assert.deepEqual(readdirSync(w.downloads), [], "what it took from Downloads is removed after the late check");
     assert.equal(await line(w), says(TAKE_AGAIN));
+  });
+  it("sends her on to the page's Reels card when her note is at the cascade: the Reels came after every step she did, and noting the take leaves nothing under way", async () => {
+    const w = await W();
+    writeGuideNotes(w.t.home, noted("cascade"));
+    exportOf(w, "reel 2");
+    // Every step is noted, and a Reel waits: the Reels' stage first, as it is whatever her note holds.
+    assert.equal(await line(w), says(REEL_2));
+    await handedOff(w);
+    assert.equal(reread(w.found).finished.revision, 2);
+    assert.equal(await line(w), says(TAKE_AGAIN_LATE));
+    assert.deepEqual((await on(depsOf(w), "guide", "3fa9c1")).said, [says(TAKE_AGAIN_LATE), "Then: that is the last step.", "Step: taken"]);
+    // Noted, the take is the last step: the note stays at the cascade, at revision 2, and the video is done.
+    const noting = await on(depsOf(w), "guide", "3fa9c1", "done", "taken");
+    assert.deepEqual([noting.code, noting.said], [0, [`Noted: ${NAMED}, taken.`, `${NAMED} is done: nothing is left to do for it.`]]);
+    assert.deepEqual(readGuideNotes(w.t.home).handoffs[ID], { kind: "episode", step: "cascade", revision: 2, at: localStamp(new Date(w.t.now())) });
+    assert.deepEqual((await on(depsOf(w), "guide")).said, [DROP_LINE, NOTHING_UNDER_WAY]);
+  });
+  it("sends her to no Reels card when her note is before the cascade: the cascade step, still to come, says it", async () => {
+    for (const step of ["taken", "kit", "posted", "live"]) {
+      const w = await W();
+      writeGuideNotes(w.t.home, noted(step));
+      exportOf(w, "reel 2");
+      await handedOff(w);
+      assert.equal(await line(w), says(TAKE_AGAIN), step);
+    }
   });
   it("is not said while the export it took is still in Downloads, the same size and time: the late check has not made yet", async () => {
     const w = await W();
