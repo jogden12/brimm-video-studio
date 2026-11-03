@@ -30,6 +30,19 @@ describe("the gate's lists", () => {
   });
 });
 
+describe("the gate and refs (PR H3)", () => {
+  it("has refs in none of the lists: `refs use` names an episode and is refused as app is, while refs and refs look name none, so the gate is never asked of them", () => {
+    assert.ok(COMMAND_NAMES.includes("refs"));
+    for (const list of [UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT]) assert.ok(!list.includes("refs"));
+    for (const record of [unanswered, { kind: null, answer: { state: "not for brimm-video" } }, session()]) {
+      for (const on of [ON, OFF]) assert.equal(gateFor("refs", record, on, ["use", "Pricing talk", "blue carousel"]), gateFor("app", record, on), JSON.stringify(record));
+    }
+    assert.equal(gateFor("refs", unanswered, ON), WAITING);
+    assert.equal(gateFor("refs", session(), ON), NOT_FOR_SESSION);
+    assert.equal(gateFor("refs", finished, OFF), "");
+  });
+});
+
 describe("gateFor, a video waiting for its answer", () => {
   it("lets through only the commands that answer it, leave it, show where it is, hand it over or sort out its files", () => {
     for (const name of ["kind", "leave", "which", "show", "release", "resolve"]) assert.equal(gateFor(name, unanswered, ON), "", name);

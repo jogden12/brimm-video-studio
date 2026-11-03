@@ -121,7 +121,10 @@ const TODAY_ASKED = {
   guide: [],
   // The app, new with Studio: tests/edit-app.test.js pins its words, and tests/edit-app-history.test.js those of `app … what-happened`
   // and `app … versions`. The walk below runs both for a video waiting for its answer and for a session.
-  app: []
+  app: [],
+  // The reference folder, new with the HyperFrames-led path (PR H3): tests/edit-refs.test.js pins its words. Today's Mac has no such folder, and no
+  // app, so here it says so; the walk below runs `refs use` for a video waiting for its answer and for a session, where the gate answers.
+  refs: [[], ["look", "blue carousel"], ["use", FOLDER, "blue carousel"], ["use", NAME, "blue carousel", "reel", "2"], ["use"]]
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1244,7 +1247,8 @@ describe("the walk: every command, for a video imported lightly from a file name
     principles: [[label], [label, "keep", "1"], [label, "recurring", "drop", "1"], []],
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
-    app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]]
+    app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]],
+    refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

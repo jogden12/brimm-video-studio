@@ -103,6 +103,7 @@ import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -315,7 +316,18 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js cut "<episode>" remove [main | reel <n>] (--words "<words>" | --at <time> --to <time>) [--no-hand-edits]
   node edit.js cut "<episode>" keep [main | reel <n>] (--words "<words>" | --at <time>) [--no-hand-edits]
                                         take whole phrases out, at a pause, as read on the timeline; or keep what was
-                                        cut, by its words or at the join nearest a time on the timeline`;
+                                        cut, by its words or at the join nearest a time on the timeline
+  node edit.js refs                     what is in the reference folder: the pictures she can name as a style, and any
+                                        other file in it, which Studio does not use. It writes nothing there
+  node edit.js refs look "<name>"       copy the picture of that name from the reference folder into the Looking folder in
+                                        her BRIMM Video Studio folder (a HEIC or TIFF picture as a JPEG), and say where it
+                                        is, for Claude to look at. Her skill never repeats that to her
+  node edit.js refs use "<episode>" "<name>" [reel <n>]
+                                        copy the picture of that name from the reference folder into the episode's
+                                        HyperFrames project on this Mac, the main video's or Reel n's, as a style to
+                                        follow, and say what to say in HyperFrames to have it followed. The gate asks
+                                        first, as for app; a finished video has no main project, a short video no Reels,
+                                        and a project that is not on this Mac is to be opened first`;
 
 /** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
 const homeOf = (deps) => deps.home || process.env.HOME || homedir();
@@ -7144,9 +7156,54 @@ export async function guideCommand(ctx, rest) {
   return 0;
 }
 
+/** The project `refs use` copies a picture into: { dir, who } (its folder on this Mac, and how her words name it: "<episode>" or "Reel 2 of
+    <episode>"), or { code } when there is none to copy into, having said why, in app's words and in app's order (the gate has asked
+    already): a video her editor finished has no main project; an iPhone clip has no Reels; this Mac must be set up for HyperFrames; a
+    project made on another Mac and not handed over is that Mac's; a project of the record that is a session clip's folder is not used;
+    and a project whose folder is not on this Mac is to be opened first, or a Reel the episode does not have is said as app says it.
+    Nothing is claimed, brought or written, and no record is. */
+function refsProject(ctx, { found, record }, reel) {
+  const name = record.name.text;
+  const key = reel === null ? "main" : `reel ${reel}`;
+  const of = reel === null ? "" : `Reel ${reel} of `;
+  const no = (why) => ({ code: refuse(ctx, why) });
+  if (reel === null && recordKind(record) === "finished") return no(finishedHasNoProject(name));
+  if (reel !== null && recordKind(record) === "short video") return no(NO_REELS);
+  if (!appOf(ctx.settings)) return no(APP_NOT_SET_UP);
+  const elsewhere = projectOnAnotherMac(ctx, { found, record }, key);
+  if (elsewhere && !projectSnapshot(record, key)) return no(projectIsElsewhere(name, elsewhere, of, holderOf(ctx, record)));
+  const clip = clipWords(ctx, { found, record }, key, `${of}${name}`);
+  if (clip) return no(clip);
+  const project = (record.app?.projects ?? []).find((p) => (reel === null ? inUse(p) : p.key === key));
+  const dir = project && plainName(project.name) ? join(episodeWork(ctx.home, found.name), project.name) : "";
+  if (dir && existsSync(dir)) return { dir, who: `${of}${name}` };
+  return no((reel === null ? "" : reelWhy(ctx, found, record, reel)) || `Open it in HyperFrames first: say "${reel === null ? openInAppWords(name) : openReelWords(reel, name)}".`);
+}
+
+/** `refs`, `refs look "<name>"` and `refs use "<episode>" "<name>" [reel <n>]`: the reference folder (references.js; PR H3), edit.js being only the wiring.
+    `refs` and `refs look` name no episode, so the gate is never asked of them and they run on any Mac that has the folder. `refs use` finds its
+    episode as every command does, through the gate, and `refs` is in none of the gate's lists, so a video not yet answered, a video left alone,
+    a session not cleared and a video held beside a session are refused in the gate's own words, as `app` refuses them. It then finds the
+    project to copy into (refsProject) and gives it to references.js. It claims nothing, brings nothing and writes no record: the only file it
+    makes is the picture, in a project's folder on this Mac or in Looking/, and nothing is written in the reference folder. */
+async function refs(ctx, rest) {
+  const asked = referencesAsked(rest);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  if (asked.form === "list") return sayReferences(ctx);
+  if (asked.form === "look") return lookAt(ctx, asked.name);
+  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const where = refsProject(ctx, got, asked.reel);
+  if (where.code !== undefined) return where.code;
+  return useIn(ctx, where, asked.name);
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so is `workcopy` (`kind` and `app` start it): both are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

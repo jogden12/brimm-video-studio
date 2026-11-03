@@ -77,6 +77,13 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
       if (args.includes("-ojf")) writeFileSync(base + ".json", JSON.stringify(toldOf(srt)));
       return { code: 0, stderr: "" };
     },
+    // macOS's sips, which turns a HEIC or TIFF reference picture into a JPEG Claude can read (references.js). Run as the real one is: told where to
+    // write with --out, never over the picture it reads. A picture is a made-up JPEG, and a test that wants sips to fail gives its own.
+    SIPS: (args) => {
+      if (!args.includes("--out")) throw new Error("sips is always told where to write, or it would write over the picture it reads");
+      writeFileSync(args[args.indexOf("--out") + 1], "a JPEG made by sips");
+      return { code: 0, stderr: "" };
+    },
     ...programs
   };
   const run = async (cmd, args, asked = {}) => {
@@ -99,7 +106,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     // No test waits for the process `finish … --yes` starts: the stand-in for it starts nothing, so there is no lock to wait for. A test of
     // that wait takes this away, and the command's own five seconds stand (finish-start-wait.test.js).
     startWaitMs: 0,
-    run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL" }, running: async () => false, progress: noProgress,
+    run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL", sips: "SIPS" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
     // No test reads this computer's own Claude settings: `behind` looks at the environment, the managed settings folder and the

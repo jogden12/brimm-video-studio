@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REFERENCE_KINDS, findReference, listReferences, lookingFolder, projectNameOf, referencesAsked, sameName } from "../references.js";
+import { REFERENCE_KINDS, findReference, listReferences, lookingFolder, projectNameOf, referencesAsked, refNamesOf, sameName } from "../references.js";
 import { referencesFolder } from "../settings.js";
 import { studioFolder } from "../studio.js";
 
@@ -160,6 +160,19 @@ describe("projectNameOf: the file as Claude and a project can read it", () => {
     assert.equal(projectNameOf("scan.TIF"), "scan.jpg");
     assert.equal(projectNameOf("scan.tiff"), "scan.jpg");
     assert.equal(projectNameOf("A.B.HEIC"), "A.B.jpg");
+  });
+});
+
+describe("refNamesOf: the pictures a list of cues names", () => {
+  const cue = (style) => ({ n: 1, words: "x", kind: "graphic", show: "y", seconds: 4, style });
+  it("is the file name of each style that is a ref, once each (a name that is the same for a person, as the first is spelled), in the order the cues come", () => {
+    assert.deepEqual(refNamesOf([cue({ ref: "b.png" }), cue(null), cue({ ref: "a.png" }), cue({ ref: "b.png" }), cue({ ref: "B.PNG" })]), ["b.png", "a.png"]);
+  });
+  it("leaves out a style that names an inspiration or a link, no style, and anything that is not a cue", () => {
+    assert.deepEqual(refNamesOf([cue({ inspiration: "a" }), cue({ link: "https://example.com/post" }), cue(null), cue(undefined), { n: 2 }, null, "text", 7, cue({ ref: "" }), cue({ ref: 3 })]), []);
+  });
+  it("is nothing for no cues, and for what is not a list", () => {
+    for (const given of [[], undefined, null, "text", {}]) assert.deepEqual(refNamesOf(given), []);
   });
 });
 

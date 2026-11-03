@@ -50,7 +50,9 @@ const ASKED = {
   workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
-  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER]
+  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER],
+  // `refs` names an episode only in `refs use`, which is the form walked here: `refs` and `refs look` name none, and are never gated (tests/edit-refs.test.js).
+  refs: ["use", FOLDER, "blue carousel"]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
