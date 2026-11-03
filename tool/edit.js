@@ -4408,14 +4408,16 @@ function unhandedReels(record) {
 }
 
 /** What she is told of the Reel projects not handed off yet (unhandedReels), when a spelling is saved: a spelling is not pushed into a project (architecture 4.8), so
-    the captions already drawn in one keep the old spelling, and the assistant in HyperFrames fixes them before the Reel is exported. It goes at the end of the line
-    that says the spelling was saved, after every sentence about the parts handed off. "" when there is none. It is left out where the reply asks the assistant to fix
-    any caption already drawn (ASK_ASSISTANT), which covers every project, where nothing is saved, and where a finished video's hand-off comes out as it was. */
+    the captions already drawn in one keep the old spelling, and so do those of an export of it she has already (she may have just watched it and seen the word
+    misspelt): the assistant in HyperFrames fixes them, then the Reel is exported, again if she has exported it. "Then export it" is right whether or not she has. It goes
+    at the end of the line that says the spelling was saved, after every sentence about the parts handed off. "" when there is none. It is left out where the reply asks
+    the assistant to fix any caption already drawn (ASK_ASSISTANT), which covers every project, where nothing is saved, and where a finished video's hand-off comes out
+    as it was. */
 function unhandedWords(record) {
   const names = unhandedReels(record).map((n) => `Reel ${n}`);
   if (!names.length) return "";
   const one = names.length === 1;
-  return ` ${listed(names)} ${one ? "is" : "are"} not handed off yet. If ${one ? "it shows" : "they show"} captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them before you export ${one ? "it" : "each"}.`;
+  return ` ${listed(names)} ${one ? "is" : "are"} not handed off yet. If ${one ? "it shows" : "they show"} captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export ${one ? "it" : "each"}.`;
 }
 
 /** Whether a command changes the episode's spellings: `after` is not `before`, a pair more, fewer or spelled another way, in any order. An answer to Claude's offers that
