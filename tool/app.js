@@ -67,7 +67,7 @@ import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
 import { aboutLeft, progressFolder, readRates } from "./progress.js";
-import { graphicCuesOfPlan } from "./graphic-cues.js";
+import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
 import { projectFiles, projectName, writeProject } from "./project.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
@@ -468,11 +468,13 @@ function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
   const { name, number } = nextMain(record, projects);
   const reels = jsonIn(join(found.folder, REELS_FILE));
   const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
-  // The cut plan's graphic cues go in beside its suggested cuts, placed on the project's words (project.js): the plan's own, or for a
-  // plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan).
+  // The graphic cues go in beside the suggested cuts, placed on the project's words (project.js). A raw video's are the cut plan's own,
+  // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
+  // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
+  const short = record.kind === "short video";
   writeProject(join(episodeWork(home, found.name), name), projectFiles({
-    kind: "main", number, short: record.kind === "short video", id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
-    plan, graphicCues: graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
+    kind: "main", number, short, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
+    plan, graphicCues: short ? graphicCuesOfRecord(record) : graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   }));
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy: { bytes: facts.bytes, seconds: facts.seconds, fps: facts.fps } }) };
 }

@@ -8,9 +8,10 @@
 //   and transcript, Claude's notes, the Reel suggestions and the spellings as offers; and the rough cut rendered on this Mac, by
 //   today's ffmpeg, as version 0 of the main video, from the timeline kept as edit/main.v0.fcpxml, and opened in QuickTime
 //   Player. It replaces files the import's late check looks at, so it waits first while that check still holds the video.
-// - An iPhone clip: the spellings as offers, one line on what the clip is, and its graphic cues (three at most), which go into its
-//   cut plan as `claude.graphicCues`, put in by the rule with the record. Its plan is set aside in history/ first, as a raw video's
-//   is, and it waits for the import's late check as a raw reading does, since it replaces a file that check looks at.
+// - An iPhone clip: the spellings as offers, one line on what the clip is, and its graphic cues (three at most, PR H2). It changes the
+//   record alone, in the one write it makes: the cues are kept in the record's `reading.graphicCues`, beside `reading.about`, and the
+//   clip's cut plan is left exactly as the import wrote it. It replaces no file that the import's late check looks at, so it does not
+//   wait for that check.
 // - A client or group session, once she has asked for its teachings (`teachings`, edit.js) and while this Mac's training gate is
 //   on: every speaker of the meeting's own transcript but her is replaced before the call, the reply is read for principles,
 //   recurring principles and Reel ideas, every field that holds a name brimm-video can see is taken out (sessions.js), and what
@@ -28,7 +29,8 @@ import { keptSpans, roughRate, roughCaptions, planText, probeArgs, factsOf, stre
 import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
-import { readEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
+import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
+import { commitOf, thisCheckout } from "./filing.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { timelineFor } from "./timeline.js";
@@ -36,7 +38,7 @@ import { episodeWork, runsFolder, readSettings } from "./settings.js";
 import { fileSafe, shortId, timelineFile } from "./names.js";
 import { askOnce, roughCut, intoEpisode, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
 import { noProgress } from "./progress.js";
-import { isWhole, readThrough, LATE_CHECK_MS } from "./dropbox.js";
+import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { lastLine } from "./run.js";
 import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
@@ -288,10 +290,10 @@ export async function readEpisodeNow(ctx, found, deps) {
   const stem = basename(video, extname(video));
 
   // A reading that replaces a file the import's late check looks at waits while that check is still to come, and asks nothing
-  // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), an iPhone clip's always
-  // (the plan, which now holds its graphic cues), and a finished one when the import put in a reels.json or suggestions (as the
-  // full import does).
-  const replaces = kind === "raw" || kind === "short video" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
+  // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), and a finished one when
+  // the import put in a reels.json or suggestions (as the full import does). An iPhone clip's replaces no file: it changes the record
+  // alone (its graphic cues are kept in the record's reading, and its cut plan is left as the import wrote it), so it never waits.
+  const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
   if (replaces) {
     let waited = 0;
     for (;;) {
@@ -468,30 +470,18 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     candidates = number(stretched.items).map((n) => n.candidate);
   }
 
-  /** The import's plan, the rules' alone, and its cut log (`endings`: the ones the reading replaces) set aside in history/ by the rule,
-      put in before the reading replaces them, so that a video read again can start from them. A rules' plan that `kind … --again` put
-      back from history/ is kept there already, whole: it is not set aside twice. A plan that holds a block of Claude's is not the
-      rules' alone: it was set aside when it was read. */
-  const keepRulesPlan = (endings) => {
-    const rules = plan.claude ? null : rulesPlanKept(folder, stem);
-    if (plan.claude || (rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) return;
-    const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
-    for (const ending of endings) {
-      const at_ = join(folder, `${stem}${ending}`);
-      if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
-    }
-  };
-
-  if (kind === "short video") {
-    // An iPhone clip's cut plan keeps the graphic cues Claude read of it (PR H2), in a block of Claude's as a raw video's plan does, and
-    // its main project places them on its words (graphic-cues.js). Nothing else of the plan changes: Claude decided no cut and picked
-    // no clip. The plan is put in last of the files, as the import writes it last.
-    keepRulesPlan([".cut-plan.json"]);
-    planLast = JSON.stringify({ ...plan, claude: { decisions: [], graphicCues: read.graphicCues, ignored: unused, clips: [] } }, null, 2) + "\n";
-  }
-
   if (kind === "raw") {
-    keepRulesPlan([".cut-plan.json", ".cut-plan.txt"]);
+    // The import's plan, the rules' alone, and its cut log are set aside in history/ by the rule, put in before the reading
+    // replaces them, so that a raw reading made again can start from them.
+    // A rules' plan that `kind … --again` put back from history/ is kept there already, whole: it is not set aside twice.
+    const rules = plan.claude ? null : rulesPlanKept(folder, stem);
+    if (!plan.claude && !(rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) {
+      const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
+      for (const ending of [".cut-plan.json", ".cut-plan.txt"]) {
+        const at_ = join(folder, `${stem}${ending}`);
+        if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
+      }
+    }
     // The plan changed by Claude's decisions with the pauses the import kept (pausesOfPlan), so a cut falls where the rules'
     // cuts fall, and its suggestions taken from the plan as it then is.
     const pauses = pausesOfPlan(plan);
@@ -553,7 +543,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     ...r,
     ...(reeled ? { reels: [...(Array.isArray(r.reels) ? r.reels : []).filter((reel) => reel.status !== "candidate"), ...reelEntries(candidates)] } : {}),
     offers: { ...(isObject(r.offers) ? r.offers : {}), spellings: offered(r) },
-    reading: { kind, model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", ...(kind === "short video" ? { about: read.about } : {}) },
+    reading: { kind, model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", ...(kind === "short video" ? { about: read.about, graphicCues: read.graphicCues } : {}) },
     ...(render ? { main: { ...r.main, pushed: [{ v: 0, how: "render", at: render.at, on: ctx.machine, file: render.file, opened: localStamp(new Date(now())) }, ...(Array.isArray(r.main.pushed) ? r.main.pushed : []).filter((p) => p.v !== 0)] } } : {})
   });
   const okNow = () => !failed.some((f) => f.startsWith("The rough cut"));
@@ -574,9 +564,26 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     if (deps.early) deps.early({ ok: okNow(), made, failed: [...failed], next: saidNext });
   };
   const file = record.video.file;
-  // Every kind's reading puts files in with the record, by the rule: an iPhone clip's is its cut plan, with its graphic cues, the
-  // record written last on the record the call was made from. The rule's own lines name the video's file first: the reading names
-  // the episode by its name and id.
+  // An iPhone clip's reading changes the record alone (its line on what it is, its graphic cues and its spellings): it is written by
+  // the rule, as a command that writes only the record writes it, on the record the call was made from.
+  if (!madeAt.length) {
+    try {
+      const writer = { commit: deps.commit || commitOf(thisCheckout()), on: ctx.machine };
+      const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
+      writeEpisode(folder, change(record), { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home });
+    } catch (e) {
+      const why = e.code === "CHANGED" ? "this episode changed while Claude read it" : String(e.message).replace(/\.$/, "");
+      return { ok: false, made: [], failed: [...failed, `Nothing was written: ${why}.`], next: AGAIN };
+    }
+    try {
+      (deps.notify || (() => {}))(noticeOf(name));
+    } catch (e) {
+      // A notice is a courtesy: the result says the same.
+    }
+    log(`${named}: read.`);
+    return { ok: true, made, failed, next: saidNext };
+  }
+  // The rule's own lines name the video's file first: the reading names the episode by its name and id.
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
   const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);

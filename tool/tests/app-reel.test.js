@@ -229,6 +229,17 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
         assert.ok(e.saved.length === 1 && existsSync(e.project), String(cues));
       }
     });
+    it("always has the file, in its brimm/ folder and in the list of its files, with no cue in it when it has none: for a Reel of a raw video or of a finished one, whatever is beside the video", async (c) => {
+      const cases = [{}, { plan: planWith([]) }, { record: { kind: "finished" } }, { record: { kind: "finished" }, cues: { version: 1, cues: [] } }, { record: { kind: "finished" }, cues: "{ not json" }];
+      for (const over of cases) {
+        const e = episode(c, over);
+        const label = JSON.stringify(over);
+        assert.equal(await run(e), 0, label);
+        assert.deepEqual(readdirSync(join(e.project, "brimm")).sort(), ["brand.md", "facts.json", "graphic-cues.json", "spellings.json"], label);
+        assert.deepEqual(cuesFile(e), { version: 1, clock: "reel", cues: [] }, label);
+        assert.ok("brimm/graphic-cues.json" in JSON.parse(readFileSync(join(e.project, "brimm", "facts.json"), "utf8")).files, label);
+      }
+    });
     it("takes no cue from the cut plan for a Reel of a video her editor finished: the cues of a plan are for a video she edits whole", async (c) => {
       const e = episode(c, { record: { kind: "finished" }, plan: planWith(PLAN_CUES) });
       assert.equal(await run(e), 0);

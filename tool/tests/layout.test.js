@@ -230,6 +230,16 @@ describe("the record's layout 3", () => {
     for (const principles of ["../x.principles.json", "/tmp/x.principles.json", "history/x.principles.json", "x.json", "", ".principles.json", 4]) {
       assert.match(episodeFault({ ...made(), reading: { ...READING, kind: "session", principles } }), /reading/, JSON.stringify(principles));
     }
+    // An iPhone clip's reading keeps its graphic cues (PR H2), a list of cues, beside its line on what the clip is: one read before the
+    // cues has none, and the list may be empty.
+    const CUE = { n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null, phrase: "p2" };
+    assert.equal(episodeFault({ ...made(), kind: "short video", reading: { ...READING, kind: "short video", about: "A clip." } }), "");
+    for (const graphicCues of [[], [CUE], [CUE, { ...CUE, n: 2 }, { ...CUE, n: 3 }]]) {
+      assert.equal(episodeFault({ ...made(), kind: "short video", reading: { ...READING, kind: "short video", about: "A clip.", graphicCues } }), "", JSON.stringify(graphicCues));
+    }
+    for (const graphicCues of ["none", null, {}, 4, true, [null], ["words"], [[]], [CUE, 3], [CUE, null]]) {
+      assert.match(episodeFault({ ...made(), kind: "short video", reading: { ...READING, kind: "short video", about: "A clip.", graphicCues } }), /reading/, JSON.stringify(graphicCues));
+    }
   });
   it("is written as version 3 for an unanswered record, stays at 3, and is never written without a kind it needs", () => {
     const folder = mkdtempSync(join(tmpdir(), "layout-"));

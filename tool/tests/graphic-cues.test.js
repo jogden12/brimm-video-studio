@@ -5,8 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, REEL_CUES_MOST, REEL_EDGE_SLACK, graphicCuesOf, graphicCuesAsk, graphicCuesInReply, cueTokens, phraseSpans, keptPhraseSpans, keptIndexes, placeGraphicCues,
-  reelGraphicCues, graphicCuesJson, legacyCues, graphicCuesOfPlan, graphicCuesInPlan, cueMarkers
+  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, CLIP_CUES_MOST, REEL_CUES_MOST, REEL_EDGE_SLACK, graphicCuesOf, graphicCuesAsk, graphicCuesInReply, cueTokens, phraseSpans, keptPhraseSpans, keptIndexes, placeGraphicCues,
+  reelGraphicCues, graphicCuesJson, legacyCues, graphicCuesOfPlan, graphicCuesOfRecord, graphicCuesInPlan, cueMarkers
 } from "../graphic-cues.js";
 
 /** A cue as the brief writes one. */
@@ -537,7 +537,42 @@ describe("graphicCuesInPlan: where the cues of a plan are, among the plan's own 
   });
 });
 
-// --- PR H2: the cues in a reply, and a Reel's ---
+// --- PR H2: the cues in a reply, an iPhone clip's in its record, and a Reel's ---
+
+describe("graphicCuesOfRecord: the cues an iPhone clip's reading kept in its record (PR H2)", () => {
+  const KEPT = [
+    { n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null, phrase: "p2" },
+    { n: 2, words: "pricing", kind: "words", show: "The word pricing.", seconds: 3, style: null, phrase: "p5" }
+  ];
+  /** A clip's record with its reading, as the reading writes it. */
+  const clip = (graphicCues, over = {}) => ({ kind: "short video", reading: { kind: "short video", model: "m", at: "2026-10-20T15:00:00-05:00", on: "Mac Studio", account: "", outcome: "read", about: "A clip.", graphicCues, ...over } });
+  it("are three at most, as a clip is asked for", () => {
+    assert.equal(CLIP_CUES_MOST, 3);
+  });
+  it("are the record's reading.graphicCues, as they were read", () => {
+    assert.deepEqual(graphicCuesOfRecord(clip(KEPT)), KEPT);
+  });
+  it("are read again as cues are read: numbered from 1, a video already shot's kinds only, and three at most, so a record changed by hand puts nothing else in a project", () => {
+    const four = ["one", "two", "three", "four"].map((words, i) => ({ n: 9 - i, words, kind: "graphic", show: `Card ${i}.`, seconds: 3, style: null }));
+    assert.deepEqual(graphicCuesOfRecord(clip(four)).map((c) => [c.n, c.words]), [[1, "one"], [2, "two"], [3, "three"]]);
+    const odd = [{ words: "b-roll", kind: "b-roll", show: "A shot.", shot: 1 }, null, "words", { words: "", kind: "graphic", show: "x" }, { words: "fine", kind: "words", show: "A card.", style: { ref: "../../x.png" } }, KEPT[0]];
+    assert.deepEqual(graphicCuesOfRecord(clip(odd)).map((c) => [c.n, c.words]), [[1, "too many SKUs"]]);
+  });
+  it("are none for a record that has no reading, a reading of another kind, a reading with no list of cues, an empty one, and what is not a record", () => {
+    assert.deepEqual(graphicCuesOfRecord({ kind: "short video" }), []);
+    assert.deepEqual(graphicCuesOfRecord(clip(KEPT, { kind: "finished" })), []);
+    assert.deepEqual(graphicCuesOfRecord(clip(KEPT, { kind: "raw" })), []);
+    for (const given of [undefined, null, "none", {}, 3, KEPT[0]]) assert.deepEqual(graphicCuesOfRecord(clip(given)), [], String(given));
+    assert.deepEqual(graphicCuesOfRecord(clip([])), []);
+    for (const given of [undefined, null, "record", 7, [], { reading: null }, { reading: "read" }]) assert.deepEqual(graphicCuesOfRecord(given), [], JSON.stringify(given));
+  });
+  it("do not change the record", () => {
+    const record = clip(KEPT);
+    const before = JSON.stringify(record);
+    graphicCuesOfRecord(record);
+    assert.equal(JSON.stringify(record), before);
+  });
+});
 
 describe("graphicCuesInReply: the cues in what Claude replied", () => {
   const reply = (graphicCues) => ({ graphicCues });

@@ -12,7 +12,7 @@
 // never guessed at.
 // Nothing here touches a disk, runs a program or asks Claude anything. It takes plain data and gives back plain data.
 import { notesRequest, readNotes, objectIn, asked, section, runsOf, oneLine, ASK, GUARD, DATA } from "./notes.js";
-import { graphicCuesAsk, graphicCuesInReply, REEL_CUES_MOST } from "./graphic-cues.js";
+import { graphicCuesAsk, graphicCuesInReply, CLIP_CUES_MOST, REEL_CUES_MOST } from "./graphic-cues.js";
 import { plain, stamp, list } from "./shared/text.js";
 import { SHOW, HOST } from "./shared/show.js";
 import { REEL_MIN, REEL_MAX } from "./reframe.js";
@@ -54,9 +54,6 @@ const REEL_IDEAS = `- "reel_ideas": a list of {"from", "to", "idea", "words", "w
 
 /** What a raw video is asked: what notes.js asks, less the title, with the point of each clip and the spellings as well. */
 const RAW_TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphicCues, `${ASK.clips} Each clip has a "point" too: one sentence on the point it makes.`, SPELLINGS].join("\n");
-
-/** How many graphic cues an iPhone clip is asked for, and how many are read, at most (design 10.9). */
-const CLIP_CUES_MOST = 3;
 
 /** The file and the length, which a finished video and a short video are shown. */
 const fileAndLength = (about) => [`File: ${oneLine(about.video)}`, `Length: ${stamp(Math.round(about.duration))}`];

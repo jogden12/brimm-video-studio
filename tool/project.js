@@ -575,7 +575,7 @@ export const settingsText = (kind) => jsonText(settingsFor(kind));
       the first when it is not given; `graphicCues`, the cut plan's graphic cues (graphic-cues.js graphicCuesOf, or for a plan made
       before them graphicCuesOfPlan), which brimm/graphic-cues.json places on the transcript's words; and `short`, true when the
       episode is a short video (an iPhone clip), which has no Reels: its notes say nothing of them (brimmRules). Its graphic cues are
-      the ones its reading gave it, as a raw video's are;
+      the ones its reading kept in its record (graphic-cues.js graphicCuesOfRecord; its cut plan holds none), given as a raw video's are;
     - for a Reel, its `stretch` of the recording, { start, end } in seconds (a Reel's video is that stretch, cut by workcopy.js, and
       its words are the recording's words in it, on its own clock: reelWords), the cut `plan` of the recording, by whose phrases the
       words are placed as the main video's are, before they are chosen (it may be none: the words are then only moved inside their
@@ -618,7 +618,7 @@ export function projectFiles(input) {
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
     // The graphic cues, each placed on the transcript's own words (graphic-cues.js): in its own phrase when that phrase is kept, and
     // else in kept words before any cut, so a cue that names a phrase the plan cuts is placed as if it named none. The words of a
-    // cue are spelled as the transcript's are. A short video's are the ones its reading gave it (PR H2), as a raw video's are.
+    // cue are spelled as the transcript's are. A short video's are the ones its reading kept in its record (PR H2), placed as a raw video's are.
     const graphicCues = Array.isArray(input.graphicCues) ? input.graphicCues : [];
     const placedGraphicCues = placeGraphicCues(graphicCues, transcript, { spans: keptPhraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
     files.set("brimm/graphic-cues.json", graphicCuesJson(placedGraphicCues, "recording"));

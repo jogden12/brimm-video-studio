@@ -4,7 +4,8 @@
 // A cue is read from Claude's reply or from a package (graphicCuesOf, graphicCuesInReply), and is placed by its words, never by a time
 // written in advance (placeGraphicCues): Studio finds the words in the recording's word times, so a cue lands where she says them, even
 // when she says them a little differently. What a project holds of them is brimm/graphic-cues.json (graphicCuesJson). A Reel of an
-// episode holds the cues that fall in its stretch, on its own clock and with its own word ids (reelGraphicCues; PR H2). A cue is a
+// episode holds the cues that fall in its stretch, on its own clock and with its own word ids (reelGraphicCues; PR H2). An iPhone
+// clip's reading keeps its cues in its record, and leaves its cut plan as the import wrote it (graphicCuesOfRecord; PR H2). A cue is a
 // suggestion and is built only when she takes it, in the app, as a suggested cut is.
 // Nothing here touches a disk or runs a program. It takes plain data and gives back plain data.
 import { plain } from "./shared/text.js";
@@ -253,6 +254,22 @@ export function placeGraphicCues(cues, words, { spans = null, kept = null, spell
   const places = placesOf(given, list, { spans, kept, spell });
   const idOf = (i) => (typeof list[i].id === "string" && list[i].id ? list[i].id : `w${i}`);
   return given.map((cue, i) => ({ ...cue, at: places[i] ? { from: idOf(places[i].first), to: idOf(places[i].last), start: list[places[i].first].start, end: list[places[i].last].end } : null }));
+}
+
+// --- An iPhone clip's cues (PR H2) ---
+
+/** How many cues an iPhone clip is asked for, and has, at most (design 10.9). */
+export const CLIP_CUES_MOST = 3;
+
+/** The graphic cues an iPhone clip's reading kept in its record (`reading.graphicCues`): its main project's, placed on its words as a raw
+    video's are. They are kept in the record and not in the clip's cut plan, which stays as the import wrote it. Read again as a reply's
+    are (graphicCuesOf): numbered from 1, only the two kinds a video already shot has, three at most, so a record changed by hand cannot put
+    other cues, or more, into a project. None for a record that is not a short video's, or whose reading kept none (a reading made before
+    them, a record with no reading, a list that is no list). */
+export function graphicCuesOfRecord(record) {
+  const reading = record?.reading;
+  if (reading?.kind !== "short video" || !Array.isArray(reading.graphicCues)) return [];
+  return graphicCuesOf(reading.graphicCues, { most: CLIP_CUES_MOST }).cues;
 }
 
 // --- A Reel's cues (PR H2) ---

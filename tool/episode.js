@@ -140,11 +140,13 @@ const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.t
   && listOf(x.agreed, isAgreement)
   && (x.emptyRevision === undefined || x.emptyRevision === "owed" || (Number.isInteger(x.emptyRevision) && x.emptyRevision >= 1));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
-    ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
-    own folder. */
+    ended; for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's own
+    folder; and for an iPhone clip's, the one line on what the clip is (`about`) and the graphic cues it read (`graphicCues`, PR H2),
+    a list of cues as graphic-cues.js has them, which the clip's main project is given (graphicCuesOfRecord reads them again). */
 const isTeachingsFile = (v) => typeof v === "string" && v.length > ".principles.json".length && v.endsWith(".principles.json") && !/[/\\]/.test(v) && !v.startsWith(".");
 const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome)
-  && (x.principles === undefined || isTeachingsFile(x.principles));
+  && (x.principles === undefined || isTeachingsFile(x.principles))
+  && (x.graphicCues === undefined || (Array.isArray(x.graphicCues) && x.graphicCues.every(isObject)));
 /** A field of layout 3 that may be missing or null, and is checked when it is there. */
 const optional = (v, ok) => v === undefined || v === null || ok(v);
 

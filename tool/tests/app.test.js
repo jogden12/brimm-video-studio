@@ -254,33 +254,63 @@ describe("app: opening an episode in HyperFrames", () => {
       { n: 2, words: "says Sally.", kind: "graphic", show: "A card with her name.", seconds: 4, style: null, phrase: "p2", at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }
     ]);
   });
-  it("gives the main project a file with no cues when the plan holds none (Claude has not read it), for a short video as for a raw one", async (c) => {
+  it("gives the main project a file with no cues when the plan holds none (Claude has not read it), and a short video's project takes none from its plan, whatever the plan holds: its cues are its record's", async (c) => {
     const none = episode(c);
     assert.equal(await run(none), 0);
     assert.deepEqual(JSON.parse(readFileSync(join(none.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
-    const clip = episode(c, { record: { kind: "short video" } });
-    assert.equal(await run(clip), 0);
-    assert.deepEqual(JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
+    const short = episode(c, { record: { kind: "short video" }, plan: { ...PLAN, claude: { graphicCues: [{ n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" }] } } });
+    assert.equal(await run(short), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(short.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
   });
-  it("gives a short video's main project the graphic cues its reading put into its cut plan, placed on the words of its transcript as a raw video's are (PR H2)", async (c) => {
+  /** An iPhone clip's reading as its record keeps it, with `over` laid on it. */
+  const clipReading = (over = {}) => ({ kind: "short video", model: "claude-sonnet-4-5", at: "2026-10-28T14:00:00-04:00", on: "Mac Studio", account: "", outcome: "read", about: "A clip about her name.", ...over });
+  it("gives a short video's main project the graphic cues its reading kept in its record, placed on the words of its transcript as a raw video's are, whatever its cut plan holds (PR H2)", async (c) => {
     const cues = [
       { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" },
       { n: 2, words: "the moon", kind: "graphic", show: "The moon.", seconds: 4, style: null, phrase: "p2" }
     ];
-    const plan = { ...PLAN, claude: { decisions: [], graphicCues: cues, ignored: [], clips: [] } };
-    const clip = episode(c, { record: { kind: "short video" }, plan });
+    // The clip's plan is the import's: the reading wrote no block of Claude's into it.
+    const clip = episode(c, { record: { kind: "short video", reading: clipReading({ graphicCues: cues }) } });
     assert.equal(await run(clip), 0);
     const transcript = JSON.parse(readFileSync(join(clip.project, "transcript.json"), "utf8"));
     const made = JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8"));
     assert.deepEqual(made, { version: 1, clock: "recording", cues: [{ ...cues[0], at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }, { ...cues[1], at: null }] });
-    // The same cues in a raw video's project are placed the same.
-    const raw = episode(c, { plan });
+    // The same cues in a raw video's project, given by its plan, are placed the same.
+    const raw = episode(c, { plan: { ...PLAN, claude: { decisions: [], graphicCues: cues, ignored: [], clips: [] } } });
     assert.equal(await run(raw), 0);
     assert.deepEqual(JSON.parse(readFileSync(join(raw.project, "brimm", "graphic-cues.json"), "utf8")), made);
     // Its notes still have the clip's one line in place of the Reels', and the rule for the cues it offers.
     const notes = readFileSync(join(clip.project, "CLAUDE.md"), "utf8");
     assert.match(notes, /- \*\*Graphic cues\.\*\* Studio's suggested graphics are in `brimm\/graphic-cues\.json`/);
     assert.match(notes, /- \*\*No new projects\.\*\* Never make a Reel/);
+    plain(clip.said);
+  });
+  it("places a short video's cues as a raw video's, at most three of a record's, numbered from 1, and of the two kinds a shot already has", async (c) => {
+    const entry = (n, words, kind = "words") => ({ n, words, kind, show: `The words ${words}.`, seconds: 3, style: null, phrase: "p2" });
+    const given = [entry(1, "says Sally"), entry(2, "Sally"), entry(3, "says", "b-roll"), entry(4, "Pricing"), entry(5, "Sally.")];
+    const clip = episode(c, { record: { kind: "short video", reading: clipReading({ graphicCues: given }) } });
+    assert.equal(await run(clip), 0);
+    const made = JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8"));
+    // The third is not a kind a shot already has, so it is left out; the rest are renumbered; a record edited by hand gives no more than three.
+    assert.deepEqual(made.cues.map((cue) => [cue.n, cue.words]), [[1, "says Sally"], [2, "Sally"], [3, "Pricing"]]);
+  });
+  it("gives a short video's main project no cues when its record has none to give: a reading from before them, an empty list, a list that is no list, a list of what is no cue, or no reading", async (c) => {
+    const empty = { version: 1, clock: "recording", cues: [] };
+    for (const reading of [clipReading(), clipReading({ graphicCues: [] }), clipReading({ graphicCues: "none" }), clipReading({ graphicCues: [null, 3, "words"] }), undefined, null]) {
+      const clip = episode(c, { record: { kind: "short video", ...(reading === undefined ? {} : { reading }) } });
+      const label = `reading: ${JSON.stringify(reading) ?? "(none)"}`;
+      assert.equal(await run(clip), 0, label);
+      assert.deepEqual(JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8")), empty, label);
+    }
+  });
+  it("reads cues from a record for a short video only: a raw video's project takes its cues from its plan, and a reading of another kind than a short video's gives none", async (c) => {
+    const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };
+    const raw = episode(c, { record: { reading: clipReading({ kind: "raw", graphicCues: [cue] }) } });
+    assert.equal(await run(raw), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(raw.project, "brimm", "graphic-cues.json"), "utf8")).cues, []);
+    const other = episode(c, { record: { kind: "short video", reading: clipReading({ kind: "finished", graphicCues: [cue] }) } });
+    assert.equal(await run(other), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(other.project, "brimm", "graphic-cues.json"), "utf8")).cues, []);
   });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);
