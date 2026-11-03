@@ -29,10 +29,12 @@ async function on(deps, ...argv) {
   const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
   return { code, said, text: said.join("\n") };
 }
-/** Nothing she reads holds a path, a flag or the name of a command: but for the one line that is for Claude, and the one that says what
-    to say in HyperFrames, which names the picture in the project. */
+/** Nothing she reads holds a path, a flag or the name of a command: but for the one line that is for Claude, `Picture to look at: <path>`,
+    which her skill never repeats to her. That rule wins over the brief's wording of what to say in HyperFrames: it names the picture by its stem. */
 const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|hyperframes\.mjs|\bsips\b/;
 const isPlain = (line) => !PLAIN.test(line);
+/** A picture's extension, which the words she is told to say never hold. */
+const EXTENSION = /\.(?:png|jpe?g|heic|webp|gif|tiff?)\b/i;
 
 const AT = "2026-10-20T15:00:00-05:00";
 const ANSWER = { state: "needs your answer", guess: "raw", seen: "wide, 0:23, no retakes", came: "camera" };
@@ -123,8 +125,9 @@ async function readOnly(dir, work) {
     for (const path of all.reverse()) chmodSync(path, statSync(path).isDirectory() ? 0o755 : 0o644);
   }
 }
-/** The success line of `refs use`, as the brief words it: `of` is "" for the main video and "Reel 2 of " for a Reel. */
-const DONE = (stem, file, of = "") => `The ${stem} is in the HyperFrames project for ${of}${NAME}. In HyperFrames, say "Use brimm/references/${file} as the style for the graphics".`;
+/** The success line of `refs use`: the picture is named by its stem, with no folder and no extension, in both sentences; `of` is "" for the
+    main video and "Reel 2 of " for a Reel. */
+const DONE = (stem, of = "") => `The ${stem} is in the HyperFrames project for ${of}${NAME}. In HyperFrames, say "Use the ${stem} picture as the style for the graphics".`;
 
 describe("refs: the command", () => {
   it("is one of edit.js's commands, with its three usages in the help", () => {
@@ -155,7 +158,7 @@ describe("refs: the README", () => {
     const [list, look, use] = rows;
     for (const words of ["**Studio only reads the reference folder**", "names no episode"]) assert.ok(list.includes(words), words);
     for (const words of ["Picture to look at: <path>", "never to repeat the path to her", "`Looking/`", "/usr/bin/sips -s format jpeg", "It can't be used: Studio couldn't turn <name> into a picture it can read.", "It's still coming down from Dropbox. Say it again in a minute."]) assert.ok(look.includes(words), words);
-    for (const words of ["brimm/references/<file>", 'In HyperFrames, say "Use brimm/references/blue carousel.png as the style for the graphics".', "as for `app`", "`refs` is in no gate list", 'Open it in HyperFrames first: say "open <name> in HyperFrames".']) assert.ok(use.includes(words), words);
+    for (const words of ["brimm/references/<file>", 'In HyperFrames, say "Use the blue carousel picture as the style for the graphics".', "as for `app`", "`refs` is in no gate list", 'Open it in HyperFrames first: say "open <name> in HyperFrames".']) assert.ok(use.includes(words), words);
   });
 });
 
@@ -382,9 +385,30 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
   it("copies the picture into the main video's project as brimm/references/<file>, and says what to say in HyperFrames", async () => {
     const { t, work } = world({ projects: both });
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "blue carousel");
-    assert.deepEqual([r.code, r.said], [0, [DONE("blue carousel", "blue carousel.png")]]);
+    assert.deepEqual([r.code, r.said], [0, [DONE("blue carousel")]]);
     assert.equal(readFileSync(join(work, MAIN_PROJECT, "brimm", "references", "blue carousel.png"), "utf8"), PICTURES["blue carousel.png"]);
     assert.deepEqual(readdirSync(join(work, MAIN_PROJECT, "brimm", "references")), ["blue carousel.png"]);
+    t.done();
+  });
+  it("tells her no path and no extension: what she is to say names the picture by its stem, as the line before it does", async () => {
+    const { t } = world({ projects: both });
+    for (const rest of [["blue carousel"], ["quote card", "reel", "2"], ["title style"]]) {
+      const r = await on(t.ctx.deps, "refs", "use", FOLDER, ...rest);
+      assert.equal(r.code, 0, r.text);
+      assert.equal(r.said.length, 1);
+      assert.ok(isPlain(r.said[0]), r.said[0]);
+      assert.doesNotMatch(r.said[0], EXTENSION);
+      assert.doesNotMatch(r.said[0], /brimm|references/);
+      assert.match(r.said[0], /^The (.+) is in the HyperFrames project for .+\. In HyperFrames, say "Use the \1 picture as the style for the graphics"\.$/);
+    }
+    t.done();
+  });
+  it("names the picture by its whole stem, in the file's own case, however much of it she said", async () => {
+    const { t } = world({ pictures: { "Blue Carousel.PNG": "a", "quote card.jpg": "b" }, projects: both });
+    for (const said of ["Blue Carousel", "blue carousel", "CAROUSEL", "blue carousel.png"]) {
+      const r = await on(t.ctx.deps, "refs", "use", FOLDER, said);
+      assert.deepEqual([r.code, r.said], [0, [DONE("Blue Carousel")]], said);
+    }
     t.done();
   });
   it("makes the project's one new file and touches no other: the rest of the project has the same names, bytes and times, and the other project is as it was", async () => {
@@ -408,16 +432,16 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
     const { t, work } = world({ projects: both });
     const main = snapshotOf(join(work, MAIN_PROJECT));
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "quote card", "reel", "2");
-    assert.deepEqual([r.code, r.said], [0, [DONE("quote card", "quote card.jpg", "Reel 2 of ")]]);
+    assert.deepEqual([r.code, r.said], [0, [DONE("quote card", "Reel 2 of ")]]);
     assert.equal(readFileSync(join(work, REEL_PROJECT, "brimm", "references", "quote card.jpg"), "utf8"), PICTURES["quote card.jpg"]);
     assert.deepEqual(snapshotOf(join(work, MAIN_PROJECT)), main);
     t.done();
   });
-  it("copies a HEIC picture in as a JPEG of the same stem, and names that file in what she is to say", async () => {
+  it("copies a HEIC picture in as a JPEG of the same stem, and names the picture by that stem in what she is to say", async () => {
     const { t, folder, work } = world({ projects: both });
     const before = snapshotOf(folder);
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "title style");
-    assert.deepEqual([r.code, r.said], [0, [DONE("title style", "title style.jpg")]]);
+    assert.deepEqual([r.code, r.said], [0, [DONE("title style")]]);
     assert.deepEqual(readdirSync(join(work, MAIN_PROJECT, "brimm", "references")), ["title style.jpg"]);
     assert.equal(readFileSync(join(work, MAIN_PROJECT, "brimm", "references", "title style.jpg"), "utf8"), "a JPEG made by sips");
     const [call] = t.calls.filter((c) => c.cmd === "SIPS");
@@ -438,7 +462,7 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
     await on(t.ctx.deps, "refs", "use", FOLDER, "blue carousel");
     writeFileSync(join(folder, "blue carousel.png"), "A NEW SCREENSHOT");
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "blue carousel");
-    assert.deepEqual([r.code, r.said], [0, [DONE("blue carousel", "blue carousel.png")]]);
+    assert.deepEqual([r.code, r.said], [0, [DONE("blue carousel")]]);
     assert.deepEqual(readdirSync(join(work, MAIN_PROJECT, "brimm", "references")), ["blue carousel.png"]);
     assert.equal(readFileSync(join(work, MAIN_PROJECT, "brimm", "references", "blue carousel.png"), "utf8"), "A NEW SCREENSHOT");
     t.done();
@@ -456,7 +480,7 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
     for (const said of [FOLDER, NAME, "Pricing"]) {
       const { t } = world({ projects: both });
       const r = await on(t.ctx.deps, "refs", "use", said, "blue carousel");
-      assert.deepEqual(r.said, [DONE("blue carousel", "blue carousel.png")], said);
+      assert.deepEqual(r.said, [DONE("blue carousel")], said);
       t.done();
     }
   });
@@ -508,7 +532,7 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
   it("names a finished video's Reel project, which it has, the same way", async () => {
     const { t, work } = world({ record: FINISHED, projects: [["reel 2", REEL_PROJECT]] });
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "quote card", "reel", "2");
-    assert.deepEqual([r.code, r.said], [0, [DONE("quote card", "quote card.jpg", "Reel 2 of ")]]);
+    assert.deepEqual([r.code, r.said], [0, [DONE("quote card", "Reel 2 of ")]]);
     assert.ok(existsSync(join(work, REEL_PROJECT, "brimm", "references", "quote card.jpg")));
     t.done();
   });

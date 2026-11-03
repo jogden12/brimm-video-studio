@@ -16,9 +16,8 @@
 // name there is replaced by a move, never written into.
 //
 // edit.js is only the wiring (refs); this module says what the command says, and does what it does. What it says goes into her chat,
-// so it holds no path, no flag and no name of a command. The exceptions are the line that is for Claude, `Picture to look at: <path>`,
-// which her skill tells Claude never to repeat to her, and the words she is to say in HyperFrames, which name the picture in the
-// project.
+// so it holds no path, no flag and no name of a command. The one exception is the line that is for Claude, `Picture to look at: <path>`,
+// which her skill tells Claude never to repeat to her. The words she is to say in HyperFrames name a picture by its stem, as she would.
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { readThrough } from "./dropbox.js";
@@ -276,8 +275,10 @@ export async function useIn(ctx, { dir, who }, said) {
   const made = await readableCopy(ctx, from, join(dir, "brimm", "references"));
   if (made.cannot) return refuse(ctx, cannotUse(named.file));
   if (made.error) return refuse(ctx, `${named.file} could not be copied into the HyperFrames project (${made.error}).`);
+  // She is told the picture by its stem, with no folder and no extension: what she is told holds no path. The project's notes tell the app's
+  // agent that brimm/references/ holds the style references she chose, so it finds the file by the stem there.
   const stem = made.name.slice(0, made.name.length - extname(made.name).length);
-  ctx.say(`The ${stem} is in the HyperFrames project for ${who}. In HyperFrames, say "Use brimm/references/${made.name} as the style for the graphics".`);
+  ctx.say(`The ${stem} is in the HyperFrames project for ${who}. In HyperFrames, say "Use the ${stem} picture as the style for the graphics".`);
   return 0;
 }
 
