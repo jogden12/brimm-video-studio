@@ -30,6 +30,10 @@
 //                                         hand-off it has, with the Reels added (finish-reels.js)
 //   node edit.js free "<episode>"         take the working copy and the renders of its HyperFrames projects away from this
 //                                         Mac to give the room back, by named paths in BRIMM Video Work alone (free.js)
+//   node edit.js refs [look "<name>" | use "<episode>" "<name>" [reel <n>]]
+//                                         the reference folder (references.js): what is in it; a picture of it copied into her
+//                                         Looking folder for Claude to look at; or copied into an episode's HyperFrames project
+//                                         on this Mac to be followed as a style. Studio only reads the folder
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few

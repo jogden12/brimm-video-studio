@@ -63,8 +63,8 @@ describe("listReferences", () => {
   });
   it("sorts the names without minding their case, the same way on every Mac", () => {
     const w = folderWith(["title style.heic", "Quote card.jpg", "blue carousel.png", "Blue carousel 2.png", "apple.png", "Zebra.png"]);
-    // By the name in lower case, with a space before a dot, so that "carousel 2" comes before "carousel.png".
-    assert.deepEqual(listReferences(w.folder).pictures, ["apple.png", "Blue carousel 2.png", "blue carousel.png", "Quote card.jpg", "title style.heic", "Zebra.png"]);
+    // By the stem in lower case, then by the extension, as Finder puts a name before its numbered copy: "carousel.png" before "carousel 2.png".
+    assert.deepEqual(listReferences(w.folder).pictures, ["apple.png", "blue carousel.png", "Blue carousel 2.png", "Quote card.jpg", "title style.heic", "Zebra.png"]);
     w.done();
   });
   it("lists files only: a folder inside it, even one named like a picture, and a link, are not files of it", () => {
@@ -118,12 +118,12 @@ describe("findReference", () => {
   });
   it("says there is none, with the pictures there are, in order, when no name fits", () => {
     const w = folderWith(NAMES);
-    assert.deepEqual(findReference(w.folder, "blue carusel"), { none: true, pictures: ["blue carousel 2.png", "blue carousel.png", "quote card.jpg", "title style.heic"] });
+    assert.deepEqual(findReference(w.folder, "blue carusel"), { none: true, pictures: ["blue carousel.png", "blue carousel 2.png", "quote card.jpg", "title style.heic"] });
     w.done();
   });
   it("looks among the pictures only: a stem that is not a picture's is none", () => {
     const w = folderWith(NAMES);
-    assert.deepEqual(findReference(w.folder, "launch"), { none: true, pictures: ["blue carousel 2.png", "blue carousel.png", "quote card.jpg", "title style.heic"] });
+    assert.deepEqual(findReference(w.folder, "launch"), { none: true, pictures: ["blue carousel.png", "blue carousel 2.png", "quote card.jpg", "title style.heic"] });
     assert.deepEqual(findReference(w.folder, "launch.mov").none, true);
     w.done();
   });

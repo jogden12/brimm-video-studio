@@ -303,7 +303,7 @@ describe("refs look", () => {
   });
   it("asks which one, with or between the names, for a name that fits several, and copies none", async () => {
     for (const [pictures, said, words] of [
-      [{ "blue carousel.png": "a", "blue carousel 2.png": "b", "red.png": "c" }, "carousel", "Which one? blue carousel 2.png or blue carousel.png"],
+      [{ "blue carousel.png": "a", "blue carousel 2.png": "b", "red.png": "c" }, "carousel", "Which one? blue carousel.png or blue carousel 2.png"],
       [{ "a one.png": "a", "a two.png": "b", "a three.png": "c" }, "a", "Which one? a one.png, a three.png or a two.png"]
     ]) {
       const { t, looking } = world({ pictures });
@@ -515,7 +515,7 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
   it("says there is no such picture, which one, that it is no picture, that it is still coming down, or that there is no folder, as refs look does, and copies nothing", async () => {
     const cases = [
       [{}, "nothing like it", ['There\'s no "nothing like it" in the reference folder. It has: blue carousel.png, quote card.jpg and title style.heic.']],
-      [{ pictures: { "blue carousel.png": "a", "blue carousel 2.png": "b" } }, "carousel", ["Which one? blue carousel 2.png or blue carousel.png"]],
+      [{ pictures: { "blue carousel.png": "a", "blue carousel 2.png": "b" } }, "carousel", ["Which one? blue carousel.png or blue carousel 2.png"]],
       [{}, "launch", ["launch.mov isn't a picture, so Studio doesn't use it."]],
       [{ pictures: false }, "blue carousel", [NO_FOLDER]]
     ];
@@ -537,6 +537,15 @@ describe("refs use: a picture into the episode's HyperFrames project on this Mac
     const { t } = world({ projects: [], pictures: false });
     const r = await on(t.ctx.deps, "refs", "use", FOLDER, "blue carousel");
     assert.deepEqual(r.said, [`Open it in HyperFrames first: say "open ${NAME} in HyperFrames".`]);
+    t.done();
+  });
+  it("refuses a project the record gives a session clip's folder as its name, as app does, and copies nothing into that folder", async () => {
+    const CLIP = "Session clip 1 3fa9c1";
+    const { t, work } = world({ projects: [["main", CLIP], ["clip 1", CLIP]] });
+    const before = snapshotOf(join(work, CLIP));
+    const r = await on(t.ctx.deps, "refs", "use", FOLDER, "blue carousel");
+    assert.deepEqual([r.code, r.said], [1, [`The folder for ${NAME} on this Mac is not as it was made, so it wasn't opened. Ask Jason.`]]);
+    assert.deepEqual(snapshotOf(join(work, CLIP)), before);
     t.done();
   });
   it("tells her which Reels there are when she names a Reel the episode does not have, as app does, and copies nothing", async () => {

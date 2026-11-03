@@ -32,7 +32,7 @@ export const REFERENCE_KINDS = Object.freeze([".png", ".jpg", ".jpeg", ".heic", 
 /** The kinds Claude cannot read as they are: they are copied as a JPEG (projectNameOf). */
 const TURNED_KINDS = Object.freeze([".heic", ".tif", ".tiff"]);
 /** macOS's own picture program, which makes the JPEG, and how long it may take over one picture: a minute. */
-export const SIPS = "/usr/bin/sips";
+const SIPS = "/usr/bin/sips";
 const SIPS_MS = 60 * 1000;
 /** How long a read that asks Dropbox to bring a picture down may go with nothing coming: a picture is small, so 20 seconds. */
 const BRING_MS = 20 * 1000;
@@ -42,11 +42,15 @@ const plainly = (text) => String(text ?? "").normalize("NFC").toLowerCase().repl
 /** Whether two names are one for a person: the same whatever their case, however their accents are written, and whatever their spacing.
     A blank is no name. */
 export const sameName = (a, b) => plainly(a) !== "" && plainly(a) === plainly(b);
-/** Names in order: by the name as `plainly` has it, in code units and so the same on every Mac; two that are the same so are in the
-    order of their own letters. */
+/** A file's name without its extension, as `plainly` has it. */
+const stemOf = (name) => plainly(name.slice(0, name.length - extname(name).length));
+/** Names in order: by the stem, then by the extension, each as `plainly` has it and compared in code units, so that the order is the same
+    on every Mac; two names that are the same so are in the order of their own letters. A name comes before its numbered copy, as Finder
+    puts it: "carousel.png" before "carousel 2.png". */
 const byName = (a, b) => {
-  const [x, y] = [plainly(a), plainly(b)];
-  return x < y ? -1 : x > y ? 1 : a < b ? -1 : a > b ? 1 : 0;
+  const [x, y] = [stemOf(a), stemOf(b)];
+  const [i, j] = [plainly(extname(a)), plainly(extname(b))];
+  return x < y ? -1 : x > y ? 1 : i < j ? -1 : i > j ? 1 : a < b ? -1 : a > b ? 1 : 0;
 };
 /** Whether a file name is a picture's. */
 const isPicture = (name) => REFERENCE_KINDS.includes(extname(name).toLowerCase());
@@ -71,8 +75,7 @@ export function listReferences(folder) {
 function pick(names, said) {
   const word = plainly(said);
   if (!word) return { none: true };
-  const stem = (name) => plainly(name.slice(0, name.length - extname(name).length));
-  for (const fits of [(name) => plainly(name) === word, (name) => stem(name) === word, (name) => stem(name).includes(word)]) {
+  for (const fits of [(name) => plainly(name) === word, (name) => stemOf(name) === word, (name) => stemOf(name).includes(word)]) {
     const hits = names.filter(fits);
     if (hits.length === 1) return { file: hits[0] };
     if (hits.length > 1) return { several: hits };
@@ -133,13 +136,13 @@ export function referencesAsked(rest) {
 // --- What is said ---
 
 /** What `refs` says when this Mac has no reference folder (the installer makes it, on Jason's yes), and what it says of an empty one. */
-export const NO_FOLDER = "There's no reference folder on this Mac yet: ask Jason.";
+const NO_FOLDER = "There's no reference folder on this Mac yet: ask Jason.";
 const ADD = "Add screenshots or pictures to References, in the BRIMM Video folder in Dropbox.";
-export const EMPTY = `The reference folder is empty. ${ADD}`;
+const EMPTY = `The reference folder is empty. ${ADD}`;
 /** What is said of a picture that is online only in Dropbox and has not come down. */
-export const COMING = "It's still coming down from Dropbox. Say it again in a minute.";
+const COMING = "It's still coming down from Dropbox. Say it again in a minute.";
 /** What is said of a picture Studio could not turn into one Claude can read. */
-export const cannotUse = (file) => `It can't be used: Studio couldn't turn ${file} into a picture it can read.`;
+const cannotUse = (file) => `It can't be used: Studio couldn't turn ${file} into a picture it can read.`;
 
 /** Things as they are said in a row: "a", "a and b", "a, b and c" (with `word` "or", "a or b"). */
 const joined = (things, word = "and") => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} ${word} ${things[things.length - 1]}`);
