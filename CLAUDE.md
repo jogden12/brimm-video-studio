@@ -14,7 +14,7 @@ Studio began as brimm-video: its history up to c666508, which is the tag `brimm-
 - Never read a `.env` file. The project's one secret is a read-only deploy key on Sallie's laptop, kept only in her `~/.ssh` (never in the repo or Dropbox); Jason revokes it in the repo's GitHub settings when it is no longer needed. Until her laptop is switched to Studio, the key there is brimm-video's; Studio gets its own then.
 - Nothing is installed on a Mac, and no launch agent is added or changed, without Jason's yes in chat first.
 - Write a failing test first, then the code.
-- No launch agent runs from a checkout of this repo yet. brimm-video's `com.thebrimm.unedited` still runs from brimm-video's own folder, and nothing here changes it. When Studio gets one (a new label, on Jason's yes), that checkout stays on `main`. Work in git worktrees either way.
+- Since 2026-11-03 the Mac Studio's launch agent, `com.thebrimm.unedited`, runs from Studio's main checkout, `~/Claude Code/brimm-video-studio`. Studio's installer kept that label and replaced brimm-video's agent in place, on Jason's yes. That checkout stays on `main`: work in git worktrees. Sallie's laptop runs brimm-video's agent until it is moved to Studio.
 - Experiments never write into the watched Dropbox folder: a new file there starts the tool.
 - Final Cut Pro's library, where Final Cut is still used, is in `~/BRIMM Video Work`, because `~/Movies` on the Mac Studio is a link into Dropbox.
 
@@ -78,4 +78,4 @@ cd tool && ./install.sh --print "<folder>"   # what the installer would do. It c
 
 ## Both Macs
 
-Both Macs edit in the HyperFrames app (A0 installs it on the Mac Studio first; Sallie's laptop follows, on Jason's yes). Final Cut Pro stays optional, fed by the app's MOV export; whether Studio still writes Final Cut files is Jason's call. Sallie's laptop is set up by `docs/setup/sallies-laptop.md`, which still describes brimm-video until a later step updates it.
+Both Macs edit in the HyperFrames app (A0 installs it on the Mac Studio first; Sallie's laptop follows, on Jason's yes). Final Cut Pro stays optional, fed by the app's MOV export; whether Studio still writes Final Cut files is Jason's call. Sallie's laptop is set up by `docs/setup/sallies-laptop.md`, which still describes brimm-video until a later step updates it. Moving it to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT); the Mac Studio's own move, check 40, was done on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4). The BRIMM Video Guide it replaces describes brimm-video, and is retired once her laptop moves.
