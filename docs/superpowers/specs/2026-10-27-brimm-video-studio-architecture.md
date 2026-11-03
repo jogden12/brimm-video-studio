@@ -197,6 +197,8 @@ Ids are `w0`, `w1` and so on; punctuation stays in `text`.
 
 ### F11. Sallie's laptop is not on the light import, and Zoom downloads are held at the drop
 
+**2026-11-03:** her laptop has been on the light import since 2026-10-26, at brimm-video 7aaa110, with its drop folder at `Drop/Sallie's laptop`. The README line quoted below was out of date then. The Zoom half stands.
+
 **Seen.** README: "Sallie's laptop is not switched yet". `tool/filing.js` holds a Zoom download in the drop folder with "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." `tool/kinds.js` gives a Zoom name no guess and the card offers a session, never assumes one.
 
 **So.** Everything here stands on the light import, so her laptop is switched first (`docs/setup/sallies-laptop.md`, "Switching her laptop"). "A Zoom download is a session at the drop" (decision 10) needs what the 2026-10-22 design called phase Z, which therefore becomes part of S1.
@@ -889,7 +891,7 @@ The handoff's table (its section 5), corrected by the import graph (F1). "Retire
 |---|---|---|
 | 1 | Nothing is deleted. `reel-candidates.js` moves out of `reels.js`. The tests that import both halves (`reels.test.js`, `reading.test.js`, `notes.test.js`) change their imports; no assertion changes | Studio exists as a repo |
 | 2 | In `reading.js`: the rough cut, the Final Cut file, `timelineFor`. In `guide.js`: the rough-cut estimate (`roughIn`, `roughAt`, and "Making the rough cut" among `READING_STEPS`). In `edit.js`: the kept commands stop using `newestOf`, `newestIsRender`, `clockFor` and `presetOf` (the guide's use of `newestIsRender`, for the Final Cut way's stages, waits for wave 4) | Wave 1; B1 working by hand |
-| 3 | In `unedited.js`: the full import's rough cut, upright version, clips and Final Cut file, with `needsReframe` and `uprightQuality` | Sallie's laptop on the light import (F11) |
+| 3 | In `unedited.js`: the full import's rough cut, upright version, clips and Final Cut file, with `needsReframe` and `uprightQuality` | Sallie's laptop on the light import (F11; met since 2026-10-26) |
 | 4 | In `finish.js`: the Final Cut half (`finishNow`'s Shares and exports) and `expectedWords` (a Reel's first words come from its suggestion; the main video's first-words check is dropped, 8.2). In `guide.js`: the Final Cut way's stages (`show`, `finish`, `finish-again`) and the facts only they use (`shownInFinalCut`, `shownSinceFinish`, and `edit.js`'s `newestIsRender` for them), after which every raw video is on the HyperFrames way. Then `parts.js`, and with it `edit.js`'s `freeLibrary` (the only other user of `unkeptParts`) and its tests in `edit-finish.test.js` | B2 in daily use; `edit.js`'s `finish`, `release` and `episodes` rewritten first |
 | 5 | In `edit.js`: `text`, `graphic`, `logo`, `captions`, `preset`, `cut`, and `reel` but for `drop`. Then `layers.js`, `captions.js`, `pictures.js`, `styles.js`, `timeline.js`, `projects.js` (which `timeline.js` imports), `recut.js` and `reel.js`. The shared test helper `tests/phase4.js` is rewritten to need none of them. The skill's rows for all of it | Waves 2 to 4 |
 | 6 | What is left, each on Jason's call: `push`, `portable.js`, `fcpxml.js` and the Final Cut files; `cuts.js`'s rough-cut functions; the installer's Final Cut checks; the README and the skill | Wave 5; Jason's call on Final Cut |

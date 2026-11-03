@@ -13,7 +13,7 @@
 **Not here:**
 - A0 and A0b, the app tests (Jason, by hand). This plan says which pull request waits for which answer.
 - The Studio repo's `main` branch and its copy of the tag `brimm-video-v1` (handoff Appendix A, section 6). brimm-video already has the tag, at 42a39a3. The Studio repo exists (Jason made it on 2026-10-28) and holds brimm-video's history up to c666508 on the branch `claude/seed-from-brimm-video`. A cloud session may push only `claude/*` branches, so Jason renames that branch to `main` and pushes the tag to the Studio repo from a clone that has both remotes.
-- Switching Sallie's laptop to the light import (`docs/setup/sallies-laptop.md`).
+- Switching Sallie's laptop to the light import (`docs/setup/sallies-laptop.md`). Done on 2026-10-26, at brimm-video 7aaa110 (found on 2026-11-03).
 - The contract change for a session clip with no client (decision D5, with brimm-operations).
 - HeyGen's training opt-out (Jason's email).
 - Installing anything on a Mac. The installer is shown with `--print` until Jason says yes.
@@ -37,7 +37,7 @@
 | 9 | `finish … reels` for a finished video (B2c) | 5, 7 | No | One Reel of a finished video |
 | 10 | The guide's new states and progress steps; its Final Cut stages go for an episode going the HyperFrames way (the section has the ruling) | 4, 7 | No | Ask "what's next?" at each stage |
 | 11 | `release`'s snapshot, and the take-over | 4, 5, 7, 15 | No | Release on one Mac, take over on the other |
-| 12 | S1: a Zoom download is a session; the reading at the drop; clip suggestions; the feedback switches; `heygenOptOut` | Sallie's laptop on the light import; 1 | No | Jason's own made-up call |
+| 12 | S1: a Zoom download is a session; the reading at the drop; clip suggestions; the feedback switches; `heygenOptOut` | Sallie's laptop on the light import (met since 2026-10-26); 1 | No | Jason's own made-up call |
 | 13 | S2: `clips` | 12, 4 | Items 2, 5 | A clip through to the app |
 | 14 | S3: a session clip in the hand-off | D5 decided with brimm-operations | No | |
 | 15 | `free`: built, to take a project's working copy and `renders/` away (today a stub) | 4 | No | Free one old episode |
@@ -1075,7 +1075,7 @@ And the suite passes whole, with the tests of a deleted module deleted with it a
   Its additions (`docs/phase-a0/additions.md`, items 1 and 8 among them) and A0b are being run. PRs 4 to 7 each name the answer they wait for.
 - The Studio repo's `main` branch and its copy of the tag `brimm-video-v1` (Jason; see "Not here").
 - The questions Q1 to Q3 and decisions D1 to D10 of the spec. Decision D5 (a session clip's hand-off) needs brimm-operations as well.
-- Sallie's laptop is not on the light import, which PR 12 waits for (`docs/setup/sallies-laptop.md`).
+- Sallie's laptop on the light import, which PR 12 waited for: met since 2026-10-26, at brimm-video 7aaa110 (found on 2026-11-03; `docs/setup/sallies-laptop.md`).
 - Whether the Mac's ffmpeg has what PR 3 needs to make an HDR clip standard: the `videotoolbox` hwaccel and the `scale_vt` filter (PR 3 first asked for `zscale` and `tonemap`, and the Mac Studio's ffmpeg has no `zscale`; Jason chose VideoToolbox on 2026-10-28). The Mac Studio's ffmpeg (Homebrew 9.0.2) has both. The installer's `--print` for a Mac (`--machine`) now says whether its ffmpeg has both, and with what it is missing; Sallie's laptop is read the same way when it is set up. A Mac whose ffmpeg lacks either refuses an HDR clip in words.
 - `free` (PR 15) takes a project's `renders/` whole, with the note each export leaves there (`renders/<project>_<date>_<time>.meta.json`, found by A0), once the episode is handed off; before that, it takes nothing while a video is in a `renders/`. Spec 8.1 says a file in `renders/` is not an export, so nothing in the hand-off waits for the notes; but if the app's Export dialog can save into a project's `renders/`, or PR 7 comes to need the notes, `free` has to spare what is there. Jason looks at both on PR 15's by-hand step.
 - A Reel's video and `free` (PR 5 and PR 15): `free` leaves a Reel's video, since nothing makes a taken one again. `app … reel N` (PR 5) makes a Reel once and opens it again as it is, so after both PRs `free` still leaves it. To let `free` take it, `app … reel N` has to do for a Reel what PR 15 made `app` do for the main project: ask for the Reel's copy again, check it against the facts of its project and the recording against the project's `from`, and put it back; then `freePaths` names a Reel's video. Jason's call whether the room is worth a step of its own. PR 11 does the first half: a Reel project whose video is gone is put back by `app … reel N` (its rebuild needs it), so only `freePaths` and its tests are left.
