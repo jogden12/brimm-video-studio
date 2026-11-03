@@ -277,7 +277,7 @@ The commands (design 7):
   - An empty folder: `The reference folder is empty. Add screenshots or pictures to References, in the BRIMM Video folder in Dropbox.`
   - No folder: `There's no reference folder on this Mac yet: ask Jason.`
 - **`refs look "<name>"`:** copies the picture into `Looking/` in her BRIMM Video Studio folder (made when first needed, the same name replaced), and prints `Picture to look at: <path>` for Claude. A Read inside her folder passes today, so the guard is not changed. Her skill tells Claude to look at the picture and never repeat the path to her.
-- **`refs use "<episode>" "<name>" [reel <n>]`:** copies the picture into that episode's HyperFrames project on this Mac, the main project or Reel n, as `brimm/references/<file>`. It says `The blue carousel is in the HyperFrames project for <name>. In HyperFrames, say "Use brimm/references/blue carousel.png as the style for the graphics".`
+- **`refs use "<episode>" "<name>" [reel <n>]`:** copies the picture into that episode's HyperFrames project on this Mac, the main project or Reel n, as `brimm/references/<file>`. It says `The blue carousel is in the HyperFrames project for <name>. In HyperFrames, say "Use the blue carousel picture as the style for the graphics".`, naming the picture by its stem with no folder or extension. The project's rule already tells the agent where her references are (H3 ruling: what she is told holds no path).
 - **Refusals:**
   - with no project on this Mac: `Open it in HyperFrames first: say "open <name> in HyperFrames".`;
   - with the project on another Mac, in `app`'s words;
