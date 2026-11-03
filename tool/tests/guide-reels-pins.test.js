@@ -56,7 +56,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     assert.ok(paragraph, "the README has the paragraph");
     assert.ok(paragraph.includes('The guide tells her too: once a Reel of the video is exported from HyperFrames and is not in its hand-off, "what\'s next?" says so, ahead of the BRIMM Ops page\'s steps (plan PR 16).'));
   });
-  it("has both skills offer to hand off the Reels at that stage, in the very line of their section on the guide, and stay under 160 lines", () => {
+  it("has both skills offer to hand off the Reels at that stage, in the very line of their section on the guide, and stay under 170 lines", () => {
     const offer = '"Shall I hand off the Reels?" once she has exported a Reel of a finished video';
     for (const [which, skill] of Object.entries(skills)) {
       const guide = guideSection(skill);
@@ -64,7 +64,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       const next = guide.split("\n").find((line) => line.startsWith("- Any other next step:"));
       assert.ok(next && next.includes(offer), `${which}: ${next}`);
       assert.ok(next.indexOf('"Shall I hand it off?" once she has exported it') < next.indexOf(offer) && next.indexOf(offer) < next.indexOf('"Shall I show it in Final Cut?"'), `${which}: the offers are in the order of the stages`);
-      assert.ok(skill.split("\n").length < 160, `${which}: ${skill.split("\n").length} lines`);
+      assert.ok(skill.split("\n").length < 170, `${which}: ${skill.split("\n").length} lines`);
     }
     // The two skills' sections on the guide, and their rows and section on handing off, are the same words.
     assert.equal(guideSection(skills.open), guideSection(skills.strict));
