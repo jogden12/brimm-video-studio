@@ -2,7 +2,7 @@
 
 For Jason, with Sallie, in person or by screen share. About two hours. Each step says what to check. Nothing here is done without your yes; the installer runs with `--print` first.
 
-Her laptop was set up on 2026-10-15, before the switch, and still imports the old way. To bring it to the switch, follow "Switching her laptop" at the end; the steps below are for setting a laptop up from the start, as it is done since the switch (the Mac Studio was switched on 2026-10-25, at `main` 1b43474). Her guide is the BRIMM Video Guide (https://claude.ai/artifact/WHVePKCjhjUjtBdHvPipgC).
+Her laptop was set up on 2026-10-15, before the switch, and still imports the old way. To bring it to the switch, follow "Switching her laptop" at the end; the steps below are for setting a laptop up from the start, as it is done since the switch (the Mac Studio was switched on 2026-10-25, at `main` 1b43474). This doc still describes brimm-video. Moving her laptop to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT), after the Mac Studio's own move on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4), from recording a video to posting it. It replaces the BRIMM Video Guide (https://claude.ai/artifact/WHVePKCjhjUjtBdHvPipgC), which describes brimm-video and is retired once her laptop moves.
 
 ## Morning checks (only the laptop can answer these)
 
