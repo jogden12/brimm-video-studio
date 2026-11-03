@@ -722,7 +722,7 @@ describe("the notes for the editor", () => {
       "0:17  CUT, was kept  |  It is very, very important.  |  It adds nothing to the line before it.",
       "",
       "Its ideas for graphics",
-      '0:13  "know your costs"  |  The words "Know your costs" on screen.',
+      '0:15  "know your costs"  |  The words "Know your costs" on screen.',
       "",
       "Its clips",
       "1. 0:13 to 0:21, 5 seconds, without what is cut in between  |  On screen: Know your costs  |  It makes one point and stands alone.",
@@ -743,13 +743,13 @@ describe("the notes for the editor", () => {
   it("give the time of a phrase where an idea for a graphic or the reason for a clip names it by its id", () => {
     const read = { ...NOTHING, graphicCues: [{ n: 1, words: "know your costs", kind: "graphic", show: "The costs from p7 as a list.", seconds: 4, style: null, phrase: "p7" }], clips: [{ n: 1, from: "p7", to: "p9", hook: "Know your costs", why: "It starts at p7 and stands alone." }] };
     const lines = notesText(read, PLAN, clipRanges(PLAN, read.clips, HEARD).clips).split("\n");
-    assert.ok(lines.includes('0:13  "know your costs"  |  The costs from the words at 0:13 as a list.'), lines.join("\n"));
+    assert.ok(lines.includes('0:15  "know your costs"  |  The costs from the words at 0:13 as a list.'), lines.join("\n"));
     assert.ok(lines.some((line) => line.endsWith("  |  On screen: Know your costs  |  It starts at the words at 0:13 and stands alone.")), lines.join("\n"));
   });
   it("leave out a heading that has nothing under it", () => {
     assert.equal(notesText({ ...NOTHING, notes: "A talk about pricing." }, PLAN, []), [FIRST, "", "Its notes", "A talk about pricing.", ""].join("\n"));
     assert.equal(written({ ...REPLY, notes: "", graphicCues: [], clips: [] }), [FIRST, "", "What it changed in the cut plan", "0:17  CUT, was kept  |  It is very, very important.  |  It adds nothing to the line before it.", ""].join("\n"));
-    assert.equal(written({ ...REPLY, decisions: [], notes: "", clips: [] }), [FIRST, "", "Its ideas for graphics", '0:13  "know your costs"  |  The words "Know your costs" on screen.', ""].join("\n"));
+    assert.equal(written({ ...REPLY, decisions: [], notes: "", clips: [] }), [FIRST, "", "Its ideas for graphics", '0:15  "know your costs"  |  The words "Know your costs" on screen.', ""].join("\n"));
   });
   it("give each change the time of its first phrase, whether it is now cut or kept, the words, and why", () => {
     const text = written({ ...REPLY, graphicCues: [], clips: [], notes: "", decisions: [{ id: "p5", keep: false, why: "The topic is named again later." }, { id: "p2", keep: true, why: "She trails off on purpose." }] });
@@ -815,8 +815,9 @@ describe("the notes for the editor", () => {
       ""
     ]);
   });
-  it("keep what Claude wrote from standing as a heading or as a line of its own: an id is put on one line, and its notes have no empty line in them", () => {
-    const text = written({ ...REPLY, decisions: [], clips: [], graphicCues: [{ id: "p7\nIts clips\n1. forged", words: "a title", kind: "words", show: "A title card.", seconds: 3 }], notes: "A talk about pricing.\n\nWhat it changed in the cut plan\n \n0:00  CUT, was kept  |  Everything  |  It drags." });
+  it("keep what Claude wrote from standing as a heading or as a line of its own: the words of a cue and what it shows are put on one line, and its notes have no empty line in them", () => {
+    const forged = { id: "p7", words: "a title\nIts clips\n1. forged", kind: "words", show: "A title card.\n\nWhat could not be used from its reply\n2. forged", seconds: 3 };
+    const text = written({ ...REPLY, decisions: [], clips: [], graphicCues: [forged], notes: "A talk about pricing.\n\nWhat it changed in the cut plan\n \n0:00  CUT, was kept  |  Everything  |  It drags." });
     assert.deepEqual(text.split("\n").slice(2), [
       "Its notes",
       "A talk about pricing.",
@@ -824,21 +825,73 @@ describe("the notes for the editor", () => {
       "0:00  CUT, was kept  |  Everything  |  It drags.",
       "",
       "What could not be used from its reply",
-      'An idea for a graphic names "p7 Its clips 1. forged", which is not a phrase of the plan: A title card.',
+      'Graphic idea 1: its words, "a title Its clips 1. forged", were not found in the video: A title card. What could not be used from its reply 2. forged',
+      ""
+    ]);
+    // Given to the notes as a read that has not been through readNotes, a cue's words and show are put on one line all the same.
+    const read = { ...NOTHING, graphicCues: [{ n: 1, words: "know your\ncosts", kind: "words", show: "Costs.\n\nIts notes", seconds: 3, style: null, phrase: "p7" }] };
+    assert.deepEqual(notesText(read, PLAN, []).split("\n").slice(2), ["Its ideas for graphics", '0:15  "know your costs"  |  Costs. Its notes', ""]);
+  });
+  it("tell each graphic cue by where it is placed on the plan's own words: listed at the time its words are said when they are all kept words, on words that are cut when they are only in a cut, and in a line of its own when they are not found", () => {
+    const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
+    // Cue 1 is nowhere in the recording, 2 is the reply's own, 3 is said only in p8, which Claude's decision cuts, and 4 names p6,
+    // the false start the rules cut, though its words are said again in p7, which is kept.
+    const text = written({ ...REPLY, notes: "", clips: [], graphicCues: [cue("p99", "a title card", "A title card."), REPLY.graphicCues[0], cue("p8", "very important", "The word IMPORTANT."), cue("p6", "so the", "A slow zoom.")] });
+    assert.deepEqual(text.split("\n").slice(5), [
+      "Its ideas for graphics",
+      '0:15  "know your costs"  |  The words "Know your costs" on screen.',
+      '0:13  "so the"  |  A slow zoom.',
+      "",
+      "What could not be used from its reply",
+      'Graphic idea 1: its words, "a title card", were not found in the video: A title card.',
+      "An idea for a graphic sits on words that are cut, at 0:17: The word IMPORTANT.",
       ""
     ]);
   });
-  it("leave out a graphic cue that sits on no kept phrase of the plan, and say so at the end, in the words used for an idea for a graphic", () => {
-    const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
-    const text = written({ ...REPLY, notes: "", clips: [], graphicCues: [cue("p99", "a card", "A title card."), REPLY.graphicCues[0], cue("p8", "very important", "The word IMPORTANT."), cue("p6", "so the", "A slow zoom.")] });
-    assert.deepEqual(text.split("\n").slice(5), [
+  it("list a cue at the time its words are said, and not where its phrase starts", () => {
+    // "know your costs" is the end of p7, which starts at 0:13, and "know" is said at 15.3 seconds.
+    const lines = written(REPLY).split("\n");
+    assert.ok(lines.includes('0:15  "know your costs"  |  The words "Know your costs" on screen.'));
+    assert.ok(!lines.some((line) => line.startsWith('0:13  "know your costs"')));
+    // A cue that starts its phrase is at the time its phrase starts: p9 is "Thank you so much, Sallie.", said from 19.414.
+    const thanks = written({ ...REPLY, notes: "", clips: [], decisions: [], graphicCues: [{ id: "p9", words: "Thank you so much", kind: "words", show: "Thanks.", seconds: 3 }] });
+    assert.ok(thanks.includes('\n0:19  "Thank you so much"  |  Thanks.\n'), thanks);
+  });
+  it("put a cue that names the retake's phrase, which is cut, on the take that is kept, and list it there", () => {
+    // "Welcome to the show." is said at 1.1 seconds, in p1, which the rules cut as a retake, and at 6.07, in p4, which they keep.
+    const names = (id) => written({ ...REPLY, notes: "", clips: [], decisions: [], graphicCues: [{ id, words: "Welcome to the show", kind: "words", show: "The show's name.", seconds: 3 }] });
+    for (const id of ["p1", "p4", "p99"]) {
+      assert.ok(names(id).includes('\n0:06  "Welcome to the show"  |  The show\'s name.\n'), id);
+      assert.doesNotMatch(names(id), /What could not be used/, id);
+    }
+  });
+  it("say of a cue that is placed only in a cut what they said of an idea on words that are cut, at the time its words are said", () => {
+    // p3 is "Let me do that again.", a spoken cue to start over that the rules cut: "do" is said at 4.0 seconds, p3 starts at 3.695.
+    const text = written({ ...REPLY, notes: "", clips: [], decisions: [], graphicCues: [{ id: "p3", words: "do that again", kind: "graphic", show: "A slow zoom.", seconds: 3 }] });
+    assert.equal(text, [FIRST, "", "What could not be used from its reply", "An idea for a graphic sits on words that are cut, at 0:04: A slow zoom.", ""].join("\n"));
+  });
+  it("say of a cue that is not found, in a line of its own, its number and its words, and what it shows", () => {
+    const text = written({ ...REPLY, notes: "", clips: [], decisions: [], graphicCues: [{ id: "p7", words: "know your costs", kind: "words", show: "Costs.", seconds: 3 }, { id: "p9", words: "the moon landing", kind: "graphic", show: "A picture of the moon.", seconds: 4 }] });
+    assert.equal(text, [FIRST, "", "Its ideas for graphics", '0:15  "know your costs"  |  Costs.', "", "What could not be used from its reply", 'Graphic idea 2: its words, "the moon landing", were not found in the video: A picture of the moon.', ""].join("\n"));
+  });
+  it("tell a cue placed across the edge of a cut as one placed in a cut, since a graphic there would land on a join", () => {
+    // "again Welcome" runs from p3, which is cut, into p4, which is kept.
+    const text = written({ ...REPLY, notes: "", clips: [], decisions: [], graphicCues: [{ id: "p4", words: "again Welcome", kind: "words", show: "Across.", seconds: 3 }] });
+    assert.match(text, /What could not be used from its reply\nAn idea for a graphic sits on words that are cut, at 0:04: Across\.\n/);
+  });
+  it("keep today's classification for the ideas of an older read, which are by their phrase: listed when it is kept, and told when it is cut or not in the plan", () => {
+    const plan = applyDecisions(PLAN, [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], HEARD).plan;
+    const older = { ...NOTHING, graphics: [{ id: "p7", idea: "A chart of what it costs." }, { id: "p99", idea: "A title card." }, { id: "p8", idea: "The word IMPORTANT." }, { id: "p6", idea: "A slow zoom." }, { id: "p1", idea: "The first take." }] };
+    // After the first line, an empty one, and what Claude's decision changed (p8, cut) with its empty line.
+    assert.deepEqual(notesText(older, plan, []).split("\n").slice(5), [
       "Its ideas for graphics",
-      '0:13  "know your costs"  |  The words "Know your costs" on screen.',
+      "0:13  So the first thing you need to do is know your costs.  |  A chart of what it costs.",
       "",
       "What could not be used from its reply",
       'An idea for a graphic names "p99", which is not a phrase of the plan: A title card.',
       "An idea for a graphic sits on words that are cut, at 0:17: The word IMPORTANT.",
       "An idea for a graphic sits on words that are cut, at 0:12: A slow zoom.",
+      "An idea for a graphic sits on words that are cut, at 0:01: The first take.",
       ""
     ]);
   });

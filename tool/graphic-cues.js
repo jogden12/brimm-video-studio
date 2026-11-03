@@ -113,19 +113,28 @@ export const cueTokens = (text) => plain(text).split(/\s+/).map(tokenOf).filter(
 
 // --- Where the plan's phrases are among its words ---
 
-/** For each phrase of a cut plan that has words, its first word and its last among all the plan's words, as [first, last] indexes:
-    the phrases split the recording's words in order (cuts.js phrasesOf), so they are found by counting, as the cut suggestions
-    are (project.js cutSuggestions). A phrase with no words is not in it. */
-export function phraseSpans(phrases) {
+/** The spans of the phrases of a cut plan that have words, or only of those that are kept (`keep` is not false): the first word and
+    the last of each among all the plan's words, as [first, last] indexes. The phrases split the recording's words in order (cuts.js
+    phrasesOf), so they are found by counting, as the cut suggestions are (project.js cutSuggestions). A phrase with no words is
+    not in it, and a phrase that is left out is still counted. */
+function spansOf(phrases, onlyKept) {
   const spans = new Map();
   let at = 0;
   for (const phrase of Array.isArray(phrases) ? phrases : []) {
     const n = Array.isArray(phrase?.words) ? phrase.words.length : 0;
-    if (n > 0) spans.set(phrase.id, [at, at + n - 1]);
+    if (n > 0 && (!onlyKept || phrase.keep !== false)) spans.set(phrase.id, [at, at + n - 1]);
     at += n;
   }
   return spans;
 }
+
+/** For each phrase of a cut plan that has words, its first word and its last among all the plan's words, as [first, last] indexes. */
+export const phraseSpans = (phrases) => spansOf(phrases, false);
+
+/** The same for the phrases that are kept alone (`keep` is not false), counted over all the words. A cue is given these as its
+    phrases (placeGraphicCues): a cue is asked for a kept phrase, so one that names a phrase that is cut counts as naming none, and
+    its words are looked for in kept words first. */
+export const keptPhraseSpans = (phrases) => spansOf(phrases, true);
 
 /** The indexes of the words in the phrases whose `keep` is not false, counted the same way. */
 export function keptIndexes(phrases) {
@@ -231,7 +240,9 @@ function placesOf(cues, words, { spans, kept, spell }) {
     first go through `spell`, the speller the words were spelled with, so a cue from an unspelled phrase finds "BRIMM" where the
     phrase said "brim". Cues are placed in the order of their numbers. A candidate is a run of the recording's tokens (see
     candidatesFor). The candidates that count are, in this order: those inside the cue's `phrase`, where it has one and `spans` ({id:
-    [first, last]}, phraseSpans') has it; those wholly in kept words, `kept` being the Set of their indexes (keptIndexes); any.
+    [first, last]}, phraseSpans' or keptPhraseSpans') has it; those wholly in kept words, `kept` being the Set of their indexes
+    (keptIndexes); any. A cue is asked for a kept phrase, so a caller gives the spans of the kept phrases alone (keptPhraseSpans):
+    a cue that names a phrase that is cut then counts as naming none.
     Of the first of those that has a candidate, an exact one wins over a loose one, a higher count over a lower, and then the
     first at or after where the search starts, which is after the first word of the cue placed before it, and failing that the
     first. */
@@ -274,19 +285,35 @@ export function graphicCuesOfPlan(plan) {
   return Array.isArray(claude?.graphics) ? legacyCues(claude.graphics, plan.phrases) : [];
 }
 
+/** The cues of a cut plan placed on `words`, as the plan's own phrases say which words are kept: [{ cue, at, kept }], in the order
+    the cues are given. `at` is { start, end }, the start of the first word of the cue's words and the end of the last, or null when
+    they are not found; `kept` is whether they are all kept words (outside every suggested cut), which a cue not found is not.
+    Placed as placeGraphicCues places a cue, given the plan's phrases: a cue is first in its own phrase when that phrase is kept,
+    and one that names a phrase that is cut counts as naming none, so its words are looked for in kept words first and in the cut
+    only when they are said nowhere else. With `older` the cues are an older plan's ideas for graphics (legacyCues), which stay
+    tied to their own phrase, kept or cut, as they always were: one on a phrase that is cut is placed there, in the cut.
+    `words` are the episode's, as they are said (clock.js heardWords), each {w, start, end} or {text, start, end}. */
+export function graphicCuesInPlan(cues, plan, words, { older = false } = {}) {
+  const given = Array.isArray(cues) ? cues : [];
+  const list = Array.isArray(words) ? words : [];
+  const kept = keptIndexes(plan?.phrases);
+  const places = placesOf(given, list, { spans: older ? phraseSpans(plan?.phrases) : keptPhraseSpans(plan?.phrases), kept, spell: (text) => text });
+  return given.map((cue, i) => {
+    const place = places[i];
+    if (!place) return { cue, at: null, kept: false };
+    const whole = Array.from({ length: place.last - place.first + 1 }, (_, n) => place.first + n).every((n) => kept.has(n));
+    return { cue, at: { start: list[place.first].start, end: list[place.last].end }, kept: whole };
+  });
+}
+
 /** The notes a Final Cut file gets for a cut plan's cues, [{at, text}]: `Graphic idea: <show>` at the moment the first word of
     each cue starts, worded so that nobody takes it for more than an idea. A note is made only for a cue placed wholly in kept
     words: today's notes keep only kept phrases, and a note in a cut would land on a join, as if it belonged there (fcpxml.js).
+    An older plan's ideas are placed on their own phrases (graphicCuesInPlan `older`), so they have the notes they always had.
     `words` are the episode's, as they are said (clock.js heardWords), each {w, start, end} or {text, start, end}. */
 export function cueMarkers(plan, words) {
-  const cues = graphicCuesOfPlan(plan);
-  const list = Array.isArray(words) ? words : [];
-  if (!cues.length || !list.length) return [];
-  const kept = keptIndexes(plan.phrases);
-  const places = placesOf(cues, list, { spans: phraseSpans(plan.phrases), kept, spell: (text) => text });
-  return cues.flatMap((cue, i) => {
-    const place = places[i];
-    const whole = place && Array.from({ length: place.last - place.first + 1 }, (_, n) => place.first + n).every((n) => kept.has(n));
-    return whole ? [{ at: list[place.first].start, text: `Graphic idea: ${oneLine(cue.show)}` }] : [];
-  });
+  const older = !Array.isArray(plan?.claude?.graphicCues);
+  return graphicCuesInPlan(graphicCuesOfPlan(plan), plan, words, { older })
+    .filter(({ kept }) => kept)
+    .map(({ cue, at }) => ({ at: at.start, text: `Graphic idea: ${oneLine(cue.show)}` }));
 }

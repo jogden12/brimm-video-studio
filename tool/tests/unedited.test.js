@@ -1229,7 +1229,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
       "0:17  CUT, was kept  |  It is very, very important.  |  It adds nothing to the line before it.",
       "",
       "Its ideas for graphics",
-      '0:13  "know your costs"  |  The words "Know your costs" on screen.',
+      '0:15  "know your costs"  |  The words "Know your costs" on screen.',
       "",
       "Its clips",
       "1. 0:13 to 0:21, 5 seconds, without what is cut in between  |  On screen: Know your costs  |  It makes one point and stands alone.",
@@ -1262,7 +1262,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     assert.equal(plan.by, "rules");
     assert.deepEqual(plan.claude.graphicCues.map((c) => [c.n, c.words, c.phrase]), [[1, "know your costs", "p7"]]);
     assert.deepEqual(plan.claude.ignored, ['Its reply has no "decisions".', 'Its reply has no "notes".', 'Its reply has no "clips".']);
-    assert.match(t.read("talk.edit-notes.txt"), /Its ideas for graphics\n0:13  "know your costs"  \|  /);
+    assert.match(t.read("talk.edit-notes.txt"), /Its ideas for graphics\n0:15  "know your costs"  \|  /);
     t.done();
   });
   it("reads Claude's reply out of the words or the code fence around it", async () => {
@@ -1732,15 +1732,19 @@ describe("Claude's graphic cues in the Final Cut file", () => {
       "576576/30000s Taken out, 2.7 seconds. Claude: It adds nothing to the line before it.",
       "637637/30000s Taken out, 2.1 seconds. Pause: silence after the last words"
     ]);
-    // A cue whose words are cut, or are not found, gets no marker. The notes say what became of the ones on words that are cut.
+    // A cue whose words are cut, or are not found, gets no marker. The notes say what became of each, by where the cue is placed on
+    // the plan's own words: in a cut, at the time its words are said ("do" of "do that again" at 4.0 seconds), or not found.
     assert.doesNotMatch(xml, /IMPORTANT|slow zoom|title card|moon/);
-    assert.deepEqual(t.read("talk.edit-notes.txt").split("\n").slice(-5), [
+    assert.deepEqual(t.read("talk.edit-notes.txt").split("\n").slice(-6), [
       "What could not be used from its reply",
       "An idea for a graphic sits on words that are cut, at 0:17: The word IMPORTANT.",
-      "An idea for a graphic sits on words that are cut, at 0:03: A slow zoom.",
-      'An idea for a graphic names "p99", which is not a phrase of the plan: A title card.',
+      "An idea for a graphic sits on words that are cut, at 0:04: A slow zoom.",
+      'Graphic idea 4: its words, "a title card", were not found in the video: A title card.',
+      'Graphic idea 6: its words, "the moon landing", were not found in the video: The moon.',
       ""
     ]);
+    // The ones that are placed in kept words are listed at the time their words are said, in the order they were asked for.
+    assert.match(t.read("talk.edit-notes.txt"), /\n\nIts ideas for graphics\n0:15  "know your costs"  \|  The words "Know your costs" on screen\.\n0:06  "Welcome to the show"  \|  The show's name\.\n\n/);
     assert.deepEqual(checkFcpxml(xml, { duration: 23.423, frameRate: "30000/1001" }), []);
     t.done();
   });
@@ -1756,11 +1760,11 @@ describe("Claude's graphic cues in the Final Cut file", () => {
     assert.equal("graphics" in plan.claude, false);
     // The one that is not a graphic or words is said of in the plan's ignored, and in the notes of what could not be used.
     assert.deepEqual(plan.claude.ignored, ["Graphic cue 3 could not be read."]);
-    assert.match(t.read("talk.edit-notes.txt"), /\n\nWhat could not be used from its reply\nGraphic cue 3 could not be read\.\nAn idea for a graphic names "p99"/);
+    assert.match(t.read("talk.edit-notes.txt"), /\n\nWhat could not be used from its reply\nGraphic cue 3 could not be read\.\nGraphic idea 2: its words, "a title card", were not found in the video: A title card\.\n/);
     t.done();
   });
-  it("land on the take that is kept when their words are in a retake the rules cut, whether their phrase is the kept take's or no phrase of the plan", async () => {
-    for (const id of ["p4", "p99"]) {
+  it("land on the take that is kept when their words are in a retake the rules cut, whether their phrase is the kept take's, the retake's that is cut, or no phrase of the plan", async () => {
+    for (const id of ["p4", "p1", "p99"]) {
       const t = setup({ claude: [answers({ ...REPLY, graphicCues: [cue(id, "Welcome to the show", "The show's name.")] })] });
       await uneditedFile(t.video("talk.mov"), t.deps);
       assert.deepEqual(tags(t.read("talk.fcpxml"), "marker").map((m) => `${m.start} ${m.value}`).filter((m) => m.includes("Graphic idea")), ["182182/30000s Graphic idea: The show's name."], id);

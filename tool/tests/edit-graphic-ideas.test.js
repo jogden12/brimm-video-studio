@@ -268,7 +268,8 @@ describe("graphic ideas, from graphic cues", () => {
   });
   it("puts a cue on the take of its words that she keeps, not on the first time they are said, whichever phrase it names", async () => {
     // "Welcome to the show" is said at 1.1 s, in a retake the rules cut ("cut now" if it were there), and at 6.07 s, which is 0:00.
-    for (const phrase of ["p4", "p99", undefined]) {
+    // Naming p1, the retake that is cut, is naming no phrase: a cue is asked for a kept phrase.
+    for (const phrase of ["p4", "p1", "p99", undefined]) {
       const { t } = rawWithCues([{ ...CUES[0], phrase }]);
       const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
       assert.equal(r.text.split("\n")[1], `Idea 1, 0:00 to 0:01: The show's name in the lower third. Over "Welcome to the show"`, String(phrase));
@@ -403,6 +404,20 @@ describe("Claude's notes of a raw video she has answered", () => {
       else assert.doesNotMatch(r.text, /What could not be used/);
       t.done();
     }
+  });
+  it("keep a cue whose words were not found in the video in a line of its own, since the notes are the only place that says so beside the list, and leave the cut one out", async () => {
+    const t = setup();
+    const found = episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, name: { text: "Pricing talk", placeholder: false } } });
+    const graphicCues = [
+      { n: 1, words: "very important", kind: "words", show: "Important in the corner", seconds: 3, style: null, phrase: "p8" },
+      { n: 2, words: "the moon landing", kind: "graphic", show: "A picture of the moon.", seconds: 4, style: null, phrase: "p9" }
+    ];
+    writeFileSync(join(found.folder, NOTES_FILE), notesText({ notes: "A tight talk.", graphicCues, problems: [] }, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]), []));
+    const r = await on(t.ctx.deps, "show", FOLDER, "notes");
+    assert.equal(r.code, 0, r.text);
+    assert.doesNotMatch(r.text, /An idea for a graphic sits on words that are cut/);
+    assert.ok(r.text.endsWith('\n\nWhat could not be used from its reply\nGraphic idea 2: its words, "the moon landing", were not found in the video: A picture of the moon.'), r.text);
+    t.done();
   });
 });
 

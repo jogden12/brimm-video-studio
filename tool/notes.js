@@ -10,7 +10,8 @@ import { readAnswer, parseReply, salvageReply } from "./shared/answers.js";
 import { SHOW, HOST } from "./shared/show.js";
 import { rangesOf, KEPT, KEPT_SIDE } from "./cuts.js";
 import { REEL_MIN, REEL_MAX, fitReel, storyParts } from "./reframe.js";
-import { graphicCuesOf, graphicCuesAsk } from "./graphic-cues.js";
+import { graphicCuesOf, graphicCuesAsk, graphicCuesInPlan } from "./graphic-cues.js";
+import { heardWords } from "./clock.js";
 
 const list = (v) => (Array.isArray(v) ? v : []);
 /** Text on one line: a line break in it would start a line that reads as something else. */
@@ -423,12 +424,14 @@ const WROTE = "Claude wrote this from the words of the recording and their times
     - its notes, as it wrote them but with no empty line in them: a heading here is the line after an empty one;
     - what it changed in the cut plan: for each change the time of the first phrase, whether it is now cut or kept, the words,
       and why, and a second line when the change has something to check by eye;
-    - its ideas for graphics, which are its graphic cues (`read.graphicCues`): for each the time of the phrase it goes with, the
-      words it goes with in quotation marks, and what it shows;
+    - its ideas for graphics, which are its graphic cues (`read.graphicCues`) that are placed wholly in kept words of the plan (graphic-
+      cues.js graphicCuesInPlan): for each the time its words are said, the words in quotation marks, and what it shows. (A read
+      from before the cues has `graphics`, each {id, idea}, listed by the time of the phrase it sits on and the phrase's words.)
     - its clips: for each its number, its start and end, its length, the words to put on screen and why, a second line when
       it does not fit a Reel, and one when it starts or ends where there is no pause;
-    - what could not be used from its reply: the problems readNotes found, and each graphic cue that goes with no kept
-      phrase of the plan, which is told as an idea for a graphic always was.
+    - what could not be used from its reply: the problems readNotes found, and each graphic cue that is placed only in a cut (or
+      across the edge of one), told as an idea on words that are cut always was and at the time its words are said, and each that
+      is not found, in a line of its own with its number. (An idea of an older read is told by its phrase: cut, or not in the plan.)
     Where Claude named a phrase by its id, in its notes, an idea or the reason for a clip, the time of the words is written.
     What applyDecisions and clipRanges left out is in their `ignored`, and is not written here unless it is put with
     `read.problems` first. Without it nothing says why the number of a clip is missing from the list. */
@@ -441,11 +444,22 @@ export function notesText(read, plan, clips) {
     return change.check ? [line, `   ${change.check}`] : [line];
   });
   const graphics = [];
-  for (const g of list(read.graphicCues)) {
-    const p = phrases.get(g.phrase);
-    if (!p) unused.push(`An idea for a graphic names "${oneLine(g.phrase)}", which is not a phrase of the plan: ${oneLine(g.show)}`);
-    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(g.show)}`);
-    else graphics.push(`${stamp(p.start)}  "${oneLine(g.words)}"  |  ${byTime(oneLine(g.show), plan.phrases)}`);
+  // Each graphic cue is told by where it is placed on the plan's own words, as they are said: listed at the time its words are said
+  // when all of them are kept words, said to sit on words that are cut when they are only in a cut (or across the edge of one, where
+  // a graphic would land on a join), and said in a line of its own when they are not found.
+  const planWords = heardWords(list(plan.phrases).flatMap((p) => list(p.words)), list(plan.phrases));
+  graphicCuesInPlan(list(read.graphicCues), plan, planWords).forEach(({ cue, at, kept }, i) => {
+    const show = oneLine(cue.show);
+    if (!at) unused.push(`Graphic idea ${Number.isInteger(cue.n) ? cue.n : i + 1}: its words, "${oneLine(cue.words)}", were not found in the video: ${show}`);
+    else if (!kept) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(at.start)}: ${show}`);
+    else graphics.push(`${stamp(at.start)}  "${oneLine(cue.words)}"  |  ${byTime(show, plan.phrases)}`);
+  });
+  // The ideas of a read from before the cues (`graphics`, each {id, idea}) are told by their phrase, as they always were.
+  for (const g of list(read.graphics)) {
+    const p = phrases.get(g.id);
+    if (!p) unused.push(`An idea for a graphic names "${oneLine(g.id)}", which is not a phrase of the plan: ${oneLine(g.idea)}`);
+    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(g.idea)}`);
+    else graphics.push(`${stamp(p.start)}  ${oneLine(p.text)}  |  ${byTime(oneLine(g.idea), plan.phrases)}`);
   }
   const made = list(clips).flatMap((clip) => {
     const seconds = Math.round(clip.length);

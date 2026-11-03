@@ -72,7 +72,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { spelled } from "./final-transcript.js";
-import { keptIndexes, phraseSpans, placeGraphicCues } from "./graphic-cues.js";
+import { keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -4832,9 +4832,10 @@ function wordsOnTimeline(read, { start: from, end: to }) {
     `said` the words it goes with, `outside` when the timeline is a Reel whose stretch does not hold its words, and `at`, `for`,
     `start` and `end` as wordsOnTimeline gives them.
     - A plan the reading of PR H1 wrote holds `claude.graphicCues`: each is placed on the words of the recording (graphic-cues.js
-      placeGraphicCues), spelled as the episode's words are (`spellings`), and keeps the number the cue has. A cue whose words are
-      not found is `missing` (and `outside` on a Reel, whose stretch cannot be said to hold it). It stays for the seconds the cue says
-      (`for`), from the moment its words start.
+      placeGraphicCues), spelled as the episode's words are (`spellings`), and keeps the number the cue has. It is first in its own
+      phrase when that is kept, and else in kept words before any cut: one that names a phrase the plan cuts is placed as if it named
+      none. A cue whose words are not found is `missing` (and `outside` on a Reel, whose stretch cannot be said to hold it). It stays
+      for the seconds the cue says (`for`), from the moment its words start.
     - A plan made before it holds `claude.graphics`: each idea on a phrase of the plan, numbered in the order their words are said
       (Claude's order for two on one phrase); one that names no phrase of the plan is left out. It goes with the whole phrase, and
       stays for as long as the phrase takes. */
@@ -4843,7 +4844,7 @@ function graphicIdeas(read, spellings = []) {
   const phrases = read.plan.phrases || [];
   const outsideReel = (span) => Boolean(read.span) && !(span.end > read.span.from && span.start < read.span.to);
   if (Array.isArray(claude.graphicCues)) {
-    const placed = placeGraphicCues(claude.graphicCues, read.words || [], { spans: phraseSpans(phrases), kept: keptIndexes(phrases), spell: (text) => spelled(text, spellings) });
+    const placed = placeGraphicCues(claude.graphicCues, read.words || [], { spans: keptPhraseSpans(phrases), kept: keptIndexes(phrases), spell: (text) => spelled(text, spellings) });
     return placed.map((g) => {
       const idea = { n: g.n, idea: g.show, said: g.words };
       if (!g.at) return read.span ? { ...idea, outside: true, at: null } : { ...idea, missing: true, at: null };

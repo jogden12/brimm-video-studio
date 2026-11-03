@@ -659,10 +659,15 @@ describe("what the app is given to start from (5.8)", () => {
         assert.deepEqual([placed.at.from, placed.at.to], ["w8", "w10"], String(phrase));
       }
     });
-    it("lands a cue that names the retake's phrase, which is cut, in that phrase, as the rule for a cue's own phrase says", () => {
-      // The cue is written for the phrase it names, and that is where it is placed first. (A cue is asked for a kept phrase.)
-      const [placed] = cuesOf(projectFiles(main({ words: SKUS.words, plan: SKUS.plan, graphicCues: [{ n: 1, words: "too many SKUs", kind: "graphic", show: "A stack.", seconds: 4, style: null, phrase: "p2" }] }))).cues;
-      assert.deepEqual([placed.at.from, placed.at.to], ["w3", "w5"]);
+    it("lands a cue that names the retake's phrase, which is cut, on the take that is kept, as one that names no phrase does (Review Focus 2): a cue is asked for a kept phrase", () => {
+      const cue = { n: 1, words: "too many SKUs", kind: "graphic", show: "A stack.", seconds: 4, style: null, phrase: "p2" };
+      const [placed] = cuesOf(projectFiles(main({ words: SKUS.words, plan: SKUS.plan, graphicCues: [cue] }))).cues;
+      assert.deepEqual([placed.at.from, placed.at.to], ["w8", "w10"]);
+    });
+    it("lands a cue that names a phrase that is cut in that phrase only when its words are said nowhere else: the cut is the fallback", () => {
+      const cue = { n: 1, words: "here uh", kind: "words", show: "A card.", seconds: 3, style: null, phrase: "p2" };
+      const [placed] = cuesOf(projectFiles(main({ words: SKUS.words, plan: SKUS.plan, graphicCues: [cue] }))).cues;
+      assert.deepEqual([placed.at.from, placed.at.to], ["w6", "w7"]);
     });
     it("goes by a cue's place in the order when its words are said twice: the second cue with the same words is on the second time", () => {
       const cue = (n) => ({ n, words: "too many SKUs", kind: "graphic", show: "A stack.", seconds: 4, style: null });

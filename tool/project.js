@@ -35,7 +35,7 @@ import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
 import { UPRIGHT, shownWidth, speakerPlace, uprightPosition } from "./reframe.js";
-import { graphicCuesJson, keptIndexes, phraseSpans, placeGraphicCues } from "./graphic-cues.js";
+import { graphicCuesJson, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 
 /** A file of this tool's own, by its path from this file. */
 const own = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -569,11 +569,12 @@ export function projectFiles(input) {
   if (kind === "main") {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
-    // The graphic cues, each placed on the transcript's own words, by its phrase and outside the plan's suggested cuts where it can
-    // be (graphic-cues.js). The words of a cue are spelled as the transcript's are. A short video's has none until its reading gives
-    // it some (the plan of PR H2): its file is empty.
+    // The graphic cues, each placed on the transcript's own words (graphic-cues.js): in its own phrase when that phrase is kept, and
+    // else in kept words before any cut, so a cue that names a phrase the plan cuts is placed as if it named none. The words of a
+    // cue are spelled as the transcript's are. A short video's has none until its reading gives it some (the plan of PR H2): its
+    // file is empty.
     const graphicCues = input.short === true || !Array.isArray(input.graphicCues) ? [] : input.graphicCues;
-    const placedGraphicCues = placeGraphicCues(graphicCues, transcript, { spans: phraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
+    const placedGraphicCues = placeGraphicCues(graphicCues, transcript, { spans: keptPhraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
     files.set("brimm/graphic-cues.json", graphicCuesJson(placedGraphicCues, "recording"));
   }
   if (track) files.set("brimm/face-track.json", jsonText(track));

@@ -5,8 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, graphicCuesOf, graphicCuesAsk, cueTokens, phraseSpans, keptIndexes, placeGraphicCues,
-  graphicCuesJson, legacyCues, graphicCuesOfPlan, cueMarkers
+  GRAPHIC_CUE_KINDS, SHOT_KINDS, CUE_SECONDS, graphicCuesOf, graphicCuesAsk, cueTokens, phraseSpans, keptPhraseSpans, keptIndexes, placeGraphicCues,
+  graphicCuesJson, legacyCues, graphicCuesOfPlan, graphicCuesInPlan, cueMarkers
 } from "../graphic-cues.js";
 
 /** A cue as the brief writes one. */
@@ -182,6 +182,11 @@ describe("phraseSpans and keptIndexes: where the plan's phrases are among its wo
     assert.deepEqual([...keptIndexes(PHRASES)], [2, 3, 4, 5]);
     assert.ok(keptIndexes(PHRASES) instanceof Set);
   });
+  it("give, for the spans of the kept phrases alone, the spans phraseSpans gives of the phrases whose keep is not false, counted over all the words", () => {
+    assert.deepEqual([...keptPhraseSpans(PHRASES)], [["p2", [2, 2]], ["p4", [3, 5]]]);
+    assert.ok(keptPhraseSpans(PHRASES) instanceof Map);
+    for (const given of [undefined, null, [], "p1"]) assert.deepEqual([...keptPhraseSpans(given)], []);
+  });
   it("are empty for a plan with no phrases", () => {
     for (const given of [undefined, null, [], "p1"]) assert.deepEqual([[...phraseSpans(given)], [...keptIndexes(given)]], [[], []]);
   });
@@ -277,6 +282,22 @@ describe("placeGraphicCues: placing a cue on the words said", () => {
     // With no phrase, or one the plan has not, it goes by its place in the order.
     assert.deepEqual(where(placeGraphicCues([cue("too many SKUs", { phrase: "p9" })], words, { spans })), [["w0", "w2"]]);
     assert.deepEqual(where(placeGraphicCues([cue("too many SKUs", { phrase: "p2" })], words)), [["w0", "w2"]]);
+  });
+  it("counts a phrase that is cut as no phrase when it is given the spans of the kept phrases alone: the kept words first, and the cut only when the words are said nowhere else", () => {
+    // A retake the plan cuts (p2, words 0 to 4) and the take it keeps (p3, words 5 to 8), then a phrase that is said once, in the cut.
+    const words = said("too many SKUs here uh too many SKUs there bye uh now");
+    const phrases = [
+      { id: "p2", keep: false, words: words.slice(0, 5) },
+      { id: "p3", keep: true, words: words.slice(5, 9) },
+      { id: "p4", keep: false, words: words.slice(9) }
+    ];
+    const options = { spans: keptPhraseSpans(phrases), kept: keptIndexes(phrases) };
+    // Naming the cut retake's phrase is naming none: the cue is on the take that is kept.
+    for (const phrase of ["p2", "p3", "p9", undefined]) assert.deepEqual(where(placeGraphicCues([cue("too many SKUs", { phrase })], words, options)), [["w5", "w7"]], String(phrase));
+    // Said nowhere else, it is in the cut, which is the fallback.
+    assert.deepEqual(where(placeGraphicCues([cue("uh now", { phrase: "p4" })], words, options)), [["w10", "w11"]]);
+    // Given the spans of every phrase, as placeGraphicCues is by default for a caller that gives them, a cue is first in its own phrase.
+    assert.deepEqual(where(placeGraphicCues([cue("too many SKUs", { phrase: "p2" })], words, { spans: phraseSpans(phrases), kept: keptIndexes(phrases) })), [["w0", "w2"]]);
   });
   it("counts a run in its phrase before an exact one outside it, and one that fills only part of the phrase is not inside it", () => {
     const words = said("one two three four five six, then one two q r five six");
@@ -438,9 +459,29 @@ describe("cueMarkers: the Final Cut file's notes", () => {
     assert.deepEqual(cueMarkers(plan, WORDS), [{ at: 18, text: "Graphic idea: Boxes." }]);
     assert.deepEqual(cueMarkers(planOf({ graphicCues: [cue("too many SKUs", { n: 1, show: "Boxes.", phrase: "p3" })] }), WORDS), [{ at: 18, text: "Graphic idea: Boxes." }]);
   });
+  it("go to the take that is kept for a cue that names the retake's phrase, which is cut, as for a cue that names no phrase (Review Focus 2)", () => {
+    // "too many SKUs" is said in p2, the retake the plan cuts, and again in p3, which it keeps; the cue names p2.
+    const plan = planOf({ graphicCues: [cue("too many SKUs", { n: 1, show: "Boxes.", phrase: "p2" })] });
+    assert.deepEqual(cueMarkers(plan, WORDS), [{ at: 18, text: "Graphic idea: Boxes." }]);
+  });
+  it("are none for a cue that names a phrase that is cut when its words are said nowhere else: the cut is only the fallback", () => {
+    const plan = planOf({ graphicCues: [cue("here uh", { n: 1, show: "In the cut.", phrase: "p2" })] });
+    assert.deepEqual(cueMarkers(plan, WORDS), []);
+  });
   it("come from an older plan's ideas when it holds no cues: one at the start of each idea's phrase, none for an idea whose phrase is cut", () => {
     const plan = planOf({ graphics: [{ id: "p1", idea: "The first line." }, { id: "p2", idea: "On the cut." }, { id: "p3", idea: "The last line." }, { id: "p99", idea: "Nowhere." }] });
     assert.deepEqual(cueMarkers(plan, WORDS), [{ at: 10, text: "Graphic idea: The first line." }, { at: 18, text: "Graphic idea: The last line." }]);
+  });
+  it("keep an older plan's idea on its own phrase as it always was: none when that phrase is cut, though its words are said again in a take that is kept", () => {
+    // p1 is "too many SKUs uh", a retake the plan cuts, and p2 is "too many SKUs", which it keeps.
+    const words = said("too many SKUs uh too many SKUs").map((w, i) => ({ ...w, start: 10 + i, end: 10.5 + i }));
+    const phrases = [
+      { id: "p1", keep: false, text: "too many SKUs uh", words: words.slice(0, 4) },
+      { id: "p2", keep: true, text: "too many SKUs", words: words.slice(4) }
+    ];
+    assert.deepEqual(cueMarkers({ phrases, claude: { graphics: [{ id: "p1", idea: "On the retake." }, { id: "p2", idea: "On the take." }] } }, words), [{ at: 14, text: "Graphic idea: On the take." }]);
+    // A cue of the same words that names that phrase is on the take that is kept.
+    assert.deepEqual(cueMarkers({ phrases, claude: { graphicCues: [cue("too many SKUs uh", { n: 1, show: "On the retake.", phrase: "p1" })] } }, words), [{ at: 14, text: "Graphic idea: On the retake." }]);
   });
   it("are none for a plan with no cues or ideas, and take the words of the episode as they are kept ({w, start, end}) as well", () => {
     assert.deepEqual(cueMarkers(planOf(), WORDS), []);
@@ -452,5 +493,46 @@ describe("cueMarkers: the Final Cut file's notes", () => {
     const plan = planOf({ graphicCues: [cue("too many SKUs there", { phrase: "p3", show: "Boxes." })] });
     const recut = { ...plan, phrases: plan.phrases.map((p) => (p.id === "p3" ? { ...p, keep: false } : p)) };
     assert.deepEqual(cueMarkers(recut, WORDS), []);
+  });
+});
+
+describe("graphicCuesInPlan: where the cues of a plan are, among the plan's own words", () => {
+  const WORDS = PLAN_WORDS.map((w, i) => ({ ...w, start: 10 + i, end: 10.5 + i }));
+  it("gives each cue back, in the order given, with where its words are: their start and end, or null when they are not found, and whether they are all in kept words", () => {
+    const cues = [
+      cue("too many SKUs there", { n: 1, phrase: "p3" }),
+      cue("here uh", { n: 2 }),
+      cue("the moon landing", { n: 3 }),
+      cue("here uh too", { n: 4 })
+    ];
+    const got = graphicCuesInPlan(cues, planOf(), WORDS);
+    assert.deepEqual(got.map((g) => g.cue), cues);
+    assert.deepEqual(got.map(({ cue: c, at, kept }) => [c.n, at, kept]), [
+      [1, { start: 18, end: 21.5 }, true],
+      // Said in the retake that is cut, and nowhere else.
+      [2, { start: 16, end: 17.5 }, false],
+      [3, null, false],
+      // Across the edge of the cut: not wholly in kept words.
+      [4, { start: 16, end: 18.5 }, false]
+    ]);
+  });
+  it("puts a cue that names the retake's phrase, which is cut, on the take that is kept, and its words are all in kept words", () => {
+    const [got] = graphicCuesInPlan([cue("too many SKUs", { phrase: "p2" })], planOf(), WORDS);
+    assert.deepEqual([got.at, got.kept], [{ start: 18, end: 20.5 }, true]);
+  });
+  it("keeps an older plan's idea on its own phrase when it is told the cues are an older plan's, kept or cut as that phrase is", () => {
+    const words = said("too many SKUs uh too many SKUs").map((w, i) => ({ ...w, start: 10 + i, end: 10.5 + i }));
+    const plan = { phrases: [{ id: "p1", keep: false, text: "too many SKUs uh", words: words.slice(0, 4) }, { id: "p2", keep: true, text: "too many SKUs", words: words.slice(4) }] };
+    const ideas = legacyCues([{ id: "p1", idea: "On the retake." }], plan.phrases);
+    assert.deepEqual(graphicCuesInPlan(ideas, plan, words, { older: true }).map((g) => [g.at.start, g.kept]), [[10, false]]);
+    assert.deepEqual(graphicCuesInPlan(ideas, plan, words).map((g) => [g.at.start, g.kept]), [[14, true]]);
+  });
+  it("takes the words of the episode as they are kept ({w, start, end}), and finds nothing in no words or no cues", () => {
+    const cues = [cue("too many SKUs there", { phrase: "p3" })];
+    assert.deepEqual(graphicCuesInPlan(cues, planOf(), WORDS.map(({ text, start, end }) => ({ w: text, start, end }))).map((g) => g.kept), [true]);
+    assert.deepEqual(graphicCuesInPlan(cues, planOf(), []).map((g) => [g.at, g.kept]), [[null, false]]);
+    assert.deepEqual(graphicCuesInPlan(cues, planOf(), undefined).map((g) => [g.at, g.kept]), [[null, false]]);
+    assert.deepEqual(graphicCuesInPlan([], planOf(), WORDS), []);
+    assert.deepEqual(graphicCuesInPlan(undefined, planOf(), WORDS), []);
   });
 });
