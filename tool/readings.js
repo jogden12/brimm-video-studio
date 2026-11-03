@@ -51,7 +51,7 @@ const RECURRING = `- "recurring_principles": a list of short sentences, each a p
 const REEL_IDEAS = `- "reel_ideas": a list of {"from", "to", "idea", "words", "why", "refilm", "principle"}, only from stretches where ${HOST} alone speaks, judged from the words and the speaker labels. "from" and "to" are the ids of the phrases it runs from and to. "idea" is what the Reel would say, in one sentence; "words" are the words she would say in it; "why" is one sentence. "refilm" is true when it is better filmed again by her on its own, and false when the stretch could be cut from the session as it is. "principle" is the place in "frameworks", counted from 1, of the framework it shows, or null. An empty list when nothing fits.`;
 
 /** What a raw video is asked: what notes.js asks, less the title, with the point of each clip and the spellings as well. */
-const RAW_TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphics, `${ASK.clips} Each clip has a "point" too: one sentence on the point it makes.`, SPELLINGS].join("\n");
+const RAW_TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphicCues, `${ASK.clips} Each clip has a "point" too: one sentence on the point it makes.`, SPELLINGS].join("\n");
 
 /** The file and the length, which a finished video and a short video are shown. */
 const fileAndLength = (about) => [`File: ${oneLine(about.video)}`, `Length: ${stamp(Math.round(about.duration))}`];
@@ -188,7 +188,7 @@ const readSession = (reply, about) => reading(reply, ["frameworks", "recurring_p
     not asked for, so nothing is said of one that is not text. */
 function readRaw(reply) {
   const old = readNotes(reply);
-  const read = { decisions: old.decisions, notes: old.notes, graphics: old.graphics, suggestions: [], spellings: [], problems: old.problems.filter((problem) => problem !== TITLE_NOT_TEXT) };
+  const read = { decisions: old.decisions, notes: old.notes, graphicCues: old.graphicCues, suggestions: [], spellings: [], problems: old.problems.filter((problem) => problem !== TITLE_NOT_TEXT) };
   const data = typeof reply === "string" ? objectIn(reply).data : null;
   if (!asked(data)) return read;
   const clips = list(data.clips);
@@ -205,7 +205,7 @@ const READERS = { finished: readFinished, raw: readRaw, session: readSession, "s
     The things read are:
     - "finished": {suggestions, spellings}. A suggestion is {n, from, to, first, last, why, point}: the ids of its first phrase and
       its last, and the rest as texts, which may be empty. At most eight are read. A spelling is {heard, spelled, why}.
-    - "raw": {decisions, notes, graphics, suggestions, spellings}. The first three are as readNotes reads them. A suggestion is a
+    - "raw": {decisions, notes, graphicCues, suggestions, spellings}. The first three are as readNotes reads them. A suggestion is a
       clip as readNotes reads it, {n, from, to, hook, why}, with its `point`. A reply's title is not read.
     - "short video": {spellings, about}: its `about` is one line on what the clip is.
     - "session": {principles, recurringPrinciples, reelIdeas, spellings}. A principle is {n, name, category, description, steps,

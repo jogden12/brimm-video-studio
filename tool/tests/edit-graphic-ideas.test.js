@@ -234,6 +234,138 @@ describe("graphic add --idea", () => {
   });
 });
 
+// --- Graphic cues (PR H1): the same list, from the cues a raw reading writes ---
+
+/** The made-up episode's files, its plan holding `graphicCues` and no ideas for graphics: a plan the reading of PR H1 wrote. */
+const withCues = (graphicCues) => {
+  const plan = JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]);
+  return { ...EPISODE, files: { ...EPISODE.files, "Pricing talk.cut-plan.json": JSON.stringify({ ...plan, claude: { graphicCues } }) } };
+};
+const cue = (n, phrase, words, show, kind = "words", seconds = 3) => ({ n, words, kind, show, seconds, style: null, phrase });
+/** Claude's cues: on "Welcome to the show" (said twice: the rules cut the first, p1, and keep the second, p4), on "know your
+    costs" (p7), on "very important" (p8, which Claude's decision cut), and on words nobody says. */
+const CUES = [
+  cue(1, "p4", "Welcome to the show", "The show's name in the lower third."),
+  cue(2, "p7", "know your costs", "A chart of what it costs to run the business", "graphic", 4),
+  cue(3, "p8", "very important", 'The word "important" in the corner'),
+  cue(4, "p9", "the moon landing", "A picture of the moon.", "graphic", 4)
+];
+const rawWithCues = (cues = CUES, record = {}) => episode({ version: 3, kind: "raw", answer: ANSWERED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [ROUGH], base: null }, ...record }, {}, withCues(cues));
+
+describe("graphic ideas, from graphic cues", () => {
+  it("lists each cue by its number, with its words' start and end on the rough cut she watches, cut now, or not found", async () => {
+    const { t } = rawWithCues();
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.deepEqual([r.code, r.text], [0, [
+      "Claude's ideas for graphics on the main video: 4, with times on main v0.",
+      `Idea 1, 0:00 to 0:01: The show's name in the lower third. Over "Welcome to the show"`,
+      'Idea 2, 0:06 to 0:07: A chart of what it costs to run the business. Over "know your costs"',
+      'Idea 3, cut now: The word "important" in the corner. Over "very important"',
+      'Idea 4: A picture of the moon. Its words, "the moon landing", were not found in the video.',
+      ask(1)
+    ].join("\n")]);
+    t.done();
+  });
+  it("puts a cue on the take of its words that she keeps, not on the first time they are said, whichever phrase it names", async () => {
+    // "Welcome to the show" is said at 1.1 s, in a retake the rules cut ("cut now" if it were there), and at 6.07 s, which is 0:00.
+    for (const phrase of ["p4", "p99", undefined]) {
+      const { t } = rawWithCues([{ ...CUES[0], phrase }]);
+      const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+      assert.equal(r.text.split("\n")[1], `Idea 1, 0:00 to 0:01: The show's name in the lower third. Over "Welcome to the show"`, String(phrase));
+      t.done();
+    }
+  });
+  it("numbers the cues by their own numbers, which no cut, version or Reel changes, and lists on a Reel only those whose words are in its stretch", async () => {
+    const { t } = rawWithCues();
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas", "reel", "2");
+    assert.deepEqual([r.code, r.text], [0, [
+      "Claude's ideas for graphics on Reel 2: 2, with times on Reel 2 as it is now.",
+      'Idea 2, 0:02 to 0:03: A chart of what it costs to run the business. Over "know your costs"',
+      'Idea 3, cut now: The word "important" in the corner. Over "very important"',
+      ask(2)
+    ].join("\n")]);
+    t.done();
+  });
+  it("reads each cue's times on the version she watches, as the ideas of an older plan are", async () => {
+    const { t } = rawWithCues();
+    assert.equal((await on(t.ctx.deps, "cut", "Pricing", "remove", "--words", "Today we are going to talk about pricing")).code, 0);
+    assert.equal((await on(t.ctx.deps, "push", "Pricing")).code, 0);
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.deepEqual(r.text.split("\n").slice(0, 3), [
+      "Claude's ideas for graphics on the main video: 4, with times on main v1.",
+      `Idea 1, cut now: The show's name in the lower third. Over "Welcome to the show"`,
+      'Idea 2, 0:02 to 0:03: A chart of what it costs to run the business. Over "know your costs"'
+    ]);
+    t.done();
+  });
+  it("says a cue's words were kept again since the version she watches, and gives it no time, never 0:00", async () => {
+    const { t } = rawWithCues();
+    assert.equal((await on(t.ctx.deps, "cut", "Pricing", "keep", "--words", "very important")).code, 0);
+    assert.match((await on(t.ctx.deps, "graphic", "Pricing", "ideas")).text, /\nIdea 3, not on main v0 \(kept again since\): The word "important" in the corner\. Over "very important"\n/);
+    t.done();
+  });
+  it("finds the words of a cue as the episode spells them now: the cue is written from the plan's own words, and her spelling changes the transcript's", async () => {
+    // "thing" is spelled "item" on the timeline; a cue of two words is found only if its words are spelled so too.
+    const { t } = rawWithCues([cue(1, "p7", "first thing", "A list.", "graphic", 4)], { spellings: [["thing", "item"]] });
+    assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "ideas")).text.split("\n")[1], 'Idea 1, 0:05 to 0:05: A list. Over "first thing"');
+    t.done();
+  });
+  it("says Claude gave none when the plan holds no cues", async () => {
+    const { t } = rawWithCues([]);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "ideas"), { code: 0, text: "Claude gave no ideas for graphics on the main video." });
+    t.done();
+  });
+  it("lists the ideas of an older plan as it always did, when the plan holds no graphic cues", async () => {
+    const { t } = raw();
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.equal(r.text.split("\n")[2], 'Idea 2, 0:04 to 0:07: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."');
+    t.done();
+  });
+  it("is refused for a video waiting for its answer and for a session, by the gate, before any words are read", async () => {
+    const WAITING = { version: 3, kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 0:23, no retakes", came: "camera" }, label: "Video of 20 Oct, 15:00 (Mac Studio)" };
+    const { t } = episode(WAITING, {}, withCues(CUES));
+    const r = await on(t.ctx.deps, "graphic", FOLDER, "ideas");
+    assert.deepEqual([r.code, r.text], [1, "This video is waiting for its answer: say what it is first."]);
+    t.done();
+  });
+});
+
+describe("graphic add --idea, from graphic cues", () => {
+  it("puts a picture at the start of a cue's words, for the seconds the cue stays, in the place the cue says, and says where on her timeline", async () => {
+    const { t, found } = rawWithCues();
+    picture(t, "chart.png", 1600, 900);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "2"), { code: 0, text: 'Graphic g1, chart.png, full, idea 2, on main v0 at 0:06, for 4 seconds. Say "show it in Final Cut" to see it.' });
+    assert.deepEqual((await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "1")).text, 'Graphic g2, chart.png, lower, idea 1, on main v0 at 0:00, for 3 seconds. Say "show it in Final Cut" to see it.');
+    // What she says wins over what the cue says.
+    assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "2", "--place", "corner", "--for", "6")).code, 0);
+    assert.deepEqual(reread(found).main.graphics, [
+      { id: "g1", picture: "media/chart.png", at: 15.3, for: 4, place: "full" },
+      { id: "g2", picture: "media/chart.png", at: 6.07, for: 3, place: "lower" },
+      { id: "g3", picture: "media/chart.png", at: 15.3, for: 6, place: "corner" }
+    ]);
+    t.done();
+  });
+  it("refuses a cue whose words are cut now, one that was not found, one there is not, and one outside a Reel's stretch, and writes nothing", async () => {
+    const { t, found } = rawWithCues();
+    picture(t, "chart.png", 1600, 900);
+    for (const [argv, said] of [
+      [["--idea", "3"], 'Idea 3 is on words cut from the main video now: "very important" Keep them first, or pick another idea.'],
+      [["--idea", "4"], 'Idea 4\'s words, "the moon landing", were not found in the video, so it has no time to go at. Pick another idea, or say when it goes.'],
+      [["--idea", "5"], 'There is no idea 5 for graphics. Say "any ideas for graphics?" to see them.'],
+      [["reel", "2", "--idea", "1"], "Idea 1 is outside Reel 2's stretch of the recording."],
+      [["reel", "2", "--idea", "4"], "Idea 4 is outside Reel 2's stretch of the recording."]
+    ]) assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", ...argv), { code: 1, text: said }, argv.join(" "));
+    assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+  it("puts up an older plan's idea as it always did", async () => {
+    const { t } = raw();
+    picture(t, "chart.png", 1600, 900);
+    assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "2")).text, 'Graphic g1, chart.png, full, idea 2, on main v0 at 0:04, for 2.7 seconds. Say "show it in Final Cut" to see it.');
+    t.done();
+  });
+});
+
 // --- Task 3 ---
 
 describe("Claude's notes of a raw video she has answered", () => {
@@ -260,8 +392,8 @@ describe("Claude's notes of a raw video she has answered", () => {
     for (const problems of [[], [PROBLEM]]) {
       const t = setup();
       const found = episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, name: { text: "Pricing talk", placeholder: false } } });
-      const graphics = [{ id: "p7", idea: "A chart" }, { id: "p8", idea: "Important in the corner" }];
-      writeFileSync(join(found.folder, NOTES_FILE), notesText({ notes: "A tight talk.", graphics, problems }, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]), []));
+      const graphicCues = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart", seconds: 4, style: null, phrase: "p7" }, { n: 2, words: "very important", kind: "words", show: "Important in the corner", seconds: 3, style: null, phrase: "p8" }];
+      writeFileSync(join(found.folder, NOTES_FILE), notesText({ notes: "A tight talk.", graphicCues, problems }, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]), []));
       const r = await on(t.ctx.deps, "show", FOLDER, "notes");
       assert.equal(r.code, 0, r.text);
       assert.match(r.text, /\nIts ideas for graphics\nSay "any ideas for graphics\?" to see them/);

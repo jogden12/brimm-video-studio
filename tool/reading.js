@@ -453,11 +453,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     const changes = (next.changes || []).length;
     const spans = keptSpans(next.ranges, roughRate(facts));
     const roughSrt = roughCaptions(next.phrases, spans);
-    // The plan as the import writes it: it keeps the pauses, and what Claude made of it, its ideas for graphics among them,
-    // which the timeline marks.
-    const claude = { decisions: read.decisions, graphics: read.graphics, ignored: unused, clips: clips.map((clip) => ({ ...clip, files: [] })) };
+    // The plan as the import writes it: it keeps the pauses, and what Claude made of it, its graphic cues among them, which the
+    // timeline marks and the HyperFrames project is given (graphic-cues.js).
+    const claude = { decisions: read.decisions, graphicCues: read.graphicCues, ignored: unused, clips: clips.map((clip) => ({ ...clip, files: [] })) };
     const readPlan = { ...plan, phrases: next.phrases, ranges: next.ranges, kept: next.kept, cut: next.cut, by: next.by || plan.by || "rules", ...(next.changes ? { changes: next.changes } : {}), claude };
-    text(notesFile, notesText({ notes: read.notes, graphics: read.graphics, problems: unused }, next, clips));
+    text(notesFile, notesText({ notes: read.notes, graphicCues: read.graphicCues, problems: unused }, next, clips));
     text(`${stem}.rough-cut.srt`, roughSrt);
     text(`${stem}.rough-cut.transcript.txt`, stampedText(roughSrt));
     text(`${stem}.cut-plan.txt`, planText(next, readPlanNote(changes, notesFile)));

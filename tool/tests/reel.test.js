@@ -124,7 +124,7 @@ import { writeFileSync as writeFile } from "node:fs";
 const PHASE_3 = (() => {
   const heard = pausesOf(PAUSES);
   const facts = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
-  const read = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphics: [], clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, { from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
+  const read = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphicCues: [], clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, { from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
   const plan = applyDecisions(cutPlan(phrasesOf(wordsOf(TOLD), heard), { duration: facts.duration, pauses: heard }), read.decisions, heard).plan;
   const stills = Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [{ x: 0.2, y: 0.2, w: 0.1, h: 0.2 }] }));
   const candidates = reelCandidates({ clips: clipRanges(plan, read.clips, heard).clips, plan, facts, stills }).map((c) => ({ ...c, preview: previewPath(c.n) }));
@@ -401,7 +401,7 @@ import { lockOf, readResult } from "../detached.js";
 import { mkdirSync as makeDir } from "node:fs";
 
 /** What Claude Code prints with its reply: one clip, from "Today we are going..." (p5) to "pricing"... that is p5 alone. */
-const claudeSays = (clips) => () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: "", graphics: [], clips }) }) });
+const claudeSays = (clips) => () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: "", graphicCues: [], clips }) }) });
 /** A phase 3 episode whose ctx can ask Claude, find faces and make previews, all by stand-ins. */
 const askable = (programs = {}, shape = { only: [2] }) => {
   const p = phase3({ CLAUDE: claudeSays([{ from: "p7", to: "p7", hook: "Know your costs, first", why: "It is the point." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: JSON.stringify(Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [] }))) }), ...programs }, shape);
@@ -469,6 +469,19 @@ describe("ask, Claude asked again for Reels (phase 3)", () => {
     const result = readResult(t.home, FOLDER, "ask");
     assert.deepEqual(result.made, []);
     assert.match(result.next, /^Every clip Claude picked has words of a Reel or a candidate already there\. The Reel candidates are as they were\.$/);
+    t.done();
+  });
+  it("throws away the graphic cues in what Claude says, as it threw away its ideas for graphics: the cut plan is as it was, and the cues are said of nowhere", async () => {
+    const reply = { decisions: [], notes: "A new note.", graphicCues: [{ id: "p5", words: "talk about pricing", kind: "words", show: "The word pricing.", seconds: 3 }], clips: [{ from: "p7", to: "p7", hook: "Know your costs, first", why: "It is the point." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }] };
+    const { t, found } = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(reply) }) }) });
+    const plan = join(found.folder, "Pricing talk.cut-plan.json");
+    const before = readFileSync(plan, "utf8");
+    assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0);
+    assert.equal(readFileSync(plan, "utf8"), before);
+    const result = readResult(t.home, FOLDER, "ask");
+    assert.deepEqual([result.ok, result.made], [true, ["Reel 3"]]);
+    assert.deepEqual(result.failed.filter((line) => /graphic|pricing|cue/i.test(line)), []);
+    assert.deepEqual(readdirSync(found.folder).filter((name) => /graphic|cue/i.test(name)), []);
     t.done();
   });
   it("changes nothing, and says why, when Claude cannot be asked", async () => {
@@ -678,7 +691,7 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
     p.t.done();
   });
   it("says which of Claude's clips were left out, and what was wrong with its reply, when another clip is taken", async () => {
-    const p = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: 3, graphics: [], clips: [{ from: "p999", to: "p999", hook: "Nowhere", why: "None." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }] }) }) }) });
+    const p = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: 3, graphicCues: [], clips: [{ from: "p999", to: "p999", hook: "Nowhere", why: "None." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }] }) }) }) });
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0);
     const result = readResult(p.t.home, FOLDER, "ask");
     assert.deepEqual(result.made, ["Reel 3"]);
@@ -1476,7 +1489,7 @@ describe("ask, of a recording with no picture (PR 19's review)", () => {
 
 describe("ask's result when no clip is taken, pinned (PR 19's re-review, N3)", () => {
   it("still says what was wrong with Claude's reply, and which clips were left out", async () => {
-    const p = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: 3, graphics: [], clips: [{ from: "p999", to: "p999", hook: "Nowhere", why: "None." }] }) }) }) });
+    const p = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: 3, graphicCues: [], clips: [{ from: "p999", to: "p999", hook: "Nowhere", why: "None." }] }) }) }) });
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0);
     const result = readResult(p.t.home, FOLDER, "ask");
     assert.deepEqual(result.made, []);

@@ -71,6 +71,8 @@ import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } fr
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
+import { spelled } from "./final-transcript.js";
+import { keptIndexes, phraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -2965,7 +2967,8 @@ const IDEAS_ELSEWHERE = 'Say "any ideas for graphics?" to see them, numbered, wi
     times are the recording's and not her timeline's, left out and IDEAS_ELSEWHERE in their place (spec 2026-10-22, section 3,
     "Times"), and with each idea on words that are cut left out of what could not be used, and that heading too when nothing
     else is under it; any other video's as written. Each part of the notes is a heading and its lines, after an empty line
-    (notes.js notesText), and Claude's own notes in them hold no empty line. */
+    (notes.js notesText), and Claude's own notes in them hold no empty line. An idea for a graphic is a graphic cue now (PR H1,
+    graphic-cues.js), told under the same heading and, when it sits on words that are cut, in the same line. */
 function notesForHer(text, record) {
   if (!(isAnswered(record) && recordKind(record) === "raw")) return text;
   return text.split("\n\n").map((block) => {
@@ -4810,27 +4813,51 @@ async function text(ctx, rest) {
   return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: [...texts, layer] })), `Name title ${id} on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}: "${lines.join('", "')}". ${SHOW_IT}`);
 }
 
-/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"): each idea of the plan's
-    `claude.graphics` on a phrase of the plan, numbered in the order their words are said (Claude's order for two on one
-    phrase), so that no cut, version or Reel changes a number; one that names no phrase of the plan is left out. Each is
-    { n, idea, phrase, outside, at, for, start, end }: `outside` when the timeline is a Reel whose stretch does not hold its
-    words; `at`, the second of the recording its kept words start at, and `for`, how long they take on the timeline now, `at`
-    null when its words are cut now; `start` and `end`, its times on the clock she is reading (`read.on`), null when its words
-    are not on that version (kept again since it was made). `read` is clockFor's. */
-function graphicIdeas(read) {
-  const phrases = new Map((read.plan.phrases || []).map((p) => [p.id, p]));
-  const listed = ((read.plan.claude && read.plan.claude.graphics) || []).map((g, i) => ({ idea: g.idea, phrase: phrases.get(g.id), i })).filter(({ phrase }) => phrase);
+/** Where words of the recording, a stretch { start, end } in seconds of it, are on the timeline she is reading (`read` is clockFor's):
+    { at: null } when they are cut now; else { at, for, start, end }: `at`, the second of the recording its kept words start at, and
+    `for`, how long they take on the timeline now; `start` and `end`, their times on the clock she is reading (`read.on`), null
+    when they are not on that version (kept again since it was made). */
+function wordsOnTimeline(read, { start: from, end: to }) {
+  const kept = read.pieces.filter((r) => to > r.start && from < r.end);
+  if (!kept.length) return { at: null };
+  const at = Math.max(from, kept[0].start);
+  const until = Math.min(to, kept[kept.length - 1].end);
+  const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(until, r.end) - Math.max(at, r.start)), 0);
+  const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, until)];
+  const on = start !== null && end !== null;
+  return { at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+}
+/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"), numbered so that no cut,
+    version or Reel changes a number. Each is { n, idea, said, outside, missing, at, for, start, end }: `idea` is what it shows,
+    `said` the words it goes with, `outside` when the timeline is a Reel whose stretch does not hold its words, and `at`, `for`,
+    `start` and `end` as wordsOnTimeline gives them.
+    - A plan the reading of PR H1 wrote holds `claude.graphicCues`: each is placed on the words of the recording (graphic-cues.js
+      placeGraphicCues), spelled as the episode's words are (`spellings`), and keeps the number the cue has. A cue whose words are
+      not found is `missing` (and `outside` on a Reel, whose stretch cannot be said to hold it). It stays for the seconds the cue says
+      (`for`), from the moment its words start.
+    - A plan made before it holds `claude.graphics`: each idea on a phrase of the plan, numbered in the order their words are said
+      (Claude's order for two on one phrase); one that names no phrase of the plan is left out. It goes with the whole phrase, and
+      stays for as long as the phrase takes. */
+function graphicIdeas(read, spellings = []) {
+  const claude = read.plan.claude || {};
+  const phrases = read.plan.phrases || [];
+  const outsideReel = (span) => Boolean(read.span) && !(span.end > read.span.from && span.start < read.span.to);
+  if (Array.isArray(claude.graphicCues)) {
+    const placed = placeGraphicCues(claude.graphicCues, read.words || [], { spans: phraseSpans(phrases), kept: keptIndexes(phrases), spell: (text) => spelled(text, spellings) });
+    return placed.map((cue) => {
+      const idea = { n: cue.n, idea: cue.show, said: cue.words };
+      if (!cue.at) return read.span ? { ...idea, outside: true, at: null } : { ...idea, missing: true, at: null };
+      if (outsideReel(cue.at)) return { ...idea, outside: true, at: null };
+      const on = wordsOnTimeline(read, cue.at);
+      return on.at === null ? { ...idea, ...on } : { ...idea, ...on, for: cue.seconds };
+    });
+  }
+  const byId = new Map(phrases.map((p) => [p.id, p]));
+  const listed = (claude.graphics || []).map((g, i) => ({ idea: g.idea, phrase: byId.get(g.id), i })).filter(({ phrase }) => phrase);
   return listed.sort((a, b) => a.phrase.start - b.phrase.start || a.i - b.i).map(({ idea, phrase }, k) => {
     const n = k + 1;
-    if (read.span && !(phrase.end > read.span.from && phrase.start < read.span.to)) return { n, idea, phrase, outside: true, at: null };
-    const kept = read.pieces.filter((r) => phrase.end > r.start && phrase.start < r.end);
-    if (!kept.length) return { n, idea, phrase, at: null };
-    const at = Math.max(phrase.start, kept[0].start);
-    const to = Math.min(phrase.end, kept[kept.length - 1].end);
-    const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(to, r.end) - Math.max(at, r.start)), 0);
-    const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, to)];
-    const on = start !== null && end !== null;
-    return { n, idea, phrase, at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+    if (outsideReel(phrase)) return { n, idea, said: phrase.text, outside: true, at: null };
+    return { n, idea, said: phrase.text, ...wordsOnTimeline(read, phrase) };
   });
 }
 /** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or "not on main v0 (kept again
@@ -4838,6 +4865,11 @@ function graphicIdeas(read) {
 const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
+/** An idea as the list says it: where it is, what it shows, and the words it goes with; or, for a graphic cue whose words were
+    not found in the video (`missing`), what it shows and that. */
+const ideaLine = (idea, on) => (idea.missing
+  ? `Idea ${idea.n}: ${ideaSaid(idea.idea)} Its words, "${oneLine(idea.said)}", were not found in the video.`
+  : `Idea ${idea.n}, ${ideaWhere(idea, on)}: ${ideaSaid(idea.idea)} Over "${oneLine(idea.said)}"`);
 /** The place an idea says, when it says one: "corner" for a corner of the screen ("in the corner", "at the top right
     corner"), "lower" for a lower third; null otherwise. A corner the picture shows ("the street corner", "a corner shop") and a
     "lower price" are no place: Claude is not asked for a place, so the word alone says what is in the picture. */
@@ -4869,14 +4901,14 @@ async function graphic(ctx, rest) {
     const got = clockRead(ctx, found, part);
     if (got.code !== undefined) return got.code;
     const { read } = got;
-    const ideas = graphicIdeas(read).filter((i) => !i.outside);
+    const ideas = graphicIdeas(read, found.record.spellings).filter((i) => !i.outside);
     if (!ideas.length) {
       ctx.say(`Claude gave no ideas for graphics on ${partLabel(part)}.`);
       return 0;
     }
     const head = `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
     const first = ideas.find((i) => i.at !== null);
-    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
+    ctx.say([head, ...ideas.map((i) => ideaLine(i, read.on)), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
     return 0;
   }
   if (!takes) {
@@ -4901,10 +4933,11 @@ async function graphic(ctx, rest) {
     const got = clockRead(ctx, found, part);
     if (got.code !== undefined) return got.code;
     const { read } = got;
-    chosen = graphicIdeas(read).find((i) => i.n === n);
+    chosen = graphicIdeas(read, found.record.spellings).find((i) => i.n === n);
     if (!chosen) return refuse(ctx, `There is no idea ${n} for graphics. Say "any ideas for graphics?" to see them.`);
     if (chosen.outside) return refuse(ctx, `Idea ${n} is outside Reel ${part.reel}'s stretch of the recording.`);
-    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.phrase.text)}" Keep them first, or pick another idea.`);
+    if (chosen.missing) return refuse(ctx, `Idea ${n}'s words, "${oneLine(chosen.said)}", were not found in the video, so it has no time to go at. Pick another idea, or say when it goes.`);
+    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.said)}" Keep them first, or pick another idea.`);
     moment = { at: chosen.at, for: chosen.for, on: read.on, clock: read.clock, read };
   } else {
     moment = momentFrom(ctx, found, part, flags);

@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { probeArgs, factsOf, colourOf, KEPT } from "./cuts.js";
 import { colorSpaceOf } from "./fcpxml.js";
 import { lastLine, runProgram } from "./run.js";
-import { soundOf, findPrograms, sameVideo, described, ideaNotes } from "./unedited.js";
+import { soundOf, findPrograms, sameVideo, described } from "./unedited.js";
+import { cueMarkers } from "./graphic-cues.js";
 import { relativeMedia } from "./portable.js";
 import { runsFolder } from "./settings.js";
 import { eventName, timelineFile } from "./names.js";
@@ -194,7 +195,7 @@ export async function timelineFor(found, part, ctx, { build = false, plan: given
     const hdr = colour.primaries === "bt2020" || ["arib-std-b67", "smpte2084"].includes(colour.transfer);
     const layers = layersFor({ record, part, frame, ranges: pieces, words, face: face.face, pictures: sizes, video: { height: plan.facts.height, hdr }, lookPresets: ctx.deps.lookPresets });
     const made = part === "main"
-      ? mainProject({ video, facts: plan.facts, more, plan, ranges, srt: readFileSync(join(found.folder, `${stem}.srt`), "utf8"), spellings: record.spellings, ideas: ideaNotes({ ...plan, phrases: cutPhrases(plan.phrases, target.cuts || []) }, (plan.claude && plan.claude.graphics) || []), titles: layers.titles, stills: layers.stills, look: layers.look, project: "main", event: eventName(found.name) })
+      ? mainProject({ video, facts: plan.facts, more, plan, ranges, srt: readFileSync(join(found.folder, `${stem}.srt`), "utf8"), spellings: record.spellings, ideas: cueMarkers({ ...plan, phrases: cutPhrases(plan.phrases, target.cuts || []) }, words), titles: layers.titles, stills: layers.stills, look: layers.look, project: "main", event: eventName(found.name) })
       : reelProject({ video, facts: plan.facts, candidate: { start: span.from, end: span.to, ranges: pieces }, plan, planRanges: ranges, titles: layers.titles, stills: layers.stills, look: layers.look, more, project: `reel ${part.reel}`, event: eventName(found.name) });
     if (made.why) return { why: `Its timeline could not be made: ${made.why}.` };
     const kept = join(found.folder, "edit", "timeline.fcpxml");

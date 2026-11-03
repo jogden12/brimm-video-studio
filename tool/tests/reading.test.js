@@ -90,10 +90,12 @@ const FINISHED_REPLY = {
 const RAW_REPLY = {
   decisions: [{ id: "p6", keep: true, why: "The false start leads into the point." }],
   notes: "Open on the welcome.",
-  graphics: [{ id: "p7", idea: "A chart of what it costs" }],
+  graphicCues: [{ id: "p7", words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4 }],
   clips: [{ from: "p4", to: "p5", hook: "What this is about", why: "It says what the talk is about.", point: "Pricing is the subject." }],
   spellings: [{ heard: "Sally", spelled: "Sallie", why: "It is her name." }]
 };
+/** The graphic cues of that reply as the cut plan keeps them: numbered, each with the phrase it was written for. */
+const RAW_CUES = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" }];
 const CLIP_REPLY = { spellings: [{ heard: "Sally", spelled: "Sallie", why: "It is her name." }], about: "A clip about knowing your costs." };
 const REPLIES = { finished: FINISHED_REPLY, raw: RAW_REPLY, "short video": CLIP_REPLY };
 
@@ -321,7 +323,9 @@ describe("read, a raw video", () => {
     assert.deepEqual(plan.pauses, HEARD);
     assert.equal(plan.by, "rules and Claude");
     assert.deepEqual(plan.claude.decisions, RAW_REPLY.decisions);
-    assert.deepEqual(plan.claude.graphics, RAW_REPLY.graphics);
+    assert.deepEqual(plan.claude.graphicCues, RAW_CUES);
+    assert.equal("graphics" in plan.claude, false);
+    assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphicCues", "ignored", "clips"]);
     assert.match(readFileSync(join(found.folder, "Pricing talk.cut-plan.txt"), "utf8"), /^The times here are the recording's own, from its start\.\nClaude read this plan and changed it in 1 place\./);
     const rough = roughCaptions(withPauses.phrases, keptSpans(withPauses.ranges, FACTS.fps));
     assert.equal(readFileSync(join(found.folder, "Pricing talk.rough-cut.srt"), "utf8"), rough);
@@ -905,10 +909,31 @@ describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6,
 });
 
 describe("the raw reading's version 0 (fix 7, fix 8, fix 9)", () => {
-  it("holds Claude's graphic ideas on its timeline", async () => {
+  it("holds Claude's graphic cues on its timeline as ideas, each at the moment its words start", async () => {
     const { t, found } = reading("raw");
     assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
-    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /Graphic idea: A chart of what it costs/);
+    // "know" of "know your costs" is said at 15.3 seconds, which is picture 459.
+    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /<marker start="459459\/30000s" duration="[^"]*" value="Graphic idea: A chart of what it costs"/);
+    t.done();
+  });
+  it("lists Claude's graphic cues in its notes under its ideas for graphics, by the time of the phrase and the words they go with", async () => {
+    const { t, found } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const notes = readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8");
+    assert.match(notes, /\n\nIts ideas for graphics\n0:13  "know your costs"  \|  A chart of what it costs\n\n/);
+    t.done();
+  });
+  it("has a marker for a cue placed in kept words, on the take she keeps when the words are said twice, and none for a cue that is not found or sits in a cut", async () => {
+    // "Welcome to the show" is said twice, and the rules cut the first take; "the moon landing" is never said; p3 is cut by the rules.
+    const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
+    const reply = { ...RAW_REPLY, graphicCues: [cue("p4", "Welcome to the show", "The show's name."), cue("p9", "the moon landing", "The moon."), cue("p3", "do that again", "A slow zoom."), RAW_REPLY.graphicCues[0]] };
+    const { t, found } = reading("raw", { reply });
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const xml = readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8");
+    assert.deepEqual([...xml.matchAll(/<marker start="([^"]*)"[^>]*value="(Graphic idea[^"]*)"/g)].map((m) => `${m[1]} ${m[2]}`), ["182182/30000s Graphic idea: The show's name.", "459459/30000s Graphic idea: A chart of what it costs"]);
+    const notes = readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8");
+    assert.match(notes, /Its ideas for graphics\n0:06  "Welcome to the show"  \|  The show's name\.\n0:19  "the moon landing"  \|  The moon\.\n0:13  "know your costs"  \|  A chart of what it costs\n/);
+    assert.match(notes, /What could not be used from its reply\nAn idea for a graphic sits on words that are cut, at 0:03: A slow zoom\.\n/);
     t.done();
   });
   it("opens the rough cut only once what it read is in the episode", async () => {

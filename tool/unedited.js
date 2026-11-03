@@ -54,6 +54,8 @@ import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, 
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
 import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, soundStream, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
+import { cueMarkers } from "./graphic-cues.js";
+import { heardWords } from "./clock.js";
 import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
 import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
 import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, reelEntries, readReels, mergeCandidates, REELS_FILE } from "./reels.js";
@@ -314,9 +316,10 @@ async function planFor({ facts, probe, told, untimed, silent, wav }, { run, tool
   return { words, pauses, plan: cutPlan(phrasesOf(words, pauses), { duration: facts.duration, pauses }) };
 }
 
-/** Did Claude's reply, as readNotes read it, give nothing at all: no decision, no notes, no idea, no clip, and something
-    wrong with it? A reply that finds the rules right and has nothing to add is whole, and is not one of these. */
-const nothingIn = (read) => !read.decisions.length && !read.notes && !read.graphics.length && !read.clips.length && read.problems.length > 0;
+/** Did Claude's reply, as readNotes read it, give nothing at all: no decision, no notes, no graphic cue, no clip, and something
+    wrong with it? A reply that finds the rules right and has nothing to add is whole, and is not one of these, and neither is
+    one that has graphic cues and nothing else. */
+const nothingIn = (read) => !read.decisions.length && !read.notes && !read.graphicCues.length && !read.clips.length && read.problems.length > 0;
 
 /** Ask Claude once, through Claude Code, run in `folder`, with the text `request` (the one Claude call: CLAUDE_ARGS, the
     request on standard input, the reply read as data): {read}, its reply as `read` read it, or {why} there is none. It counts
@@ -617,15 +620,6 @@ export function soundOf(printed) {
   } catch (e) {
     return {};
   }
-}
-
-/** Claude's ideas for graphics as notes for the Final Cut file: one for each idea that sits on a kept phrase of the plan, at
-    the moment that phrase starts, worded so that nobody takes it for more than an idea. An idea whose phrase is cut, or is
-    not in the plan, gets none: the Final Cut writer would put it on the join after it, as if it belonged there. The notes
-    for the editor say what became of such an idea. */
-export function ideaNotes(plan, graphics) {
-  const phrases = new Map(plan.phrases.map((p) => [p.id, p]));
-  return graphics.map((idea) => ({ on: phrases.get(idea.id), idea: idea.idea })).filter(({ on }) => on && on.keep).map(({ on, idea }) => ({ at: on.start, text: `Graphic idea: ${idea}` }));
 }
 
 /** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none: the main video's project
@@ -1035,7 +1029,8 @@ async function workOn(file, deps) {
       day = deps.watched && !episode ? dayFor(deps.watched, deps) : "";
       const named = resolve(day ? join(deps.watched, day) : dirname(file), name);
       const library = deps.home && !episode ? join(deps.home, LIBRARY) : "";
-      const ideas = read ? ideaNotes(plan, read.graphics) : [];
+      // Each of Claude's graphic cues placed in kept words is a note at the moment its words start, as they are said (heardWords).
+      const ideas = read ? cueMarkers({ ...plan, claude: { graphicCues: read.graphicCues } }, heardWords(planned.words, plan.phrases)) : [];
       const src = episode ? relativeUrl(`../${name}`) : "";
       const textFor = (video) => finalCut(video, { plan, facts, spans, srt, printed, ideas }, { library, src, writer: deps.finalCut });
       const first = textFor(named);
@@ -1081,12 +1076,13 @@ async function workOn(file, deps) {
       // was held in the run's own folder goes with it. It keeps the pauses ffmpeg heard, which the plan was made from, so that
       // a reading made later, perhaps on the other Mac with no sound file, changes the plan with the same pauses (pausesOfPlan,
       // in notes.js). A pause that never ends lasts to the end of the video, and is written so: JSON has no time with no end,
-      // and nothing changes by it. It says who made the plan. When Claude read it, it keeps what Claude decided, its ideas for
-      // graphics as they were read, what was left out of its reply and why, and each clip with the names of the files that
-      // were made of it, so that a person can see what changed. Nothing reads the ideas back yet: they are there for what is
-      // made of the plan later. The title Claude recommends comes first, when it gave one: the import of an episode takes it
-      // for the episode's title, for a person to approve.
-      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphics: read.graphics, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
+      // and nothing changes by it. It says who made the plan. When Claude read it, it keeps what Claude decided, its graphic cues
+      // as they were read, what was left out of its reply and why, and each clip with the names of the files that were made of
+      // it, so that a person can see what changed. The cues are what the timeline's markers and the HyperFrames project are
+      // made from later (graphic-cues.js): they are put on her words when they are used, and not here. A plan made before them
+      // holds `graphics` in their place, the ideas it was written with, which are still read. The title Claude recommends comes
+      // first, when it gave one: the import of an episode takes it for the episode's title, for a person to approve.
+      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphicCues: read.graphicCues, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
       files.text(out.plan, planJson(plan, claude));
     }
     for (const what of missing) log(`${shown}: ${what}.`);
@@ -1761,6 +1757,8 @@ export async function askAgain({ folder, record }, deps) {
     const streams = streamsOf(printed);
     const asked = await askClaude(name, plan, plan.facts, work, deps);
     if (!asked.read) return { ok: false, made: [], failed: [`Claude could not be asked (${asked.why}).`], next: as };
+    // Claude is asked what it was asked at the import (askClaude), and of its reply only the clips are used. Its decisions, its notes
+    // and its graphic cues are thrown away, as its ideas for graphics were: the cut plan keeps the cues its reading wrote.
     // The plan was read back from its file, so the pauses ffmpeg heard are the ones it kept.
     const picked = clipRanges(plan, asked.read.clips, pausesOfPlan(plan));
     // What was wrong with Claude's reply, and the clips of it that were left out, are said whatever else happens.

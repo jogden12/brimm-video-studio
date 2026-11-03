@@ -52,12 +52,12 @@ const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}((?: [\\w-]+="[
 /** Where a file is, as a Final Cut file names it. */
 const address = (path) => "file://" + path.split("/").map(encodeURIComponent).join("/");
 
-/** A reply as Claude is asked to write it, for the made-up recording: a phrase to cut that the rules kept, its notes, an idea
-    for a graphic, and one clip. */
+/** A reply as Claude is asked to write it, for the made-up recording: a phrase to cut that the rules kept, its notes, a graphic
+    cue (words on screen over "know your costs"), and one clip. */
 const REPLY = {
   decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }],
   notes: "A short talk about pricing.\nThe opening is said twice, and the second telling is the one to use.",
-  graphics: [{ id: "p7", idea: 'The words "Know your costs" on screen.' }],
+  graphicCues: [{ id: "p7", words: "know your costs", kind: "words", show: 'The words "Know your costs" on screen.', seconds: 3 }],
   clips: [{ from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }]
 };
 /** Two clips of the made-up recording: its opening, and from "So the first thing" to the end. */
@@ -1175,13 +1175,13 @@ describe("a video whose cut plan Claude is asked to read", () => {
       changes: [{ ids: ["p8"], was: "keep", now: "cut", why: "It adds nothing to the line before it." }],
       claude: {
         decisions: reply.decisions,
-        graphics: REPLY.graphics,
+        graphicCues: [{ n: 1, words: "know your costs", kind: "words", show: 'The words "Know your costs" on screen.', seconds: 3, style: null, phrase: "p7" }],
         ignored: ['Claude\'s decision for "p99" was left out: the plan has no phrase with that id.', "Clip 2 was left out: it overlaps clip 1."],
         clips: [{ ...made.clips[0], files: ["talk.reel-1.mp4", "talk.reel-1.srt"] }]
       }
     });
     assert.deepEqual(Object.keys(plan), ["version", "video", "facts", "phrases", "ranges", "kept", "cut", "pauses", "by", "changes", "claude"]);
-    assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphics", "ignored", "clips"]);
+    assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphicCues", "ignored", "clips"]);
     assert.deepEqual([plan.claude.clips[0].n, plan.claude.clips[0].ranges], [1, [{ start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }]]);
     t.done();
   });
@@ -1190,7 +1190,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
     await uneditedFile(t.video("talk.mov"), t.deps);
     const plan = JSON.parse(t.read("talk.cut-plan.json"));
     assert.equal(plan.claude.title, "Know your costs");
-    assert.deepEqual(Object.keys(plan.claude), ["title", "decisions", "graphics", "ignored", "clips"]);
+    assert.deepEqual(Object.keys(plan.claude), ["title", "decisions", "graphicCues", "ignored", "clips"]);
     assert.match(t.read("talk.edit-notes.txt"), /\n\nIts title for the video\nKnow your costs\n\n/);
     t.done();
   });
@@ -1202,7 +1202,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
   });
   it("hands the pauses ffmpeg heard on with Claude's decisions, so that the silence beside a phrase Claude keeps is cut as the rules cut it", async () => {
     // Claude keeps the first telling of the opening. There is silence before it, to 1.111 seconds, which only the pauses show.
-    const reply = { ...REPLY, decisions: [{ id: "p2", keep: true, why: "She trails off on purpose." }], graphics: [], clips: [] };
+    const reply = { ...REPLY, decisions: [{ id: "p2", keep: true, why: "She trails off on purpose." }], graphicCues: [], clips: [] };
     const t = setup({ claude: [answers(reply)] });
     await uneditedFile(t.video("talk.mov"), t.deps);
     const plan = JSON.parse(t.read("talk.cut-plan.json"));
@@ -1229,7 +1229,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
       "0:17  CUT, was kept  |  It is very, very important.  |  It adds nothing to the line before it.",
       "",
       "Its ideas for graphics",
-      '0:13  So the first thing you need to do is know your costs.  |  The words "Know your costs" on screen.',
+      '0:13  "know your costs"  |  The words "Know your costs" on screen.',
       "",
       "Its clips",
       "1. 0:13 to 0:21, 5 seconds, without what is cut in between  |  On screen: Know your costs  |  It makes one point and stands alone.",
@@ -1260,12 +1260,12 @@ describe("a video whose cut plan Claude is asked to read", () => {
     t.done();
   });
   it("leaves the rules' plan as it is when Claude changes nothing in it, says that Claude read it, and writes the notes all the same", async () => {
-    const reply = { decisions: [], notes: "A short talk about pricing. Nothing to change.", graphics: [], clips: [] };
+    const reply = { decisions: [], notes: "A short talk about pricing. Nothing to change.", graphicCues: [], clips: [] };
     const t = setup({ claude: [answers(reply)] });
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual(r, { ok: true, name: "talk.mov", captions: 5, kept: 11.882, cut: 11.541, folder: "", message: "" });
     assert.deepEqual(t.names(), WITH_NOTES.map((ending) => "talk." + ending));
-    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules", claude: { decisions: [], graphics: [], ignored: [], clips: [] } });
+    assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")), { version: 1, video: "talk.mov", facts: FACTS, phrases: PLAN.phrases, ranges: PLAN.ranges, kept: 11.882, cut: 11.541, pauses: HEARD, by: "rules", claude: { decisions: [], graphicCues: [], ignored: [], clips: [] } });
     assert.equal(t.read("talk.cut-plan.txt"), planText(PLAN, "Claude read this plan and changed nothing in it. Its notes are in talk.edit-notes.txt."));
     assert.equal(t.read("talk.edit-notes.txt").split("\n").slice(2).join("\n"), "Its notes\nA short talk about pricing. Nothing to change.\n");
     assert.deepEqual(t.logs.slice(4, 7), ["talk.mov: asking Claude to read the cut plan.", "talk.mov: Claude changed nothing in the cut plan.", "talk.mov: making the rough cut."]);
@@ -1305,7 +1305,7 @@ describe("a video whose cut plan Claude is asked to read", () => {
   it("asks Claude about a plan that keeps nothing, and makes the rough cut of what Claude keeps", async () => {
     // The one thing said is a cue to start over, which the rules cut. Claude says it is the line itself.
     const said = { srt: "1\n00:00:00,000 --> 00:00:01,000\n Take two.\n", told: told([[0, 1000, [[" Take", 40], [" two", 80], [".", 90]]]]), pauses: "" };
-    const t = setup({ ...said, claude: [answers({ decisions: [{ id: "p1", keep: true, why: "It is the name of the talk." }], notes: "", graphics: [], clips: [] })] });
+    const t = setup({ ...said, claude: [answers({ decisions: [{ id: "p1", keep: true, why: "It is the name of the talk." }], notes: "", graphicCues: [], clips: [] })] });
     const r = await uneditedFile(t.video("slate.mov"), t.deps);
     assert.deepEqual([r.ok, r.message], [true, ""]);
     assert.equal(roughCalls(t).length, 1);
@@ -1335,7 +1335,7 @@ describe("a video Claude could not be asked about", () => {
     ["Claude Code says is_error and no more", { code: 1, stderr: "", stdout: printed(undefined, { is_error: true }) }, "Claude Code gave an error (no reason given)"],
     ["Claude's reply has nothing in it that was asked for", answers("I cannot judge a video I have not seen."), "its reply could not be read: there is no JSON object in it"],
     ["Claude's reply is empty", answers(""), "Claude sent nothing back"],
-    ["Claude's reply has nothing in it that can be read", answers({ decisions: "none", notes: 7 }), '"decisions" in its reply is not a list, so nothing was read from it; "notes" in its reply is not text, so it was left out; its reply has no "graphics"; its reply has no "clips"'],
+    ["Claude's reply has nothing in it that can be read", answers({ decisions: "none", notes: 7 }), '"decisions" in its reply is not a list, so nothing was read from it; "notes" in its reply is not text, so it was left out; its reply has no "graphicCues"; its reply has no "clips"'],
     ["the asking stops in a way nobody foresaw", "throw", "the work stopped (spawn EAGAIN)"]
   ];
   for (const [when, ends, why] of FAILS) {
@@ -1455,7 +1455,7 @@ describe("the short clips Claude picked", () => {
     const cutOff = { probed: probed({ duration: "20.900000" }), pauses: PAUSES.split("\n").slice(0, -3).join("\n") + "\n" };
     const heard = pausesOf(cutOff.pauses);
     const plan = cutPlan(phrasesOf(wordsOf(TOLD), heard), { duration: 20.9, pauses: heard });
-    const reply = { decisions: [], notes: "", graphics: [], clips: REPLY.clips };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: REPLY.clips };
     const [clip] = used(reply, plan, heard).clips;
     assert.deepEqual([heard[heard.length - 1], plan.phrases[8].id, plan.phrases[8].end, clip.ranges], [[19.022, 19.414], "p9", 20.94, [{ start: 13.383, end: 20.9 }]]);
     const t = setup({ ...cutOff, claude: [answers(reply)] });
@@ -1534,7 +1534,7 @@ describe("the short clips Claude picked", () => {
   it("of more than a minute come with each part of their Story as well, as <name>.reel-<n>.story-<k>.mp4", async () => {
     const talk = longTalk(16);
     const { plan, pauses } = planned(talk, 87.5);
-    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
     const made = used(reply, plan, pauses);
     // From the second sentence to the fifteenth is 76.9 seconds. Its Story is cut on the last pause before the 60 second mark.
     assert.deepEqual(made.clips.map((c) => [c.n, c.length, c.fits.fits, c.story.map((part) => part.ranges)]), [[1, 76.9, true, [[{ start: 5.3, end: 60.5 }], [{ start: 60.5, end: 82.2 }]]]]);
@@ -1557,7 +1557,7 @@ describe("the short clips Claude picked", () => {
     // 80 seconds of talk with no pause in it, after 5.519 seconds of silence. Claude picks all of it as one clip.
     const talk = longTalk(16, { lead: 5519, gap: 0, tail: 4481 });
     const { plan, pauses } = planned(talk, 90);
-    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p1", to: "p16", hook: "Sixteen points", why: "It stands alone." }] };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p1", to: "p16", hook: "Sixteen points", why: "It stands alone." }] };
     const [clip] = used(reply, plan, pauses).clips;
     // Nobody pauses in the 15 seconds before the 60 second mark, so the Story is cut at the mark: its first part is 60 seconds.
     assert.deepEqual([clip.ranges, clip.story.map((part) => [part.ranges, part.length])], [[{ start: 5.319, end: 85.719 }], [[[{ start: 5.319, end: 65.319 }], 60], [[{ start: 65.319, end: 85.719 }], 20.4]]]);
@@ -1643,7 +1643,7 @@ describe("the short clips Claude picked", () => {
   });
   it("keep what was made of them when a part of a Story cannot be cut, and the log and the notes say which part", async () => {
     const talk = longTalk(16);
-    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
     const t = setup({ ...talk, claude: [answers(reply)], reels: { "1.2": "fail" } });
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     const why = "part 2 of the Story of clip 1 could not be cut: ffmpeg stopped (Error while filtering: Cannot allocate memory)";
@@ -1699,34 +1699,60 @@ describe("the short clips Claude picked", () => {
   });
 });
 
-describe("Claude's ideas for graphics in the Final Cut file", () => {
-  it("are each a marker at the start of the phrase the idea sits on, beside the markers at the joins, and are worded as ideas", async () => {
-    // Ideas for two kept phrases, for one that Claude itself cut, for one the rules cut, and for a phrase the plan does not have.
-    const graphics = [REPLY.graphics[0], { id: "p8", idea: "The word IMPORTANT." }, { id: "p6", idea: "A slow zoom." }, { id: "p99", idea: "A title card." }, { id: "p4", idea: "The show's name." }];
-    const t = setup({ claude: [answers({ ...REPLY, graphics })] });
+describe("Claude's graphic cues in the Final Cut file", () => {
+  const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
+  it("are each a marker at the moment the first of their words is said, beside the markers at the joins, and are worded as ideas", async () => {
+    // Cues for two kept phrases, for one that Claude itself cut, for one the rules cut, for a phrase the plan does not have, and
+    // for words nobody says. "Welcome to the show" is said twice: the first time is a retake the rules cut, and the cue is
+    // written for the take that is kept.
+    const graphicCues = [REPLY.graphicCues[0], cue("p8", "very important", "The word IMPORTANT."), cue("p3", "do that again", "A slow zoom."), cue("p99", "a title card", "A title card."), cue("p4", "Welcome to the show", "The show's name."), cue("p9", "the moon landing", "The moon.")];
+    const t = setup({ claude: [answers({ ...REPLY, graphicCues })] });
     const r = await uneditedFile(t.video("talk.mov"), t.deps);
     assert.deepEqual([r.ok, r.message], [true, ""]);
     const xml = t.read("talk.fcpxml");
-    // "Welcome to the show." starts at 6.07 seconds, which is picture 182, and "So the first thing" at 13.583, picture 407.
+    // "Welcome to the show." starts at 6.07 seconds, which is picture 182, and "know" of "know your costs" at 15.3, picture 459.
     assert.deepEqual(tags(xml, "marker").map((m) => `${m.start} ${m.value}`), [
       "176176/30000s Taken out, 5.9 seconds. Retake: said again at 0:06, the later one is kept. Cue: a spoken cue to start over",
       "182182/30000s Graphic idea: The show's name.",
       "401401/30000s Taken out, 3.5 seconds. False start: begun again at 0:13",
-      "407407/30000s Graphic idea: The words &quot;Know your costs&quot; on screen.",
+      "459459/30000s Graphic idea: The words &quot;Know your costs&quot; on screen.",
       "576576/30000s Taken out, 2.7 seconds. Claude: It adds nothing to the line before it.",
       "637637/30000s Taken out, 2.1 seconds. Pause: silence after the last words"
     ]);
-    // An idea whose time is cut gets no marker. The notes say what became of it.
-    assert.doesNotMatch(xml, /IMPORTANT|slow zoom|title card/);
+    // A cue whose words are cut, or are not found, gets no marker. The notes say what became of the ones on words that are cut.
+    assert.doesNotMatch(xml, /IMPORTANT|slow zoom|title card|moon/);
     assert.deepEqual(t.read("talk.edit-notes.txt").split("\n").slice(-5), [
       "What could not be used from its reply",
       "An idea for a graphic sits on words that are cut, at 0:17: The word IMPORTANT.",
-      "An idea for a graphic sits on words that are cut, at 0:12: A slow zoom.",
+      "An idea for a graphic sits on words that are cut, at 0:03: A slow zoom.",
       'An idea for a graphic names "p99", which is not a phrase of the plan: A title card.',
       ""
     ]);
     assert.deepEqual(checkFcpxml(xml, { duration: 23.423, frameRate: "30000/1001" }), []);
     t.done();
+  });
+  it("go in the plan as they were read, each with the phrase it was written for, and the plan holds no ideas for graphics", async () => {
+    const graphicCues = [REPLY.graphicCues[0], cue("p99", "a title card", "A title card."), { id: "p4", words: "Welcome", kind: "b-roll", show: "A shot of a studio.", seconds: 3 }];
+    const t = setup({ claude: [answers({ ...REPLY, graphicCues })] });
+    await uneditedFile(t.video("talk.mov"), t.deps);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    assert.deepEqual(plan.claude.graphicCues, [
+      { n: 1, words: "know your costs", kind: "words", show: 'The words "Know your costs" on screen.', seconds: 3, style: null, phrase: "p7" },
+      { n: 2, words: "a title card", kind: "words", show: "A title card.", seconds: 3, style: null, phrase: "p99" }
+    ]);
+    assert.equal("graphics" in plan.claude, false);
+    // The one that is not a graphic or words is said of in the plan's ignored, and in the notes of what could not be used.
+    assert.deepEqual(plan.claude.ignored, ["Graphic cue 3 could not be read."]);
+    assert.match(t.read("talk.edit-notes.txt"), /\n\nWhat could not be used from its reply\nGraphic cue 3 could not be read\.\nAn idea for a graphic names "p99"/);
+    t.done();
+  });
+  it("land on the take that is kept when their words are in a retake the rules cut, whether their phrase is the kept take's or no phrase of the plan", async () => {
+    for (const id of ["p4", "p99"]) {
+      const t = setup({ claude: [answers({ ...REPLY, graphicCues: [cue(id, "Welcome to the show", "The show's name.")] })] });
+      await uneditedFile(t.video("talk.mov"), t.deps);
+      assert.deepEqual(tags(t.read("talk.fcpxml"), "marker").map((m) => `${m.start} ${m.value}`).filter((m) => m.includes("Graphic idea")), ["182182/30000s Graphic idea: The show's name."], id);
+      t.done();
+    }
   });
   it("are still there when the file is written again to name the video where it stayed", async () => {
     const t = setup({ claude: [answers(REPLY)] });
@@ -1826,7 +1852,7 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
   });
   it("makes each part of a clip's Story again, from the ranges the plan keeps for it", async () => {
     const talk = longTalk(16);
-    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
     const t = setup({ ...talk, claude: [answers(reply)] });
     const { file, first } = await doneOnce(t);
     const r = await videosFromPlan(file, t.deps);
@@ -1889,7 +1915,7 @@ describe("the videos of a video, made again from its cut plan (--from-plan)", ()
     t.done();
     // The second part of a Story that could not be cut.
     const talk = longTalk(16);
-    const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+    const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
     const story = { ...talk, claude: [answers(reply)], reels: { "1.2": "fail" } };
     const s = setup(story);
     const done = await doneOnce(s);
@@ -4522,7 +4548,7 @@ describe("the streams a run takes, by their numbers, when they are not their pla
     return JSON.stringify(told);
   };
   const talk = longTalk(16);
-  const reply = { decisions: [], notes: "", graphics: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
+  const reply = { decisions: [], notes: "", graphicCues: [], clips: [{ from: "p2", to: "p15", hook: "Fourteen points", why: "It stands alone." }] };
   /** The streams of the video an ffmpeg call names: by -map, and in its graph of filters. A graph's own outputs, mapped as [v]
       and [a], are not streams of the video. */
   const named = (args) => [...args.filter((a, i) => args[i - 1] === "-map" && a.startsWith("0:")), ...(args.includes("-filter_complex") ? [...after(args, "-filter_complex").matchAll(/\[(0:[^\]]+)\]/g)].map((m) => m[1]) : [])];

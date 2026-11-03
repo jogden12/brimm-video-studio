@@ -27,15 +27,20 @@ const SPELLINGS = '- "spellings": a list of {"heard", "spelled", "why"}: the nam
 const WHOLE = 'Each line inside <phrases> is one phrase: its id, the time it starts, and its words. A phrase ends at a pause or at the end of a sentence. A phrase marked "straight on from" has no pause before it, so a stretch never starts or ends between it and the phrase it names.';
 
 describe("notes.js, which the requests are made from", () => {
-  it("gives the text of a raw video's request as it was before the requests for the other kinds were made from it", () => {
-    // The hash of notesRequest(PLAN, ABOUT) as it was at commit 0294dcb: 3854 characters.
-    assert.equal(createHash("sha256").update(notesRequest(PLAN, ABOUT)).digest("hex"), "943c87c418a8843682324d333faa9aaa920864fab97b06009b6c94623e31218d");
+  it("gives the text of a raw video's request as it was before the requests for the other kinds were made from it, but for the one line that asks for graphic cues", () => {
+    // The hash of notesRequest(PLAN, ABOUT) as it was at commit 0294dcb was 943c87c4…218d, 3854 characters. It asked for "graphics",
+    // at most six ideas; it asks for "graphicCues" now (PR H1), and nothing else of it has changed: with the old line put back in
+    // the place of the new one, it hashes to that again. This is its hash now: 4166 characters.
+    const text = notesRequest(PLAN, ABOUT);
+    assert.equal(createHash("sha256").update(text).digest("hex"), "442ecd9f20dd3b99482061b75626ad091a41e36001f01ee9198cf219ddf2956b");
+    const was = '- "graphics": at most six {"id", "idea"}. "id" is a kept phrase where words on screen, a graphic or a cutaway shot would help, and "idea" says what it would show, in one sentence.';
+    assert.equal(createHash("sha256").update(text.replace(ASK.graphicCues, was)).digest("hex"), "943c87c418a8843682324d333faa9aaa920864fab97b06009b6c94623e31218d");
   });
   it("takes the task as a third thing, and with two things gives the task it always did", () => {
     const task = ["Say hello.", "Say goodbye."].join("\n");
     assert.equal(notesRequest(PLAN, ABOUT, task), notesRequest(PLAN, ABOUT).replace(/<task>[\s\S]*<\/task>$/, `<task>\n${task}\n</task>`));
-    assert.deepEqual(keysOf(notesRequest(PLAN, ABOUT)), ["decisions", "notes", "graphics", "clips", "title"]);
-    assert.deepEqual(Object.keys(ASK), ["start", "decisions", "notes", "graphics", "clips", "title"]);
+    assert.deepEqual(keysOf(notesRequest(PLAN, ABOUT)), ["decisions", "notes", "graphicCues", "clips", "title"]);
+    assert.deepEqual(Object.keys(ASK), ["start", "decisions", "notes", "graphicCues", "clips", "title"]);
   });
 });
 
@@ -126,7 +131,7 @@ describe("the request for each kind of video", () => {
     it("asks for reel suggestions and spellings, and for nothing else: no title, notes, graphics or decisions", () => {
       assert.deepEqual(keysOf(request), ["suggestions", "spellings"]);
       const task = taskOf(request);
-      for (const key of ["title", "notes", "graphics", "decisions", "clips"]) assert.ok(!task.includes(`"${key}"`), key);
+      for (const key of ["title", "notes", "graphicCues", "decisions", "clips"]) assert.ok(!task.includes(`"${key}"`), key);
       assert.ok(task.startsWith(`${START}\n- "suggestions"`));
       assert.ok(task.endsWith(`\n${SPELLINGS}`));
     });
@@ -147,8 +152,13 @@ describe("the request for each kind of video", () => {
       assert.equal(request.slice(0, request.indexOf("<task>")), was.slice(0, was.indexOf("<task>")));
       assert.ok(request.includes("The rules keep 0:12 of it and cut 0:11."));
     });
+    it("asks for the graphic cues in the line notes.js has, twelve at most, and for no ideas for graphics", () => {
+      assert.ok(request.split("\n").includes(ASK.graphicCues));
+      assert.match(ASK.graphicCues, /^- "graphicCues": at most twelve /);
+      assert.ok(!request.includes('- "graphics"') && !request.includes('"idea"'));
+    });
     it("asks for what it did, less the title, and for the spellings and the point each clip makes", () => {
-      assert.deepEqual(keysOf(request), ["decisions", "notes", "graphics", "clips", "spellings"]);
+      assert.deepEqual(keysOf(request), ["decisions", "notes", "graphicCues", "clips", "spellings"]);
       assert.ok(!request.includes('- "title"'));
       const [now, before] = [taskOf(request).split("\n"), taskOf(was).split("\n")];
       assert.deepEqual(now.slice(0, 4), before.slice(0, 4));
@@ -226,7 +236,7 @@ describe("the request for each kind of video", () => {
 /** What a reading of each kind is when nothing could be read: the same shape every time, so a caller needs no special cases. */
 const NOTHING = {
   finished: { suggestions: [], spellings: [] },
-  raw: { decisions: [], notes: "", graphics: [], suggestions: [], spellings: [] },
+  raw: { decisions: [], notes: "", graphicCues: [], suggestions: [], spellings: [] },
   "short video": { spellings: [], about: "" },
   session: { principles: [], recurringPrinciples: [], reelIdeas: [], spellings: [] }
 };
@@ -251,7 +261,7 @@ const REPLY = {
   raw: {
     decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }],
     notes: "A short talk about pricing.",
-    graphics: [{ id: "p7", idea: 'The words "Know your costs" on screen.' }],
+    graphicCues: [{ id: "p7", words: "know your costs", kind: "words", show: 'The words "Know your costs" on screen.', seconds: 3 }],
     clips: [{ from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone.", point: "Know your costs before you set a price." }],
     spellings: [SPELLING]
   },
@@ -264,7 +274,7 @@ const READ = {
   raw: {
     decisions: REPLY.raw.decisions,
     notes: REPLY.raw.notes,
-    graphics: REPLY.raw.graphics,
+    graphicCues: [{ n: 1, words: "know your costs", kind: "words", show: 'The words "Know your costs" on screen.', seconds: 3, style: null, phrase: "p7" }],
     suggestions: [{ n: 1, from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone.", point: "Know your costs before you set a price." }],
     spellings: [SPELLING],
     problems: []
@@ -426,9 +436,9 @@ describe("what Claude says of a raw video", () => {
   it("is what it always was, and the point of each clip, which has the place of the clip in the reply", () => {
     const read = readReading("raw", json("raw"));
     const old = readNotes(json("raw"));
-    assert.deepEqual([read.decisions, read.notes, read.graphics], [old.decisions, old.notes, old.graphics]);
+    assert.deepEqual([read.decisions, read.notes, read.graphicCues], [old.decisions, old.notes, old.graphicCues]);
     assert.deepEqual(read.suggestions, old.clips.map((c) => ({ ...c, point: REPLY.raw.clips[0].point })));
-    assert.deepEqual(Object.keys(read), ["decisions", "notes", "graphics", "suggestions", "spellings", "problems"]);
+    assert.deepEqual(Object.keys(read), ["decisions", "notes", "graphicCues", "suggestions", "spellings", "problems"]);
   });
   it("has no title, and no list of clips, even when the reply gives a title", () => {
     const read = readReading("raw", json("raw", { title: "Know your costs" }));
@@ -452,15 +462,15 @@ describe("what Claude says of a raw video", () => {
     assert.deepEqual(read.problems, ['Clip 1 could not be read: it needs a "from" and a "to", each the id of a phrase.', 'Clip 3 could not be read: it needs a "from" and a "to", each the id of a phrase.']);
   });
   it("says what notes.js says of what it could not read, and then what it could not read of the spellings", () => {
-    const read = readReading("raw", JSON.stringify({ ...REPLY.raw, decisions: "cut p8", graphics: undefined, spellings: [{ heard: "Sally" }] }));
-    assert.deepEqual(read.problems, ['"decisions" in its reply is not a list, so nothing was read from it.', 'Its reply has no "graphics".', 'Spelling 1 could not be read: it needs a "heard" and a "spelled".']);
+    const read = readReading("raw", JSON.stringify({ ...REPLY.raw, decisions: "cut p8", graphicCues: undefined, spellings: [{ heard: "Sally" }] }));
+    assert.deepEqual(read.problems, ['"decisions" in its reply is not a list, so nothing was read from it.', 'Its reply has no "graphicCues".', 'Spelling 1 could not be read: it needs a "heard" and a "spelled".']);
     assert.deepEqual(readReading("raw", json("raw", { spellings: undefined })).problems, ['Its reply has no "spellings".']);
   });
   it("that breaks off says so once", () => {
     const whole = json("raw");
     const read = readReading("raw", whole.slice(0, whole.indexOf("The words")));
     assert.deepEqual(read.problems.filter((p) => p.startsWith("Its reply breaks off")), ["Its reply breaks off part-way, and only the finished part of it was read."]);
-    assert.deepEqual(read.problems.slice(1), ['Its reply has no "graphics".', 'Its reply has no "clips".', 'Its reply has no "spellings".']);
+    assert.deepEqual(read.problems.slice(1), ['Its reply has no "graphicCues".', 'Its reply has no "clips".', 'Its reply has no "spellings".']);
   });
   it("says nothing more of the spellings when notes.js could not open the reply at all", () => {
     for (const reply of ["", "no json here", "{}", '{"spellings": [{"heard": "Sally"}]}']) assert.equal(readReading("raw", reply).problems.length, 1, JSON.stringify(reply));

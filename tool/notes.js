@@ -10,6 +10,7 @@ import { readAnswer, parseReply, salvageReply } from "./shared/answers.js";
 import { SHOW, HOST } from "./shared/show.js";
 import { rangesOf, KEPT, KEPT_SIDE } from "./cuts.js";
 import { REEL_MIN, REEL_MAX, fitReel, storyParts } from "./reframe.js";
+import { graphicCuesOf, graphicCuesAsk } from "./graphic-cues.js";
 
 const list = (v) => (Array.isArray(v) ? v : []);
 /** Text on one line: a line break in it would start a line that reads as something else. */
@@ -42,17 +43,20 @@ const NUMBER = ["", "one", "two", "three", "four", "five", "six", "seven", "eigh
 /** How many words the title Claude recommends for the whole video may have: a title on screen is read at a glance. */
 const TITLE_WORDS = 8;
 
+/** How many graphic cues a raw video's request asks for, and how many are read, at most. */
+const MAX_GRAPHIC_CUES = 12;
+
 /** What a raw video's request asks, a line for each thing. Another kind of video asks for some of them with others of its own. */
 export const ASK = {
   start: "Read the whole plan before you answer. Reply with one JSON object and nothing else: no introduction, no code fence, no closing note. Use exactly these keys:",
   decisions: '- "decisions": a list of {"id", "keep", "why"}, ONLY for the phrases where you disagree with the rules. There are three reasons to disagree: an abandoned take the rules kept (a line said, and then said again better after a cue or a stumble), a sentence that trails off, or something the rules cut that should stay because it is a deliberate repeat for emphasis. "keep" is true or false. "why" is one plain sentence. An empty list is the right answer when the rules are right. Be cautious: when you are unsure, leave the phrase as it is.',
   notes: '- "notes": at most 200 words of plain text for the person who will edit the video: what the video is, where it drags, what to tighten, and anything to check by eye. No markdown.',
-  graphics: '- "graphics": at most six {"id", "idea"}. "id" is a kept phrase where words on screen, a graphic or a cutaway shot would help, and "idea" says what it would show, in one sentence.',
+  graphicCues: graphicCuesAsk(MAX_GRAPHIC_CUES),
   clips: `- "clips": at most ${NUMBER[MAX_CLIPS] || MAX_CLIPS} {"from", "to", "hook", "why"}. Each is a stretch that would stand alone as a short vertical clip of ${REEL_MIN} to ${REEL_MAX} seconds. It runs from the phrase "from" to a later phrase "to", and is made of what is kept between them, with your own decisions counted. Start it on a phrase that is not marked "straight on from", and end it on a phrase that the one after it is not straight on from: a clip is cut at a pause, as the plan is. "hook" is at most eight words to put on screen. "why" is one sentence. An empty list when nothing stands alone.`,
   title: `- "title": one title to put on screen for the whole video, at most ${NUMBER[TITLE_WORDS] || TITLE_WORDS} words, in plain words with no quotation marks and no emoji. An empty text when nothing fits.`
 };
 
-const TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphics, ASK.clips, ASK.title].join("\n");
+const TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphicCues, ASK.clips, ASK.title].join("\n");
 
 /** The whole text of one request to Claude about a cut plan. `about` is {video, duration}: the file's name and its length in
     seconds. Every phrase of the plan is shown on a line of its own, and what is asked comes last, after everything that comes
@@ -89,8 +93,8 @@ const unquoted = (t) => {
   return inner.includes(t[0]) || inner.includes(t[t.length - 1]) ? t : inner.trim();
 };
 
-/** The four things Claude is asked for. */
-const ASKED = ["decisions", "notes", "graphics", "clips"];
+/** The four things Claude is asked for. A reply that holds only graphic cues has answered. */
+const ASKED = ["decisions", "notes", "graphicCues", "clips"];
 /** Does an object hold one of the things asked for? `keys` are those: the four, unless a caller asks for something else. */
 export const asked = (data, keys = ASKED) => Boolean(data) && keys.some((key) => data[key] !== undefined);
 const text = (v) => plain(v).trim();
@@ -140,19 +144,22 @@ export function objectIn(reply, keys = ASKED) {
   return first;
 }
 
-/** Claude's reply, read into {decisions, notes, graphics, clips, problems}. The reply may be in a code fence, have words around
+/** Claude's reply, read into {decisions, notes, graphicCues, clips, problems}. The reply may be in a code fence, have words around
     it, or break off part-way: what is whole is read. `problems` says in plain words what was missing or in a form that could
     not be read. Such a piece is left out, and never guessed at. A reply that cannot be read at all gives empty lists, empty
     notes and one problem. Nothing is thrown from here, whatever the reply is.
-    A decision is {id, keep, why} and needs all three: a cut with no reason is not one a person can check. An idea for a graphic
-    is {id, idea}. A clip is {n, from, to, hook, why}, and is read without a hook or a reason, because it can be cut without
+    A decision is {id, keep, why} and needs all three: a cut with no reason is not one a person can check. A graphic cue is read
+    by graphicCuesOf from the five things it is asked for, its `id` being the phrase it was written for (its `phrase`): it needs
+    that, its words and what it shows, and is a graphic or words on screen. A style or a shot in a reply is not asked for and is
+    not read. At most twelve are read, and one that could not be read is named in `problems` by its place in Claude's list. A
+    clip is {n, from, to, hook, why}, and is read without a hook or a reason, because it can be cut without
     them. `n` is its place in Claude's list, counted from 1: a clip that could not be read is named by that number in
     `problems`, and the clips after it keep theirs.
     `title`, when the reply gives one, is the title Claude recommends to put on screen for the whole video: on one line,
     without the pair of quotation marks around all of it, and at most eight words. A reply without one is read whole, with no problem said.
     Whether an id is a phrase of the plan is not looked at here. applyDecisions, clipRanges and notesText each see to that. */
 export function readNotes(reply) {
-  const read = { decisions: [], notes: "", graphics: [], clips: [], problems: [] };
+  const read = { decisions: [], notes: "", graphicCues: [], clips: [], problems: [] };
   const none = (problem) => ({ ...read, problems: [problem] });
   if (reply == null || (typeof reply === "string" && !reply.trim())) return none("Claude sent nothing back.");
   const answer = typeof reply === "string" ? objectIn(reply) : { data: null };
@@ -177,7 +184,15 @@ export function readNotes(reply) {
   if (data.notes === undefined) read.problems.push('Its reply has no "notes".');
   else if (typeof data.notes !== "string") read.problems.push('"notes" in its reply is not text, so it was left out.');
   else read.notes = data.notes.trim();
-  entries("graphics", (g) => (text(g.id) && text(g.idea) ? { id: text(g.id), idea: text(g.idea) } : null), (n) => `Idea ${n} for a graphic could not be read: it needs an "id" and an "idea".`);
+  if (data.graphicCues === undefined) read.problems.push('Its reply has no "graphicCues".');
+  else if (!Array.isArray(data.graphicCues)) read.problems.push('"graphicCues" in its reply is not a list, so nothing was read from it.');
+  else {
+    // Only the five things asked for are read of a cue, and one with no id is no cue: the id is the phrase it was written for.
+    const given = data.graphicCues.map((c) => (c && typeof c === "object" && text(c.id) ? { phrase: text(c.id), words: c.words, kind: c.kind, show: c.show, seconds: c.seconds } : null));
+    const cues = graphicCuesOf(given, { most: MAX_GRAPHIC_CUES });
+    read.graphicCues = cues.cues;
+    read.problems.push(...cues.problems);
+  }
   entries("clips", (c, n) => (text(c.from) && text(c.to) ? { n, from: text(c.from), to: text(c.to), hook: text(c.hook), why: text(c.why) } : null), (n) => `Clip ${n} could not be read: it needs a "from" and a "to", each the id of a phrase.`);
   // The title is the one thing a reply may leave out without a word said: a reply from before it was asked for is whole.
   if (typeof data.title === "string") {
@@ -408,11 +423,12 @@ const WROTE = "Claude wrote this from the words of the recording and their times
     - its notes, as it wrote them but with no empty line in them: a heading here is the line after an empty one;
     - what it changed in the cut plan: for each change the time of the first phrase, whether it is now cut or kept, the words,
       and why, and a second line when the change has something to check by eye;
-    - its ideas for graphics: for each the time of the phrase it sits on, the words of that phrase, and the idea;
+    - its ideas for graphics, which are its graphic cues (`read.graphicCues`): for each the time of the phrase it goes with, the
+      words it goes with in quotation marks, and what it shows;
     - its clips: for each its number, its start and end, its length, the words to put on screen and why, a second line when
       it does not fit a Reel, and one when it starts or ends where there is no pause;
-    - what could not be used from its reply: the problems readNotes found, and each idea for a graphic that sits on no kept
-      phrase of the plan.
+    - what could not be used from its reply: the problems readNotes found, and each graphic cue that goes with no kept
+      phrase of the plan, which is told as an idea for a graphic always was.
     Where Claude named a phrase by its id, in its notes, an idea or the reason for a clip, the time of the words is written.
     What applyDecisions and clipRanges left out is in their `ignored`, and is not written here unless it is put with
     `read.problems` first. Without it nothing says why the number of a clip is missing from the list. */
@@ -425,11 +441,11 @@ export function notesText(read, plan, clips) {
     return change.check ? [line, `   ${change.check}`] : [line];
   });
   const graphics = [];
-  for (const g of list(read.graphics)) {
-    const p = phrases.get(g.id);
-    if (!p) unused.push(`An idea for a graphic names "${oneLine(g.id)}", which is not a phrase of the plan: ${oneLine(g.idea)}`);
-    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(g.idea)}`);
-    else graphics.push(`${stamp(p.start)}  ${oneLine(p.text)}  |  ${byTime(oneLine(g.idea), plan.phrases)}`);
+  for (const cue of list(read.graphicCues)) {
+    const p = phrases.get(cue.phrase);
+    if (!p) unused.push(`An idea for a graphic names "${oneLine(cue.phrase)}", which is not a phrase of the plan: ${oneLine(cue.show)}`);
+    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(cue.show)}`);
+    else graphics.push(`${stamp(p.start)}  "${oneLine(cue.words)}"  |  ${byTime(oneLine(cue.show), plan.phrases)}`);
   }
   const made = list(clips).flatMap((clip) => {
     const seconds = Math.round(clip.length);
