@@ -4319,10 +4319,12 @@ function offerFault(record, offer) {
     one or the next revision of it, with the record `record` (its spellings and the answer to the offers in it), and say `done`
     and what came of it, the Reels the hand-off holds among it: those the spelling reached are told that their captions on screen keep the old
     spelling, and those whose captions keep it are told in finish-reels.js keepOldWords' words. Version 1 of the hand-off waits for the switch:
-    the record is kept, and nothing is put in final/. */
-async function importHandoff(ctx, found, record, done) {
+    the record is kept, and nothing is put in final/. `unhanded` is what `spell` says of the Reel projects not handed off yet (unhandedWords; `finish` for an
+    iPhone clip says none): it ends the line that says the hand-off is written, made again or waiting, after the Reels the spelling reached, and the line
+    keepOldWords is on follows as it did. It is not said when the hand-off comes out as it was, nor when nothing is written. */
+async function importHandoff(ctx, found, record, done, unhanded = "") {
   const wrote = await finishFinished(ctx, found, { record });
-  if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}`);
+  if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}${unhanded}`);
   if (wrote.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: wrote.coming });
     return refuse(ctx, `Dropbox is still bringing ${listed([...new Set(wrote.coming.map(whatIs))])} over: say it again in a minute.`);
@@ -4332,8 +4334,8 @@ async function importHandoff(ctx, found, record, done) {
   // video's Reels (stillWords): all are made in HyperFrames, and are handed off by "hand off the Reels". A Reel whose captions keep a spelling is told below.
   const drawn = (wrote.drawn || []).map((n) => ({ name: `Reel ${n}`, app: true }));
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
-  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.${stillWords(drawn, "hand off the Reels")}`);
-  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}`);
+  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.${stillWords(drawn, "hand off the Reels")}${unhanded}`);
+  else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}${unhanded}`);
   // A Reel whose captions keep the spelling they were made with (a spelling cannot be put into them, or taken out) says so, and the way back.
   if (Array.isArray(wrote.kept) && wrote.kept.length) ctx.say(keepOldWords(wrote.kept));
   // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
@@ -4395,6 +4397,31 @@ const stillWords = (drawn, handOff = "hand it off") => byMaking(drawn).map(({ ap
   return app ? `${keep}. Ask the assistant in HyperFrames to fix them, then export ${one ? "it" : "each"} again and say "${handOff}".` : `${keep} until ${changesIt(false, parts.length)}.`;
 }).join("");
 
+/** The Reels of the record that have a project (reelProjectsOf) and are not handed off yet, as their numbers in order, each once: `finished.parts` has no part
+    for their key (`reel N`). A finish gives a part to every Reel it takes, so the sentences about parts above tell a Reel that has one (stillWords, keptWords, and
+    finish-reels.js keepOldWords for a finished video's Reels), and a Reel project that is not exported and taken yet, as `app … reel N` leaves it, is told by
+    unhandedWords. A project kept for an earlier kind is no Reel project (reelProjectsOf), and a Reel the record says is dropped after its project was made is no
+    part of a finish (exports.js exportsFound, as the guide has it), so it is not one that is waited for. */
+function unhandedReels(record) {
+  const dropped = new Set((Array.isArray(record.reels) ? record.reels : []).filter((r) => r && r.status === "dropped").map((r) => r.n));
+  return [...new Set(reelProjectsOf(record).map(({ reel }) => reel))].filter((n) => !dropped.has(n) && (record.finished?.parts ?? {})[`reel ${n}`] === undefined).sort((a, b) => a - b);
+}
+
+/** What she is told of the Reel projects not handed off yet (unhandedReels), when a spelling is saved: a spelling is not pushed into a project (architecture 4.8), so
+    the captions already drawn in one keep the old spelling, and the assistant in HyperFrames fixes them before the Reel is exported. It goes at the end of the line
+    that says the spelling was saved, after every sentence about the parts handed off. "" when there is none. It is left out where the reply asks the assistant to fix
+    any caption already drawn (ASK_ASSISTANT), which covers every project, where nothing is saved, and where a finished video's hand-off comes out as it was. */
+function unhandedWords(record) {
+  const names = unhandedReels(record).map((n) => `Reel ${n}`);
+  if (!names.length) return "";
+  const one = names.length === 1;
+  return ` ${listed(names)} ${one ? "is" : "are"} not handed off yet. If ${one ? "it shows" : "they show"} captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them before you export ${one ? "it" : "each"}.`;
+}
+
+/** Whether a command changes the episode's spellings: `after` is not `before`, a pair more, fewer or spelled another way, in any order. An answer to Claude's offers that
+    applies none changes nothing, and no caption then keeps an old spelling. */
+const spellingsChanged = (before, after) => before.length !== after.length || after.some(([heard, meant]) => !before.some(([h, m]) => h === heard && m === meant));
+
 /** The record with its spellings, `spellings`; and after a finish (spec section 4, "spell applies to every timeline and to
     the final transcripts") the final transcripts with each spelling they do not hold yet, and the hand-off made again as its
     next revision, each file put in by the rule, and only when its words change. Each finished part's transcripts hold the
@@ -4409,11 +4436,15 @@ const stillWords = (drawn, handOff = "hand it off") => byMaking(drawn).map(({ ap
     same record, and `later` what is said at the end when no hand-off is written yet and none is due (a raw video's). `inApp` is whether the
     video is edited in HyperFrames and was never shown in Final Cut (editedInApp): `done` then holds nothing of Final Cut, and what is said
     after it tells her that the final transcripts take the spellings when she hands it off (before the first finish) and to ask the
-    assistant in HyperFrames to fix any caption already drawn, unless a sentence about the captions of a part says so already. Resolves the
-    save's code. */
+    assistant in HyperFrames to fix any caption already drawn, unless a sentence about the captions of a part says so already. A spelling
+    changed is also told of the Reel projects not handed off yet (unhandedWords), at the end of the line that says it was saved, after every
+    sentence about the parts handed off, on each path that saves; not where that sentence to ask the assistant is said, which covers every
+    project, nor where a finished video's hand-off comes out as it was, nor where no spelling changed. Resolves the save's code. */
 async function saveSpellings(ctx, found, spellings, done, { set = {}, later = "", inApp = false } = {}) {
   const record = { ...found.record, ...set, spellings };
   const finished = record.finished;
+  // The Reel projects not handed off yet, told once the spellings change: their captions already drawn keep the old spelling (unhandedWords).
+  const unhanded = spellingsChanged(found.record.spellings || [], spellings) ? unhandedWords(record) : "";
   // The hand-off of a finished video or an iPhone clip is made from the import's own captions (finish.js finishFinished): it is
   // written at the first spell once its offers are answered, and made again from the captions at every one after, so that a
   // spelling dropped or changed is dropped or changed in it too. Which refusals apply is that function's.
@@ -4430,12 +4461,12 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       // in it, have none.
       const waits = Object.keys(finished.parts || {}).some((key) => REEL_KEY.test(key)) ? lateCheckWaits(ctx, finished) : "";
       if (waits) return refuse(ctx, waits);
-      return importHandoff(ctx, found, record, done);
+      return importHandoff(ctx, found, record, done, unhanded);
     }
-    return save(ctx, found, record, `${shownName(record)}: spelled. Its hand-off waits for its new reading.`);
+    return save(ctx, found, record, `${shownName(record)}: spelled. Its hand-off waits for its new reading.${unhanded}`);
   }
-  if (!finished && handoffOwed(record)) return importHandoff(ctx, found, record, done);
-  if (!finished) return save(ctx, found, record, `${[done, later].filter(Boolean).join(" ")}${inApp ? `${AT_HAND_OFF}${ASK_ASSISTANT}` : ""}`);
+  if (!finished && handoffOwed(record)) return importHandoff(ctx, found, record, done, unhanded);
+  if (!finished) return save(ctx, found, record, `${[done, later].filter(Boolean).join(" ")}${inApp ? `${AT_HAND_OFF}${ASK_ASSISTANT}` : unhanded}`);
   // A client or group session, and a video not yet answered, are refused at once, as finish refuses them (finish.js
   // cannotFinish), before any file in final/ is named or read, and nothing is written, the spelling included: none of a
   // session's transcripts may be in the shared folder, and an unanswered video has no kind to hand off as.
@@ -4453,7 +4484,9 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   const keptNote = keptWords(keeping, parts.every((p) => !p.app));
   // A video edited in HyperFrames is told to ask the assistant to fix any caption already drawn where no sentence about the captions of a part says it.
   const ask = inApp ? ASK_ASSISTANT : "";
-  if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${ask}${keptNote}`);
+  // That sentence covers every project, so a reply that says it does not name the Reel projects not handed off yet.
+  const unhandedAfterAsk = ask ? "" : unhanded;
+  if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${ask}${keptNote}${unhandedAfterAsk}`);
   const finals = [...parts.flatMap((p) => [`${p.stem}.srt`, `${p.stem}.transcript.txt`, ...(p.part.words ? [p.part.words] : [])]), finished.handoff];
   const gone = finals.find((rel) => !existsSync(join(found.folder, rel)));
   if (gone) return refuse(ctx, `${gone} is not in the episode's folder, so the final transcripts cannot be spelled again. Nothing was changed. Say finish again.`);
@@ -4497,7 +4530,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       if (!sameWords(made)) writes.push([p.part.words, made.words]);
     }
     const toApply = [...new Map(parts.flatMap((p) => p.toApply).map(([h, m]) => [h, [h, m]])).values()];
-    if (!writes.length) return save(ctx, found, { ...record, finished: withHeld(held) }, `${done} The final transcripts do not have ${listed(toApply.map(([h]) => `"${h}"`))}, so they are as they were.${ask}${keptNote}`);
+    if (!writes.length) return save(ctx, found, { ...record, finished: withHeld(held) }, `${done} The final transcripts do not have ${listed(toApply.map(([h]) => `"${h}"`))}, so they are as they were.${ask}${keptNote}${unhandedAfterAsk}`);
     // The hand-off is made again as version 2 once this Mac's settings say so, and when it is version 2 already: version 1 is
     // never written over it (spec 2026-10-22, section 8; finish.js writesV2For, which a finish asks too). Version 2 is under the
     // video's first version's id, above every revision written for that id on this Mac (finish.js nextRevision), and only when
@@ -4536,10 +4569,12 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     // A finished part may have captions drawn into its picture (whether it has is not known here), which keep the old spelling
     // until it is made again, by the way it was made (stillWords): a full episode's main video has none, in Final Cut and in
     // HyperFrames (the brief its agent is given says a wide main video has no captions drawn on it). A part made in HyperFrames
-    // is told to have them fixed by the assistant there; where none is named, a video edited in HyperFrames is told so all the same.
+    // is told to have them fixed by the assistant there; where none is named, a video edited in HyperFrames is told so all the same. The
+    // Reel projects no part is made for yet follow, unless that sentence is said.
     const drawn = parts.filter((p) => p.key !== "main" || presetOf(record, "main").job !== "full-episode");
-    const still = `${stillWords(drawn)}${drawn.some((p) => p.app) ? "" : ask}`;
-    const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}`);
+    const asked = drawn.some((p) => p.app) ? "" : ask;
+    const still = `${stillWords(drawn)}${asked}`;
+    const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}${asked ? "" : unhanded}`);
     if (code !== 0) {
       const lost = putBack();
       if (lost.length) ctx.say(`${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`);
