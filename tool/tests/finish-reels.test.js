@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REELS_WORD, START, SAY_AGAIN, BRINGING, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, retitledReels, unusableWords } from "../finish-reels.js";
+import { REELS_WORD, START, SAY_AGAIN, BRINGING, exportAgainWords, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, retitledReels, unusableWords } from "../finish-reels.js";
 import { reelsBase } from "../finish.js";
 
 const NAME = "Pricing: what to charge?";
@@ -126,6 +126,11 @@ describe("the words she reads", () => {
       [keepOldWords([2]), `Reel 2's captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".`],
       [keepOldWords([2, 3]), `Reel 2's and Reel 3's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
       [keepOldWords([1, 2, 5]), `Reel 1's, Reel 2's and Reel 5's captions keep the old spelling until you export each again from HyperFrames and say "hand off the Reels".`],
+      // What she does to make a part new that was made from an export of HyperFrames: keepOldWords says it of a finished video's Reels, and `spell` (edit.js) of a raw
+      // video's parts and an iPhone clip's, with the words that hand them off.
+      [exportAgainWords(1, "hand off the Reels"), `you export it again from HyperFrames and say "hand off the Reels"`],
+      [exportAgainWords(1, "hand it off"), `you export it again from HyperFrames and say "hand it off"`],
+      [exportAgainWords(2, "hand it off"), `you export each again from HyperFrames and say "hand it off"`],
       [START, 'Say "yes, hand off the Reels" to start.'],
       [SAY_AGAIN, 'Say "hand off the Reels" again.'],
       [BRINGING, "Dropbox is still bringing the hand-off over: say it again in a minute."]

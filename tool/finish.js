@@ -1353,9 +1353,12 @@ function respellHeldReels({ folder, prior, onFile, before, now, standing }) {
     - { why }: why it was not written, in plain words, with "Nothing was written." or "Nothing was changed.". When files it had
       put in could not be put back as they were, it says which and to tell Jason.
     - { coming: [path…] }: files, as paths from the episode's folder, that Dropbox has to bring over first (whatIs says what each is).
-    - { ok: true, revision, handoff, left, same, shown, kept }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
+    - { ok: true, revision, handoff, left, same, shown, kept, drawn }: written, as revision `revision`, at `handoff` (a path from the folder); `left`
       says the suggestions that were left out; `same` is true when the hand-off came out as it was and only the record was written; `kept`
-      names the Reels whose captions keep the old spelling (respellHeldReels).
+      names the Reels whose captions keep the old spelling (respellHeldReels); `drawn` the other Reels the spelling concerned (those it
+      tried, or whose spelling it took back or changed), in the order of their numbers: their captions in the hand-off are as spelled, but
+      captions drawn into their pictures by HyperFrames are not, for a spelling is not pushed into a project (architecture 4.8), and edit.js
+      says so of them.
     The Reels the hand-off holds (finish "<episode>" reels) are spelled with the record's spellings too, from what is kept of each in final/,
     their files put in by the same rule before the hand-off, and put back as they were with the others (respellHeldReels, plan PR 9, the
     review's I1); `main` is made from the import's captions as before. A hand-off that holds Reels and is gone or cannot be read is not made
@@ -1528,7 +1531,9 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
       // The hand-off is in final/ all the same.
     }
   }
-  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same, shown, kept: reelsNow.kept };
+  // The Reels the spelling concerned whose captions it reached: a Reel told by `kept` is told in keepOldWords' words, and none is told twice.
+  const drawn = [...reelsNow.done.keys()].filter((n) => !reelsNow.kept.includes(n)).sort((x, y) => x - y);
+  return { ok: true, revision: same ? prior.revision : target.revision, handoff: handoffRel, left, same, shown, kept: reelsNow.kept, drawn };
 }
 
 // --- A client or group session's own hand-off (spec 2026-10-22, sections 3 and 8) ---

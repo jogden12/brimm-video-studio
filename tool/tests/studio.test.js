@@ -218,10 +218,25 @@ describe("her folder's settings", () => {
     assert.equal(rowOf('| "Hand it off" / "Finish the episode" |').length, 1);
     assert.doesNotMatch(rowOf('| "Hand it off" / "Finish the episode" |')[0], /reels/);
     // A spelling reaches the Reels of such a video too; when a Reel's captions keep the old spelling, the way back is a fresh export from
-    // HyperFrames, not Final Cut (the review's I1).
+    // HyperFrames, not Final Cut (the review's I1): `spell` says so in its own words (finish-reels.js keepOldWords), and the skill's row
+    // passes on what it says, a Reel's captions among the things (the next test).
     const [spell, ...others] = rowOf('| "It\'s Hormozi, not Hormozy" |');
     assert.deepEqual(others, []);
-    assert.ok(spell.includes('if it says a Reel\'s captions keep the old spelling, tell her to export that Reel again from HyperFrames and say "Hand off the Reels"'), spell);
+    assert.ok(spell.includes("a Reel's captions"), spell);
+  });
+  it("have the skill pass on what spell says keeps the old spelling after a finish, in plain words, and name no program of its own (2 November 2026)", () => {
+    // `spell` says part by part what still keeps the old spelling and what changes it: a part exported again from HyperFrames and handed off,
+    // a part shown in Final Cut, Shared and finished again, a finished video's Reel handed off with "hand off the Reels". The skill used to say
+    // Final Cut's way of every one, which is wrong for a part made in HyperFrames. Its two files say it in one row, word for word.
+    const [strict, open] = ["SKILL.md", "SKILL-open.md"].map((name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8"));
+    const rowsOf = (text) => text.split("\n").filter((line) => line.startsWith('| "It\'s Hormozi, not Hormozy" |'));
+    for (const text of [strict, open]) {
+      const [row, ...others] = rowsOf(text);
+      assert.deepEqual(others, []);
+      assert.ok(row.includes("After a finish it may say the hand-off was made again: tell her to drop it on the BRIMM Ops page again; if it says captions on screen, a Reel's captions or the final transcripts keep the old spelling, tell her what it says to do, in plain words |"), row);
+      assert.doesNotMatch(row, /Final Cut|Shared|HyperFrames|Hand off the Reels/);
+    }
+    assert.deepEqual(rowsOf(open), rowsOf(strict));
   });
   it("have the skill run only commands edit.js has, and say the ones it has not yet are not ready", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];

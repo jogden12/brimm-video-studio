@@ -56,12 +56,18 @@ export function retitledReels(held, recordReels) {
     return title !== "" && title !== reel.title;
   }).map((reel) => reel.n);
 }
+/** What she does to make a part new that was made from an export of HyperFrames: export it again from there and say the words that hand it
+    off, `handOff` ("hand off the Reels" for the Reels of a finished video, "hand it off" for the parts of a raw video and of an iPhone clip).
+    `count` is how many parts she does it for: "it" for one, "each" for more. keepOldWords says it of a finished video's Reels, and `spell`
+    (edit.js keptWords) of the final transcripts of the parts of a raw video and of an iPhone clip, so that the words are in one place. The
+    captions drawn into a part's picture are told otherwise (edit.js stillWords): the assistant in HyperFrames fixes them first. */
+export const exportAgainWords = (count, handOff) => `you export ${count === 1 ? "it" : "each"} again from HyperFrames and say "${handOff}"`;
 /** What she is told of the Reels (`ns`, their numbers) whose captions keep the spelling they were made with after a spelling is made: it
     cannot be put into them, or taken out, from what is kept of them. The way back is a fresh export. */
 export function keepOldWords(ns) {
   const reels = ns.map((n) => `Reel ${n}'s`);
   const said = reels.length < 2 ? reels.join("") : `${reels.slice(0, -1).join(", ")} and ${reels[reels.length - 1]}`;
-  return `${said} captions keep the old spelling until you export ${ns.length === 1 ? "it" : "each"} again from HyperFrames and say "hand off the Reels".`;
+  return `${said} captions keep the old spelling until ${exportAgainWords(ns.length, "hand off the Reels")}.`;
 }
 /** What she is asked to say when everything is found and nothing is left to ask. */
 export const START = 'Say "yes, hand off the Reels" to start.';
