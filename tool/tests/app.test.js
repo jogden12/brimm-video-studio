@@ -254,13 +254,33 @@ describe("app: opening an episode in HyperFrames", () => {
       { n: 2, words: "says Sally.", kind: "graphic", show: "A card with her name.", seconds: 4, style: null, phrase: "p2", at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }
     ]);
   });
-  it("gives the main project a file with no cues when the plan holds none (Claude has not read it), and a short video's project none whatever the plan holds", async (c) => {
+  it("gives the main project a file with no cues when the plan holds none (Claude has not read it), for a short video as for a raw one", async (c) => {
     const none = episode(c);
     assert.equal(await run(none), 0);
     assert.deepEqual(JSON.parse(readFileSync(join(none.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
-    const short = episode(c, { record: { kind: "short video" }, plan: { ...PLAN, claude: { graphicCues: [{ n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" }] } } });
-    assert.equal(await run(short), 0);
-    assert.deepEqual(JSON.parse(readFileSync(join(short.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
+    const clip = episode(c, { record: { kind: "short video" } });
+    assert.equal(await run(clip), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
+  });
+  it("gives a short video's main project the graphic cues its reading put into its cut plan, placed on the words of its transcript as a raw video's are (PR H2)", async (c) => {
+    const cues = [
+      { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" },
+      { n: 2, words: "the moon", kind: "graphic", show: "The moon.", seconds: 4, style: null, phrase: "p2" }
+    ];
+    const plan = { ...PLAN, claude: { decisions: [], graphicCues: cues, ignored: [], clips: [] } };
+    const clip = episode(c, { record: { kind: "short video" }, plan });
+    assert.equal(await run(clip), 0);
+    const transcript = JSON.parse(readFileSync(join(clip.project, "transcript.json"), "utf8"));
+    const made = JSON.parse(readFileSync(join(clip.project, "brimm", "graphic-cues.json"), "utf8"));
+    assert.deepEqual(made, { version: 1, clock: "recording", cues: [{ ...cues[0], at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }, { ...cues[1], at: null }] });
+    // The same cues in a raw video's project are placed the same.
+    const raw = episode(c, { plan });
+    assert.equal(await run(raw), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(raw.project, "brimm", "graphic-cues.json"), "utf8")), made);
+    // Its notes still have the clip's one line in place of the Reels', and the rule for the cues it offers.
+    const notes = readFileSync(join(clip.project, "CLAUDE.md"), "utf8");
+    assert.match(notes, /- \*\*Graphic cues\.\*\* Studio's suggested graphics are in `brimm\/graphic-cues\.json`/);
+    assert.match(notes, /- \*\*No new projects\.\*\* Never make a Reel/);
   });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);

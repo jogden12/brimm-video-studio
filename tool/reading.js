@@ -8,7 +8,9 @@
 //   and transcript, Claude's notes, the Reel suggestions and the spellings as offers; and the rough cut rendered on this Mac, by
 //   today's ffmpeg, as version 0 of the main video, from the timeline kept as edit/main.v0.fcpxml, and opened in QuickTime
 //   Player. It replaces files the import's late check looks at, so it waits first while that check still holds the video.
-// - An iPhone clip: the spellings as offers, and one line on what the clip is.
+// - An iPhone clip: the spellings as offers, one line on what the clip is, and its graphic cues (three at most), which go into its
+//   cut plan as `claude.graphicCues`, put in by the rule with the record. Its plan is set aside in history/ first, as a raw video's
+//   is, and it waits for the import's late check as a raw reading does, since it replaces a file that check looks at.
 // - A client or group session, once she has asked for its teachings (`teachings`, edit.js) and while this Mac's training gate is
 //   on: every speaker of the meeting's own transcript but her is replaced before the call, the reply is read for principles,
 //   recurring principles and Reel ideas, every field that holds a name brimm-video can see is taken out (sessions.js), and what
@@ -20,14 +22,13 @@
 // name the episode by its name and id, and never quote Claude's reply or the transcript.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { requestFor, readReading } from "./readings.js";
+import { requestFor, readReading, reelCuesRequest, reelPhraseLines, readReelCues } from "./readings.js";
 import { applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
 import { keptSpans, roughRate, roughCaptions, planText, probeArgs, factsOf, streamsOf } from "./cuts.js";
 import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
-import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
-import { commitOf, thisCheckout } from "./filing.js";
+import { readEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { timelineFor } from "./timeline.js";
@@ -35,7 +36,7 @@ import { episodeWork, runsFolder, readSettings } from "./settings.js";
 import { fileSafe, shortId, timelineFile } from "./names.js";
 import { askOnce, roughCut, intoEpisode, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
 import { noProgress } from "./progress.js";
-import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
+import { isWhole, readThrough, LATE_CHECK_MS } from "./dropbox.js";
 import { lastLine } from "./run.js";
 import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
@@ -287,9 +288,10 @@ export async function readEpisodeNow(ctx, found, deps) {
   const stem = basename(video, extname(video));
 
   // A reading that replaces a file the import's late check looks at waits while that check is still to come, and asks nothing
-  // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), and a finished one when
-  // the import put in a reels.json or suggestions (as the full import does).
-  const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
+  // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), an iPhone clip's always
+  // (the plan, which now holds its graphic cues), and a finished one when the import put in a reels.json or suggestions (as the
+  // full import does).
+  const replaces = kind === "raw" || kind === "short video" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
   if (replaces) {
     let waited = 0;
     for (;;) {
@@ -389,6 +391,46 @@ export async function readEpisodeNow(ctx, found, deps) {
   }
 }
 
+/** How long Claude may take over a Reel's cues: three minutes. The run that makes the Reel's video holds the working copy's lock for as
+    long as it works, so that one that hangs would hold every video of the episode for good (workcopy.js REEL_FACES_MS says the same of
+    the face finder). A Reel is at most 90 seconds, and its cues are three at most: on 2026-10-13 a plan of 58 seconds took 19. */
+export const REEL_CUES_MS = 3 * 60 * 1000;
+
+/** Ask Claude for the graphic cues of a Reel of a video her editor finished, once, through the reading's own call (unedited.js askOnce:
+    its model, its locked-down arguments, its folder of the run's own for each call, a reply read as data) with the request for a Reel's
+    cues (readings.js reelCuesRequest) over the phrases of the cut plan that the Reel's `stretch` ({ start, end } in seconds of the
+    video) holds, and nothing else of the video. Resolves { cues } (numbered cues, three at most; none when Claude had none to suggest),
+    or { why }, in fixed words that quote nothing Claude or the recording said, when it was not asked or there is no answer to use: it is
+    never thrown from here. This is the run's own work and writes nothing; the run keeps the cues (workcopy.js).
+    It is asked only of a finished video that may be read, by the record as it is on this Mac's disk right now (the run holds the working
+    copy's lock and not the episode's, so she may have answered otherwise meanwhile), and only while this Mac's readings are on (the same
+    setting a reading checks before it asks, read again from the disk): a session, a video not answered and a video of another kind are
+    never read for cues. `ctx` is { home, settings } (edit.js's), `found` { folder }, `work` the run's own folder, and `deps` the run's:
+    { run, tools }. */
+export async function askReelCues({ ctx, found, record, stretch, work }, deps) {
+  try {
+    if ((readSettings(ctx.home).settings || ctx.settings).readings === false) return { why: "readings are off on this Mac" };
+    if (!deps.tools.claude) return { why: "Claude Code is not installed on this Mac" };
+    const stem = basename(record.video.file, extname(record.video.file));
+    const now = readEpisode(found.folder);
+    if (!now.record || now.newer) return { why: "the episode's record cannot be read now" };
+    if (kindOf(now.record) !== "finished" || gated(now.record)) return { why: "it is no longer a finished video that may be read" };
+    let plan;
+    try {
+      plan = JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
+    } catch (e) {
+      return { why: `its cut plan cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message})` };
+    }
+    const lines = reelPhraseLines(isObject(plan) ? plan.phrases : [], stretch);
+    if (!lines.length) return { why: "the cut plan has no phrase in the Reel" };
+    const request = reelCuesRequest(lines, { video: record.video.file, duration: stretch.end - stretch.start });
+    const got = await askOnce(request, join(work, "claude-cues"), deps, { read: readReelCues, nothing: (read) => read.cues.length === 0 && read.problems.length > 0, quote: false, limit: REEL_CUES_MS });
+    return got.read ? { cues: got.read.cues } : { why: got.why };
+  } catch (e) {
+    return { why: `the work stopped (${(e && e.code) || "an error"})` };
+  }
+}
+
 /** What a reading writes of what Claude read (`read`), by the rule, and the result it ends with: see readEpisodeNow. */
 async function written(ctx, found, deps, { kind, record, plan, facts, read, at, account, work, named, name, stem, log, now }) {
   const home = ctx.home;
@@ -426,18 +468,30 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     candidates = number(stretched.items).map((n) => n.candidate);
   }
 
-  if (kind === "raw") {
-    // The import's plan, the rules' alone, and its cut log are set aside in history/ by the rule, put in before the reading
-    // replaces them, so that a raw reading made again can start from them.
-    // A rules' plan that `kind … --again` put back from history/ is kept there already, whole: it is not set aside twice.
+  /** The import's plan, the rules' alone, and its cut log (`endings`: the ones the reading replaces) set aside in history/ by the rule,
+      put in before the reading replaces them, so that a video read again can start from them. A rules' plan that `kind … --again` put
+      back from history/ is kept there already, whole: it is not set aside twice. A plan that holds a block of Claude's is not the
+      rules' alone: it was set aside when it was read. */
+  const keepRulesPlan = (endings) => {
     const rules = plan.claude ? null : rulesPlanKept(folder, stem);
-    if (!plan.claude && !(rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) {
-      const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
-      for (const ending of [".cut-plan.json", ".cut-plan.txt"]) {
-        const at_ = join(folder, `${stem}${ending}`);
-        if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
-      }
+    if (plan.claude || (rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) return;
+    const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
+    for (const ending of endings) {
+      const at_ = join(folder, `${stem}${ending}`);
+      if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
     }
+  };
+
+  if (kind === "short video") {
+    // An iPhone clip's cut plan keeps the graphic cues Claude read of it (PR H2), in a block of Claude's as a raw video's plan does, and
+    // its main project places them on its words (graphic-cues.js). Nothing else of the plan changes: Claude decided no cut and picked
+    // no clip. The plan is put in last of the files, as the import writes it last.
+    keepRulesPlan([".cut-plan.json"]);
+    planLast = JSON.stringify({ ...plan, claude: { decisions: [], graphicCues: read.graphicCues, ignored: unused, clips: [] } }, null, 2) + "\n";
+  }
+
+  if (kind === "raw") {
+    keepRulesPlan([".cut-plan.json", ".cut-plan.txt"]);
     // The plan changed by Claude's decisions with the pauses the import kept (pausesOfPlan), so a cut falls where the rules'
     // cuts fall, and its suggestions taken from the plan as it then is.
     const pauses = pausesOfPlan(plan);
@@ -520,26 +574,9 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     if (deps.early) deps.early({ ok: okNow(), made, failed: [...failed], next: saidNext });
   };
   const file = record.video.file;
-  // An iPhone clip's reading changes the record alone: it is written by the rule, as a command that writes only the record writes
-  // it, on the record the call was made from.
-  if (!madeAt.length) {
-    try {
-      const writer = { commit: deps.commit || commitOf(thisCheckout()), on: ctx.machine };
-      const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
-      writeEpisode(folder, change(record), { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home });
-    } catch (e) {
-      const why = e.code === "CHANGED" ? "this episode changed while Claude read it" : String(e.message).replace(/\.$/, "");
-      return { ok: false, made: [], failed: [...failed, `Nothing was written: ${why}.`], next: AGAIN };
-    }
-    try {
-      (deps.notify || (() => {}))(noticeOf(name));
-    } catch (e) {
-      // A notice is a courtesy: the result says the same.
-    }
-    log(`${named}: read.`);
-    return { ok: true, made, failed, next: saidNext };
-  }
-  // The rule's own lines name the video's file first: the reading names the episode by its name and id.
+  // Every kind's reading puts files in with the record, by the rule: an iPhone clip's is its cut plan, with its graphic cues, the
+  // record written last on the record the call was made from. The rule's own lines name the video's file first: the reading names
+  // the episode by its name and id.
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
   const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);
