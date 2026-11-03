@@ -1252,6 +1252,19 @@ describe("a video whose cut plan Claude is asked to read", () => {
     assert.deepEqual(JSON.parse(t.read("talk.cut-plan.json")).claude.ignored, t.read("talk.edit-notes.txt").split("\n").slice(-4, -1));
     t.done();
   });
+  it("reads a reply that has graphic cues and nothing else, asked once, and does not take it for a reply with nothing in it (PR H1)", async () => {
+    const t = setup({ claude: [answers({ graphicCues: REPLY.graphicCues })] });
+    const r = await uneditedFile(t.video("talk.mov"), t.deps);
+    assert.deepEqual([r.ok, r.message], [true, ""]);
+    assert.equal(t.asks.length, 1);
+    const plan = JSON.parse(t.read("talk.cut-plan.json"));
+    // The rules' plan, read by Claude: it decided nothing, and the cues are in it, with what its reply lacked said in plain words.
+    assert.equal(plan.by, "rules");
+    assert.deepEqual(plan.claude.graphicCues.map((c) => [c.n, c.words, c.phrase]), [[1, "know your costs", "p7"]]);
+    assert.deepEqual(plan.claude.ignored, ['Its reply has no "decisions".', 'Its reply has no "notes".', 'Its reply has no "clips".']);
+    assert.match(t.read("talk.edit-notes.txt"), /Its ideas for graphics\n0:13  "know your costs"  \|  /);
+    t.done();
+  });
   it("reads Claude's reply out of the words or the code fence around it", async () => {
     const t = setup({ claude: [answers("Here is what I found.\n\n```json\n" + JSON.stringify(REPLY, null, 2) + "\n```\n")] });
     await uneditedFile(t.video("talk.mov"), t.deps);

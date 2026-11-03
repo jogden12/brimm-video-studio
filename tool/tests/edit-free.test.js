@@ -218,7 +218,7 @@ describe("free: an episode HyperFrames was opened on", () => {
     for (const [rel, text] of Object.entries(after)) assert.equal(before[rel], text, rel);
     // Every file the writer made for the project but its video is still there: the whole file list, but for that one.
     assert.ok(Object.keys(after).filter((rel) => rel.startsWith(`${w.project.name}/`)).length >= 15);
-    for (const stays of ["index.html", "meta.json", "transcript.json", "CLAUDE.md", "AGENTS.md", "brimm/facts.json", "brimm/cut-suggestions.json", ".claude/settings.json", "vendor/gsap.min.js", "compositions/title.html", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json", "node_modules/.bin/hyperframes"]) assert.ok(`${w.project.name}/${stays}` in after, stays);
+    for (const stays of ["index.html", "meta.json", "transcript.json", "CLAUDE.md", "AGENTS.md", "brimm/facts.json", "brimm/cut-suggestions.json", "brimm/graphic-cues.json", ".claude/settings.json", "vendor/gsap.min.js", "compositions/title.html", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json", "node_modules/.bin/hyperframes"]) assert.ok(`${w.project.name}/${stays}` in after, stays);
     // The exports, the episode in Dropbox and its record stay as they were.
     assert.deepEqual([treeOf(w.downloads), listAll(w.found.folder), reread(w.found)], around);
     assert.equal(readFileSync(w.exported, "utf8"), "an export in Downloads");

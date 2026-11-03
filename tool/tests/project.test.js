@@ -466,11 +466,14 @@ describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jaso
         assert.doesNotMatch(notes, /if its picture is wide|make the composition upright|crop it on the speaker\. `brimm|It is exported upright/);
       }
     });
-    it("keep the rest of the Reel's rules, in their order, and the main project's and a clip's rules as they were", () => {
+    it("keep the rest of the Reel's rules, in their order, and the main project's with the graphic cues after Cutting, and a clip's rules as they were", () => {
       const reelLabels = ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "Reels.", "This Reel.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
       assert.deepEqual(labels(rulesOf(projectFiles(reel({ faces: seen([0.25]) })))), reelLabels);
-      assert.deepEqual(labels(rulesOf(projectFiles(main()))), reelLabels.filter((label) => label !== "This Reel."));
-      assert.ok(!labels(rulesOf(projectFiles(clip()))).includes("This Reel."));
+      // The main project's rule for graphic cues stands right after Cutting, and a Reel's has none yet.
+      const mainLabels = ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
+      assert.deepEqual(labels(rulesOf(projectFiles(main()))), mainLabels);
+      assert.deepEqual(labels(rulesOf(projectFiles(main({ short: true })))), mainLabels.map((label) => (label === "Reels." ? "No new projects." : label)));
+      assert.ok(!labels(rulesOf(projectFiles(clip()))).includes("This Reel.") && !labels(rulesOf(projectFiles(clip()))).includes("Graphic cues."));
       // The rule that a Reel is made by Studio only, the captions' clear areas and the way out are the lines they were.
       const rules = rulesOf(projectFiles(reel({ faces: seen([0.25]) })));
       assert.match(rules, /\*\*Reels\.\*\* Never make a Reel as a new project yourself/);
@@ -596,6 +599,117 @@ describe("what the app is given to start from (5.8)", () => {
     assert.ok(!projectFiles(reel()).has("brimm/reel-suggestions.json"));
     assert.ok(!projectFiles(clip()).has("brimm/reel-suggestions.json"));
   });
+
+  describe("brimm/graphic-cues.json (PR H1)", () => {
+    const CUE = { n: 1, words: "says Hormozy", kind: "words", show: "The name on screen.", seconds: 3, style: null, phrase: "p2" };
+    const cuesOf = (files) => json(files, "brimm/graphic-cues.json");
+    /** The made-up recording where "too many SKUs" is said twice, the first time in a retake the plan cuts, with the plan's phrases. */
+    const SKUS = (() => {
+      const words = ["so", "we", "have", "too", "many", "SKUs", "here", "uh", "too", "many", "SKUs", "there", "today"].map((w, i) => ({ w, start: i, end: i + 0.8 }));
+      return {
+        words,
+        plan: {
+          by: "rules",
+          phrases: [
+            { id: "p1", start: 0, end: 2.8, text: "so we have", words: words.slice(0, 3), keep: true, kind: "keep", why: "" },
+            { id: "p2", start: 3, end: 7.8, text: "too many SKUs here uh", words: words.slice(3, 8), keep: false, kind: "retake", why: "said again at 0:08, the later one is kept" },
+            { id: "p3", start: 8, end: 12.8, text: "too many SKUs there today", words: words.slice(8), keep: true, kind: "keep", why: "" }
+          ]
+        }
+      };
+    })();
+    it("has each cue placed on the transcript's own words, by their ids, with their times, and the recording's clock", () => {
+      const files = projectFiles(main({ graphicCues: [CUE] }));
+      const transcript = json(files, "transcript.json");
+      // "says Hormozy" is spelled as the transcript spells it, "says Hormozi", and found there: the second and third words.
+      assert.deepEqual(transcript.slice(1, 3).map((w) => [w.id, w.text]), [["w1", "says"], ["w2", "Hormozi,"]]);
+      assert.deepEqual(cuesOf(files), { version: 1, clock: "recording", cues: [{ ...CUE, at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }] });
+      assert.deepEqual(Object.keys(cuesOf(files)), ["version", "clock", "cues"]);
+      const ids = new Set(transcript.map((w) => w.id));
+      assert.ok(cuesOf(files).cues.every((c) => ids.has(c.at.from) && ids.has(c.at.to)));
+      assert.ok(files.get("brimm/graphic-cues.json").endsWith("}\n"));
+    });
+    it("has the same file as the placing rule makes of the cues, written as the other files of brimm/ are", () => {
+      const files = projectFiles(main({ graphicCues: [CUE] }));
+      assert.equal(files.get("brimm/graphic-cues.json"), `${JSON.stringify(cuesOf(files), null, 2)}\n`);
+    });
+    it("has a cue whose words are not found with no place, and still places the cues after it", () => {
+      const lost = { ...CUE, n: 1, words: "the moon landing", phrase: "p2" };
+      const found = { ...CUE, n: 2, words: "a skill", phrase: "p2" };
+      const cues = cuesOf(projectFiles(main({ graphicCues: [lost, found] }))).cues;
+      assert.deepEqual(cues.map((c) => [c.n, c.at && [c.at.from, c.at.to]]), [[1, null], [2, ["w4", "w5"]]]);
+    });
+    it("is empty of cues for a main project given none, and for a short video whatever it is given", () => {
+      for (const given of [undefined, [], "none", null]) assert.deepEqual(cuesOf(projectFiles(main({ graphicCues: given }))), { version: 1, clock: "recording", cues: [] }, String(given));
+      assert.deepEqual(cuesOf(projectFiles(main({ short: true, graphicCues: [CUE] }))), { version: 1, clock: "recording", cues: [] });
+    });
+    it("spells the words of a cue as the transcript's are spelled: the company's name first, then the episode's spellings, so the cue finds its words", () => {
+      const words = [{ w: "learn", start: 0, end: 0.5 }, { w: "the", start: 0.5, end: 0.7 }, { w: "brim", start: 0.7, end: 1.1 }, { w: "method,", start: 1.1, end: 1.6 }, { w: "Hormozy", start: 1.7, end: 2.4 }];
+      const plan = { by: "rules", phrases: [{ id: "p1", start: 0, end: 2.4, text: "learn the brim method, Hormozy", words, keep: true, kind: "keep", why: "" }] };
+      const cue = (n, said) => ({ n, words: said, kind: "words", show: "A card.", seconds: 3, style: null, phrase: "p1" });
+      const files = projectFiles(main({ words, plan, graphicCues: [cue(1, "brim method"), cue(2, "The BRIMM method"), cue(3, "method Hormozy")] }));
+      assert.deepEqual(json(files, "transcript.json").map((w) => w.text), ["learn", "the", "BRIMM", "method,", "Hormozi"]);
+      // Two of the three are of two tokens, which need both: they are found only because "brim" is spelled "BRIMM" like the transcript.
+      assert.deepEqual(cuesOf(files).cues.map((c) => [c.at.from, c.at.to]), [["w2", "w3"], ["w1", "w3"], ["w3", "w4"]]);
+    });
+    it("lands a cue on the take that is kept when its words are said twice in a retake the plan cuts, whether it names the kept take's phrase, a phrase the plan has not, or none", () => {
+      const cue = (phrase) => ({ n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null, ...(phrase ? { phrase } : {}) });
+      for (const phrase of ["p3", "p9", undefined]) {
+        const [placed] = cuesOf(projectFiles(main({ words: SKUS.words, plan: SKUS.plan, graphicCues: [cue(phrase)] }))).cues;
+        assert.deepEqual([placed.at.from, placed.at.to], ["w8", "w10"], String(phrase));
+      }
+    });
+    it("lands a cue that names the retake's phrase, which is cut, in that phrase, as the rule for a cue's own phrase says", () => {
+      // The cue is written for the phrase it names, and that is where it is placed first. (A cue is asked for a kept phrase.)
+      const [placed] = cuesOf(projectFiles(main({ words: SKUS.words, plan: SKUS.plan, graphicCues: [{ n: 1, words: "too many SKUs", kind: "graphic", show: "A stack.", seconds: 4, style: null, phrase: "p2" }] }))).cues;
+      assert.deepEqual([placed.at.from, placed.at.to], ["w3", "w5"]);
+    });
+    it("goes by a cue's place in the order when its words are said twice: the second cue with the same words is on the second time", () => {
+      const cue = (n) => ({ n, words: "too many SKUs", kind: "graphic", show: "A stack.", seconds: 4, style: null });
+      const noPlan = cuesOf(projectFiles(main({ words: SKUS.words, plan: undefined, graphicCues: [cue(1), cue(2)] }))).cues;
+      assert.deepEqual(noPlan.map((c) => c.at.from), ["w3", "w8"]);
+    });
+    it("is a main project's only: not a Reel's and not a session clip's, whatever they are given", () => {
+      assert.ok(!projectFiles(reel({ graphicCues: [CUE] })).has("brimm/graphic-cues.json"));
+      assert.ok(!projectFiles(clip({ graphicCues: [CUE] })).has("brimm/graphic-cues.json"));
+      assert.ok(!("brimm/graphic-cues.json" in json(projectFiles(reel()), "brimm/facts.json").files));
+      assert.ok(!("brimm/graphic-cues.json" in json(projectFiles(clip()), "brimm/facts.json").files));
+    });
+  });
+});
+
+describe("the notes and facts of a main project, on its graphic cues (PR H1)", () => {
+  const rulesOf = (files) => {
+    const notes = files.get("CLAUDE.md");
+    return notes.slice(notes.indexOf("# The BRIMM: rules for this project"), notes.indexOf("\n# ", notes.indexOf("# The BRIMM: rules for this project") + 1));
+  };
+  const RULE = "- **Graphic cues.** Studio's suggested graphics are in `brimm/graphic-cues.json`, each tied to the words it goes with: word ids and times on the recording's clock, so add the recording's `data-start` if it has moved. After the cuts, offer them to her, one at a time or all together, and build only the ones she takes: each short (its `seconds`), in the brand, with things and words and never people. A cue with no `at` was not found in her words: tell her, and place it only where she says. Never add a graphic she has not taken.";
+  const ABOUT_FILE = "the graphics Studio suggests, each on the words it goes with, by word ids";
+  it("have the rule for graphic cues, as it is written, right after the rule for cutting, in CLAUDE.md and AGENTS.md alike", () => {
+    for (const files of [projectFiles(main()), projectFiles(main({ short: true }))]) {
+      const lines = rulesOf(files).split("\n");
+      assert.equal(lines.filter((line) => line.startsWith("- **Graphic cues.**")).length, 1);
+      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Cutting.**")) + 1], RULE);
+      assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+    }
+  });
+  it("name a graphic as something shown, in the brand, and never a person, and build only what she takes", () => {
+    assert.match(RULE, /build only the ones she takes/);
+    assert.match(RULE, /with things and words and never people/);
+    assert.match(RULE, /Never add a graphic she has not taken\./);
+    assert.ok(rulesOf(projectFiles(main())).includes(RULE));
+  });
+  it("have no such rule in a Reel's project, which has none yet, nor in a session clip's", () => {
+    assert.doesNotMatch(projectFiles(reel()).get("CLAUDE.md"), /Graphic cues|graphic-cues/);
+    assert.doesNotMatch(projectFiles(clip()).get("CLAUDE.md"), /Graphic cues|graphic-cues/);
+  });
+  it("say what the file is in the facts and in the notes' list of the project's files, after the cuts' and the Reels'", () => {
+    const files = projectFiles(main());
+    assert.equal(json(files, "brimm/facts.json").files["brimm/graphic-cues.json"], ABOUT_FILE);
+    assert.ok(files.get("CLAUDE.md").includes(`  - \`brimm/graphic-cues.json\`: ${ABOUT_FILE}.`));
+    const listed = Object.keys(json(files, "brimm/facts.json").files);
+    assert.deepEqual(listed.filter((path) => path.startsWith("brimm/")).slice(0, 3), ["brimm/cut-suggestions.json", "brimm/reel-suggestions.json", "brimm/graphic-cues.json"]);
+  });
 });
 
 describe("the file set of each kind of project (5.2)", () => {
@@ -603,9 +717,9 @@ describe("the file set of each kind of project (5.2)", () => {
   const logos = ["assets/logos/the-brimm-stacked-navy.svg", "assets/logos/the-brimm-stacked-white.svg"];
   const sorted = (paths) => [...paths].sort();
   it("is exactly this for a main project", () => {
-    assert.deepEqual(sorted(projectFiles(main()).keys()), sorted([...common, ...logos, "brimm/cut-suggestions.json", "brimm/reel-suggestions.json", "brimm/spellings.json"]));
+    assert.deepEqual(sorted(projectFiles(main()).keys()), sorted([...common, ...logos, "brimm/cut-suggestions.json", "brimm/graphic-cues.json", "brimm/reel-suggestions.json", "brimm/spellings.json"]));
   });
-  it("is the same for a Reel's project, without the cut and Reel suggestions", () => {
+  it("is the same for a Reel's project, without the cut and Reel suggestions and the graphic cues", () => {
     assert.deepEqual(sorted(projectFiles(reel()).keys()), sorted([...common, ...logos, "brimm/spellings.json"]));
   });
   it("has the face track too for a Reel whose video has faces in it, and for no other project", () => {

@@ -112,7 +112,7 @@ function world(c, { names = [KEPT, MAIN, REEL, CLIP, UNLISTED], listed = [KEPT, 
       `.hyperframes/`, its video and its renders; and beside them files that only look like what free takes. */
   const project = (name) => {
     const at = join(work, name);
-    for (const file of ["index.html", "meta.json", "hyperframes.json", "package.json", "transcript.json", "CLAUDE.md", "AGENTS.md", ".claude/settings.json", "brimm/facts.json", "brimm/cut-suggestions.json", "brimm/brand.md", "compositions/title.html", "assets/fonts/Allison-Regular.ttf", "vendor/gsap.min.js", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json"]) put(join(at, file), `${name}: ${file}`);
+    for (const file of ["index.html", "meta.json", "hyperframes.json", "package.json", "transcript.json", "CLAUDE.md", "AGENTS.md", ".claude/settings.json", "brimm/facts.json", "brimm/cut-suggestions.json", "brimm/graphic-cues.json", "brimm/brand.md", "compositions/title.html", "assets/fonts/Allison-Regular.ttf", "vendor/gsap.min.js", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json"]) put(join(at, file), `${name}: ${file}`);
     put(join(at, "media", "recording.mp4"), "v".repeat(2000));
     put(join(at, "renders", "draft.mp4"), "r".repeat(300));
     put(join(at, "renders", "draft_2026-10-28_11-00.meta.json"), META);
@@ -240,7 +240,7 @@ describe("free: what it takes", () => {
     await w.run();
     const after = treeOf(w.work);
     for (const name of [MAIN, KEPT, REEL]) {
-      for (const stays of ["media/recording.mp4.bak", "media/other.mp4", "renders-old/old.mp4", "renders.txt", "index.html", "meta.json", "transcript.json", "brimm/facts.json", "brimm/cut-suggestions.json", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json", "compositions/title.html", "assets/fonts/Allison-Regular.ttf", "vendor/gsap.min.js", ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "node_modules/.bin/hyperframes"]) {
+      for (const stays of ["media/recording.mp4.bak", "media/other.mp4", "renders-old/old.mp4", "renders.txt", "index.html", "meta.json", "transcript.json", "brimm/facts.json", "brimm/cut-suggestions.json", "brimm/graphic-cues.json", ".hyperframes/app-history.jsonl", ".hyperframes/transcripts/t.json", "compositions/title.html", "assets/fonts/Allison-Regular.ttf", "vendor/gsap.min.js", ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "node_modules/.bin/hyperframes"]) {
         assert.ok(`${name}/${stays}` in after, `${name}/${stays}`);
         assert.equal(after[`${name}/${stays}`], before[`${name}/${stays}`], `${name}/${stays}`);
       }

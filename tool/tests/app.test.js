@@ -143,7 +143,7 @@ const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAU
 /** An episode on this Mac, as `app` finds it once the gate and the claim are past: its folder in Episodes with the raw video, its
     words, its cut plan and its Reel candidates; this Mac's home with the stand-in's answers; and a context that collects what is
     said, what is started and each record written. `copy` makes the working copy first, as the job would. */
-function episode(c, { open = "opened", copy = true, words = true, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {} } = {}) {
+function episode(c, { open = "opened", copy = true, words = true, handover = false, chat = { sessionId: CHAT, held: false }, record: over = {}, plan = PLAN } = {}) {
   const s = standIn(c, { open });
   const folder = join(s.home, "Dropbox", "BRIMM Video", "Episodes", FOLDER);
   const raw = join(folder, "Talk.mov");
@@ -153,7 +153,7 @@ function episode(c, { open = "opened", copy = true, words = true, handover = fal
   };
   write(raw, "the raw video's bytes");
   if (words) write(join(folder, "Talk.words.json"), JSON.stringify(WORDS));
-  write(join(folder, "Talk.cut-plan.json"), JSON.stringify(PLAN));
+  write(join(folder, "Talk.cut-plan.json"), JSON.stringify(plan));
   write(join(folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 1, candidates: [] }));
   const stat = statSync(raw);
   const paths = workCopyPaths(s.home, FOLDER, workCopyKey({ bytes: stat.size, mtimeMs: stat.mtimeMs }));
@@ -227,6 +227,40 @@ describe("app: opening an episode in HyperFrames", () => {
     const rawNotes = readFileSync(join(raw.project, "CLAUDE.md"), "utf8");
     assert.match(rawNotes, /tell her to say "Open Reel 2 in HyperFrames" in her Claude chat/);
     assert.doesNotMatch(rawNotes, /No new projects/);
+  });
+  it("gives the main project the graphic cues of the cut plan, each placed on the words of the project's transcript, by their ids (PR H1)", async (c) => {
+    const cues = [
+      { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" },
+      { n: 2, words: "the moon", kind: "graphic", show: "The moon.", seconds: 4, style: null, phrase: "p2" }
+    ];
+    const e = episode(c, { plan: { ...PLAN, claude: { graphicCues: cues } } });
+    assert.equal(await run(e), 0);
+    const transcript = JSON.parse(readFileSync(join(e.project, "transcript.json"), "utf8"));
+    const made = JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8"));
+    // "says Sally" is spelled as the words are, "says Sallie", and found at the second and third words; "the moon" is not said.
+    assert.deepEqual(made, { version: 1, clock: "recording", cues: [{ ...cues[0], at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }, { ...cues[1], at: null }] });
+    assert.ok(made.cues[0].at.from === transcript[1].id && made.cues[0].at.to === transcript[2].id);
+    assert.match(readFileSync(join(e.project, "CLAUDE.md"), "utf8"), /- \*\*Graphic cues\.\*\* Studio's suggested graphics are in `brimm\/graphic-cues\.json`/);
+    plain(e.said);
+  });
+  it("gives the main project an older plan's ideas for graphics as cues, each on the words of the phrase it sat on", async (c) => {
+    const e = episode(c, { plan: { ...PLAN, claude: { decisions: [], graphics: [{ id: "p2", idea: "A card with her name." }, { id: "p1", idea: "On the cut." }, { id: "p99", idea: "Nowhere." }], ignored: [], clips: [] } } });
+    assert.equal(await run(e), 0);
+    const transcript = JSON.parse(readFileSync(join(e.project, "transcript.json"), "utf8"));
+    const made = JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8"));
+    // In the order of the phrases, the idea on a phrase the plan has not is left out, and each cue goes with its phrase's words.
+    assert.deepEqual(made.cues, [
+      { n: 1, words: "Pricing,", kind: "graphic", show: "On the cut.", seconds: 4, style: null, phrase: "p1", at: { from: "w0", to: "w0", start: transcript[0].start, end: transcript[0].end } },
+      { n: 2, words: "says Sally.", kind: "graphic", show: "A card with her name.", seconds: 4, style: null, phrase: "p2", at: { from: "w1", to: "w2", start: transcript[1].start, end: transcript[2].end } }
+    ]);
+  });
+  it("gives the main project a file with no cues when the plan holds none (Claude has not read it), and a short video's project none whatever the plan holds", async (c) => {
+    const none = episode(c);
+    assert.equal(await run(none), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(none.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
+    const short = episode(c, { record: { kind: "short video" }, plan: { ...PLAN, claude: { graphicCues: [{ n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" }] } } });
+    assert.equal(await run(short), 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(short.project, "brimm", "graphic-cues.json"), "utf8")), { version: 1, clock: "recording", cues: [] });
   });
   it("opens the same project again, and makes no second project or working copy", async (c) => {
     const e = episode(c);

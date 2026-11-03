@@ -6,7 +6,8 @@
 // and to publish. So Studio writes every file of a project itself, after what `init --video` and `transcribe` write (the golden
 // files, tests/fixtures/hyperframes-0.8.208/init/), with BRIMM's own in place of what conflicts:
 //   - the page, HyperFrames' settings, the package and its scripts, with GSAP from the project's own vendor/ folder;
-//   - transcript.json, from the episode's words with its spellings (F5), and Studio's suggestions by the same word ids (5.8);
+//   - transcript.json, from the episode's words with its spellings (F5), and Studio's suggestions by the same word ids (5.8): the
+//     cuts, the Reels, and for the main video the graphic cues, each placed on the words it goes with (graphic-cues.js; PR H1);
 //   - the notes for the agent, CLAUDE.md and AGENTS.md: BRIMM's rules first, then what the project is, then HyperFrames' own
 //     guidance without what the rules forbid (5.4);
 //   - the brand pack (tool/brand/): the brand's rules, Josefin Sans and Allison; and the logos chosen, from the Assets folder.
@@ -34,6 +35,7 @@ import { spelled } from "./final-transcript.js";
 import { COMMANDS, settingsFor } from "./hyperframes.js";
 import { fileSafe, partName, shortId } from "./names.js";
 import { UPRIGHT, shownWidth, speakerPlace, uprightPosition } from "./reframe.js";
+import { graphicCuesJson, keptIndexes, phraseSpans, placeGraphicCues } from "./graphic-cues.js";
 
 /** A file of this tool's own, by its path from this file. */
 const own = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -242,11 +244,18 @@ export function faceTrack(found) {
   };
 }
 
+/** How a project's words are spelled: the show's names, the house's spellings and then the episode's (final-transcript.js spelled).
+    transcript.json is spelled by it word by word, and a graphic cue's words are spelled by it too (projectFiles), so that the
+    words of a cue from an unspelled phrase find the words as the project has them. */
+const speller = (spellings = []) => (text) => spelled(text, [...HOUSE_SPELLINGS, ...(spellings ?? [])]);
+
 /** transcript.json (F5): the list the pinned `transcribe` writes, {text, start, end, id} for each word in order, its ids "w0",
     "w1", …, made from the episode's words (cuts.js wordsOf: {w, start, end}) with the show's names, the house's spellings and the
     episode's (final-transcript.js spelled). A word keeps its punctuation, its times and its id: a spelling changes its text alone. */
-export const transcriptJson = (words, spellings = []) =>
-  (Array.isArray(words) ? words : []).map((word, i) => ({ text: spelled(word.w, [...HOUSE_SPELLINGS, ...(spellings ?? [])]), start: word.start, end: word.end, id: `w${i}` }));
+export const transcriptJson = (words, spellings = []) => {
+  const spell = speller(spellings);
+  return (Array.isArray(words) ? words : []).map((word, i) => ({ text: spell(word.w), start: word.start, end: word.end, id: `w${i}` }));
+};
 
 /** brimm/cut-suggestions.json (5.8): the phrases the cut plan cuts, as the rules decided and Claude changed them, each by the ids
     of its first and last words in transcript.json and those words' times: {n, from, to, start, end, kind, why, by}. The plan's
@@ -399,6 +408,11 @@ function thisReel(crop) {
   return `- **This Reel.** ${made} Keep it upright, 1080 by 1920: it is exported and handed off at that size. \`brimm/face-track.json\`, when it is there, says where the faces are, to move the crop by or to follow the speaker with.`;
 }
 
+/** The main project's rule for the graphic cues Studio suggests (PR H1; design 3 and 4): they are offered to her after the cuts and
+    built only when she takes them, as a suggested cut is. The times in their file are on the recording's clock, which is the
+    project's own until its video has moved (`data-start`). */
+const GRAPHIC_CUES_RULE = "- **Graphic cues.** Studio's suggested graphics are in `brimm/graphic-cues.json`, each tied to the words it goes with: word ids and times on the recording's clock, so add the recording's `data-start` if it has moved. After the cuts, offer them to her, one at a time or all together, and build only the ones she takes: each short (its `seconds`), in the brand, with things and words and never people. A cue with no `at` was not found in her words: tell her, and place it only where she says. Never add a graphic she has not taken.";
+
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
     to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
@@ -417,6 +431,7 @@ function brimmRules(kind, short = false, crop = null) {
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
+    ...(kind === "main" ? [GRAPHIC_CUES_RULE] : []),
     ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
     ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, thisReel(crop)] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
@@ -439,6 +454,7 @@ const ABOUT = {
   "brimm/facts.json": "what this project is, for Studio",
   "brimm/cut-suggestions.json": "the cuts Studio suggests, by word ids",
   "brimm/reel-suggestions.json": "the Reels Studio suggests, by word ids",
+  "brimm/graphic-cues.json": "the graphics Studio suggests, each on the words it goes with, by word ids",
   "brimm/face-track.json": "where the faces are in this Reel, for the upright crop",
   "brimm/spellings.json": "names spelled as she spells them",
   "brimm/brand.md": "The BRIMM's brand: colours, typefaces, logos and how to use them",
@@ -511,8 +527,10 @@ export const settingsText = (kind) => jsonText(settingsFor(kind));
     - for an episode's part, `name` and, for a Reel, `part` ({reel: n}); its `spellings` ([wrong, right] pairs) and `logos`
       (the paths of the logos chosen, in the Assets folder);
     - for the main video, the cut `plan` and the Reel candidates, `reels`, and `number`, which main project this is (projectName),
-      the first when it is not given; and `short`, true when the episode is a short video (an iPhone clip), which has no Reels: its
-      notes say nothing of them (brimmRules);
+      the first when it is not given; `graphicCues`, the cut plan's graphic cues (graphic-cues.js graphicCuesOf, or for a plan made
+      before them graphicCuesOfPlan), which brimm/graphic-cues.json places on the transcript's words; and `short`, true when the
+      episode is a short video (an iPhone clip), which has no Reels: its notes say nothing of them (brimmRules), and its file of
+      graphic cues is empty;
     - for a Reel, its `stretch` of the recording, { start, end } in seconds (a Reel's video is that stretch, cut by workcopy.js, and
       its words are the recording's words in it, on its own clock: reelWords), the cut `plan` of the recording, by whose phrases the
       words are placed as the main video's are, before they are chosen (it may be none: the words are then only moved inside their
@@ -551,6 +569,12 @@ export function projectFiles(input) {
   if (kind === "main") {
     files.set("brimm/cut-suggestions.json", jsonText(cutSuggestions(input.plan, transcript)));
     files.set("brimm/reel-suggestions.json", jsonText(reelSuggestions(input.reels, transcript)));
+    // The graphic cues, each placed on the transcript's own words, by its phrase and outside the plan's suggested cuts where it can
+    // be (graphic-cues.js). The words of a cue are spelled as the transcript's are. A short video's has none until its reading gives
+    // it some (the plan of PR H2): its file is empty.
+    const graphicCues = input.short === true || !Array.isArray(input.graphicCues) ? [] : input.graphicCues;
+    const placedGraphicCues = placeGraphicCues(graphicCues, transcript, { spans: phraseSpans(input.plan?.phrases), kept: keptIndexes(input.plan?.phrases), spell: speller(input.spellings) });
+    files.set("brimm/graphic-cues.json", graphicCuesJson(placedGraphicCues, "recording"));
   }
   if (track) files.set("brimm/face-track.json", jsonText(track));
   if (episode) files.set("brimm/spellings.json", jsonText({ version: 1, spellings: [...HOUSE_SPELLINGS, ...(input.spellings ?? [])].map(([wrong, right]) => ({ wrong, right })) }));

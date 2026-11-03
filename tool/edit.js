@@ -4844,12 +4844,12 @@ function graphicIdeas(read, spellings = []) {
   const outsideReel = (span) => Boolean(read.span) && !(span.end > read.span.from && span.start < read.span.to);
   if (Array.isArray(claude.graphicCues)) {
     const placed = placeGraphicCues(claude.graphicCues, read.words || [], { spans: phraseSpans(phrases), kept: keptIndexes(phrases), spell: (text) => spelled(text, spellings) });
-    return placed.map((cue) => {
-      const idea = { n: cue.n, idea: cue.show, said: cue.words };
-      if (!cue.at) return read.span ? { ...idea, outside: true, at: null } : { ...idea, missing: true, at: null };
-      if (outsideReel(cue.at)) return { ...idea, outside: true, at: null };
-      const on = wordsOnTimeline(read, cue.at);
-      return on.at === null ? { ...idea, ...on } : { ...idea, ...on, for: cue.seconds };
+    return placed.map((g) => {
+      const idea = { n: g.n, idea: g.show, said: g.words };
+      if (!g.at) return read.span ? { ...idea, outside: true, at: null } : { ...idea, missing: true, at: null };
+      if (outsideReel(g.at)) return { ...idea, outside: true, at: null };
+      const on = wordsOnTimeline(read, g.at);
+      return on.at === null ? { ...idea, ...on } : { ...idea, ...on, for: g.seconds };
     });
   }
   const byId = new Map(phrases.map((p) => [p.id, p]));

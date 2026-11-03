@@ -188,10 +188,10 @@ export function readNotes(reply) {
   else if (!Array.isArray(data.graphicCues)) read.problems.push('"graphicCues" in its reply is not a list, so nothing was read from it.');
   else {
     // Only the five things asked for are read of a cue, and one with no id is no cue: the id is the phrase it was written for.
-    const given = data.graphicCues.map((c) => (c && typeof c === "object" && text(c.id) ? { phrase: text(c.id), words: c.words, kind: c.kind, show: c.show, seconds: c.seconds } : null));
-    const cues = graphicCuesOf(given, { most: MAX_GRAPHIC_CUES });
-    read.graphicCues = cues.cues;
-    read.problems.push(...cues.problems);
+    const given = data.graphicCues.map((g) => (g && typeof g === "object" && text(g.id) ? { phrase: text(g.id), words: g.words, kind: g.kind, show: g.show, seconds: g.seconds } : null));
+    const made = graphicCuesOf(given, { most: MAX_GRAPHIC_CUES });
+    read.graphicCues = made.cues;
+    read.problems.push(...made.problems);
   }
   entries("clips", (c, n) => (text(c.from) && text(c.to) ? { n, from: text(c.from), to: text(c.to), hook: text(c.hook), why: text(c.why) } : null), (n) => `Clip ${n} could not be read: it needs a "from" and a "to", each the id of a phrase.`);
   // The title is the one thing a reply may leave out without a word said: a reply from before it was asked for is whole.
@@ -441,11 +441,11 @@ export function notesText(read, plan, clips) {
     return change.check ? [line, `   ${change.check}`] : [line];
   });
   const graphics = [];
-  for (const cue of list(read.graphicCues)) {
-    const p = phrases.get(cue.phrase);
-    if (!p) unused.push(`An idea for a graphic names "${oneLine(cue.phrase)}", which is not a phrase of the plan: ${oneLine(cue.show)}`);
-    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(cue.show)}`);
-    else graphics.push(`${stamp(p.start)}  "${oneLine(cue.words)}"  |  ${byTime(oneLine(cue.show), plan.phrases)}`);
+  for (const g of list(read.graphicCues)) {
+    const p = phrases.get(g.phrase);
+    if (!p) unused.push(`An idea for a graphic names "${oneLine(g.phrase)}", which is not a phrase of the plan: ${oneLine(g.show)}`);
+    else if (!p.keep) unused.push(`An idea for a graphic sits on words that are cut, at ${stamp(p.start)}: ${oneLine(g.show)}`);
+    else graphics.push(`${stamp(p.start)}  "${oneLine(g.words)}"  |  ${byTime(oneLine(g.show), plan.phrases)}`);
   }
   const made = list(clips).flatMap((clip) => {
     const seconds = Math.round(clip.length);
