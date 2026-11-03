@@ -577,6 +577,7 @@ if [[ -n "$machine" ]]; then
   fi
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
+  say "  The reference folder, to make in Dropbox:  $root/References"
   say "  On this Mac:  $WORK/From Final Cut"
   say "  Once, in Finder:  Control-click $drop and choose Make available offline, so that a video dropped there from another device is brought down at once"
   say "  This Mac's settings, in $SETTINGS_FILE:"
@@ -891,15 +892,16 @@ fi
 
 # Give the Mac the launch agent: write its file, check it, stop the agent of that name if one is running, and start this one.
 mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-# For one of the two Macs: Episodes and its status files in Dropbox, the marker by the rule for writing into Dropbox, this
-# Mac's settings, its folders for Final Cut's work, and the folder for Claude, ~/BRIMM Video Studio.
+# For one of the two Macs: Episodes and its status files in Dropbox, the reference folder (References: Studio only reads it), the
+# marker by the rule for writing into Dropbox, this Mac's settings, its folders for Final Cut's work, and the folder for Claude,
+# ~/BRIMM Video Studio.
 if [[ -n "$machine" ]]; then
-  mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"
+  mkdir -p "$root/Episodes/.importing" "$root/References" "$WORK/From Final Cut"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
   # It checks the old drop folder once more, and may still refuse: the marker is made, and the settings and the agent are not.
   if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then
     say ""
-    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again."
+    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files, for the reference pictures and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again."
     exit 1
   fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi

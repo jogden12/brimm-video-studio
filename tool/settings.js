@@ -43,6 +43,9 @@ export const settingsFile = (home) => join(home, "Library", "Application Support
 export const dropFolder = (root, machine, folder = "Unedited Video") => join(root, folder, machine);
 /** The folder of episodes, in BRIMM Video. No Mac watches it. */
 export const episodesFolder = (root) => join(root, "Episodes");
+/** The reference folder, in BRIMM Video: screenshots and pictures of post styles that Sallie adds to from any device and names when
+    she wants one followed (references.js; design 2026-11-03, section 7). Studio only reads it, and no Mac watches it. */
+export const referencesFolder = (root) => join(root, "References");
 /** The folder of the small status files that say how far each import has got, in Episodes. */
 export const importingFolder = (root) => join(episodesFolder(root), ".importing");
 /** Where this Mac keeps its work in Final Cut: on its own disk, never in Dropbox. */
@@ -649,6 +652,7 @@ function show(home, say, now) {
   say(`  BRIMM Video:  ${s.root}`);
   say(`  Its drop folder:  ${dropFolder(s.root, s.machine, s.drop)}`);
   say(`  Episodes:  ${episodesFolder(s.root)}`);
+  say(`  References:  ${referencesFolder(s.root)}`);
   say(`  brimm-video, run from:  ${s.checkout}`);
   say(`  Work in Final Cut:  ${workFolder(home)}`);
   say(`  From Final Cut:  ${fromFinalCutFolder(home)}`);

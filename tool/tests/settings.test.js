@@ -834,6 +834,7 @@ describe("node settings.js", () => {
       `  BRIMM Video:  ${ROOT}`,
       `  Its drop folder:  ${ROOT}/Unedited Video/Mac Studio`,
       `  Episodes:  ${ROOT}/Episodes`,
+      `  References:  ${ROOT}/References`,
       `  brimm-video, run from:  ${CHECKOUT}`,
       `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
       `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`
@@ -1151,6 +1152,7 @@ describe("node settings.js set and sessions", () => {
       `  BRIMM Video:  ${ROOT}`,
       `  Its drop folder:  ${ROOT}/Drop/Mac Studio`,
       `  Episodes:  ${ROOT}/Episodes`,
+      `  References:  ${ROOT}/References`,
       `  brimm-video, run from:  ${CHECKOUT}`,
       `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
       `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`,
