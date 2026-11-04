@@ -22,9 +22,9 @@ const NODE = "/opt/homebrew/bin/node";
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
 
 /** The classes of spec 5.5, typed out again here so that a command moved from one class to another fails a test. */
-const AGENT = ["preview", "render", "lint", "check", "validate", "inspect", "keyframes", "snapshot", "info", "compositions", "timeline", "history", "docs", "doctor", "beats", "audio", "media-treatment", "normalize-audio", "grade-compare", "compare", "tts"];
+const AGENT = ["preview", "render", "lint", "check", "validate", "inspect", "keyframes", "snapshot", "info", "compositions", "timeline", "history", "docs", "doctor", "beats", "audio", "media-treatment", "normalize-audio", "grade-compare", "compare"];
 const EDIT = ["open", "catch-up"];
-const DENIED = ["init", "add", "catalog", "capture", "present", "publish", "cloud", "lambda", "cloudrun", "auth", "feedback", "telemetry", "skills", "models", "browser", "upgrade", "benchmark", "clean", "transcribe", "remove-background"];
+const DENIED = ["init", "add", "catalog", "capture", "present", "publish", "cloud", "lambda", "cloudrun", "auth", "feedback", "telemetry", "skills", "models", "browser", "upgrade", "benchmark", "clean", "transcribe", "tts", "remove-background"];
 const classOf = (c) => Object.keys(COMMANDS).filter((name) => COMMANDS[name].class === c).sort();
 /** The variables by which version 0.8.208 takes a HeyGen key or token, in the order it looks (resolveCredential), and then at its own
     file, ~/.heygen/credentials. An empty value counts as unset. A project's settings blank all three, since whether the app hands
@@ -78,9 +78,9 @@ describe("every command of the pinned help is classified", () => {
   it("finds the 43 commands in the help", () => assert.equal(commandsIn(help).length, 43));
   it("leaves none unclassified", () => assert.deepEqual(unclassified(help), []));
   it("reports one that no class names", () => assert.deepEqual(unclassified(`${help}\n  frobnicate         Does a thing\n`), ["frobnicate"]));
-  it("has 21 the agent may run, 2 for edit.js only and 20 denied", () => {
+  it("has 20 the agent may run, 2 for edit.js only and 21 denied", () => {
     const count = (c) => Object.values(COMMANDS).filter((x) => x.class === c).length;
-    assert.deepEqual([count("agent"), count("edit"), count("denied")], [21, 2, 20]);
+    assert.deepEqual([count("agent"), count("edit"), count("denied")], [20, 2, 21]);
   });
   it("puts no command in two classes, and gives each a reason", () => {
     for (const [name, c] of Object.entries(COMMANDS)) assert.ok(["agent", "edit", "denied"].includes(c.class) && c.why, name);
@@ -155,19 +155,22 @@ describe("the deny rules and the project's settings", () => {
   });
   it("denyRules has none for a command the agent may run, and nothing else", () => {
     assert.deepEqual(denyRules(), [...[...DENIED, ...EDIT].flatMap(spellings), "Bash(npm run publish:*)"].sort());
-    assert.equal(denyRules().length, 22 * 3 + 1);
+    assert.equal(denyRules().length, 23 * 3 + 1);
     for (const c of AGENT) assert.ok(!denyRules().some((rule) => rule.includes(` ${c}:`)), c);
   });
-  // Jason, 2026-11-04, after A1: HeyGen's tools are open and a stock voice is fine, so `tts`, the command that writes speech from text,
-  // is the agent's to run. The notes warn before an AI avatar or an AI Sallie (project.js); nothing here blocks them.
-  it("lets the agent run tts, a stock voice, and denies it in no spelling, whatever the kind of project", () => {
-    assert.deepEqual(COMMANDS.tts, { class: "agent", why: "writes speech from text with a local model: a stock voice, which Jason allows (2026-11-04)" });
-    for (const kind of ["main", "clip"]) for (const rule of spellings("tts")) assert.ok(!settingsFor(kind).permissions.deny.includes(rule), `${kind}: ${rule}`);
-    assert.ok(!denyRules().some((rule) => rule.includes(" tts:")));
+  // Jason, 2026-11-04: a stock voice is fine, and it comes from the app's own HeyGen voice tool. `tts` fetches a local voice model the
+  // first time it runs, which is an install, and nothing is installed on a Mac without Jason's yes: so it stays denied.
+  it("keeps tts denied, with its reason, in each of the three spellings, in the settings of every kind of project", () => {
+    assert.deepEqual(COMMANDS.tts, { class: "denied", why: "writes speech with a local voice model, which it fetches the first time: nothing is installed without Jason's yes, and a stock voice comes from the app's own HeyGen voice tool" });
+    assert.equal(spellings("tts").length, 3);
+    for (const rule of spellings("tts")) {
+      assert.ok(denyRules().includes(rule), rule);
+      for (const kind of ["main", "clip"]) assert.ok(settingsFor(kind).permissions.deny.includes(rule), `${kind}: ${rule}`);
+    }
   });
   it("denyRules names the pinned version in the spelling that has one", () => {
     const pinned = denyRules().filter((rule) => rule.includes("--yes"));
-    assert.equal(pinned.length, 22);
+    assert.equal(pinned.length, 23);
     for (const rule of pinned) assert.match(rule, new RegExp(`^Bash\\(npx --yes hyperframes@${PIN.version.replace(/\./g, "\\.")} [a-z-]+:\\*\\)$`));
   });
   it("denyRules are sorted and without repeats, so the settings file is the same every time", () => {

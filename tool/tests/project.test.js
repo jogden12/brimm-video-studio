@@ -470,7 +470,8 @@ describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jaso
       const reelLabels = ["A draft only.", "On this Mac only.", "Sharing.", "AI-generated people.", "Commands never run here.", "The words.", "Cutting.", "Reels.", "This Reel.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
       assert.deepEqual(labels(rulesOf(projectFiles(reel({ faces: seen([0.25]) })))), reelLabels);
       assert.deepEqual(labels(rulesOf(projectFiles(main()))), reelLabels.filter((label) => label !== "This Reel."));
-      assert.ok(!labels(rulesOf(projectFiles(clip()))).includes("This Reel."));
+      // A session clip has no Reels and no spellings, and keeps its old rule about generated people, under its old label.
+      assert.deepEqual(labels(rulesOf(projectFiles(clip()))), ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "The brand.", "Captions.", "Versions.", "When she is done."]);
       // The rule that a Reel is made by Studio only, the captions' clear areas and the way out are the lines they were.
       const rules = rulesOf(projectFiles(reel({ faces: seen([0.25]) })));
       assert.match(rules, /\*\*Reels\.\*\* Never make a Reel as a new project yourself/);
@@ -667,24 +668,33 @@ describe("the notes for the agent (5.4)", () => {
       }
     }
   });
-  // Jason, 2026-11-04, after A1: "I don't want to block ai generated content on either computer." The notes warn, in his words, before an AI
-  // avatar, lip-sync or an AI-generated Sallie, her face or her voice, and block none of them. They are the only guard in the app: the app
-  // starts its agent with `--setting-sources user`, so a project's `.claude/settings.json` has no effect there.
+  // Jason, 2026-11-04, after A1: "I don't want to block ai generated content on either computer." The notes of a main video and of a Reel
+  // warn, in his words, before an AI avatar, lip-sync or an AI-generated Sallie, her face or her voice, and block none of them. They are the
+  // only guard in the app: it starts its agent with `--setting-sources user`, so a project's `.claude/settings.json` has no effect there.
   const AI_PEOPLE = `- **AI-generated people.** HeyGen's tools are open. The BRIMM doesn't use AI avatars, lip-sync, or an AI-generated Sallie, her face or her voice, for now. If she asks for one of these, warn her first: "The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now. Do you still want it?" Go ahead only if she still wants it, and remind her that YouTube needs the video marked as altered or synthetic content. A stock HeyGen voice is fine without the warning, with the same YouTube reminder.`;
-  it("warn before an AI avatar, lip-sync or an AI-generated Sallie, her face or her voice, in the project of every kind, and block none of them", () => {
-    for (const files of [projectFiles(main()), projectFiles(reel()), projectFiles(clip())]) {
+  // A session clip keeps the rule it had: no session clip uses HeyGen's features until HeyGen confirms the training opt-out (CLAUDE.md).
+  const NO_GENERATED_PEOPLE = "- **No generated people.** No HeyGen avatars, HeyGen voices or HeyGen Video 1 clips without Jason's yes. No generated people who could pass as real, and never a generated Sallie, face or voice.";
+  it("warn before an AI avatar, lip-sync or an AI-generated Sallie, her face or her voice, in a main video's notes and a Reel's, and block none of them", () => {
+    for (const files of [projectFiles(main()), projectFiles(reel())]) {
       for (const path of ["CLAUDE.md", "AGENTS.md"]) {
         const text = files.get(path);
         assert.ok(text.split("\n").includes(AI_PEOPLE), path);
+        assert.ok(!text.split("\n").includes(NO_GENERATED_PEOPLE), path);
         assert.doesNotMatch(text, /No generated people|HeyGen Video 1|without Jason's yes|never a generated/i, path);
       }
     }
   });
+  it("keep a session clip's old rule about generated people, and never say that HeyGen's tools are open", () => {
+    for (const path of ["CLAUDE.md", "AGENTS.md"]) {
+      const text = projectFiles(clip()).get(path);
+      assert.ok(text.split("\n").includes(NO_GENERATED_PEOPLE), path);
+      assert.ok(!text.includes(AI_PEOPLE), path);
+      assert.doesNotMatch(text, /HeyGen's tools are open|AI-generated people|AI Sallie/, path);
+    }
+  });
   it("name every command the agent may not run, and send it to transcript.json", () => {
     for (const [name, c] of Object.entries(COMMANDS)) if (c.class !== "agent") assert.ok(rules.includes(`\`${name}\``), name);
-    for (const name of ["skills", "publish", "cloud", "add"]) assert.ok(rules.includes(`\`${name}\``), name);
-    // `tts` is one the agent may run now (Jason, 2026-11-04: a stock voice is fine), so the list does not name it.
-    assert.ok(!rules.includes("`tts`"));
+    for (const name of ["skills", "publish", "cloud", "tts", "add"]) assert.ok(rules.includes(`\`${name}\``), name);
     assert.match(rules, /`transcript\.json`/);
     assert.match(rules, /never transcribe/i);
   });
