@@ -158,6 +158,16 @@ describe("the deny rules and the project's settings", () => {
     assert.equal(denyRules().length, 23 * 3 + 1);
     for (const c of AGENT) assert.ok(!denyRules().some((rule) => rule.includes(` ${c}:`)), c);
   });
+  // Jason, 2026-11-04: a stock voice is fine, and it comes from the app's own HeyGen voice tool. `tts` fetches a local voice model the
+  // first time it runs, which is an install, and nothing is installed on a Mac without Jason's yes: so it stays denied.
+  it("keeps tts denied, with its reason, in each of the three spellings, in the settings of every kind of project", () => {
+    assert.deepEqual(COMMANDS.tts, { class: "denied", why: "writes speech with a local voice model, which it fetches the first time: nothing is installed without Jason's yes, and a stock voice comes from the app's own HeyGen voice tool" });
+    assert.equal(spellings("tts").length, 3);
+    for (const rule of spellings("tts")) {
+      assert.ok(denyRules().includes(rule), rule);
+      for (const kind of ["main", "clip"]) assert.ok(settingsFor(kind).permissions.deny.includes(rule), `${kind}: ${rule}`);
+    }
+  });
   it("denyRules names the pinned version in the spelling that has one", () => {
     const pinned = denyRules().filter((rule) => rule.includes("--yes"));
     assert.equal(pinned.length, 23);
