@@ -467,13 +467,14 @@ describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jaso
       }
     });
     it("keep the rest of the Reel's rules, in their order, and the graphic cues' after Cutting in a main project's and in a Reel's, and a clip's rules as they were", () => {
-      const reelLabels = ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "This Reel.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
+      const reelLabels = ["A draft only.", "On this Mac only.", "Sharing.", "AI-generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "This Reel.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
       assert.deepEqual(labels(rulesOf(projectFiles(reel({ faces: seen([0.25]) })))), reelLabels);
       // The rule for graphic cues stands right after Cutting, in a main project's and in a Reel's, and a clip has none.
-      const mainLabels = ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
+      const mainLabels = ["A draft only.", "On this Mac only.", "Sharing.", "AI-generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
       assert.deepEqual(labels(rulesOf(projectFiles(main()))), mainLabels);
       assert.deepEqual(labels(rulesOf(projectFiles(main({ short: true })))), mainLabels.map((label) => (label === "Reels." ? "No new projects." : label)));
-      assert.ok(!labels(rulesOf(projectFiles(clip()))).includes("This Reel.") && !labels(rulesOf(projectFiles(clip()))).includes("Graphic cues."));
+      // A session clip has no Reels, no spellings and no graphic cues, and keeps its old rule about generated people, under its old label.
+      assert.deepEqual(labels(rulesOf(projectFiles(clip()))), ["A draft only.", "On this Mac only.", "Sharing.", "No generated people.", "Commands never run here.", "The words.", "Cutting.", "The brand.", "Captions.", "Versions.", "When she is done."]);
       // The rule that a Reel is made by Studio only, the captions' clear areas and the way out are the lines they were.
       const rules = rulesOf(projectFiles(reel({ faces: seen([0.25]) })));
       assert.match(rules, /\*\*Reels\.\*\* Never make a Reel as a new project yourself/);
@@ -1063,6 +1064,30 @@ describe("the notes for the agent (5.4)", () => {
         assert.doesNotMatch(text, /--who\b|--label\b/, path);
         assert.ok(text.split("\n").includes("- **Versions.** When asked what has changed, or to go back, use `npx hyperframes history`."), path);
       }
+    }
+  });
+  // Jason, 2026-11-04, after A1: "I don't want to block ai generated content on either computer." The notes of a main video and of a Reel
+  // warn, in his words, before an AI avatar, lip-sync or an AI-generated Sallie, her face or her voice, and block none of them. They are the
+  // only guard in the app: it starts its agent with `--setting-sources user`, so a project's `.claude/settings.json` has no effect there.
+  const AI_PEOPLE = `- **AI-generated people.** HeyGen's tools are open. The BRIMM doesn't use AI avatars, lip-sync, or an AI-generated Sallie, her face or her voice, for now. If she asks for one of these, warn her first: "The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now. Do you still want it?" Go ahead only if she still wants it, and remind her that YouTube needs the video marked as altered or synthetic content. A stock HeyGen voice is fine without the warning, with the same YouTube reminder.`;
+  // A session clip keeps the rule it had: no session clip uses HeyGen's features until HeyGen confirms the training opt-out (CLAUDE.md).
+  const NO_GENERATED_PEOPLE = "- **No generated people.** No HeyGen avatars, HeyGen voices or HeyGen Video 1 clips without Jason's yes. No generated people who could pass as real, and never a generated Sallie, face or voice.";
+  it("warn before an AI avatar, lip-sync or an AI-generated Sallie, her face or her voice, in a main video's notes and a Reel's, and block none of them", () => {
+    for (const files of [projectFiles(main()), projectFiles(reel())]) {
+      for (const path of ["CLAUDE.md", "AGENTS.md"]) {
+        const text = files.get(path);
+        assert.ok(text.split("\n").includes(AI_PEOPLE), path);
+        assert.ok(!text.split("\n").includes(NO_GENERATED_PEOPLE), path);
+        assert.doesNotMatch(text, /No generated people|HeyGen Video 1|without Jason's yes|never a generated/i, path);
+      }
+    }
+  });
+  it("keep a session clip's old rule about generated people, and never say that HeyGen's tools are open", () => {
+    for (const path of ["CLAUDE.md", "AGENTS.md"]) {
+      const text = projectFiles(clip()).get(path);
+      assert.ok(text.split("\n").includes(NO_GENERATED_PEOPLE), path);
+      assert.ok(!text.includes(AI_PEOPLE), path);
+      assert.doesNotMatch(text, /HeyGen's tools are open|AI-generated people|AI Sallie/, path);
     }
   });
   it("name every command the agent may not run, and send it to transcript.json", () => {

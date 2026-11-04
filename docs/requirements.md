@@ -3,7 +3,7 @@
 A living list of what the video editing project should do for Sallie. Add to it and edit it as we go.
 
 - **Source:** Jason's direction of 2026-10-14, below, and the items on video moved here the same day from brimm-operations' requirements (`docs/requirements.md` there, at commit 84a2f61).
-- **Last updated:** 2026-11-02.
+- **Last updated:** 2026-11-04.
 - **Precedence:** as in brimm-operations, Jason's preferences on this page come first. What Sallie says is input to the design. Where the two disagree, this page wins, and the disagreement is noted, not acted on.
 - **Numbering:** the items moved from brimm-operations keep their numbers, so that "L5" means the same thing in both repos.
 
@@ -38,7 +38,7 @@ A MacBook Pro of November 2024, with an M4 chip and 16 GB of memory. It did not 
   - **OpenRouter** stays for pictures only for now.
   - **Typefaces:** Sweet Sans Pro through Adobe Fonts (replaced the same day: see "Fonts come from Adobe Fonts or Google Fonts").
   - **Music:** a library subscription, with Sallie picking the tracks.
-  - **Generated media** is labelled for YouTube's disclosure question. No generated people who could pass as real, and never a generated Sallie, face or voice.
+  - **Generated media** is labelled for YouTube's disclosure question. HeyGen's tools are open, and nothing blocks them on either Mac (Jason, 2026-11-04). Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
   - Nothing of it is built.
 - **Fonts come from Adobe Fonts or Google Fonts (2026-10-26).** Jason, word for word: "we will find a replacement font, available either through adobe or google fonts, if needed."
   - Sinthya is on neither, so its replacement script was picked by eye: **Allison**, from Google Fonts (2026-10-28). Jason, word for word: "use allison to replace sinthya".
@@ -178,3 +178,4 @@ The lines up to the first version of this page were written in brimm-operations,
 - 2026-10-27: recorded Jason's answers to the proposal's decisions 5, 6 and 10, word for word, under "Decisions": no client permission needed for teachings; he asks HeyGen to opt out of training; Zoom downloads are sessions at the drop.
 - 2026-10-27: recorded Jason's answers to the rest of the proposal's decisions, word for word, with how his numbers map to the proposal's: the design is accepted, the app is installed on the Mac Studio for A0, HeyGen on its lowest paid tier, HeyGen transcription for videos meant for posting, Share for invited people only, Higgsfield waits, H0 stops after step 4. Added A0's checklist, `docs/phase-a0/`.
 - 2026-11-02: recorded Jason's decision, word for word, that OpusClip is no longer used: a bullet under "Decisions", and a note beside each line that names it as a route (the sessions line, the lock's line, the sending answer, the Reels of a finished video, and L1). Studio's guide, its Reels messages, her skill and the README no longer send Sallie there.
+- 2026-11-04: recorded Jason's decision, after the by-hand probe of the HyperFrames app (A1), that AI-generated content is not blocked on either Mac. His words: "I don't want to block ai generated content on either computer. could the instructions just include a warning to the user about not using that content without blocking it?" The "Generated media" line under "Decisions" no longer forbids generated people. Each project's notes, and the line Studio says whenever the app opens, now warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, and block none of them. HeyGen's tools are open.

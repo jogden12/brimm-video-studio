@@ -15,7 +15,7 @@ import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 const FOLDER = "2026-10-28 Pricing talk (Mac Studio)";
 const NAME = "Pricing talk";
 const AT = Date.parse("2026-10-28T15:00:00-04:00");
