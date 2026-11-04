@@ -4954,6 +4954,77 @@ describe("the light import", () => {
     assert.deepEqual(t.notes, [READY]);
     t.done();
   });
+  // A video with a picture and no sound can only be footage for a planned video (PR H5a): the light import files it alone.
+  /** What ffprobe prints of an upright phone video of 8 seconds, with no sound stream. */
+  const SILENT = probed({ picture: { width: 1080, height: 1920 }, sound: null, duration: "8.000000" });
+  it("files a video with a picture and no sound alone: no transcript, plan or words, its two steps, and Ready (PR H5a)", async () => {
+    const t = episodeImport({ probed: SILENT });
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder, r.message], [true, "2026-10-20 Talk (Mac Studio)", ""]);
+    // Its folder holds the video and its record: nothing was said, so there is no transcript, cut plan, words or rough cut's captions.
+    assert.deepEqual(listAll(t.episodeFolder()), ["Talk.mov", "record/0001.json"]);
+    // The one program asked is ffprobe: no sound is read, no transcriber is run, and nothing is made.
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE"]);
+    assert.deepEqual(t.guarded, []);
+    assert.deepEqual(t.notes, [READY]);
+    assert.deepEqual(t.told.filter(([what]) => what === "step").map(([, name]) => name), ["Reading the sound", "Filing"]);
+    assert.deepEqual(t.told.filter(([what]) => what === "steps").map(([, names]) => names).at(-1), ["Reading the sound", "Filing"]);
+    assert.deepEqual(t.told[t.told.length - 1], ["end", true]);
+    t.done();
+  });
+  it("files its record as needing her answer: what was seen says it has no sound, how it came, no guess and no match, and video.sound false (PR H5a)", async () => {
+    const t = episodeImport({ probed: SILENT });
+    await uneditedFolder(t.drop, t.deps);
+    const r = t.record();
+    assert.deepEqual([r.version, r.kind, r.label], [3, null, LABEL]);
+    assert.deepEqual(r.answer, { state: "needs your answer", guess: null, seen: "upright, 0:08, no sound", came: "phone", match: null });
+    assert.deepEqual(r.video, { file: "Talk.mov", bytes: 5, seconds: 8, recorded: "2026-10-20", recordedFrom: "import", sound: false });
+    assert.deepEqual([r.files, r.fingerprint, r.title, r.reels, "versionOf" in r], [{ "Talk.mov": 5 }, undefined, null, [], false]);
+    t.done();
+    // A wide picture says so, and so does a short one: wide, with no sound, from a camera.
+    const wide = episodeImport({ probed: probed({ sound: null, duration: "8.000000" }) });
+    await uneditedFolder(wide.drop, wide.deps);
+    assert.deepEqual([wide.record().answer.seen, wide.record().answer.came, wide.record().video.sound], ["wide, 0:08, no sound", "camera", false]);
+    wide.done();
+  });
+  it("names it by its label in every status of its import and in its notice, and takes the video out of the drop folder at its late check (PR H5a)", async () => {
+    const t = episodeImport({ video: "Coaching call Jane Doe.mov", probed: SILENT });
+    await uneditedFolder(t.drop, t.deps);
+    const statuses = t.clones.filter(([, to]) => to.includes("/.importing/")).map(([, , text]) => JSON.parse(text));
+    assert.ok(statuses.some((s) => s.step === "Reading the sound") && statuses.some((s) => /late check/.test(s.step)), statuses.map((s) => s.step).join(", "));
+    assert.deepEqual([...new Set(statuses.map((s) => s.label))], [LABEL]);
+    assert.ok(!JSON.stringify([t.notes, t.told, t.logs]).includes("Jane"), JSON.stringify([t.notes, t.told, t.logs]));
+    assert.deepEqual([readdirSync(t.drop), readStatuses(t.root)], [[], []]);
+    t.done();
+  });
+  it("fails a file with no picture and no sound as it always did, in plain words, and files nothing (PR H5a)", async () => {
+    const t = episodeImport({ probed: probed({ picture: null, sound: null, duration: "8.000000" }) });
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.message], [false, "there is no sound in the file"]);
+    assert.deepEqual(readdirSync(t.episodes).filter((n) => n !== ".importing"), []);
+    assert.deepEqual(t.calls.map((c) => c.cmd), ["FFPROBE"]);
+    assert.deepEqual(readStatuses(t.root).map(({ status }) => status.failed), ["there is no sound in the file"]);
+    assert.deepEqual(t.notes, [`No transcript could be made from ${LABEL}. It stays in the drop folder; see the log.`]);
+    t.done();
+  });
+  it("fails a heavy import of a video with no sound as it always did: only the light import files one (PR H5a)", async () => {
+    for (const light of [false, null]) {
+      const t = episodeImport({ light, probed: SILENT });
+      const [r] = await uneditedFolder(t.drop, t.deps);
+      assert.deepEqual([r.ok, r.message], [false, "there is no sound in the file"], String(light));
+      assert.deepEqual(readdirSync(t.episodes).filter((n) => n !== ".importing"), [], String(light));
+      t.done();
+    }
+    // A video given to the import alone, or in a folder that is not this Mac's drop folder, fails as it did: it files no episode.
+    const u = setup({ probed: SILENT });
+    u.deps.light = true;
+    u.deps.settings = { version: 1, machine: "Mac Studio", root: join(u.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
+    const one = await uneditedFile(u.video("mute.mov"), u.deps);
+    assert.deepEqual([one.ok, one.message], [false, "there is no sound in the file"]);
+    assert.match(u.read("mute.failed.txt"), /Why: there is no sound in the file\./);
+    assert.ok(!existsSync(join(u.dir, "BRIMM Video")), "no episode was filed");
+    u.done();
+  });
   it("names the video by its label in the notices of an import that fails, or cannot be filed", async () => {
     const t = episodeImport({ video: "Coaching call Jane Doe.mov", whisper: "fail" });
     await uneditedFolder(t.drop, t.deps);

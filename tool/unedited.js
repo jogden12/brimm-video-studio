@@ -284,6 +284,8 @@ const sentence = (part) => `${capital(part)}.`;
     version to make (`wide`), there are clips to cut (`clips`), or, for an episode, Reel previews to make (`previews`), and the
     video is filed away after (`watched`). The light import (`light`) reads, transcribes, plans and files, and nothing more. */
 const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
+/** The steps of the light import of a video with a picture and no sound (PR H5a): there is nothing to hear, so it is looked at and filed. */
+const SILENT_STEPS = ["Reading the sound", "Filing"];
 const stepsFor = ({ claude, wide, clips, previews, watched, light }) => light ? [...LIGHT_STEPS] : [
   "Reading the sound", "Writing the transcript", "Making the cut plan", ...(claude ? ["Asking Claude"] : []), "Making the rough cut",
   ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(previews ? ["Making the Reel previews"] : clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
@@ -797,6 +799,16 @@ async function workOn(file, deps) {
     progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, log, files, progress };
+  /** Keep the late check of the episode just filed (`filed`) on this Mac's own disk, so that a run stopped first leaves it for the next. */
+  const keepLateCheck = (filed) => {
+    const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt), ...(light ? { label } : {}) };
+    try {
+      writePending(episode.home, pending);
+      log(`${shown}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
+    } catch (e) {
+      log(`${shown}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
+    }
+  };
   const fail = (given) => {
     const why = plain(given);
     // An episode's import writes nothing into the drop folder: its status file says why (importing.js).
@@ -825,7 +837,36 @@ async function workOn(file, deps) {
     const probe = await run(tools.ffprobe, probeArgs(file, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     const facts = printed ? factsOf(printed) : null;
-    if (facts && !facts.sound) return fail("there is no sound in the file");
+    // A video with a picture and no sound (PR H5a) can only be footage for a planned video: nothing is said in it to read, so the light
+    // import of an episode files it alone, with its record waiting for her answer. Any other file with no sound fails, as it always did:
+    // one with no picture too, a heavy import's, and one given to the import alone.
+    if (facts && !facts.sound) {
+      if (!(light && facts.height > 0)) return fail("there is no sound in the file");
+      progress.steps(SILENT_STEPS);
+      progress.step("Filing");
+      log(`${shown}: it has a picture and no sound, so it is filed with nothing made of it.`);
+      let filed = null;
+      try {
+        // No sound is read, no transcript, plan or words are made, and so there are no retakes, no guess and no fingerprint to match.
+        filed = fileEpisode({ file, made: [], at: files.at, fcpxml: "", facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole }) }, deps);
+        keepWork = true;
+        keepLateCheck(filed);
+      } catch (e) {
+        if (e.code === "DROP_CHANGED") {
+          log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
+          progress.drop();
+          return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
+        }
+        const why = plain(`it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`);
+        progress.fail(why);
+        log(`${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
+        notify(`${shown} could not be put into Episodes. It stays in the drop folder; see the log.`);
+        return { ok: false, name, message: why };
+      }
+      notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
+      finished = true;
+      return { ok: true, name, folder: filed.name, filed, message: "" };
+    }
     // The picture and the first sound this Mac's ffmpeg can read, which every ffmpeg the run asks for is told to take: an
     // iPhone's clip carries Apple's APAC beside its AAC, and ffmpeg on its own takes the sound with the most channels.
     const streams = streamsOf(printed);
@@ -1121,13 +1162,7 @@ async function workOn(file, deps) {
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
-        const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt), ...(light ? { label } : {}) };
-        try {
-          writePending(episode.home, pending);
-          log(`${shown}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
-        } catch (e) {
-          log(`${shown}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
-        }
+        keepLateCheck(filed);
       } catch (e) {
         if (e.code === "DROP_CHANGED") {
           // Nothing of it was put into Dropbox. The new file is imported on its own, as another recording.

@@ -96,7 +96,8 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
     are the record's Reels, made of the Reel candidates (reelEntries, in reels.js). A made file goes into the episode folder
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
-    `today`, `now`, `commit` and `rand` when a test gives others.
+    `today`, `now`, `commit` and `rand` when a test gives others. A video the facts say has no sound (`facts.sound` is false; PR H5a)
+    is filed with `video.sound` false in its record, and nothing else made of it (`made` is empty).
     The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
     `answer` (her answer, waiting, with the guess and the episode whose words it matched, or null), `label` and
     `fingerprint`, which go into the record as they are (newEpisode). An import never sets `versionOf`: her answer does.
@@ -139,7 +140,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
     id: newId(day, deps.rand),
     machine: episode.machine,
     at: localStamp(deps.now ? deps.now() : new Date()),
-    video: { file: video, bytes, seconds: facts.duration, created: createdOf(printed) },
+    video: { file: video, bytes, seconds: facts.duration, created: createdOf(printed), ...(facts.sound === false ? { sound: false } : {}) },
     kind,
     writer,
     files,

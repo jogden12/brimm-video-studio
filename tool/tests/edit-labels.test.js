@@ -127,7 +127,10 @@ const TODAY_ASKED = {
   refs: [[], ["look", "blue carousel"], ["use", FOLDER, "blue carousel"], ["use", NAME, "blue carousel", "reel", "2"], ["use"]],
   // The planned episode, new with the HyperFrames-led path (PR H4): tests/edit-plan.test.js pins its words. Today's Mac has no plan, so here it makes one,
   // says today's episode is none, and finds nothing; the walk below runs `plan` for a video waiting for its answer and for a session, where the gate answers.
-  plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], ["Pricing"], ["nothing fits this"]]
+  plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], ["Pricing"], ["nothing fits this"]],
+  // Footage for a planned video, new with the HyperFrames-led path (PR H5a): there is no output of today's to pin, and tests/edit-footage.test.js pins its words. The walk
+  // below runs it for a video waiting for its answer and for a session, where the gate answers.
+  footage: []
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1252,7 +1255,9 @@ describe("the walk: every command, for a video imported lightly from a file name
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
     app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]],
     refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]],
-    plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], ["nothing fits this"], []]
+    plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], [label, "agreed", label], ["nothing fits this"], []],
+    // Footage for a planned video (PR H5a): no plan is there, so it says so for a video waiting; the gate refuses a session.
+    footage: [[label, "Too many SKUs", "talking", "--client", "no"], [label, "Too many SKUs", "b-roll", "--client", "yes", "--shot", "2"], [label, "none"], []]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

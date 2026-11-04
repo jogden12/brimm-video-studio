@@ -641,7 +641,10 @@ describe("Studio never writes into the reference folder", () => {
     refs: [[], ["look", "blue carousel"], ["look", "title style"], ["look", "launch"], ["look", "nothing like it"], ["use", FOLDER, "blue carousel"], ["use", FOLDER, "title style", "reel", "2"], ["use", FOLDER, "launch"], ["use", FOLDER, "nothing like it"]],
     // The planned episode (PR H4) reads the folder for a cue's ref (`plan … set`): the made-up episode is no plan, so this world only walks its forms; tests/edit-plan.test.js
     // proves a ref is looked up with the folder read-only, and that a plan's set leaves it as it was.
-    plan: [["new", "Too many SKUs"], [FOLDER], [FOLDER, "drop"], [FOLDER, "set", "--cue", "graphic | 4 | w | S. | ref: blue carousel", "--line", "x"]]
+    plan: [["new", "Too many SKUs"], [FOLDER], [FOLDER, "drop"], [FOLDER, "set", "--cue", "graphic | 4 | w | S. | ref: blue carousel", "--line", "x"], [FOLDER, "agreed", FOLDER]],
+    // Footage for a planned video (PR H5a) reads and writes records and a note on this Mac, and never a reference: the made-up episode is no waiting video, so this
+    // world walks its forms.
+    footage: [[FOLDER, "Too many SKUs", "talking", "--client", "no"], [FOLDER, "none"], []]
   };
   it("has the words of every command here, so that a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in WALK, `${name}: give it its words in WALK`);

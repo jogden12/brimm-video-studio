@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, newPlannedEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, NEWEST_VERSION, PLANNED_VERSION, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { newEpisode, newPlannedEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, readEpisode, writeEpisode, recordFile, NEWEST_VERSION, PLANNED_VERSION, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
 import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
@@ -278,6 +278,46 @@ describe("the record's layout 3", () => {
       // An episode already recorded as layout 3 is not written back at a lower layout when its layout-3 fields are gone.
       writeEpisode(folder, { ...answered, rev: 2, kind: "episode", answer: null }, options(2));
       assert.equal(JSON.parse(readFileSync(recordFile(folder, 3), "utf8")).version, 3);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("layout 5 for a part: a dropped video that is footage for a planned video (PR H5a)", () => {
+  const WAITING_ANSWER = { state: "needs your answer", guess: null, seen: "upright, 0:08, no sound", came: "phone", match: null };
+  const PART_ANSWER = { ...WAITING_ANSWER, state: "part", by: "Mac Studio", on: "Mac Studio", at: "2026-11-04T09:30:00-05:00", private: "no" };
+  const PART_OF = { id: "e-20261104-3fa9c1", as: "b-roll", shot: 2, client: false };
+  const waiting = () => ({
+    ...newEpisode({ id: "e-20261104-aa11bb", machine: "Mac Studio", at: "2026-11-04T09:12:00-05:00", video: { file: "a.mov", bytes: 1, seconds: 8, created: null, sound: false }, kind: null, writer: { commit: "c709b57", on: "Mac Studio" }, answer: WAITING_ANSWER, label: "Video of 4 Nov, 09:12 (Mac Studio)" }),
+    rev: 1
+  });
+  it("is the layout of a record that holds `partOf`, so that a video waiting for its answer stays at 3", () => {
+    assert.equal(layoutOf(waiting()), 3);
+    assert.equal(layoutOf({ ...waiting(), answer: PART_ANSWER, partOf: PART_OF }), PLANNED_VERSION);
+    assert.equal(layoutOf({ ...waiting(), partOf: PART_OF }), 5, "whatever else the record holds");
+    assert.equal(layoutOf({ ...waiting(), partOf: null }), 3, "a null partOf is none");
+  });
+  it("is read by a Mac on older code as newer, for its id and rev alone, and left alone, as a plan is", () => {
+    const folder = mkdtempSync(join(tmpdir(), "layout-"));
+    try {
+      const options = (rev) => ({ expectRev: rev, writeText: (to, text) => writeFileSync(to, text), writer: { commit: "c709b57", on: "Mac Studio" } });
+      const first = writeEpisode(folder, { ...waiting(), rev: 0 }, options(0));
+      assert.equal(first.version, 3);
+      const answered = writeEpisode(folder, { ...first, answer: PART_ANSWER, partOf: PART_OF }, options(1));
+      assert.deepEqual([answered.version, answered.rev], [5, 2]);
+      assert.equal(JSON.parse(readFileSync(recordFile(folder, 2), "utf8")).version, 5);
+      // This brimm-video reads it whole.
+      assert.deepEqual(readEpisode(folder).record, answered);
+      // A Mac on older code reads the part as a newer brimm-video's record, and not the video waiting for its answer under it.
+      const older = readEpisode(folder, { known: RECORD_VERSION });
+      assert.deepEqual([older.newer, older.record.rev, older.record.version], [true, 2, 5]);
+      assert.equal(faultFor(RECORD_VERSION)(answered), "it is version 5, and this brimm-video reads versions 1 to 4");
+      // Taken back, the record is no part but stays at layout 5: a Mac on older code still leaves it alone.
+      const { partOf, ...rest } = answered;
+      const back = writeEpisode(folder, { ...rest, answer: WAITING_ANSWER }, options(2));
+      assert.deepEqual([back.version, back.partOf], [5, undefined]);
+      assert.equal(readEpisode(folder, { known: RECORD_VERSION }).newer, true);
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }

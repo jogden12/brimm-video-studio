@@ -20,6 +20,12 @@ export const SESSION = [...UNANSWERED, "name"];
 /** The commands that run for a planned episode (isPlannedRecord), beside those that name no episode: `plan`, which shows and sets its
     package, and `name`. `leave` says how to drop a plan; every other command is refused, for there is no footage. */
 export const PLANNED = ["plan", "name"];
+/** The commands that run for a record with no kind, beside those of UNANSWERED (PR H5a): `footage`, which answers a dropped video as
+    footage for a planned video, or takes it back. It runs for a video waiting for its answer, one she left alone, and a part, and for no
+    other record: a session not cleared is refused it in the gate's words (it is in none of the lists of a session), and so is a video held
+    beside one (heldGateFor lets only UNANSWERED through). The command itself refuses a Zoom download and a video that holds a session's
+    words. */
+export const FOOTAGE = ["footage"];
 /** The commands that run for a session not cleared once this Mac's training gate is on. `reel` and `render` are narrowed by
     their words (below), and `read` is the session reading's own detached run, which starts only through `teachings`. */
 export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"];
@@ -128,9 +134,9 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
     - A command that names no episode (UNSCOPED) is not gated.
     - A planned episode (isPlannedRecord), only the commands of PLANNED; `leave` is told how to drop a plan, and any other is refused
       in words that say there is no footage for it yet. A record that only claims to be planned is none, and is gated as follows.
-    - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
-      UNANSWERED. Any other is refused in the words of a video waiting for its answer, or, for one she left alone, in words that
-      say so: it is not waiting for an answer.
+    - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included and a part, PR H5a), only the
+      commands of UNANSWERED, and `footage` (FOOTAGE). Any other is refused in the words of a video waiting for its answer, or, for one
+      she left alone, in words that say so: it is not waiting for an answer.
     - A session whose mark is not cleared, only those of SESSION, and `teachings … --transcript-only`, her answer that nothing of
       it goes to Claude; and, once the training gate is on (`teachingsOn`), those of SESSION_TAUGHT, refused until then in the
       words of the gate being off, or, when Jason's check of it has lapsed (`lapsed`), in words that say so. Of those, `reel` and
@@ -140,7 +146,7 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
 export function gateFor(command, record, { teachingsOn = false, lapsed = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
   if (isPlannedRecord(record)) return PLANNED.includes(command) ? "" : command === "leave" ? TO_DROP(record) : NO_FOOTAGE(record);
-  if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
+  if (kindOf(record) === null) return UNANSWERED.includes(command) || FOOTAGE.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;

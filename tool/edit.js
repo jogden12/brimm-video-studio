@@ -39,6 +39,13 @@
 //   node edit.js plan "<planned>" [set … | drop]
 //                                         a planned video's package (its video guide, shot list and teleprompter script): said in
 //                                         plain words, set whole in one record write, or dropped
+//   node edit.js footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]
+//   node edit.js footage "<video>" none   a video dropped for a planned video, answered as one of its parts (or taken back
+//                                         until the plan is filmed): kept out of the lists, and out of any project while it
+//                                         shows a client who has not agreed (footage.js)
+//   node edit.js plan "<planned>" agreed "<video>"
+//                                         a client's agreement to being shown in a part: noted from a dialog on this Mac that
+//                                         only her click answers; who agreed stays on this Mac (footage.js)
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
@@ -53,7 +60,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isPart, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -114,6 +121,7 @@ import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyper
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
+import { footageAsked, footageCards, footageCounts, footageFor, mayGoIn, partRefused, partsReader, planTitleOf } from "./footage.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -134,9 +142,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
                                         is exported from HyperFrames that the hand-off does not hold. A raw video that
                                         goes the Final Cut way keeps its Final Cut steps. A planned video (plan) is told
-                                        to film it to its shot list, or for an explainer to record or choose its voice.
-                                        Only on a Mac that does the light import: on any other, every form says to ask
-                                        Jason
+                                        to film it to its shot list, or for an explainer to record or choose its voice;
+                                        once footage is in, what it has so far, and which part is waiting for a client's
+                                        agreement. Only on a Mac that does the light import: on any other, every form says
+                                        to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
@@ -362,8 +371,23 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         (none for an explainer) and teleprompter.txt in the plan's folder, each put in
                                         by the rule and the record last
   node edit.js plan "<planned>"         say a planned video's package in plain words: each cue, each shot and how long
-                                        the teleprompter script is
-  node edit.js plan "<planned>" drop    drop a plan: it is archived, so that episodes and the guide no longer show it`;
+                                        the teleprompter script is, and a line for each part of its footage
+  node edit.js plan "<planned>" drop    drop a plan: it is archived, so that episodes and the guide no longer show it
+  node edit.js footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]
+                                        answer a dropped video as footage for a planned video: talking to the camera, a
+                                        screen recording or b-roll, and whether it shows a client, a client's name or their
+                                        work. A screen recording or b-roll shows one shot of the plan's shot list, which is
+                                        taken when the plan has one of its kind and otherwise named with --shot. It is
+                                        answered on her two cards (the planned card and the part card), a receipt of each
+                                        under Claude Code on a Mac whose lock is open, as kind is, and never for a Zoom
+                                        download, a video that holds a client or group session's words, or one held beside a
+                                        session. A part is kept out of episodes and the guide; it goes into no project while
+                                        it shows a client who has not agreed
+  node edit.js footage "<video>" none  take a video back from a planned video, until the plan is filmed: it waits for
+                                        its answer again, with its cards
+  node edit.js plan "<planned>" agreed "<video>"
+                                        for footage that shows a client: notes, on a dialog on this Mac that only her click
+                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac`;
 
 /** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
 const homeOf = (deps) => deps.home || process.env.HOME || homedir();
@@ -921,11 +945,23 @@ function cardFor(named, label, others, links) {
     first. `others` and `links` are as cardLines has them. */
 export function cardLinesFor(named, label, others, links, { notASession = false } = {}) {
   const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
-  const lines = [`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`];
+  // A plan waiting for footage is offered first (PR H5a): the planned card and the part card, before the card, unless the video came from
+  // Zoom, has no picture, has a session's words in it (its Maybe line is a session's) or is held beside a session.
+  const maybe = maybeOf(named, others, links);
+  const blocked = Boolean((maybe && maybe.session) || links.sessionsBeside(named, null).length > 0);
+  const lines = footageCards({ record: named, label, records: others.map((e) => e.inForce).filter(Boolean), blocked });
+  // A video with no sound has no card: it can be footage for a planned video, or a session, or be left. Nothing Claude reads of it is said.
+  if (named.video && named.video.sound === false) return [...lines, NO_SOUND];
+  lines.push(`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`);
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
   if (came || notASession) lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came }))}`);
   return lines;
 }
+
+/** What `episodes` says in place of the card under a video with no sound (PR H5a). */
+const NO_SOUND = "    No sound: it can only be footage for a planned video.";
+/** What `kind` says to a video with no sound that is answered as anything but a session (PR H5a). */
+const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: it can only be footage for a planned video, or a client or group session. Or say "leave it".`;
 
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
@@ -979,8 +1015,9 @@ function shownLine(pushed) {
   return `Shown: v${top.v} (${top.how === "render" ? "rendered" : "in Final Cut"}), on ${top.on}`;
 }
 
-/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one. */
-const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one, and but a part (PR H5a):
+    a dropped video that is footage for a planned video is said with its plan (`plan "<planned>"`), and is listed nowhere else. */
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !isPart(e.inForce));
 
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
@@ -5368,7 +5405,11 @@ function answerWhy(ctx, found, record, plan) {
   const name = namedAs(found, record);
   const { stored } = plan;
   const was = recordKind(record);
+  // A part (PR H5a) is footage for a planned video, and is taken back (`footage … none`) before it is answered as anything else.
+  if (isPart(record)) return partRefused(name, planTitleOf(ctx.root, record.partOf.id));
   if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
+  // A video with no sound (PR H5a) has nothing for Claude to read: it is answered as a session, left alone, or made footage (`footage`).
+  if (stored !== "session" && record.video && record.video.sound === false) return NO_SOUND_WHY(name);
   // A video that has a kind and is gated is a session whose mark is not cleared. With --clear-session it has to be one, with a mark to
   // clear; without it, such a video can be answered only as a session (which it is) and never as another kind.
   if (plan.clearSession) {
@@ -6300,6 +6341,8 @@ export async function leaveCommand(ctx, rest) {
     }
     const { record } = read;
     const name = namedAs(found, record);
+    // A part (PR H5a) is footage for a planned video: it is taken back before it is left.
+    if (isPart(record)) return refuse(ctx, partRefused(name, planTitleOf(ctx.root, record.partOf.id)));
     if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
     if (record.answer && record.answer.state === "not for brimm-video") {
       ctx.say(`${name} is left already. It is not asked about again.`);
@@ -6848,17 +6891,21 @@ function guideSession(ctx, e, r) {
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. `downloads` is
     the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it.
+    `footageIn` is the pass's one look at the parts of the plans (footage.js partsReader, made by guideItems): a plan is given its parts by it.
     A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
     and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`. */
-function guideFacts(ctx, e, links, rates, notes, downloads) {
+function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   const r = e.inForce;
   if (isPlannedRecord(r)) {
     // Gated all the same when a conflicted copy of its record is a record that only claims to be planned: then it is named as any gated video is.
     const hidden = isGated(e);
+    // Its footage (PR H5a): the parts it has, counted in words, and the labels of those that show a client and wait for the client's agreement.
+    // Nothing of a part is read for a plan the gate holds (a conflicted copy that only claims to be planned).
+    const parts = hidden ? [] : footageIn(r.id);
     return {
       name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
       at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
-      planned: { route: r.planned.route, voice: r.planned.voice }
+      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => !mayGoIn(part, r.planned)).map((part) => part.record.label || shownName(part.record)) }
     };
   }
   const kind = recordKind(r);
@@ -7031,18 +7078,24 @@ function guideItems(ctx) {
   // plan PR 17, the review of PR 10, M5): a pass is one `guide`, one look of `guide wait` (every 5 seconds) or one of `guide … tell` (every 15), and a
   // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing.
   const downloads = downloadsOnce({ home: ctx.home, readdir: ctx.deps.readdir });
+  // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
+  // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
+  const footageIn = partsReader(ctx.root);
   const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
     const e = episodeAt(ctx, name, links);
     const r = e.inForce;
-    if (!r || e.newer || r.archived || leftAlone(r)) continue;
+    // A part (PR H5a) is footage for a plan, which the guide says: it is guided nowhere on its own.
+    if (!r || e.newer || r.archived || leftAlone(r) || isPart(r)) continue;
     if (r.answer === null || typeof r.answer !== "object") {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links, rates, notes, downloads);
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [] });
+    const facts = guideFacts(ctx, e, links, rates, notes, downloads, footageIn);
+    // A plan that has a part which shows a client says, after its step, which are waiting for the client's agreement.
+    const waiting = facts.planned && Array.isArray(facts.planned.waiting) ? facts.planned.waiting.map((label) => `${label} shows a client: it stays out until you say "the client agreed".`) : [];
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [])] });
   }
   const newest = new Map();
   for (const item of items) {
@@ -7299,12 +7352,61 @@ async function plan(ctx, rest) {
   // A plan is named by the string `plan new` was given for its title, codes and all (episodeFor's `codes`).
   const got = episodeFor(ctx, [asked.episode], { newerEnds: 1, codes: true });
   if (!got.found) return got.code;
-  return planFor(ctx, { found: got.found, record: got.record }, asked);
+  if (asked.form !== "agreed") return planFor(ctx, { found: got.found, record: got.record }, asked, editKit(ctx));
+  // A client's agreement is noted under the plan's answer lock, as a Reel's is under its session's: one dialog at a time for a plan, from before the
+  // dialog to after the write, so that two runs cannot both be open, note twice, and tell her that Dropbox undid a change it did not.
+  const lock = takeAnswerLock(ctx, got.found.name, "plan");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await planFor(ctx, { found: got.found, record: got.record }, asked, editKit(ctx));
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** What footage.js is given of edit.js's own (it imports no edit.js): how a record is saved, what a dialog asks and answers, the tool log, what is
+    said of a record that cannot be read or is a newer brimm-video's, the words `kind` uses of a video being answered and of each kind, and the check
+    that a video holds a session's words. Nothing here is a path or a program of its own. */
+function editKit(ctx) {
+  return {
+    save: (found, record, done) => save(ctx, found, record, done),
+    ask: (text, options) => askHere(ctx, text, options),
+    log: (line, holds) => toolLog(ctx, line, holds),
+    matchedSession,
+    beingAnswered,
+    kindSaid: KIND_SAID,
+    notRead: (found, read) => notRead(ctx, { ...found, read }),
+    newerWhy,
+    pending: PENDING_WHY,
+    hide: (name) => hideNames(ctx, episodeAt(ctx, name))
+  };
+}
+
+/** `footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]` and `footage "<video>" none` (footage.js; PR H5a), edit.js
+    being only the wiring: a dropped video is answered as footage for a planned video, or taken back. The video is found as every command finds its
+    episode, through the gate, which lets `footage` run for a video with no kind (gate.js FOOTAGE) and for no other record. It holds the video's answer
+    lock for the whole of its run, as `kind` and `leave` do, and claims nothing. */
+async function footage(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["client", "shot"]);
+  const asked = footageAsked(words, flags);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, [asked.video], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const lock = takeAnswerLock(ctx, got.found.name, "footage");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await footageFor(ctx, got, asked, editKit(ctx));
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
 }
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so is `workcopy` (`kind` and `app` start it): both are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

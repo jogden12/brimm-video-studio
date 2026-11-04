@@ -2,7 +2,7 @@
 // cleared. It is pure: the command's name, the record and the command's words are all it is given, and it reads nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, gateFor, printWhy, gated } from "../gate.js";
+import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, FOOTAGE, gateFor, heldGateFor, printWhy, gated } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
 import { newPlannedEpisode } from "../episode.js";
 
@@ -70,6 +70,46 @@ describe("the gate and plan (PR H4)", () => {
   });
 });
 
+describe("the gate and footage (PR H5a)", () => {
+  const left = { kind: null, answer: { state: "not for brimm-video" } };
+  /** A part: a dropped video answered as footage for a planned video. It has no kind, as a video waiting has none. */
+  const part = { kind: null, answer: { state: "part" }, partOf: { id: "e-20261104-3fa9c1", as: "b-roll", shot: 2, client: false } };
+  const cleared = { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" };
+  it("has a list of its own, footage alone, apart from the lists of a video not yet answered: it is in none of them", () => {
+    assert.deepEqual(FOOTAGE, ["footage"]);
+    for (const list of [UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED]) assert.ok(!list.includes("footage"), "footage runs for a record with no kind alone, and for no session or plan");
+    assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "release", "resolve"], "the list of a video not yet answered is as it was");
+    assert.ok(COMMAND_NAMES.includes("footage"));
+  });
+  it("lets footage run for a record with no kind: a video waiting for its answer, one left alone, and a part, which it takes back", () => {
+    for (const record of [unanswered, left, part, {}, { kind: null }]) for (const on of [ON, OFF]) assert.equal(gateFor("footage", record, on), "", JSON.stringify(record));
+  });
+  it("refuses footage for a session whose mark is not cleared, with teachings on or off, in the gate's words", () => {
+    for (const record of [session(), { kind: "session" }, { kind: "episode", session: { marked: AT, cleared: null } }, { kind: "finished", session: { marked: AT, cleared: "no" } }]) {
+      for (const on of [ON, OFF]) assert.equal(gateFor("footage", record, on, ["Session, 2026-10-22", "Too many SKUs", "talking", "--client", "no"]), NOT_FOR_SESSION, JSON.stringify(record));
+    }
+  });
+  it("refuses footage for a planned episode, which has no video to be footage, in the words it refuses every other command", () => {
+    for (const on of [ON, OFF]) assert.equal(gateFor("footage", PLAN, on), '"Too many SKUs" is a planned video, and there\'s no footage for it yet.');
+  });
+  it("refuses footage for a video held beside a session, in HELD's words, as it refuses every command but the unanswered ones", () => {
+    const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+    assert.equal(heldGateFor("footage"), HELD);
+    for (const name of UNANSWERED) assert.equal(heldGateFor(name), "", name);
+    for (const name of UNSCOPED) assert.equal(heldGateFor(name), "", name);
+  });
+  it("lets an answered record that is not a session through footage, with a cleared session, and the command says it is answered", () => {
+    for (const record of [finished, session({ session: { marked: AT, cleared } }), { kind: "episode" }, { kind: "short video" }]) assert.equal(gateFor("footage", record, OFF), "", JSON.stringify(record));
+  });
+  it("is footage alone that a record with no kind is let through beyond the list of a video not yet answered", () => {
+    for (const name of [...COMMAND_NAMES, "somethingNew"]) {
+      if (UNSCOPED.includes(name)) continue;
+      for (const record of [unanswered, part]) assert.equal(gateFor(name, record, ON) === "", UNANSWERED.includes(name) || FOOTAGE.includes(name), `${name} ${JSON.stringify(record)}`);
+      assert.equal(gateFor(name, left, ON) === "", UNANSWERED.includes(name) || FOOTAGE.includes(name), `${name} left alone`);
+    }
+  });
+});
+
 describe("gateFor, a video waiting for its answer", () => {
   it("lets through only the commands that answer it, leave it, show where it is, hand it over or sort out its files", () => {
     for (const name of ["kind", "leave", "which", "show", "release", "resolve"]) assert.equal(gateFor(name, unanswered, ON), "", name);
@@ -108,7 +148,7 @@ describe("the gate walks every command", () => {
       const scoped = !UNSCOPED.includes(name);
       if (!scoped) continue;
       const waiting = gateFor(name, { kind: null, answer: { state: "needs your answer" } }, { teachingsOn: true });
-      assert.equal(waiting === "", UNANSWERED.includes(name), name);
+      assert.equal(waiting === "", UNANSWERED.includes(name) || FOOTAGE.includes(name), name);
       const marked = gateFor(name, { kind: "session", session: { marked: AT, cleared: null } }, { teachingsOn: false });
       assert.equal(marked === "", SESSION.includes(name), name);
     }

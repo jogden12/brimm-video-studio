@@ -7,7 +7,7 @@ import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
-import { UNANSWERED, UNSCOPED } from "../gate.js";
+import { FOOTAGE, UNANSWERED, UNSCOPED } from "../gate.js";
 import { NEWEST_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { lockOf, readResult } from "../detached.js";
@@ -55,7 +55,10 @@ const ASKED = {
   refs: ["use", FOLDER, "blue carousel"],
   // `plan` names an episode in all its forms but `plan new`, which names none and is never gated: the form walked here shows the plan of the episode
   // (tests/edit-plan.test.js pins its words, and what the gate says of a planned episode).
-  plan: [FOLDER]
+  plan: [FOLDER],
+  // `footage` names the video it answers as footage for a planned video (PR H5a). It runs for a record with no kind alone (gate.js FOOTAGE): the form
+  // walked here is the one that answers (tests/edit-footage.test.js pins its words and its refusals).
+  footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
@@ -92,7 +95,8 @@ describe("the gate walks every command that names an episode", () => {
       const found = episodeFor(t, { record: UNANSWERED_RECORD });
       const before = filesIn(found);
       const r = await on(taught(t), name, ...ASKED[name]);
-      if (UNANSWERED.includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
+      // `footage` (PR H5a) is let through beside the commands that answer a video: the command itself says what it makes of this video.
+      if (UNANSWERED.includes(name) || FOOTAGE.includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
       else {
         assert.deepEqual([r.code, r.said], [1, [WAITING]], name);
         assert.deepEqual([t.started, t.calls, reread(found).rev, filesIn(found)], [[], [], 1, before], name);
@@ -101,7 +105,8 @@ describe("the gate walks every command that names an episode", () => {
     }
   });
   it("refuses a video left alone ('not for brimm-video') as it does one waiting, in words that do not say it waits for its answer", async () => {
-    for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n))) {
+    // `footage` (PR H5a) is let through for a video left alone, as for one waiting: it may be footage for a planned video all the same.
+    for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n) && !FOOTAGE.includes(n))) {
       const t = setup();
       episodeFor(t, { record: LEFT_RECORD });
       const r = await on(t.ctx.deps, name, ...ASKED[name]);

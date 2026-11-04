@@ -952,3 +952,37 @@ describe("what guide tell says", () => {
     assert.deepEqual(trailOf(making.facts), { id: BASE.id });
   });
 });
+
+describe("the step of a planned video: film it, then what its footage is (PR H4, H5a)", () => {
+  const NOTES = { version: 1, handoffs: {}, finished: {} };
+  const NOW = Date.parse("2026-11-04T12:00:00-05:00");
+  const plan = (planned) => ({ name: "Too many SKUs (400000)", id: "e-20261104-400000", kind: null, waiting: false, planned });
+  const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+  const TOLD = (footage) => `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`;
+  it("is film while no footage has come, as it was: a script, with no footage given or none counted", () => {
+    for (const planned of [{ route: "script", voice: null }, { route: "script", voice: null, footage: "" }]) {
+      assert.deepEqual(nextFor(plan(planned), NOTES, NOW), { done: false, stage: "film", text: FILM, step: "", after: "" });
+    }
+  });
+  it("is footage once a script has some, saying what it has in the words it is given, and when to say it is all in", () => {
+    for (const footage of ["1 talking part", "2 talking parts, 1 screen recording and 2 b-roll clips", "1 screen recording and 1 b-roll clip"]) {
+      assert.deepEqual(nextFor(plan({ route: "script", voice: null, footage }), NOTES, NOW), { done: false, stage: "footage", text: TOLD(footage), step: "", after: "" }, footage);
+    }
+  });
+  it("is the same step for an explainer whatever footage it is given: an explainer has none, and its voice is its step", () => {
+    const VOICE = "Record the voiceover from the teleprompter script, then drop the sound file in your drop folder.";
+    for (const footage of [undefined, "", "1 talking part"]) {
+      assert.equal(nextFor(plan({ route: "explainer", voice: null, footage }), NOTES, NOW).text, VOICE);
+      assert.equal(nextFor(plan({ route: "explainer", voice: "heygen", footage }), NOTES, NOW).text, "When the HyperFrames part is ready, you'll choose the HeyGen voice there.");
+    }
+  });
+  it("comes before the BRIMM Ops page's steps and changes none of them: the stage is not ops, and a hand-off's steps say what they said", () => {
+    const next = nextFor(plan({ route: "script", voice: null, footage: "1 talking part" }), NOTES, NOW);
+    assert.notEqual(next.stage, "ops");
+    assert.equal(next.step, "");
+    assert.deepEqual(OPS, { episode: ["taken", "kit", "posted", "live", "cascade"], "short video": ["taken", "posttext", "posted"], session: ["taken", "checked"], withdrawal: ["withdrawn"] });
+    assert.equal(opsText(HANDOFF(), "taken", false, null), OPS_TEXTS.taken);
+    assert.equal(opsText(HANDOFF({ kind: "raw" }), "taken", false, null), OPS_TEXTS.taken + OPS_TEXTS.online);
+    assert.equal(opsText(HANDOFF(), "cascade", false, NOTE({ step: "cascade" })), OPS_TEXTS.cascade);
+  });
+});

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
-import { PLANNED, UNANSWERED, UNSCOPED, gateFor, gated, leftAlone, printWhy } from "../gate.js";
+import { FOOTAGE, PLANNED, UNANSWERED, UNSCOPED, gateFor, gated, leftAlone, printWhy } from "../gate.js";
 import { newPlannedEpisode, recordFile, recordText, shownName } from "../episode.js";
 import { setup } from "./episodes.js";
 
@@ -123,7 +123,8 @@ describe("gateFor, a planned episode", () => {
       const why = record.answer && record.answer.state === "not for brimm-video" ? LEFT : WAITING;
       for (const name of COMMAND_NAMES) {
         const got = gateFor(name, record, ON);
-        const want = UNSCOPED.includes(name) || UNANSWERED.includes(name) ? "" : why;
+        // `footage` (PR H5a) runs for a record with no kind, which a record that only claims to be planned is: its own words refuse it.
+        const want = UNSCOPED.includes(name) || UNANSWERED.includes(name) || FOOTAGE.includes(name) ? "" : why;
         assert.equal(got, want, `${what}: ${name}`);
         assert.ok(!got.includes(TITLE), `${what}: ${name}`);
       }

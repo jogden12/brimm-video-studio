@@ -247,8 +247,8 @@ describe("her folder's settings", () => {
     // after it; the bare word in a span, as `principles` in a sentence of prose, does not count as running it.
     for (const command of ["teachings", "principles", "ideas"]) assert.ok(given.some((span) => span.startsWith(`${command} "`)), `the skill does not run ${command}`);
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
-    // Ten more lines than it was held to: the reference folder (PR H3) and the planned episode's rows (PR H4) are added to it.
-    assert.ok(skill.split("\n").length < 170, "the skill is short");
+    // Twenty more lines than it was held to: the reference folder (PR H3), the planned episode's rows (PR H4) and the footage paragraph and rows (PR H5; H6 adds more) are added to it.
+    assert.ok(skill.split("\n").length < 180, "the skill is short");
   });
   it("have the skill answer what is in the reference folder with refs, and use a picture from it with refs look while a guide is written and refs use for a project open in HyperFrames, never telling her the path of the picture (PR H3)", () => {
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
@@ -1092,8 +1092,53 @@ describe("a script she has, and the plan made from it: the skill's rows and scri
   it("has the skill's description name a script she has and the plan made from it, in both skills", () => {
     for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n")[2].includes("a script she has and the plan made from it"), skill.split("\n")[2]);
   });
-  it("keeps both skills under 170 lines with the rows in", () => {
-    for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n").length < 170, `${skill.split("\n").length} lines`);
+  it("has the skill's description name the footage dropped for a plan too, in both skills (PR H5a)", () => {
+    for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n")[2].includes("a script she has and the plan made from it, the footage dropped for it, conflicts"), skill.split("\n")[2]);
+  });
+  it("has both skills ask the planned card first and the part card next, as episodes prints them, never worded by Claude, and run footage on her answers (PR H5a)", () => {
+    const FOOTAGE_PARAGRAPH = [
+      "When `episodes` prints `Planned card: {…}` under a video waiting for her answer, ask it first, on one `AskUserQuestion` exactly as that line gives it, word for word: never word it yourself.",
+      'On an answer that starts "Footage for", ask `Part card: {…}` next, as given, then run `footage "<label>" "<title>" talking --client no`',
+      "the plan's title from her answer, screen or b-roll in place of talking as she chose, `--client yes` when she says it shows a client, a client's name or their work",
+      "when it says which shot, the number she gives you in the chat as `--shot <n>`",
+      'On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video or a client or group session, and run `leave "<label>"` unless she says it is a session.'
+    ];
+    for (const [which, skill] of [["strict", strict[SKILL]], ["open", openFiles()[SKILL]]]) {
+      const lines = skill.split("\n");
+      const paragraph = lines.filter((line) => line.startsWith("When `episodes` prints `Planned card: {…}`"));
+      assert.equal(paragraph.length, 1, which);
+      for (const words of FOOTAGE_PARAGRAPH) assert.ok(paragraph[0].includes(words), `${which}: ${words}`);
+      // It comes in the card's section, before the card the other kinds of video are answered on.
+      const card = sectionOf(skill, "## The card");
+      assert.ok(card.includes(paragraph[0]), which);
+      assert.ok(card.indexOf(paragraph[0]) < card.indexOf("`episodes` names a video waiting for her answer"), which);
+      // The skills name the cards as the lines `episodes` prints, and never word either one: no question or answer of theirs is in the skill.
+      for (const words of ["Is <label> for a planned video?", "Which kind of shot is", "Does <label> show a client", "Talking to the camera", "A screen recording"]) assert.ok(!skill.includes(words), `${which}: ${words}`);
+    }
+    // The paragraph is the very same words in both.
+    const same = (skill) => skill.split("\n").find((line) => line.startsWith("When `episodes` prints `Planned card: {…}`"));
+    assert.equal(same(openFiles()[SKILL]), same(strict[SKILL]));
+  });
+  it("has both skills the two rows of footage, the very same in both: the client's agreement on a dialog only her click answers, and taking a part back (PR H5a)", () => {
+    const AGREED = '| "The client agreed to <label>" |';
+    const BACK = '| "That\'s not footage for <title>" |';
+    const rows = (skill, start) => skill.split("\n").filter((line) => line.startsWith(start));
+    for (const [which, skill] of [["strict", strict[SKILL]], ["open", openFiles()[SKILL]]]) {
+      const [agreed, ...more] = rows(skill, AGREED);
+      const [back, ...moreBack] = rows(skill, BACK);
+      assert.deepEqual([more, moreBack], [[], []], which);
+      for (const words of ["Before running it, tell her a dialog will open on her Mac", 'where she types who agreed and when, then clicks "They agreed"', "Claude cannot press it", "Return presses Cancel", '`plan "<title>" agreed "<label>"`',
+        "Its line that a dialog is open is printed before it waits for her click, so once it has returned the dialog has closed: never pass that line on, and tell her only how it ended, from what it printed after that line",
+        "Never ask who agreed in the chat", "never repeat it or pass it into a command", "it goes in the dialog only"]) assert.ok(agreed.includes(words), `${which}: ${words}`);
+      assert.ok(agreed.indexOf("Before running it") < agreed.indexOf('`plan "<title>" agreed "<label>"`'), which);
+      assert.ok(back.includes('`footage "<label>" none`: the video waits for its answer again, with its cards.') && back.includes("tell her to ask Jason"), back);
+      for (const row of [agreed, back]) for (const span of commandsIn(row)) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `${which}: ${span}`);
+    }
+    assert.deepEqual(rows(openFiles()[SKILL], AGREED), rows(strict[SKILL], AGREED));
+    assert.deepEqual(rows(openFiles()[SKILL], BACK), rows(strict[SKILL], BACK));
+  });
+  it("keeps both skills under 180 lines with the rows in", () => {
+    for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n").length < 180, `${skill.split("\n").length} lines`);
   });
   it("is one file in both locks, with the checkout and node put in, and nothing left to put in", () => {
     assert.equal(openFiles()[SCRIPT], script);
@@ -1214,11 +1259,11 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
   const wordsTheCard = (line) => /^`episodes` names a video waiting for her answer/.test(line) || /^1\. "What is <label>\?"/.test(line) || /^ {3}- /.test(line)
     || /^2\. "Is it a private session with a client or a group\?"/.test(line) || /^When she answered anything but "Client or group session", and the Came line says/.test(line);
 
-  it("keeps the skill under 170 lines, running only commands edit.js has, each of them one the strict skill runs, whose flags its checks run", () => {
+  it("keeps the skill under 180 lines, running only commands edit.js has, each of them one the strict skill runs, whose flags its checks run", () => {
     const skill = openSkill();
     assert.match(skill, /^---\nname: brimm-edit\ndescription: [^\n]+\n---\n/);
-    // Ten more lines than it was held to: the reference folder (PR H3) and the planned episode's rows (PR H4) are added to it.
-    assert.ok(skill.split("\n").length < 170, `${skill.split("\n").length} lines`);
+    // Twenty more lines than it was held to: the reference folder (PR H3), the planned episode's rows (PR H4) and the footage paragraph and rows (PR H5; H6 adds more) are added to it.
+    assert.ok(skill.split("\n").length < 180, `${skill.split("\n").length} lines`);
     const given = commandsIn(skill);
     assert.ok(given.length >= 10, given.join(" "));
     const ranByStrict = new Set(commandsIn(strictSkill));

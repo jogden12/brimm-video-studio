@@ -670,7 +670,9 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     kind: [TITLE, "raw", "--private", "no"], leave: [TITLE], which: [TITLE], read: ["--now", TITLE, "--kind", "raw", "--rev", "1"], workcopy: ["--now", TITLE], open: [TITLE], app: [TITLE], push: [TITLE],
     bring: ["--now", TITLE], title: [TITLE], reel: ["drop", TITLE, "1"], reels: [TITLE, "--no-play"], ask: [TITLE], finish: [TITLE], release: [TITLE], show: [TITLE, "transcript"], resolve: [TITLE], free: [TITLE],
     spell: [TITLE], logo: [TITLE, "on"], captions: [TITLE, "reel", "1", "on"], text: [TITLE], graphic: [TITLE], preset: [TITLE], cut: [TITLE, "remove", "--words", "x"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
-    refs: ["use", TITLE, "blue carousel"]
+    refs: ["use", TITLE, "blue carousel"],
+    // A plan is no video, so it is no footage for a plan (PR H5a): the gate says there is no footage for it yet.
+    footage: [TITLE, "Another plan", "talking", "--client", "no"]
   };
   it("refuses every other command in the same words, ends with 1, and starts and writes nothing", async () => {
     const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name"].includes(name));
