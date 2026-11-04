@@ -143,7 +143,7 @@ describe("her folder's settings", () => {
   });
   it("name the checkout in the skill, with its spaces, and leave no {{ }} behind", () => {
     const files = studioFiles({ checkout: CHECKOUT, node: NODE });
-    assert.deepEqual(Object.keys(files).sort(), [".claude/settings.json", ".claude/skills/brimm-edit/SKILL.md", "CLAUDE.md"]);
+    assert.deepEqual(Object.keys(files).sort(), [".claude/settings.json", ".claude/skills/brimm-edit/SKILL.md", ".claude/skills/brimm-edit/script.md", "CLAUDE.md"]);
     assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(EDIT));
     for (const text of Object.values(files)) assert.ok(!text.includes("{{"), text);
   });
@@ -1028,15 +1028,18 @@ describe("writing her folder, when it is there already in another case", () => {
 });
 
 describe("writing her folder", () => {
-  it("writes the three files and Pictures, and keeps whatever else is there", () => {
+  it("writes the files, script.md beside the skill, and Pictures and Scripts, and keeps whatever else is there", () => {
     const home = mkdtempSync(join(tmpdir(), "brimm-studio-"));
     const folder = studioFolder(home);
     assert.equal(folder, join(home, "BRIMM Video Studio"));
     mkdirSync(join(folder, "Pictures"), { recursive: true });
+    mkdirSync(join(folder, "Scripts"), { recursive: true });
     writeFileSync(join(folder, "Pictures", "chart.png"), "x");
+    writeFileSync(join(folder, "Scripts", "episode 12.txt"), "her script");
     writeFileSync(join(folder, "notes.txt"), "hers");
     assert.equal(writeStudio(home, { checkout: CHECKOUT, node: NODE }), realpathSync(folder));
-    for (const f of ["CLAUDE.md", ".claude/settings.json", ".claude/skills/brimm-edit/SKILL.md", "Pictures/chart.png", "notes.txt"]) assert.ok(existsSync(join(folder, f)), f);
+    for (const f of ["CLAUDE.md", ".claude/settings.json", ".claude/skills/brimm-edit/SKILL.md", ".claude/skills/brimm-edit/script.md", "Pictures/chart.png", "Scripts/episode 12.txt", "notes.txt"]) assert.ok(existsSync(join(folder, f)), f);
+    assert.equal(readFileSync(join(folder, "Scripts", "episode 12.txt"), "utf8"), "her script");
     const files = studioFiles({ checkout: CHECKOUT, node: NODE, folder: realpathSync(folder) });
     for (const [name, text] of Object.entries(files)) assert.equal(readFileSync(join(folder, name), "utf8"), text, name);
     assert.equal(readFileSync(join(folder, "notes.txt"), "utf8"), "hers");
@@ -1048,6 +1051,149 @@ describe("writing her folder", () => {
   it("tells Claude in its CLAUDE.md to use the skill, run nothing else, and speak plainly", () => {
     const text = studioFiles({ checkout: CHECKOUT, node: NODE })["CLAUDE.md"];
     for (const line of ["Use the brimm-edit skill for everything here.", "do not run any other program", "Nothing here posts, sends or publishes anything.", "Never show her command names, paths or flags."]) assert.ok(text.includes(line), line);
+  });
+});
+
+describe("a script she has, and the plan made from it: the skill's rows and script.md (PR H4)", () => {
+  let w;
+  before(() => {
+    w = openWorld();
+  });
+  after(() => w.done());
+  const strict = studioFiles({ checkout: CHECKOUT, node: NODE });
+  const openFiles = () => studioFiles({ checkout: CHECKOUT, node: NODE, folder: w.folder, lock: "open", facts: w.facts });
+  const SKILL = ".claude/skills/brimm-edit/SKILL.md";
+  const SCRIPT = ".claude/skills/brimm-edit/script.md";
+  const ROWS = ['| "I have a script" / "Make a video from my script" |', '| "Make an explainer from my script" |', '| "Show me the plan for <title>" / "Drop the plan for <title>" |'];
+  const rowsOf = (skill) => skill.split("\n").filter((line) => ROWS.some((start) => line.startsWith(start)));
+  const script = strict[SCRIPT];
+  const stepOf = (n) => {
+    const step = script.split("\n").filter((line) => line.startsWith(`${n}. `));
+    assert.equal(step.length, 1, `script.md has not one step ${n}`);
+    return step[0];
+  };
+  /** The part of the help that gives `plan` its words: from its first usage to the end, which is where the last command's usage ends. */
+  const planHelp = HELP.slice(HELP.indexOf("  node edit.js plan new"));
+
+  it("has the three rows in the strict skill and the open skill, the very same: a script she has, an explainer from it, and the plan", () => {
+    assert.equal(rowsOf(strict[SKILL]).length, 3, "the strict skill has not the three rows");
+    assert.deepEqual(rowsOf(openFiles()[SKILL]), rowsOf(strict[SKILL]));
+  });
+  it("sends the rows of a script to the file script.md in the skill's folder, and the plan's row to plan", () => {
+    const [video, explainer, plan] = rowsOf(strict[SKILL]);
+    for (const row of [video, explainer]) {
+      assert.ok(row.includes("Read the file script.md in this skill's folder and follow it"), row);
+      assert.doesNotMatch(row, /`script\.md`/, "a file's name is not a command: it is not in backticks, where the tests of the skill's commands would read it as one");
+    }
+    assert.ok(explainer.includes("for an explainer"), explainer);
+    assert.ok(plan.includes('`plan "<title>"`: tell her what it says in plain words') && plan.includes('`plan "<title>" drop`'), plan);
+    for (const row of [video, explainer, plan]) for (const span of commandsIn(row)) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), span);
+  });
+  it("has the skill's description name a script she has and the plan made from it, in both skills", () => {
+    for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n")[2].includes("a script she has and the plan made from it"), skill.split("\n")[2]);
+  });
+  it("keeps both skills under 170 lines with the rows in", () => {
+    for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n").length < 170, `${skill.split("\n").length} lines`);
+  });
+  it("is one file in both locks, with the checkout and node put in, and nothing left to put in", () => {
+    assert.equal(openFiles()[SCRIPT], script);
+    assert.ok(!script.includes("{{"));
+    assert.equal(script, readFileSync(new URL("../studio/script.md", import.meta.url), "utf8").split("{{CHECKOUT}}").join(CHECKOUT).split("{{NODE}}").join(NODE));
+  });
+  it("gives Claude the route in seven steps", () => {
+    assert.equal(script.split("\n").filter((line) => /^\d\. /.test(line)).length, 7);
+    assert.equal(script.split("\n")[0], "# From her script to a plan");
+  });
+  it("takes the script as she pastes it or puts it in Scripts in her folder, and asks her to move a file from anywhere else or paste it", () => {
+    const step = stepOf(1);
+    for (const words of ["She pastes it in the chat, or puts it in the `Scripts` folder of her BRIMM Video Studio folder", "you Read it there", "A file anywhere else can't be read, so ask her to move it into `Scripts` or to paste it."]) assert.ok(step.includes(words), words);
+  });
+  it("asks about the content and the direction one question at a time", () => {
+    assert.ok(stepOf(2).includes("Ask about the content and the direction, one question at a time, in the chat"));
+  });
+  it("drafts the guide, the shot list and the teleprompter lines, shows them in plain words, and changes them as she asks", () => {
+    const text = script.split("\n").slice(script.split("\n").findIndex((line) => line.startsWith("3. "))).join("\n");
+    for (const words of [
+      "Draft the package, show it to her in plain words, and change it as she asks.",
+      "one cue for each point a graphic would make visible",
+      "A cue is short, and it shows things and words, never people, and never a made-up Sallie.",
+      "Its words are copied from her script exactly, at most 30 words.",
+      'Its kind is "graphic" (an animated graphic), "words" (words on screen), "b-roll" or "screen" (footage she films to the shot list).',
+      "It stays 1 to 10 seconds, usually 3 or 4.",
+      'each shot she has to film, as "talking" (to the camera), "screen" (a recording of work on her computer) or "b-roll" (of her working, or in a coaching session)',
+      'A "b-roll" or "screen" cue names the shot it shows.',
+      "The teleprompter lines: her words, ready to read aloud, one paragraph a line, with no directions and no cues in them."
+    ]) assert.ok(text.includes(words), words);
+  });
+  it("saves it on her yes with plan new and one plan set, and writes a quote, a dollar sign, a percent sign, a backslash, a backtick and a pipe as their codes", () => {
+    const step = stepOf(4);
+    for (const words of [
+      'On her yes, run `plan new "<title>"`, then one `plan "<title>" set` holding every cue, shot and line',
+      '`--cue "<kind> | <seconds> | <words> | <what to show>"`, `--shot "<kind> | <what>"` and `--line "<paragraph>"`',
+      "`| shot: <number>`, `| ref: <file>`, `| inspiration: <name>` or `| link: <https link>`: at most one style.",
+      "A double quote, a dollar sign, a percent sign, a backslash, a backtick or a pipe in her words or yours is written `%22`, `%24`, `%25`, `%5C`, `%60` or `%7C`",
+      'so "100% sure" is written `100%25 sure`, and only the pipes that split a cue\'s parts are bare.',
+      "An apostrophe is written as it is."
+    ]) assert.ok(step.includes(words), words);
+  });
+  it("shows her the plan after, and tells her where the teleprompter script is, with no path", () => {
+    const step = stepOf(5);
+    for (const words of ['Run `plan "<title>"`, tell her what it says, and tell her where the teleprompter script is', "in the plan's folder in Episodes, in her BRIMM Video folder in Dropbox"]) assert.ok(step.includes(words), words);
+    assert.doesNotMatch(step, /\/Users|~\//);
+  });
+  it("looks at the picture of a style she names, and puts it on the cues it styles", () => {
+    assert.equal(stepOf(6), '6. For a style she names, run `refs look "<name>"`, look at the picture, and put "ref: <file>" on the cues it styles.');
+  });
+  it("gives an explainer graphic and words cues and no shots, with a voice that is hers or a HeyGen voice she picks, never one made from her own", () => {
+    const step = stepOf(7);
+    for (const words of ['run `plan new "<title>" --explainer`', 'give only "graphic" and "words" cues, and no shots', "The voice is hers, which she records from the teleprompter script, or a HeyGen voice she picks in HyperFrames: Jason's standing yes for explainers, never a voice made from her own.", "Add `--voice sallie` or `--voice heygen` once she says which."]) assert.ok(step.includes(words), words);
+  });
+  it("shows her no command, no path and no flag, and posts, sends and publishes nothing", () => {
+    for (const words of ["never show her a command, a path or a flag: say what was done, in plain words.", "Nothing here is posted, sent or published"]) assert.ok(script.includes(words), words);
+  });
+  it("runs only commands edit.js has, and names only flags its help gives plan", () => {
+    const spans = commandsIn(script);
+    assert.ok(spans.length >= 5, spans.join(" | "));
+    for (const span of spans) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `script.md runs "${span}", which edit.js does not have`);
+    for (const command of ["plan", "refs"]) assert.ok(spans.some((span) => span.startsWith(`${command} `)), command);
+    // Every flag it names is one the help gives plan, and every flag it gives a command is on one of that command's usages.
+    const named = [...new Set([...script.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))];
+    assert.deepEqual(named.sort(), ["--cue", "--explainer", "--line", "--shot", "--voice"]);
+    for (const flag of named) assert.ok(planHelp.includes(flag), flag);
+    for (const span of spans) for (const flag of span.match(/(?<![\w-])--[a-z][a-z-]*/g) ?? []) assert.ok(planHelp.includes(flag), `${span}: ${flag}`);
+  });
+  it("runs each command it names in a world with a plan, and none prints the help or ends with 2", async () => {
+    const { t } = episode();
+    const deps = { ...t.ctx.deps, rand: () => 0.25 };
+    const run = async (...argv) => {
+      const said = [];
+      const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
+      return { code, text: said.join("\n") };
+    };
+    // plan new "<title>", then plan "<title>" set with the cue, shot and line it describes, plan "<title>", and an explainer.
+    const made = [
+      await run("plan", "new", "Too many SKUs"),
+      await run("plan", "Too many SKUs", "set", "--cue", "graphic | 4 | too many SKUs | A stack of boxes.", "--shot", "talking | Open to the camera.", "--line", "Too many SKUs will sink a small shop."),
+      await run("plan", "Too many SKUs"),
+      await run("plan", "new", "Why SKUs", "--explainer", "--voice", "sallie")
+    ];
+    for (const r of made) assert.ok(r.code !== 2 && !r.text.startsWith("The command line for episodes on this Mac"), r.text);
+    assert.deepEqual(made.map((r) => r.code), [0, 0, 0, 0]);
+    t.done();
+  });
+  it("lets the guard pass a read of script.md in the skill's folder and of a script in Scripts, and refuses a link in Scripts that leads out", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-scripts-")));
+    const folder = join(dir, "BRIMM Video Studio");
+    mkdirSync(join(folder, "Scripts"), { recursive: true });
+    mkdirSync(join(folder, ".claude", "skills", "brimm-edit"), { recursive: true });
+    writeFileSync(join(folder, ".claude", "skills", "brimm-edit", "script.md"), script);
+    writeFileSync(join(folder, "Scripts", "episode 12.txt"), "her script");
+    writeFileSync(join(dir, "outside.txt"), "not hers");
+    symlinkSync(join(dir, "outside.txt"), join(folder, "Scripts", "link.txt"));
+    const read = (file_path) => guardDecision({ tool_name: "Read", tool_input: { file_path }, cwd: folder }, { checkout: CHECKOUT, node: NODE, folder }).decision;
+    for (const path of [".claude/skills/brimm-edit/script.md", join(folder, ".claude", "skills", "brimm-edit", "script.md"), "Scripts/episode 12.txt", join(folder, "Scripts", "not there yet.txt")]) assert.equal(read(path), "pass", path);
+    for (const path of ["Scripts/link.txt", join(dir, "outside.txt"), "~/Desktop/episode 12.txt", "../outside.txt"]) assert.equal(read(path), "deny", path);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

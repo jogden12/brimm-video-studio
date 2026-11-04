@@ -121,6 +121,9 @@ describe("plan new", () => {
     const again = await on(depsOf(t, { rand: () => 0.5 }), "plan", "new", TITLE);
     assert.deepEqual([again.code, again.said], [0, [`"Too many SKUs" is planned. Next: its guide, its shot list and its teleprompter script.`]]);
     assert.deepEqual(readdirSync(join(t.root, "Episodes")).sort(), [nameOf(t), `${nameOf(t)}-2`]);
+    // The title now means the new plan, not the dropped one beside it.
+    assert.deepEqual((await on(depsOf(t), "plan", TITLE)).said, [`"Too many SKUs" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`]);
+    assert.equal(readEpisode(join(t.root, "Episodes", `${nameOf(t)}-2`)).record.archived, null);
     t.done();
   });
   it("is the help, with 2, when it is given no title, and writes nothing", async () => {

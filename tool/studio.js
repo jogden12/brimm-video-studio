@@ -1,5 +1,6 @@
 // Sallie's folder for Claude, ~/BRIMM Video Studio, on this Mac's own disk: her sessions in the Claude app run there. It
-// holds a CLAUDE.md, the folder's settings for Claude Code, the brimm-edit skill, and Pictures/ for her own pictures. The
+// holds a CLAUDE.md, the folder's settings for Claude Code, the brimm-edit skill (with script.md beside its SKILL.md: the route from a
+// script she has to a plan, PR H4), Pictures/ for her own pictures and Scripts/ for her scripts. The
 // settings let her session run brimm-video's edit.js and nothing else: they deny the editing and web tools, turn the Auto
 // and Bypass modes off, and run a guard hook before every tool call, which also keeps reads inside the folder. The hook
 // answers in every mode, which a mode alone does not: a mode picked in the Code tab overrides the folder's default. So the
@@ -222,11 +223,13 @@ export function studioFiles({ checkout, node, folder, lock = "strict", facts }) 
   return {
     "CLAUDE.md": filled(open ? "CLAUDE-open.md" : "CLAUDE.md", { checkout, node }),
     ".claude/settings.json": JSON.stringify(open ? openSettingsOf({ checkout, node, folder, facts }) : settingsOf({ checkout, node, folder }), null, 2) + "\n",
-    ".claude/skills/brimm-edit/SKILL.md": filled(open ? "SKILL-open.md" : "SKILL.md", { checkout, node })
+    ".claude/skills/brimm-edit/SKILL.md": filled(open ? "SKILL-open.md" : "SKILL.md", { checkout, node }),
+    // The route from a script she has to a plan (PR H4): the skill's rows send Claude to read it, beside SKILL.md. The same file under either lock.
+    ".claude/skills/brimm-edit/script.md": filled("script.md", { checkout, node })
   };
 }
 
-/** Write her folder in `home`: its three files, written over the ones there, and Pictures/. Nothing else in it is touched.
+/** Write her folder in `home`: its files, written over the ones there, and Pictures/ and Scripts/. Nothing else in it is touched.
     It is on this Mac's own disk, so the files are written in place. The hook is given the folder as the disk spells it,
     which is the folder Claude Code runs in, even when it was made by hand in another case. With the open lock it also makes
     the workshop, readable by her alone. Gives back the folder. */
@@ -242,6 +245,8 @@ export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
     writeFileSync(join(folder, name), text);
   }
   mkdirSync(join(folder, "Pictures"), { recursive: true });
+  // The scripts she puts in her folder to have a plan made of: a Read inside her folder passes the guard, so Scripts/ needs no change to it.
+  mkdirSync(join(folder, "Scripts"), { recursive: true });
   return folder;
 }
 
