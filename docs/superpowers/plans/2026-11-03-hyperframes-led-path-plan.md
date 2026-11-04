@@ -760,9 +760,17 @@ These came from H5a's review on 4 November, and H5b builds them:
 20. **The gate's line for a plan** becomes `"<title>" is a planned video, and it isn't made from its footage yet.` That is true whether or not footage has come.
 21. **Footage whose shot changed goes in nowhere.** If `plan … set` changes the shot list after footage has come, a b-roll or screen recording whose shot is no longer of its kind gets no file in the project. The rule then tells her the cue has no footage yet.
 
+These came from H5b's build and review on 4 November:
+
+22. **A talking part with no sound is never joined,** whether it is the only part or one of several. The join's filing refuses a kind for a video with no sound. A record's own check does not, because it also judges records read from disk. So any later path that gives a record a kind refuses a silent video itself, as `kind` does.
+23. **A failed join says nothing of its parts' names.** A part is gated, and the guide sends her from a failed join to "how far is it?". So the run's result is cleaned of every name hidden while it ran.
+24. **`guide wait` and `guide tell` wait while a join runs,** as they do for a reading or a copy. No step on the BRIMM Ops page changes.
+25. **A client's agreement can still be noted once the video is made** (`plan … agreed` runs for a video made from its footage), and `workcopy --footage` makes the footage copies alone.
+
 ## Open items
 
 - **How `claude` reads under H7's scratch home.** It is settled on the page before the first check that needs a reading.
 - **Whether parts' own files could later be freed,** once a planned episode's main video is filed (ruling 12's cost). That is Jason's call, after H5.
 - **Whether taking footage back should void its client's agreement.** Today it does not. The agreement is for that video as footage for that plan, so if she makes it footage for the same plan again, the agreement still counts. Jason's call.
 - **Whether a video she left alone can be made footage.** Today it can. `episodes` shows no card for it, but `footage` asks her both cards, and the client question still holds back footage that shows a client. Jason's call.
+- **Whether the join should wait for each part's own late check.** Today it reads each part as Dropbox has it, and a video made from its footage can't be joined again. The whole-branch review weighs it; then it is Jason's call.
