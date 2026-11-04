@@ -440,6 +440,24 @@ How it is run:
 | 4. Sound with no picture | Does a project whose only media is `media/voiceover.m4a` (an `<audio>` element, no `<video>`) open, play, show its words, and export with its sound? | H6's project from sound |
 | 5. A HeyGen voice | In a scratch explainer: can a HeyGen voice be chosen in the app, and exported as a sound file, or as a video whose sound Studio can take? | H6's voice route: an export that is dropped (first choice), or a project with no media (design 6, 10.13) |
 
+### A1's answers, 4 November
+
+Run on the Mac Studio, in scratch projects, as checks 49 to 56 on the By-Hand page.
+
+| Question | What the app did | What it decides |
+|---|---|---|
+| 1. The cue file | After "Make the cuts Studio suggests", the agent offered all six cues by itself and named the one it could not place. It built only the cue taken, on its words once the cut was counted (2.24 s earlier on the timeline). | H1's line stands as built |
+| 2. Several videos | The app opened a project with three videos in `media/` and showed all of them. The agent put each footage cue at its words, muted, with the recording's sound under it. Upright b-roll became a full cutaway, on a mist panel (Jason: "Full cutaway is fine"). Wide footage filled the frame. | H5's project as outlined. Its line says a full cutaway |
+| 3. B-roll, transcribed? | No. The app transcribes only files with sound. | H5's picture-only rule holds |
+| 4. Sound with no picture | It opened and played, with no `<video>`. Its words showed in the Script tab, from the app's own transcript, which spells BRIMM "Brim". It exported with its sound. | H6's project from her voiceover, as planned |
+| 5. A HeyGen voice | The app has no voice panel. The agent makes the voice with the app's own tool (`mcp__hf_media__voice_generateVoiceover`), which saves `assets/HeyGen voice <id>.wav` with the app's transcript beside it. The export has the voice. | H6 takes the voice from the project's `assets/`, with no export and no drop |
+
+Also found:
+- **Videos added in the app go to `assets/`,** each with the app's transcript beside it. The agent finds a stretch of one by its words (check 52).
+- **The app never applies a project's settings.** It starts its agent with `--setting-sources user`, so a project's `.claude/settings.json` has no effect in the app. Only the notes guard the agent there (check 55).
+- **The app gives its agent HeyGen tools of its own** (`hf_media`): voiceover, voice cloning, avatars, lip-sync and generated video. Jason, 4 November: block none of them on either Mac. Instead, every project's notes warn before an AI avatar or an AI Sallie, her face or her voice. That change goes to main in its own pull request.
+- **The Export dialog starts on Cloud** since the app's update of 4 November.
+
 ---
 
 ## PR H5, in outline: footage for a planned episode
@@ -471,7 +489,7 @@ Written as tasks once A1's answers 4 and 5 are in. What is decided now:
   - The project is made from the sound and the guide: `media/voiceover.m4a` in an `<audio>` element, upright 1080 by 1920 as the BRIMM explainer test is, and `transcript.json` from its words. The cues are placed on its words.
   - The kind is decided at the finish from the export, by today's rule.
 - **A HeyGen voice:** if A1 shows that the voice can be exported, the export is dropped and goes the way of her voiceover. If not, the project is made with no media, its cues have no `at`, and the agent times them to the voice.
-- **The HeyGen line:**
+- **The HeyGen line:** superseded on 4 November. Every project's notes now get the warning line on main, in its own pull request (A1's answers), so H6 adds none of its own. The text below is kept as it was planned.
   - **In words:** only an explainer's project gets: `- **Voices.** A HeyGen voice is hers to choose for this explainer (Jason's standing yes, 2026-11-03), never a voice made from Sallie's own. No HeyGen avatars or HeyGen Video 1 clips without Jason's yes, no generated people who could pass as real, and never a generated Sallie or her face.` The line said after the app opens (`BUTTONS`, app.js:179, pinned in `app.test.js`) says the same for an explainer. Every other project keeps today's lines (design 10.6).
   - **In settings:** nothing changes. `tts` stays denied and the agent's HeyGen keys stay blank, since she picks the voice in the app's own panel (design 9).
 - **At the hand-off** of an explainer with `voice: "heygen"`, Studio adds: `It has a HeyGen voice: when you upload it to YouTube, mark it as altered or synthetic content.`
