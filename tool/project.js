@@ -370,6 +370,16 @@ This is a clip of a private client session. These rules come before everything e
 - **Its own files only.** Use this project's files, and nothing from another project.
 - **No new projects.** Never make a Reel or any other new project from this clip: a new project holds a second copy of the clip outside Studio's care. Say it is not done for a client session's clip.`;
 
+/** The rule about generated people in the notes of a main video and of a Reel (Jason, 2026-11-04, after A1). HeyGen's tools are open
+    and nothing here blocks them: the agent warns her first, in his words, before an AI avatar, lip-sync or an AI-generated Sallie, her
+    face or her voice, goes ahead only if she still wants it, and reminds her of YouTube's label. The notes are the only guard in the
+    app, which starts its agent with `--setting-sources user`: a project's `.claude/settings.json` has no effect there. */
+const AI_PEOPLE = "- **AI-generated people.** HeyGen's tools are open. The BRIMM doesn't use AI avatars, lip-sync, or an AI-generated Sallie, her face or her voice, for now. If she asks for one of these, warn her first: \"The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now. Do you still want it?\" Go ahead only if she still wants it, and remind her that YouTube needs the video marked as altered or synthetic content. A stock HeyGen voice is fine without the warning, with the same YouTube reminder.";
+
+/** A session clip's rule about generated people, as it was before 2026-11-04. CLAUDE.md says no session clip uses HeyGen's features
+    until HeyGen confirms the training opt-out, so HeyGen's tools are not open in a clip's notes. */
+const NO_GENERATED_PEOPLE = "- **No generated people.** No HeyGen avatars, HeyGen voices or HeyGen Video 1 clips without Jason's yes. No generated people who could pass as real, and never a generated Sallie, face or voice.";
+
 /** The ruling of 2026-10-28 (plan PR 5): a Reel is made by Studio only. The app, asked for a Reel, makes it as a project of its
     own in ~/.hyperframes-studio/, outside BRIMM Video Work, with a copy of the whole recording in its assets (A0), and Studio
     could not find its export for the hand-off. So the agent is told never to make one, and what to tell her instead: the
@@ -402,7 +412,8 @@ function thisReel(crop) {
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
     to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
-    (SHORT_VIDEO_NO_NEW_PROJECTS). A Reel's project has a line about its own page (thisReel), from the `crop` it was made with. */
+    (SHORT_VIDEO_NO_NEW_PROJECTS). A Reel's project has a line about its own page (thisReel), from the `crop` it was made with. A
+    session clip's rule about generated people is its old one (NO_GENERATED_PEOPLE), and the other kinds' is AI_PEOPLE. */
 function brimmRules(kind, short = false, crop = null) {
   const episode = kind !== "clip";
   return [
@@ -413,7 +424,7 @@ function brimmRules(kind, short = false, crop = null) {
     "- **A draft only.** This video is a draft for The BRIMM. Never post or publish anything.",
     "- **On this Mac only.** Renders and exports are made on this Mac, never in the cloud.",
     "- **Sharing.** If asked to share, say that Sallie shares from the app's Share button, and only with \"Only people you invite\". Never set a link to \"Anyone with the link\".",
-    "- **No generated people.** No HeyGen avatars, HeyGen voices or HeyGen Video 1 clips without Jason's yes. No generated people who could pass as real, and never a generated Sallie, face or voice.",
+    episode ? AI_PEOPLE : NO_GENERATED_PEOPLE,
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,

@@ -151,7 +151,7 @@ export const COMMANDS = classify([
   ["benchmark", "denied", "renders again and again to time it, which nobody asked for"],
   ["clean", "denied", "sweeps the history and the render leftovers of every project it knows, not of one: named paths are deleted instead (7.4)"],
   ["transcribe", "denied", "listens to audio again: the words are in transcript.json already, made on the Mac"],
-  ["tts", "denied", "writes speech from text with a local model: a generated voice"],
+  ["tts", "denied", "writes speech with a local voice model, which it fetches the first time: nothing is installed without Jason's yes, and a stock voice comes from the app's own HeyGen voice tool"],
   ["remove-background", "denied", "may download a model when first used; it waits for A0 to say it is wanted"]
 ]);
 

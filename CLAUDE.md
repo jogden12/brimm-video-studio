@@ -43,7 +43,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 - The Script panel may transcribe videos meant for posting.
 - Share is for invited people only.
 - Never render in the cloud.
-- No HeyGen avatars, voices or Video 1 clips without Jason's yes, and never a generated Sallie, face or voice.
+- HeyGen's tools are open, and nothing blocks them on either Mac (Jason, 2026-11-04). Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
 - The app's agent is Claude Code with Auto access, never Full.
 
 ## HyperFrames
@@ -52,6 +52,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 - Telemetry is off.
 - Never `publish`, `cloud`, `lambda` or `cloudrun`.
 - Each project carries BRIMM's rules for the agent (`docs/phase-a0/brief.md`, `settings.json`).
+- The app starts its agent with only the user's own settings (--setting-sources user), so a project's .claude/settings.json has no effect in the app: the notes are what guide the agent there (A1, 2026-11-04).
 
 ## The brand
 

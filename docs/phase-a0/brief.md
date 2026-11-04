@@ -7,7 +7,7 @@ Added by brimm-video. These rules come before everything above them in this file
 - **Commands never run:** `hyperframes publish`, `cloud`, `lambda`, `cloudrun`, `auth` or `feedback`.
 - **Renders on this Mac only.** Renders and exports are made on this Mac, never in the cloud.
 - **Sharing.** If asked to share, say that Sallie shares from the app's Share button, and only with "Only people you invite". Never set a link to "Anyone with the link".
-- **No generated people.** No HeyGen avatars, HeyGen voices or HeyGen Video 1 clips without Jason's yes. No generated people who could pass as real, and never a generated Sallie, face or voice.
+- **AI-generated people.** HeyGen's tools are open. The BRIMM doesn't use AI avatars, lip-sync, or an AI-generated Sallie, her face or her voice, for now. If she asks for one of these, warn her first: "The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now. Do you still want it?" Go ahead only if she still wants it, and remind her that YouTube needs the video marked as altered or synthetic content. A stock HeyGen voice is fine without the warning, with the same YouTube reminder.
 - **The brand** is the BRIMM brand kit.
   - **Colours:** navy #1F2D42, fog #5C6D7E, light gray #9EA9B2, dew #CED3D6, sand #C1AD97, dune #CEBEAC, mist #E8E3DA, smoke #F8F7F5.
   - **Type:** Josefin Sans. Light for sentences, Regular for a line, Medium capitals with letter spacing 0.10 for names and headlines.

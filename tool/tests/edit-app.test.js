@@ -72,7 +72,7 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";
 /** The line `app` ends with whenever the app opened: the buttons Studio cannot turn off (architecture 5.9). */
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 /** What `open` and `app` say, for the same claim, when the other Mac has the episode. */
 const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
 const WORKING_COPY = "the working copy's bytes";
@@ -677,7 +677,7 @@ describe("app: a project that is on another Mac, and that Mac has not handed ove
 
 describe("app: the buttons Studio cannot control (architecture 3.3 and 5.9)", () => {
   it("reminds her of them in a last line whenever the app opened, after the claim's lines and the chat's, and plainly", async () => {
-    assert.equal(BUTTONS, "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.");
+    assert.equal(BUTTONS, "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.");
     const { t, found } = world();
     const r = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);

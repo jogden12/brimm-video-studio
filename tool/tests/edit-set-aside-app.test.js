@@ -65,7 +65,7 @@ function bigFile(dir, rel, size = BIG) {
 const withClip = (key = "main") => (w) => bigFile(w.dirOf(key), "assets/broll/clip.mp4");
 
 const OPEN = "It's open in HyperFrames.";
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 const SET_ASIDE = (of = "") => `The older HyperFrames project for ${of}${NAME} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
 const REBUILT = (when, of = "", by = "Sallie's laptop") => `The HyperFrames project for ${of}${NAME} is rebuilt on this Mac from what ${by} handed over at ${when}. What HyperFrames kept of its history stays on ${by}.`;
 const KEPT = (of = "") => `The video for ${of}${NAME} was kept from the older project, and it is in the project.`;
