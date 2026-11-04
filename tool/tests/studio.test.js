@@ -1101,7 +1101,7 @@ describe("a script she has, and the plan made from it: the skill's rows and scri
       'On an answer that starts "Footage for", ask `Part card: {…}` next, as given, then run `footage "<label>" "<title>" talking --client no`',
       "the plan's title from her answer, screen or b-roll in place of talking as she chose, `--client yes` when she says it shows a client, a client's name or their work",
       "when it says which shot, the number she gives you in the chat as `--shot <n>`",
-      'On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video or a client or group session, and run `leave "<label>"` unless she says it is a session.'
+      'On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video, and run `leave "<label>"`.'
     ];
     for (const [which, skill] of [["strict", strict[SKILL]], ["open", openFiles()[SKILL]]]) {
       const lines = skill.split("\n");

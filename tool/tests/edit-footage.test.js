@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { episodeFault, isPart, isPlannedRecord, localStamp, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
 import { footageAsked, mayGoIn, partsOf } from "../footage.js";
-import { CLIENT_Q, NO_RECEIPT, PLANNED_Q, SHOT_Q, footageOption, formOf, partCardOf, plannedCardOf, writeReceipt } from "../receipts.js";
+import { CLIENT_Q, NO_RECEIPT, PLANNED_Q, SHOT_Q, cardOf, expectedAnswers, footageOption, formOf, partCardOf, plannedCardOf, sessionByFollowUp, writeReceipt } from "../receipts.js";
 import { fileSafe } from "../names.js";
 import { episodeWork, runsFolder } from "../settings.js";
 import { guardDecision } from "../studio.js";
@@ -106,6 +106,20 @@ const lockOf = (t, name) => join(episodeWork(t.home, name), "answer.lock");
 function receipts(t, { label, title = TITLE, kind = "B-roll", client = "No", ago = 0, offered, also = [] } = {}) {
   writeReceipt(t.home, { at: t.now() - ago, label, form: "planned", answers: { [PLANNED_Q(label)]: footageOption(title) }, offered: offered ?? [footageOption(title), ...also.map(footageOption), "No"] });
   writeReceipt(t.home, { at: t.now() - ago, label, form: "part", answers: { [SHOT_Q(label)]: kind, [CLIENT_Q(label)]: client } });
+}
+/** Every receipt the video called `label` could hold on an open-lock Mac under Claude Code, were its card asked: her answers on the card for each kind `kind`
+    is told (with the not-a-session card's too, and a session's by that card alone), and the planned card and the part card. The receipts `kind` would take
+    for any kind a card offers are all here, so a refusal of `kind` that stands with them all in place is not for want of one. */
+function everyReceipt(t, label) {
+  const offered = cardOf({ label, guess: null, maybe: null }).questions[0].options[0].label;
+  const write = (form, answers, more = {}) => writeReceipt(t.home, { at: t.now(), label, form, answers, ...more });
+  for (const stored of ["finished", "raw", "short video", "session"]) {
+    for (const notASession of [false, true]) {
+      for (const one of expectedAnswers({ label, stored, notASession, came: null, offered })) write(one.form, one.answers, one.offered === undefined ? {} : { offered: one.offered });
+    }
+  }
+  for (const one of sessionByFollowUp({ label, came: null })) write(one.form, one.answers);
+  receipts(t, { label });
 }
 
 /** What `footage` says when it is done, by its parts. */
@@ -1118,31 +1132,51 @@ describe("kind, leave and the gate, with a part and a video with no sound", () =
     assert.deepEqual((await on(depsOf(u), "leave", labelOf(2))).said, [`${labelOf(2)} is footage for a planned video. Say "that's not footage" first.`]);
     u.done();
   });
-  it("gives a video with no sound the answer session alone, and tells her what it can be", async () => {
-    const WHY = (n) => `${labelOf(n)} has no sound, so Claude can't read it: it can only be footage for a planned video, or a client or group session. Or say "leave it".`;
+  // The three Macs `kind` and `leave` tell apart: a strict one, Terminal (no Claude Code named), and an open lock under Claude Code, the only one that asks for receipts.
+  const MACS = [
+    ["a strict Mac", (t) => open(t, { settings: { ...t.ctx.settings, lock: "strict" } })],
+    ["Terminal", (t) => open(t, { env: {} })],
+    ["an open-lock Mac under Claude Code", (t) => open(t)]
+  ];
+  it("gives a video with no sound no kind at all, session included, on every Mac and before any receipt is looked at, and says what it can be", async () => {
+    const WHY = `${labelOf(1)} has no sound, so Claude can't read it: it can only be footage for a planned video. Or say "leave it".`;
+    const ANSWERS = [
+      ["finished", "--private", "no"], ["raw", "--private", "no"], ["clip", "--private", "no"], ["session", "--private", "yes"],
+      ["raw", "--private", "no", "--again"], ["session", "--private", "yes", "--again"], ["finished", "--private", "no", "--version-of", "none"],
+      ["raw", "--private", "no", "--not-a-session"], ["finished", "--private", "no", "--clear-session"], ["raw", "--private", "no", "--here"]
+    ];
     const t = setup();
     const found = video(t, 1, { silent: true });
-    const before = snapshot(t);
-    for (const words of [["finished", "--private", "no"], ["raw", "--private", "no"], ["clip", "--private", "no"], ["raw", "--private", "no", "--again"], ["finished", "--private", "no", "--version-of", "none"]]) {
-      for (const deps of [depsOf(t), open(t)]) {
-        const r = await on(deps, "kind", labelOf(1), ...words);
-        assert.deepEqual([r.code, r.said], [1, [WHY(1)]], words.join(" "));
+    // Before any receipt is looked at: the open-lock Mac has none, and is not told to ask for a card that was never printed for this video.
+    let before = snapshot(t);
+    for (const words of ANSWERS) {
+      const r = await on(open(t), "kind", labelOf(1), ...words);
+      assert.deepEqual([r.code, r.said], [1, [WHY]], `no receipt: ${words.join(" ")}`);
+    }
+    unchanged(t, before);
+    // And not for want of one: with every receipt it could have, on every Mac, nothing is answered.
+    everyReceipt(t, labelOf(1));
+    before = snapshot(t);
+    for (const [what, deps] of MACS) {
+      for (const words of ANSWERS) {
+        const r = await on(deps(t), "kind", labelOf(1), ...words);
+        assert.deepEqual([r.code, r.said], [1, [WHY]], `${what}: ${words.join(" ")}`);
       }
     }
     unchanged(t, before);
-    // A session is the one answer it takes (a strict Mac, or Terminal, asks for no card).
-    const r = await on(depsOf(t), "kind", labelOf(1), "session", "--private", "yes");
-    assert.equal(r.code, 0, r.text);
-    assert.equal(reread(found).kind, "session");
+    assert.deepEqual([reread(found).rev, reread(found).kind, reread(found).answer.state], [1, null, "needs your answer"]);
     t.done();
   });
-  it("lets a video with no sound be left, as any video waiting is", async () => {
-    const t = setup();
-    const found = video(t, 1, { silent: true });
-    const r = await on(depsOf(t), "leave", labelOf(1));
-    assert.deepEqual([r.code, r.said], [0, [`${labelOf(1)}: left. It is not asked about again.`]]);
-    assert.equal(reread(found).answer.state, "not for brimm-video");
-    t.done();
+  it("lets a video with no sound be left, as any video waiting is, on every Mac and with no receipt", async () => {
+    for (const [what, deps] of MACS) {
+      const t = setup();
+      const found = video(t, 1, { silent: true });
+      const r = await on(deps(t), "leave", labelOf(1));
+      assert.deepEqual([r.code, r.said], [0, [`${labelOf(1)}: left. It is not asked about again.`]], what);
+      assert.equal(reread(found).answer.state, "not for brimm-video", what);
+      assert.equal(reread(found).kind, null, what);
+      t.done();
+    }
   });
   it("lets footage run for a video left alone, as a video waiting, and for a part, to take it back", async () => {
     const t = setup();

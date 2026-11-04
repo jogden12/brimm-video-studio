@@ -950,7 +950,7 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
   const maybe = maybeOf(named, others, links);
   const blocked = Boolean((maybe && maybe.session) || links.sessionsBeside(named, null).length > 0);
   const lines = footageCards({ record: named, label, records: others.map((e) => e.inForce).filter(Boolean), blocked });
-  // A video with no sound has no card: it can be footage for a planned video, or a session, or be left. Nothing Claude reads of it is said.
+  // A video with no sound has no card: it can be footage for a planned video, or be left, and takes no kind. Nothing Claude reads of it is said.
   if (named.video && named.video.sound === false) return [...lines, NO_SOUND];
   lines.push(`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`);
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
@@ -960,8 +960,8 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
 
 /** What `episodes` says in place of the card under a video with no sound (PR H5a). */
 const NO_SOUND = "    No sound: it can only be footage for a planned video.";
-/** What `kind` says to a video with no sound that is answered as anything but a session (PR H5a). */
-const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: it can only be footage for a planned video, or a client or group session. Or say "leave it".`;
+/** What `kind` says to a video with no sound, whatever it is answered as and on whatever Mac, before any receipt is looked at (PR H5a). */
+const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: it can only be footage for a planned video. Or say "leave it".`;
 
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
@@ -5373,6 +5373,9 @@ function lateCheckAt(ctx, record) {
 /** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, clearSession, versionOf, target })
     when its record is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and
     `plan.target`, the video this is a new version of, is looked for the first time it is asked. In this order:
+    - a part (PR H5a), which is footage for a planned video and is taken back first; and a video with no sound (`video.sound` is false), which
+      takes no kind at all, a session included: it has nothing for Claude to read and no words to be a session's, so it is left alone or made
+      footage. Both are met here, so before any receipt is looked at, on every Mac, whatever the answer and its flags;
     - an answered video, without --again; a session not cleared, answered as anything but a session (which only --clear-session
       does, by her click on a dialog), or as one; and, with --clear-session, a video that has no session mark to clear (no session,
       or one whose mark is cleared already) or whose mark cannot be read. What the other Mac cleared after the record was read is
@@ -5407,9 +5410,10 @@ function answerWhy(ctx, found, record, plan) {
   const was = recordKind(record);
   // A part (PR H5a) is footage for a planned video, and is taken back (`footage … none`) before it is answered as anything else.
   if (isPart(record)) return partRefused(name, planTitleOf(ctx.root, record.partOf.id));
+  // A video with no sound (PR H5a) has nothing for Claude to read and no words to be a session's: it takes no kind, whatever it is answered as. It is
+  // left alone or made footage (`footage`). This is met before the receipts (answerKind), so no Mac is asked for a card that was never printed for it.
+  if (record.video && record.video.sound === false) return NO_SOUND_WHY(name);
   if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
-  // A video with no sound (PR H5a) has nothing for Claude to read: it is answered as a session, left alone, or made footage (`footage`).
-  if (stored !== "session" && record.video && record.video.sound === false) return NO_SOUND_WHY(name);
   // A video that has a kind and is gated is a session whose mark is not cleared. With --clear-session it has to be one, with a mark to
   // clear; without it, such a video can be answered only as a session (which it is) and never as another kind.
   if (plan.clearSession) {
