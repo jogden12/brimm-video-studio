@@ -311,6 +311,8 @@ export async function freeEpisode(ctx, { found, record }, deps = {}) {
 
   // Only renders can be taken without the recording: the video is made again from it, and from nothing else.
   if (targets.some((target) => target.what !== "renders")) {
+    // A planned episode (PR H4) has no video and no project, so nothing of it is made on this Mac and there is nothing to take away (the gate
+    // refuses `free` for it all the same): this stays as it is for a record with no video.
     const raw = typeof record.video?.file === "string" && record.video.file !== "" ? ctx.stat(join(found.folder, record.video.file)) : undefined;
     if (!raw || !raw.isFile()) return stop(notThere(name));
     const taken = new Set(targets.filter((target) => target.what === "video").map((target) => target.project));

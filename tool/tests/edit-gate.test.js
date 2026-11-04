@@ -52,7 +52,10 @@ const ASKED = {
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
   teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER],
   // `refs` names an episode only in `refs use`, which is the form walked here: `refs` and `refs look` name none, and are never gated (tests/edit-refs.test.js).
-  refs: ["use", FOLDER, "blue carousel"]
+  refs: ["use", FOLDER, "blue carousel"],
+  // `plan` names an episode in all its forms but `plan new`, which names none and is never gated: the form walked here shows the plan of the episode
+  // (tests/edit-plan.test.js pins its words, and what the gate says of a planned episode).
+  plan: [FOLDER]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */

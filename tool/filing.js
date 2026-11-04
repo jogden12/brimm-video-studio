@@ -254,6 +254,7 @@ export function holdingEpisode({ root, video, bytes }) {
   } catch (e) {
     return e.code === "ENOENT" ? null : { unknown: true };
   }
+  // A planned episode (PR H4) has no video (`video` is null), so it holds no file and is never the episode a file in a drop folder is in.
   const holds = (r) => r && typeof r === "object" && r.video && r.video.file === video && r.video.bytes === bytes;
   const shaped = (r) => r !== null && typeof r === "object" && typeof r.id === "string" && Number.isInteger(r.version);
   const stem = basename(video, extname(video));

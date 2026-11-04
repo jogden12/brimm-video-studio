@@ -9,13 +9,21 @@
 // own, cloned in under their names, a file there deleted first and never written over, and the record last, with the rev it was read at.
 // The files are for a person to read; the record holds the package, and the project made of the footage (PR H5) is made from the record.
 //
-// This part is pure: the words a command is given go in, and the package, the problems with it and the three files' texts come out. What it
-// says goes into her chat, so it holds no path and no flag. The problems with a package are said to Claude, who corrects the words it gave: a
-// line that says a | in a cue is written %7C is for Claude. Nothing here posts, sends or publishes anything, and no cue is built: a cue is built
-// only when she takes it, in the app (design 3).
-import { countWords } from "./shared/text.js";
-import { SHOT_LIST_KINDS } from "./episode.js";
+// edit.js is only the wiring (plan); this module says what the command says, and does what it does. Its first half is pure: the words a
+// command is given go in, and the package, the problems with it and the three files' texts come out. What it says goes into her chat, so
+// it holds no path and no flag. The problems with a package are said to Claude, who corrects the words it gave: a line that says a | in a
+// cue is written %7C is for Claude. Nothing here posts, sends or publishes anything, and no cue is built: a cue is built only when she takes
+// it, in the app (design 3).
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { countWords, localDay } from "./shared/text.js";
+import { SHOT_LIST_KINDS, acceptRev, isPlannedRecord, localStamp, newId, newPlannedEpisode, readEpisode, shownName, undone, writeEpisode } from "./episode.js";
 import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf } from "./graphic-cues.js";
+import { findReference } from "./references.js";
+import { referencesFolder, runsFolder } from "./settings.js";
+import { episodeFolderName } from "./names.js";
+import { textWriter } from "./dropbox.js";
+import { commitOf, thisCheckout } from "./filing.js";
 
 export { SHOT_LIST_KINDS };
 
@@ -26,9 +34,9 @@ const MOST = { cues: 60, shots: 40, lines: 400, line: 2000, title: 80, words: 30
 /** How many words of the teleprompter script a minute holds, as a person reads aloud. */
 const WORDS_A_MINUTE = 150;
 /** The files of a package, by their names in the episode's folder. An explainer has no shot list. */
-export const GUIDE_FILE = "video guide.md";
-export const SHOT_LIST_FILE = "shot list.md";
-export const TELEPROMPTER_FILE = "teleprompter.txt";
+const GUIDE_FILE = "video guide.md";
+const SHOT_LIST_FILE = "shot list.md";
+const TELEPROMPTER_FILE = "teleprompter.txt";
 /** The keys a cue's last parts may have: the shot it shows, and its style (graphic-cues.js holds at most one of the three). */
 const KEYS = ["shot", "ref", "inspiration", "link"];
 
@@ -278,3 +286,193 @@ export function plannedLine(record) {
   return `"${name}": planned on ${dayText(plan.at)}, waiting for its footage (${n ? counted(n, "shot") : "no shots yet"}), id ${id}`;
 }
 
+
+// --- The command ---
+
+/** What `plan` is told, from the words after the command and its flags (edit.js flagsOf gives them, with --cue, --shot, --line and --voice
+    taking a value each time they are given): { form: "new", title, explainer, voice }, { form: "show", episode }, { form: "set", episode, cues,
+    shots, lines } or { form: "drop", episode }; or null for anything else, which is the help. `new` is followed by the title, one word in quotes. A
+    flag no form has is none. The episode is one word, as every command has it. A `set` gives at least one cue, shot or line. */
+export function planAsked(words, flags) {
+  const [first, second, ...more] = words;
+  const only = (...allowed) => Object.keys(flags).every((flag) => allowed.includes(flag));
+  const said = (word) => typeof word === "string" && word.trim() !== "";
+  if (first === "new") {
+    if (!said(second) || more.length || !only("explainer", "voice")) return null;
+    return { form: "new", title: second, explainer: flags.explainer === true, voice: flags.voice === undefined ? null : flags.voice[flags.voice.length - 1] };
+  }
+  if (!said(first) || more.length) return null;
+  if (second === undefined) return only() ? { form: "show", episode: first } : null;
+  if (second === "drop") return only() ? { form: "drop", episode: first } : null;
+  if (second !== "set" || !only("cue", "shot", "line")) return null;
+  const [cues, shots, lines] = ["cue", "shot", "line"].map((flag) => flags[flag] ?? []);
+  return cues.length + shots.length + lines.length ? { form: "set", episode: first, cues, shots, lines } : null;
+}
+
+const refuse = (ctx, why) => {
+  ctx.say(why);
+  return 1;
+};
+
+/** A name or a title as it is compared with another: whatever its case, its accents and its spacing. */
+const plainly = (text) => String(text ?? "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** What a plan is made of, as it is said: its guide, its shot list (a script's alone) and its teleprompter script. */
+const madeOf = (explainer) => joined(["its guide", ...(explainer ? [] : ["its shot list"]), "its teleprompter script"]);
+
+/** The programs and folders the rule is given on this Mac, as edit.js gives them to every command that writes. */
+const ruleOpts = (ctx) => ({ ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}), ...(ctx.deps.sameDisk ? { sameDisk: ctx.deps.sameDisk } : {}) });
+const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine });
+/** A folder of this Mac's own that a command makes its files in before they are put into Dropbox, and takes away. */
+const workOf = (ctx) => join(runsFolder(ctx.home), `plan-${process.pid}-${ctx.now()}`);
+
+/** Why a record could not be written, in plain words with no path. */
+const notWritten = (e) => {
+  if (e.code === "CHANGED") return "this plan changed on the other Mac: say it again";
+  if (e.code === "CONFLICTED") return "Dropbox has kept a conflicted copy of it: ask Jason";
+  if (e.code === "NEWER") return "Jason has a newer brimm-video. Ask him to update this Mac";
+  return `it could not be written (${e.code || "an error"})`;
+};
+
+/** The planned video that already has this title: the name it is found by, or "" when there is none. A plan that is dropped, or has been
+    filmed (PR H5), is none: only a plan waiting for its footage is. A conflicted episode is read as it lies past its copies. */
+function plannedWith(ctx, title) {
+  let names = [];
+  try {
+    names = readdirSync(ctx.episodes).filter((name) => !name.startsWith("."));
+  } catch (e) {
+    return "";
+  }
+  for (const name of names) {
+    const { record } = readEpisode(join(ctx.episodes, name), { pastCopies: true });
+    if (isPlannedRecord(record) && !record.archived && record.planned.filmed === null && [record.planned.title, shownName(record)].some((known) => plainly(known) === plainly(title))) return shownName(record);
+  }
+  return "";
+}
+
+/** `plan new "<title>" [--explainer [--voice sallie|heygen]]`: a planned episode, filed in Episodes as `<day> <title> (<Mac>)` by the import's
+    rule for a folder's name (names.js episodeFolderName), with only its first record. Ends with 0, or with 1, having said why and written
+    nothing: a voice without --explainer, a voice that is neither, a title over 80 characters, or a title already planned and not yet
+    filmed. The title's escapes are turned (textArg), so a title can hold a dollar sign or a quote. */
+export function newPlan(ctx, { title: given, explainer, voice }) {
+  const title = oneLine(textArg(given));
+  if (voice !== null && !explainer) return refuse(ctx, "A voice is only for an explainer.");
+  if (voice !== null && !["sallie", "heygen"].includes(voice)) return refuse(ctx, `A voice is Sallie's own ("sallie") or a HeyGen voice ("heygen").`);
+  if (length(title) > MOST.title) return refuse(ctx, `A title is at most ${MOST.title} characters, and that is ${length(title)}.`);
+  const same = plannedWith(ctx, title);
+  if (same) return refuse(ctx, `There's a planned video called "${same}" already. Say "show me the plan for ${same}".`);
+  const now = new Date(ctx.now());
+  const day = ctx.deps.today ? ctx.deps.today() : localDay(now);
+  let names = [];
+  try {
+    names = readdirSync(ctx.episodes);
+  } catch (e) {
+    // There is no Episodes yet: it is made below.
+  }
+  const folder = join(ctx.episodes, episodeFolderName(names, day, title, ctx.machine));
+  const record = newPlannedEpisode({ id: newId(day, ctx.deps.rand), machine: ctx.machine, at: localStamp(now), title, route: explainer ? "explainer" : "script", voice, writer: writerOf(ctx) });
+  // The folder is made here, and a name already taken is never used: making it without `recursive` fails on one.
+  try {
+    mkdirSync(ctx.episodes, { recursive: true });
+    mkdirSync(folder);
+  } catch (e) {
+    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+  }
+  const work = workOf(ctx);
+  try {
+    writeEpisode(folder, record, { expectRev: 0, writeText: textWriter({ work, ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
+  } catch (e) {
+    // The folder this command made, with no record in it, is no plan: it is taken away, so that nothing is left that looks like an import that stopped.
+    rmSync(folder, { recursive: true, force: true });
+    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  ctx.say(`"${title}" is planned. Next: ${madeOf(explainer)}.`);
+  return 0;
+}
+
+/** The record `found` holds, written as its next record, or why not: 0 when written, 1 when not, having said why. A change Dropbox took away
+    is said, as every command that writes the record says it. `before` is what is done between the checks and the record, with the work folder
+    the files are made in: the package's files, which go in before the record. */
+function writeNext(ctx, found, record, next, before = () => {}) {
+  const gone = undone(record, ctx.home);
+  if (gone) {
+    ctx.say(`${gone} Nothing was saved.`);
+    acceptRev(ctx.home, record.id, record.rev);
+    return 1;
+  }
+  const work = workOf(ctx);
+  try {
+    before(work);
+    writeEpisode(found.folder, next, { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
+  } catch (e) {
+    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  return 0;
+}
+
+/** Which file of the reference folder a style's picture is, for packageOf: { file }, or { why } in words that say what there is. */
+function pictureIn(folder, said) {
+  const found = findReference(folder, said);
+  if (found.file) return { file: found.file };
+  if (found.several) return { why: `which one is "${said}" in the reference folder? ${joined(found.several, "or")}` };
+  return { why: found.pictures.length ? `there is no "${said}" in the reference folder, which has ${joined(found.pictures)}` : `there is no "${said}" in the reference folder, which has no pictures yet` };
+}
+
+/** `plan "<planned>" set …`: the whole package replaced, in one record write. Every entry is read first (packageOf): when any cannot be used,
+    each problem is said on its own line, then "Nothing was saved.", and nothing is written, with 1. A ref is looked up in the reference folder.
+    Otherwise the three files go into the plan's folder by the rule, each replacing the one there (dropbox.js textWriter, `replace`) and no
+    other file touched, and the record last, with the rev it was read at, holding the package and the files' sizes. Says the plan is saved
+    and how long its teleprompter script is. */
+function setPlan(ctx, { found, record }, { cues, shots, lines }) {
+  const explainer = record.planned.route === "explainer";
+  const folder = referencesFolder(ctx.root);
+  const { plan, problems } = packageOf({ cues, shots, lines }, { explainer, ref: (said) => pictureIn(folder, said) });
+  if (problems.length) {
+    for (const problem of problems) ctx.say(problem);
+    ctx.say("Nothing was saved.");
+    return 1;
+  }
+  const title = shownName(record);
+  const texts = packageFiles(title, plan, { explainer });
+  const sizes = Object.fromEntries(Object.entries(texts).map(([name, text]) => [name, Buffer.byteLength(text)]));
+  const files = Object.fromEntries(Object.entries(record.files).filter(([name]) => ![GUIDE_FILE, SHOT_LIST_FILE, TELEPROMPTER_FILE].includes(name)));
+  const next = { ...record, planned: { ...record.planned, set: localStamp(new Date(ctx.now())), ...plan }, files: { ...files, ...sizes } };
+  const code = writeNext(ctx, found, record, next, (work) => {
+    const put = textWriter({ work, ...ruleOpts(ctx) });
+    for (const [name, text] of Object.entries(texts)) put(join(found.folder, name), text, { replace: true });
+  });
+  if (code === 0) ctx.say(savedLine(title, plan, { explainer }));
+  return code;
+}
+
+/** `plan "<planned>"`: the plan in plain words. A plan whose package is not set yet says what is still to be made. */
+function showPlan(ctx, { record }) {
+  const { planned } = record;
+  const explainer = planned.route === "explainer";
+  const title = shownName(record);
+  if (planned.set === null) ctx.say(`"${title}" is planned, and ${madeOf(explainer)} aren't made yet.`);
+  else for (const line of planLines(title, planned, { explainer, voice: planned.voice })) ctx.say(line);
+  return 0;
+}
+
+/** `plan "<planned>" drop`: the plan archived as an episode is (`archived`), so that `episodes` and the guide no longer show it. Its files stay
+    in its folder. */
+function dropPlan(ctx, { found, record }) {
+  const code = writeNext(ctx, found, record, { ...record, archived: { at: localStamp(new Date(ctx.now())) } });
+  if (code === 0) ctx.say(`The plan for "${shownName(record)}" is dropped.`);
+  return code;
+}
+
+/** `plan "<planned>" …` once edit.js has found the episode `got` (its gate has run): the plan shown, set or dropped. An episode that is not a
+    planned video is told so, and a plan that was dropped is told so; neither is changed. Ends with 0, or 1, having said why. */
+export function planFor(ctx, got, asked) {
+  const { record } = got;
+  if (!isPlannedRecord(record)) return refuse(ctx, `"${shownName(record)}" is not a planned video.`);
+  if (record.archived) return refuse(ctx, `The plan for "${shownName(record)}" was dropped.`);
+  if (asked.form === "set") return setPlan(ctx, got, asked);
+  return asked.form === "drop" ? dropPlan(ctx, got) : showPlan(ctx, got);
+}

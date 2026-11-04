@@ -190,6 +190,9 @@ export function opsText(handoff, step, again, note) {
       HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
       command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
       BRIMM Ops page's steps, and below her note that the video is finished.
+    - `planned`, for a planned episode (PR H4) and absent for anything else: { route, voice }. `route` is "script" or "explainer", and `voice`
+      an explainer's: "sallie", "heygen" or null. Its one step is `film`, which comes before the reading's branch of videoNext and before
+      every step of the BRIMM Ops page, and changes none of them.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
@@ -367,10 +370,22 @@ function reelsStep(reels, checking) {
   return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels"${after} to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
 }
 
+/** The step of a planned episode (PR H4), whose footage is still to come: `film`. It comes before the reading's branch of videoNext, and
+    before every step on the BRIMM Ops page (opsStep), none of which it changes: a planned episode has no video, no reading and no hand-off.
+    A script is filmed to its shot list, and its files dropped in the drop folder. An explainer's voice is hers, recorded from the teleprompter
+    script and dropped as sound alone, unless it is a HeyGen voice, which she chooses in HyperFrames (a voice chosen is dropped as sound too,
+    PR H6 builds the rest of that route). With no voice chosen yet it is hers: a voice made from hers is never the default. */
+function filmStep({ route, voice }) {
+  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.");
+  if (voice === "heygen") return toDo("film", "When the HyperFrames part is ready, you'll choose the HeyGen voice there.");
+  return toDo("film", "Record the voiceover from the teleprompter script, then drop the sound file in your drop folder.");
+}
+
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep), unless a raw video
-    goes the Final Cut way, which keeps its stages. */
+    goes the Final Cut way, which keeps its stages. A planned episode is told to film (filmStep) before anything else. */
 function videoNext(facts, notes, now) {
+  if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);

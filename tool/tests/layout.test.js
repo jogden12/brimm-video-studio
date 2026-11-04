@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, PLANNED_VERSION, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { newEpisode, newPlannedEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, NEWEST_VERSION, PLANNED_VERSION, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
 import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
@@ -94,6 +94,28 @@ describe("layout 4: the HyperFrames projects of an episode (architecture 7.1)", 
   });
   it("is refused by a Mac that knows layout 3, and changes nothing there", () => {
     assert.equal(faultFor(3)({ ...RAW, version: 4, app: APP }), "it is version 4, and this brimm-video reads versions 1 to 3");
+  });
+});
+
+describe("layout 5: the planned episode (PR H4)", () => {
+  const PLAN = { ...newPlannedEpisode({ id: "e-20261104-3fa9c1", machine: "Mac Studio", at: "2026-11-04T09:12:00-05:00", title: "Too many SKUs", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
+  it("is written only once the record holds a plan, and no other record is at layout 5", () => {
+    assert.equal(layoutOf(PLAN), 5);
+    assert.equal(layoutOf({ ...BASE, planned: PLAN.planned }), 5);
+    assert.equal(layoutOf(BASE), 1);
+    assert.equal(layoutOf({ ...BASE, kind: null, answer: { state: "needs your answer", guess: null, seen: "", came: "camera" } }), 3);
+    assert.equal(layoutOf({ ...BASE, app: { toolchain: "0.8.208", projects: [] } }), 4);
+    assert.ok(layoutOf(PLAN) > RECORD_VERSION, "no record but a plan is above the layout a Mac on older code reads");
+  });
+  it("is read whole by this brimm-video and refused by a Mac that knows layout 4, which reads it as newer, not as an import that has not finished", () => {
+    assert.equal(episodeFault(PLAN), "");
+    assert.equal(faultFor(RECORD_VERSION)(PLAN), "it is version 5, and this brimm-video reads versions 1 to 4");
+    // The same record with no video, as a record of layout 4 would be: this brimm-video reads it as an unfinished import too, which is why it is layout 5.
+    assert.equal(faultFor(RECORD_VERSION)({ ...PLAN, version: 4 }), "its plan cannot be read");
+  });
+  it("is the newest layout this brimm-video reads: a record of layout 6 is newer here too", () => {
+    assert.equal(NEWEST_VERSION, PLANNED_VERSION);
+    assert.equal(episodeFault({ ...PLAN, version: 6 }), "it is version 6, and this brimm-video reads versions 1 to 5");
   });
 });
 

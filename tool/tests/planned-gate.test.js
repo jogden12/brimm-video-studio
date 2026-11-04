@@ -202,6 +202,21 @@ describe("findEpisode and the names a gated episode hides, with a planned episod
       }
     }
   });
+  it("hides the title of a plan that is only in the history of an episode that is gated now (its footage came, and it is a video not yet answered)", () => {
+    const t = setup();
+    try {
+      const folder = folderWith(t, planned());
+      writeFileSync(recordFile(folder, 2), recordText({ ...planned(), rev: 2, version: 3, kind: null, planned: undefined, video: VIDEO, answer: { state: "needs your answer", guess: "raw", seen: "wide, 2:00", came: "camera" }, label: "Video of 4 Nov, 09:12 (Mac Studio)", name: { text: "The footage's name", placeholder: true } }));
+      const ctx = asked(t, "open");
+      const found = findEpisode(ctx, "Video of 4 Nov, 09:12 (Mac Studio)");
+      assert.equal(found.why, WAITING);
+      for (const secret of [TITLE, "The footage's name", FOLDER]) assert.ok(ctx.hidden.names.includes(secret), `${secret}: ${JSON.stringify(ctx.hidden.names)}`);
+      // By its old title it is not found: it is gated, and found by its label alone.
+      assert.match(findEpisode(asked(t, "open"), TITLE).why, /^No episode fits/);
+    } finally {
+      t.done();
+    }
+  });
   it("says a record that only claims to be planned, in a conflicted copy, as `episodes` says a video not yet answered, with nothing of its title or folder", async () => {
     for (const [what, claim] of SHAPED) {
       const t = setup();

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, gateFor, printWhy, gated } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
+import { newPlannedEpisode } from "../episode.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
 const WAITING = "This video is waiting for its answer: say what it is first.";
@@ -15,6 +16,8 @@ const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted t
 const unanswered = { kind: null, answer: { state: "needs your answer" } };
 const session = (over = {}) => ({ kind: "session", answer: { state: "answered" }, session: { marked: AT, cleared: null }, ...over });
 const finished = { kind: "finished", answer: { state: "answered" } };
+/** A planned episode, whole (episode.js isPlannedRecord): the one record with no kind that is not gated. */
+const PLAN = newPlannedEpisode({ id: "e-20261104-3fa9c1", machine: "Mac Studio", at: "2026-11-04T09:12:00-05:00", title: "Too many SKUs", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } });
 const ON = { teachingsOn: true };
 const OFF = { teachingsOn: false };
 
@@ -45,6 +48,25 @@ describe("the gate and refs (PR H3)", () => {
     assert.equal(gateFor("refs", unanswered, ON), WAITING);
     assert.equal(gateFor("refs", session(), ON), NOT_FOR_SESSION);
     assert.equal(gateFor("refs", finished, OFF), "");
+  });
+});
+
+describe("the gate and plan (PR H4)", () => {
+  it("has plan in none of the lists of a video not yet answered or a session: it is refused them as app is, and runs for a planned episode and an answered video alone", () => {
+    assert.ok(COMMAND_NAMES.includes("plan"));
+    for (const list of [UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT]) assert.ok(!list.includes("plan"));
+    for (const record of [unanswered, { kind: null, answer: { state: "not for brimm-video" } }, session()]) {
+      for (const on of [ON, OFF]) assert.equal(gateFor("plan", record, on, ["Pricing talk"]), gateFor("app", record, on), JSON.stringify(record));
+    }
+    assert.equal(gateFor("plan", unanswered, ON), WAITING);
+    assert.equal(gateFor("plan", session(), ON), NOT_FOR_SESSION);
+    assert.equal(gateFor("plan", finished, OFF), "", "an answered video is let through, and plan says it is no plan");
+  });
+  it("has the planned episode's own list: plan and name run, leave says how to drop a plan, and every other command is refused for want of footage", () => {
+    assert.deepEqual(PLANNED, ["plan", "name"]);
+    for (const name of COMMAND_NAMES) assert.equal(gateFor(name, PLAN, OFF) === "", UNSCOPED.includes(name) || PLANNED.includes(name), name);
+    assert.equal(gateFor("leave", PLAN, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
+    assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and there\'s no footage for it yet.');
   });
 });
 

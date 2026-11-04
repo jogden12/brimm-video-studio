@@ -34,6 +34,11 @@
 //                                         the reference folder (references.js): what is in it; a picture of it copied into her
 //                                         Looking folder for Claude to look at; or copied into an episode's HyperFrames project
 //                                         on this Mac to be followed as a style. Studio only reads the folder
+//   node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
+//                                         plan a video before it is shot: an episode with no footage, filed in Episodes (plan.js)
+//   node edit.js plan "<planned>" [set … | drop]
+//                                         a planned video's package (its video guide, shot list and teleprompter script): said in
+//                                         plain words, set whole in one record write, or dropped
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
@@ -108,6 +113,7 @@ import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
+import { newPlan, planAsked, planFor, plannedLine } from "./plan.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -127,8 +133,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
                                         is exported from HyperFrames that the hand-off does not hold. A raw video that
-                                        goes the Final Cut way keeps its Final Cut steps. Only on a Mac that does the
-                                        light import: on any other, every form says to ask Jason
+                                        goes the Final Cut way keeps its Final Cut steps. A planned video (plan) is told
+                                        to film it to its shot list, or for an explainer to record or choose its voice.
+                                        Only on a Mac that does the light import: on any other, every form says to ask
+                                        Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
@@ -331,7 +339,31 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         HyperFrames project on this Mac, the main video's or Reel n's, as a style to
                                         follow, and say what to say in HyperFrames to have it followed. The gate asks
                                         first, as for app; a finished video has no main project, a short video no Reels,
-                                        and a project that is not on this Mac is to be opened first`;
+                                        and a project that is not on this Mac is to be opened first
+  node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
+                                        plan a video before it is shot, from her script: an episode with no footage yet,
+                                        filed in Episodes under the title she gives (at most 80 characters; a title already
+                                        planned and not yet filmed is refused). With --explainer it is a video of graphics
+                                        and words on screen alone, whose voice is hers or a HeyGen voice she picks in
+                                        HyperFrames (--voice says which). Its guide, shot list and teleprompter script
+                                        are made next, by plan … set
+  node edit.js plan "<planned>" set [--cue "<kind> | <seconds> | <words> | <what to show>[ | <key>: <value>]…"]…
+                     [--shot "<kind> | <what>"]… [--line "<paragraph>"]…
+                                        replace the whole package of a planned video in one record write: its cues (kind
+                                        graphic, words, b-roll or screen; seconds from 1 to 10; the words they go with;
+                                        what they show; and the keys shot, ref, inspiration and link), its shots (talking,
+                                        screen or b-roll) and the lines of its teleprompter script. A b-roll or screen cue
+                                        names a shot of its own kind; an explainer has graphic and words cues and no
+                                        shots; a ref is a picture in the reference folder. A double quote, a dollar sign,
+                                        a percent sign, a backslash, a backtick or a pipe in a word is written %22, %24,
+                                        %25, %5C, %60 or %7C, and a bare pipe splits a cue's parts. At most 60 cues, 40
+                                        shots and 400 lines, of 2,000 characters at most. Every problem is said on its
+                                        own line and nothing is saved. Saved, it makes video guide.md, shot list.md
+                                        (none for an explainer) and teleprompter.txt in the plan's folder, each put in
+                                        by the rule and the record last
+  node edit.js plan "<planned>"         say a planned video's package in plain words: each cue, each shot and how long
+                                        the teleprompter script is
+  node edit.js plan "<planned>" drop    drop a plan: it is archived, so that episodes and the guide no longer show it`;
 
 /** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
 const homeOf = (deps) => deps.home || process.env.HOME || homedir();
@@ -672,7 +704,11 @@ function handOverWords(ctx, code) {
     and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
     there. Its `read` still says it is conflicted, so every command but `resolve` refuses it. In the lists of episodes it says,
     each is named as listedAs names it: never a gated one by its folder. A video held as a session (episodeAt's `held`) is gated
-    so too, found by its label and short id, and `held` is true in what is given back.
+    so too, found by its label and short id, and `held` is true in what is given back. A planned episode (episode.js isPlannedRecord)
+    is the one record with no kind that is not gated: it is found by its title, the whole of it, whatever its case and spacing (and by
+    the title and short id as `episodes` could list it), and by words of its folder and its name, as any episode is; a plan she
+    dropped is not found by its title, so that a new plan of that title is. A record that only claims to be planned is gated, and
+    found by none of that.
     When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
     gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
     read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
@@ -878,7 +914,8 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
     its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
     answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
     the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
-    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. */
+    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. A planned episode (PR H4)
+    has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id. */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
@@ -891,9 +928,14 @@ function episodeLines(ctx, e, left, all, links) {
     const named = gatedRecord(e);
     const held = e.held && !gated(named);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
-    lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    // The record in force of a gated episode is a planned episode's when a conflicted copy of it only claims to be one: it has no video to give a length.
+    const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
+    lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
+  } else if (isPlannedRecord(record)) {
+    // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
+    lines.push(`  ${plannedLine(record)}`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
     lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
@@ -6781,9 +6823,20 @@ function guideSession(ctx, e, r) {
     read once for the pass). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. `downloads` is
-    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it. */
+    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it.
+    A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
+    and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`. */
 function guideFacts(ctx, e, links, rates, notes, downloads) {
   const r = e.inForce;
+  if (isPlannedRecord(r)) {
+    // Gated all the same when a conflicted copy of its record is a record that only claims to be planned: then it is named as any gated video is.
+    const hidden = isGated(e);
+    return {
+      name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
+      at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
+      planned: { route: r.planned.route, voice: r.planned.voice }
+    };
+  }
   const kind = recordKind(r);
   const hidden = isGated(e);
   const away = heldElsewhere(r, ctx.machine);
@@ -7207,9 +7260,26 @@ async function refs(ctx, rest) {
   return useIn(ctx, where, asked.name);
 }
 
+/** `plan new "<title>" [--explainer [--voice sallie|heygen]]` and `plan "<planned>" [set … | drop]`: the planned episode (plan.js; PR H4), edit.js being
+    only the wiring. `plan new` names no episode, so the gate is never asked of it. The others find their episode as every command does, through
+    the gate, which lets a planned episode through `plan` and `name` alone (gate.js PLANNED) and refuses a video not yet answered, a session and
+    a video held beside a session in the gate's own words. */
+async function plan(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["cue", "shot", "line", "voice"]);
+  const asked = planAsked(words, flags);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  if (asked.form === "new") return newPlan(ctx, asked);
+  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  return planFor(ctx, { found: got.found, record: got.record }, asked);
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so is `workcopy` (`kind` and `app` start it): both are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

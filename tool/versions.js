@@ -101,7 +101,9 @@ export function inOrderCount(a, b) {
 }
 
 /** Whether a record is one a new file may be a version of: answered (its kind is not null), not a session (neither its kind
-    nor a mark that has not been cleared, as the gate reads one: cleared only by her click on the dialog), and not archived. */
+    nor a mark that has not been cleared, as the gate reads one: cleared only by her click on the dialog), and not archived. A planned
+    episode (PR H4) is never one: it has no kind, and its candidate would have none either (unedited.js versionIn makes no candidate of a
+    record with no video, which holds no words to match). */
 const askable = (c) => !gated(c) && c.kind !== "session" && !c.archived;
 
 /** Whether two lengths differ by no more than a fifth of the longer. A length that is not a number of seconds is no length. */

@@ -124,7 +124,10 @@ const TODAY_ASKED = {
   app: [],
   // The reference folder, new with the HyperFrames-led path (PR H3): tests/edit-refs.test.js pins its words. Today's Mac has no such folder, and no
   // app, so here it says so; the walk below runs `refs use` for a video waiting for its answer and for a session, where the gate answers.
-  refs: [[], ["look", "blue carousel"], ["use", FOLDER, "blue carousel"], ["use", NAME, "blue carousel", "reel", "2"], ["use"]]
+  refs: [[], ["look", "blue carousel"], ["use", FOLDER, "blue carousel"], ["use", NAME, "blue carousel", "reel", "2"], ["use"]],
+  // The planned episode, new with the HyperFrames-led path (PR H4): tests/edit-plan.test.js pins its words. Today's Mac has no plan, so here it makes one,
+  // says today's episode is none, and finds nothing; the walk below runs `plan` for a video waiting for its answer and for a session, where the gate answers.
+  plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], ["Pricing"], ["nothing fits this"]]
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1248,7 +1251,8 @@ describe("the walk: every command, for a video imported lightly from a file name
     ideas: [[label], [label, "edit", "1", "--words", "x"], []],
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
     app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]],
-    refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]]
+    refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]],
+    plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], ["nothing fits this"], []]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);
